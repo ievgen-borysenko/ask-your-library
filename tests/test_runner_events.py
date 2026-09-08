@@ -64,3 +64,20 @@ def test_the_clarify_pause_is_reported_to_the_deadline_clock(tmp_path, monkeypat
     assert llm._usage().deadline_s == 7             # the per-run override reached the accumulator
     metrics = [u for n, u in events if n == "metrics"]
     assert metrics[0]["seconds"] == 5.0 and metrics[1]["seconds"] == 60.0     # wall time still includes the pause
+
+
+def test_history_keeps_only_the_shape_of_a_catalogue_answer():
+    """The conversation memory goes into the next planner prompt: a catalogue
+    answer's list of titles must not travel with it (ADR-016)."""
+    from ask_your_library.runner import history_entry
+
+    listing = {"op": "list", "count": 2, "total": 2, "books": ["Private Book — Someone", "Other — Else"],
+               "query": "", "resolved": True, "suggestions": []}
+    entry = history_entry("what are my books called?", "2 books:\n- Private Book — Someone\n- Other — Else", listing)
+    assert entry.startswith("Q: what are my books called?\nA: (catalogue answer: list, 2 of 2 books")
+    assert "Private Book" not in entry and "Other — Else" not in entry
+    asked = history_entry("do I have Dracula?", "Yes:\n- Dracula — Bram Stoker",
+                          {**listing, "op": "has", "count": 1, "query": "Dracula"})
+    assert "asked about: Dracula, found: yes" in asked and "Bram Stoker" not in asked
+    assert history_entry("q", "a" * 600) == "Q: q\nA: " + "a" * 500        # every other answer: truncated, as before
+

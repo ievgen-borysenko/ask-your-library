@@ -645,7 +645,7 @@ def test_an_operation_that_is_not_ours_takes_the_research_loop_and_says_so(run):
     _, events, _ = run(model, FakeLibrary(lambda q: [MOBY]), "Who narrates Moby Dick?")
     assert names(events) == ["plan", "act", "observe", "reflect", "synthesize", "validate", "metrics"]
     plan = by_name(events, "plan")[0]
-    assert plan["mode"] == "answer" and plan["catalog_fallback"] is True and plan["current_query"] == "Ishmael sails"
+    assert plan["mode"] == "answer" and plan["catalog_fallback"] == "invalid_op" and plan["current_query"] == "Ishmael sails"
     assert "plan_fallback" not in plan and "catalog" not in by_name(events, "validate")[0]["provenance"]
 
 

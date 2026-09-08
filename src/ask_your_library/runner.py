@@ -13,8 +13,10 @@ Event contract (node_name -> keys present in update):
              mode "catalog": catalog_request {op, title, author} and no query (ADR-016);
              book_filter (a book the question names, resolved against the catalogue:
              retrieval is limited to it) or book_unresolved (the name matched nothing:
-             the whole library is searched and the answer says so); catalog_fallback
-             (present, True, only when the planner said catalog without a usable operation)
+             the whole library is searched and the answer says so); catalog_fallback (present
+             only when it happened: "invalid_op" — the planner said catalog without a usable
+             operation; "after_clarify" — a catalogue request after a clarify reply; the
+             research loop ran instead)
   catalog    answer, catalog {op, count (= len(books)), total, books (index keys), query,
              resolved, suggestions}, stop_reason — the catalogue path: code over the index
              tables, no model call, no search step; validate then reports a catalogue answer
@@ -50,6 +52,7 @@ from typing import Callable
 
 from langgraph.types import Command
 
+from .i18n import t
 from .llm import pause_deadline, reset_usage, usage_snapshot
 
 
@@ -59,13 +62,27 @@ def initial_state(question: str, history: list[str], scratchpad: Path) -> dict:
         "mode": "", "queries": [], "current_query": "",
         "hits": [], "hits_log": [], "evidence": [], "steps_taken": 0,
         "empty_streak": 0, "clarification": "", "clarify_asked": False, "coverage_probed": False,
-        "plan_fallback": False, "catalog_fallback": False,
+        "plan_fallback": False, "catalog_fallback": "",
         "clarify_candidates": [], "clarify_unresolved": False, "clarify_chosen": "",
         "read_chapters": [],
         "catalog_request": {}, "catalog": {}, "book_filter": "", "book_unresolved": "",
         "scratchpad_path": str(scratchpad),
         "answer": "", "verification": "", "provenance": {}, "stop_reason": "",
     }
+
+
+def history_entry(question: str, answer: str, catalog: dict | None = None) -> str:
+    """One turn of conversation memory, as the interfaces hand it to the next
+    plan and synthesize call (`history`). A catalogue answer IS the book list:
+    only its shape is kept (the operation, the counts, the name the user asked
+    about), never the titles, so the list does not reach the model on a later
+    turn (ADR-016). Every other answer is kept truncated, as before."""
+    if catalog:
+        shape = t("history_catalog", op=catalog.get("op", "?"), n=catalog.get("count", 0),
+                  total=catalog.get("total", 0), q=catalog.get("query") or "-",
+                  found=t("history_yes") if catalog.get("resolved") else t("history_no"))
+        return f"Q: {question}\nA: {shape}"
+    return f"Q: {question}\nA: {answer[:500]}"
 
 
 def _steps_so_far(graph, config) -> int:

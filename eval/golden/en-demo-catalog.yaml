@@ -3,8 +3,10 @@
 # (eval/run_agent_eval.py, type catalog): the set of books the code listed must EQUAL
 # expected_books (strict set equality, by title), the count carried in the state must be
 # len() of that list, and a "has" question must resolve (or not) as expected_resolved says.
-# The one research-type item is the negative control: a content question that looks like a
-# listing must NOT take the catalogue path (a catalogue result on it fails the item).
+# The research-type items are the negative controls: content questions that look like a
+# listing must NOT take the catalogue path (a catalogue result on any of them fails the item;
+# k09 is scored on routing alone), and k10 pins the hybrid (a named book becomes a retrieval
+# filter). Routing is the planner's reading; these items measure it, no code enforces it.
 # Titles are the demo manifest's (CI guard: tests/test_golden_books_in_manifest.py).
 # Run: GOLDEN_PATH=eval/golden/en-demo-catalog.yaml uv run python eval/run_agent_eval.py
 all_titles: &all_titles
@@ -90,3 +92,28 @@ questions:
   - The Three Musketeers
   notes: 'Negative control: "names" is not a catalogue question; the answer needs the book''s
     content (Athos, Porthos, Aramis). A catalogue listing on this item is a misroute and fails.'
+- id: k08-about-whaling
+  question: What do I have about whaling?
+  type: answer
+  expected_books:
+  - Moby Dick
+  notes: 'Negative control, the "what do I have about X" form: a topic, not a title, so the
+    answer needs the books'' content. A catalogue result fails the item.'
+- id: k09-mention-london
+  question: Which of my books mention London?
+  type: answer
+  expected_behavior: research
+  expected_books: []
+  notes: 'Negative control, the form the planner prompt itself names as NOT catalog: it reads like
+    a listing but needs the books'' content. Scored on routing only (research loop, at least one
+    search, no catalogue result); which books the answer names is not scored, and the answer
+    cannot be exhaustive (a known limit).'
+- id: k10-hybrid-named-book
+  question: Do I have Dracula, and why does Jonathan Harker stay at the castle?
+  type: answer
+  expected_books:
+  - Dracula
+  expected_book_filter: Dracula
+  notes: The hybrid of ADR-016. The planner names the book, code resolves it to the index key
+    and retrieval is limited to it; the report row shows the filter, and a wrong single resolve
+    fails the item.

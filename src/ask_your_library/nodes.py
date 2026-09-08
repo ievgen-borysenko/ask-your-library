@@ -106,11 +106,15 @@ def plan(state: AgentState) -> dict:
         # the reader's reply settled a book of the research loop, not a listing.
         return {"mode": "catalog", "catalog_request": catalog_request, "queries": [],
                 "current_query": "", **common}
-    # "catalog" without a usable operation (or after a clarify) is the research
-    # loop with the raw question or the planner's queries, and the event says so;
-    # a content question can never be pushed the other way, into the catalogue.
-    catalog_fallback = mode == "catalog"
-    if catalog_fallback:
+    # "catalog" without a usable operation, or after a clarify reply, is the
+    # research loop with the planner's queries or the raw question, and the
+    # event says which. Code refuses an invalid operation; it cannot tell a
+    # content question the planner labelled "catalog" from a real catalogue
+    # question: that routing is the planner's reading, measured by the negative
+    # controls of the catalogue eval set, not enforced here.
+    catalog_fallback = ""
+    if mode == "catalog":
+        catalog_fallback = "after_clarify" if catalog_request else "invalid_op"
         mode = "answer"
 
     # Valid JSON is not necessarily our schema; degrade instead of raising —
@@ -139,10 +143,12 @@ def plan(state: AgentState) -> dict:
     # is limited to the resolved key (act, like the filter after a clarify).
     # No match: the whole library is searched and the answer says so. Several
     # matches ("Holmes"): no filter, the loop's own clarify may sort it out.
+    # Strict resolution: a fragment of a title ("Time" for The Time Machine)
+    # sets no filter either — a silent wrong filter would hide a whole library.
     book_filter = book_unresolved = ""
     named = llm.str_field(decision, "book")
     if named and mode == "answer" and not chosen:
-        matches, _ = resolve_title(named, list_books())
+        matches, _ = resolve_title(named, list_books(), strict=True)
         if len(matches) == 1:
             book_filter = matches[0].key
         elif not matches:
@@ -158,7 +164,7 @@ def plan(state: AgentState) -> dict:
     if fallback:
         update["plan_fallback"] = True     # present only when it happened: the interfaces and the eval show it
     if catalog_fallback:
-        update["catalog_fallback"] = True
+        update["catalog_fallback"] = catalog_fallback
     return update
 
 

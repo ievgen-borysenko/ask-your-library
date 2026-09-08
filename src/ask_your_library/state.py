@@ -40,7 +40,8 @@ class AgentState(TypedDict):
     clarify_asked: bool    # a clarify interrupt already happened this run (one allowed)
     coverage_probed: bool  # the one forced query at an uncovered candidate book has run (ADR-013)
     plan_fallback: bool    # the planner returned no valid JSON twice; the raw question became the one query
-    catalog_fallback: bool # the planner said catalog without a usable operation: the research loop ran instead
+    catalog_fallback: str  # "" | "invalid_op" (catalog without a usable operation) | "after_clarify"
+                           # (a catalogue request after a clarify reply): the research loop ran instead
     scratchpad_path: str   # file the raw hits are written to (kept out of the LLM context)
     answer: str            # the final answer
     verification: str      # quote-provenance report on quotes (text, for humans)

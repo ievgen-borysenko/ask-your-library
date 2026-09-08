@@ -128,8 +128,16 @@ _T = {
         "en": "No books by \"{q}\" in your library.",
     },
     "catalog_closest_authors": {"ua": " Найближчі автори: {items}.", "en": " Closest authors: {items}."},
+    "history_catalog": {
+        "ua": "(відповідь з каталогу: {op}, {n} з {total} книжок; запит: {q}, знайдено: {found}; "
+              "перелік назв в історію розмови не зберігається)",
+        "en": "(catalogue answer: {op}, {n} of {total} books; asked about: {q}, found: {found}; "
+              "the list of titles is not kept in the conversation)",
+    },
+    "history_yes": {"ua": "так", "en": "yes"},
+    "history_no": {"ua": "ні", "en": "no"},
     "book_not_in_catalog": {
-        "ua": "(Книжки з назвою «{q}» в каталозі бібліотеки немає; шукав по всій бібліотеці.)",
+        "ua": "(Книжки з назвою «{q}» в каталозі бібліотеки не знайдено; шукав по всій бібліотеці.)",
         "en": "(No book titled \"{q}\" is in the library catalogue; the whole library was searched instead.)",
     },
     "clarify_candidates_list": {
@@ -250,8 +258,10 @@ _T = {
                 "en": "[plan] mode={mode}, queries: {queries}"},
     "ev_plan_catalog": {"ua": "[plan] mode=catalog, операція: {op}",
                         "en": "[plan] mode=catalog, operation: {op}"},
-    "ev_catalog_fallback": {"ua": "[plan] планер назвав операцію каталогу, якої нема: шукаю в текстах",
-                            "en": "[plan] the planner named a catalogue operation that does not exist: searching the texts instead"},
+    "ev_catalog_fallback_invalid_op": {"ua": "[plan] планер назвав операцію каталогу, якої нема: шукаю в текстах",
+                                       "en": "[plan] the planner named a catalogue operation that does not exist: searching the texts instead"},
+    "ev_catalog_fallback_after_clarify": {"ua": "[plan] запит до каталогу після уточнення не виконується: продовжую пошук у вибраній книжці",
+                                          "en": "[plan] a catalogue request after a clarify reply is not honoured: the search goes on in the chosen book"},
     "ev_book_filter": {"ua": "[plan] питання називає книжку {book}: пошук лише в ній",
                        "en": "[plan] the question names {book}: retrieval limited to it"},
     "ev_book_unresolved": {"ua": "[plan] книжки з назвою «{q}» в каталозі немає: шукаю по всій бібліотеці",
@@ -317,8 +327,10 @@ _T = {
     },
     "ui_mode": {"ua": "режим: {mode}", "en": "mode: {mode}"},
     "ui_plan_catalog": {"ua": "режим: catalog, операція: {op}", "en": "mode: catalog, operation: {op}"},
-    "ui_catalog_fallback": {"ua": "планер назвав операцію каталогу, якої нема: шукаю в текстах",
-                            "en": "the planner named a catalogue operation that does not exist: searching the texts instead"},
+    "ui_catalog_fallback_invalid_op": {"ua": "планер назвав операцію каталогу, якої нема: шукаю в текстах",
+                                       "en": "the planner named a catalogue operation that does not exist: searching the texts instead"},
+    "ui_catalog_fallback_after_clarify": {"ua": "запит до каталогу після уточнення не виконується: продовжую пошук у вибраній книжці",
+                                          "en": "a catalogue request after a clarify reply is not honoured: the search goes on in the chosen book"},
     "ui_book_filter": {"ua": "питання називає книжку {book}: пошук лише в ній",
                        "en": "the question names {book}: retrieval limited to it"},
     "ui_book_unresolved": {"ua": "книжки з назвою «{q}» в каталозі немає: шукаю по всій бібліотеці",

@@ -87,8 +87,8 @@ def test_a_catalogue_answer_is_one_step_and_the_titles_render_as_text(ui, monkey
     monkeypatch.setattr(ui, "show_step", lambda name, text: shown.append((name, text)))
 
     class Msg:
-        def __init__(self, content):
-            sent.append(content)
+        def __init__(self, content, metadata=None):
+            sent.append((content, metadata))
 
         def send(self):
             return None
@@ -98,12 +98,42 @@ def test_a_catalogue_answer_is_one_step_and_the_titles_render_as_text(ui, monkey
                              "current_query": "", "queries": []})
     assert shown[-1][0] == "plan" and "operation: list" in shown[-1][1] and "search queries" not in shown[-1][1]
     ui.render_event("catalog", {"answer": "2 books:\n- <b>Moby Dick</b> — Herman Melville",
-                                "catalog": {"op": "list", "count": 2, "total": 2}, "stop_reason": "catalog"})
+                                "catalog": {"op": "list", "count": 2, "total": 2, "books": ["x", "y"],
+                                            "query": "", "resolved": True, "suggestions": []},
+                                "stop_reason": "catalog"})
     assert shown[-1] == ("catalog", "list: 2 of 2 books, from the index tables")
-    assert "&lt;b&gt;Moby Dick&lt;/b&gt;" in sent[-1]                  # a crafted title is text, not DOM
+    content, metadata = sent[-1]
+    assert "&lt;b&gt;Moby Dick&lt;/b&gt;" in content                   # a crafted title is text, not DOM
+    assert metadata == {"catalog": {"op": "list", "count": 2, "total": 2, "query": "", "resolved": True}}
+    assert "books" not in metadata["catalog"]                          # the shape rides along, never the list
     ui.render_event("plan", {"mode": "answer", "current_query": "q", "queries": [],
                              "book_filter": "Moby Dick — Herman Melville", "book_unresolved": ""})
     assert "retrieval limited to it" in shown[-1][1]
+
+
+def test_plan_step_book_names_are_escaped_by_the_real_step_writer(ui, monkeypatch):
+    """show_step itself, not a pass-through: a crafted book name in the plan
+    step is text, not DOM."""
+    import asyncio
+    outputs = []
+
+    class Step:
+        def __init__(self, name, type=None):
+            self.name, self.output = name, ""
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            outputs.append((self.name, self.output))
+            return False
+
+    monkeypatch.setattr(ui.cl, "Step", Step)
+    monkeypatch.setattr(ui.cl, "run_sync", lambda coro: asyncio.run(coro))
+    ui.render_event("plan", {"mode": "answer", "current_query": "q", "queries": [],
+                             "book_filter": "<img src=x onerror=alert(1)> — Nobody", "book_unresolved": ""})
+    name, output = outputs[-1]
+    assert name == "plan" and "&lt;img src=x onerror=alert(1)&gt;" in output and "<img" not in output
 
 
 def test_the_badge_of_a_catalogue_answer_is_green_and_names_the_source(ui):

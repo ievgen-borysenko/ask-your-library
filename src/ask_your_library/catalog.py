@@ -24,6 +24,7 @@ CLOSE_MATCH_CUTOFF = 0.8      # a typo still resolves ("Ivanho" -> Ivanhoe)
 SUGGESTION_CUTOFF = 0.5       # what "closest titles" may name when nothing resolves
 MAX_SUGGESTIONS = 3
 MIN_CONTAINED_CHARS = 4       # "It" must not resolve by being contained in every title
+STRICT_CONTAINED_SHARE = 0.6  # strict mode: a one-word name inside a longer title must be most of it
 
 
 def parse_catalog_request(decision: dict) -> dict | None:
@@ -65,7 +66,7 @@ def _contains_words(haystack: str, needle: str) -> bool:
 
 
 def _resolve(name: str, entries: list[BookEntry], field_of,
-             last_word_too: bool = False) -> tuple[list[BookEntry], list[str]]:
+             last_word_too: bool = False, strict: bool = False) -> tuple[list[BookEntry], list[str]]:
     """Entries whose `field_of(entry)` the reader means by `name`, and, when
     none, up to MAX_SUGGESTIONS closest values for the "not found" line.
     Exact (folded, a leading article ignored) first; then the name contained in
@@ -74,7 +75,9 @@ def _resolve(name: str, entries: list[BookEntry], field_of,
     (difflib, CLOSE_MATCH_CUTOFF) so a typo still resolves — for authors also
     against the surname alone (`last_word_too`), because "Melvile" is a typo of
     "Melville", not of "Herman Melville". Several matches are returned as
-    several: "Holmes" is every Holmes book."""
+    several: "Holmes" is every Holmes book. `strict` (the retrieval filter of
+    the hybrid) accepts a name contained in a longer title only when it is
+    several words or most of the title: "Time" is not The Time Machine."""
     wanted = fold(name)
     if not wanted:
         return [], []
@@ -82,9 +85,13 @@ def _resolve(name: str, entries: list[BookEntry], field_of,
     exact = [e for e, v in values.items() if v == wanted or _without_article(v) == _without_article(wanted)]
     if exact:
         return exact, []
-    contained = [e for e, v in values.items()
-                 if (len(wanted) >= MIN_CONTAINED_CHARS and _contains_words(v, wanted))
-                 or (len(v) >= MIN_CONTAINED_CHARS and _contains_words(wanted, v))]
+    def contained_in(v: str) -> bool:
+        if len(wanted) >= MIN_CONTAINED_CHARS and _contains_words(v, wanted):
+            return (not strict or len(wanted.split()) >= 2
+                    or len(wanted) >= STRICT_CONTAINED_SHARE * len(v))
+        return len(v) >= MIN_CONTAINED_CHARS and _contains_words(wanted, v)
+
+    contained = [e for e, v in values.items() if contained_in(v)]
     if contained:
         return contained, []
     variants = {e: ({v, v.split()[-1]} if last_word_too and " " in v else {v}) for e, v in values.items()}
@@ -103,12 +110,13 @@ def _resolve(name: str, entries: list[BookEntry], field_of,
     return [], suggestions
 
 
-def resolve_title(name: str, entries: list[BookEntry]) -> tuple[list[BookEntry], list[str]]:
+def resolve_title(name: str, entries: list[BookEntry],
+                  strict: bool = False) -> tuple[list[BookEntry], list[str]]:
     """Books the reader means by a title (or a full "Title — Author" key)."""
-    by_title, suggestions = _resolve(name, entries, lambda e: e.title)
+    by_title, suggestions = _resolve(name, entries, lambda e: e.title, strict=strict)
     if by_title:
         return by_title, []
-    by_key, _ = _resolve(name, entries, lambda e: e.key)
+    by_key, _ = _resolve(name, entries, lambda e: e.key, strict=strict)
     return (by_key, []) if by_key else ([], suggestions)
 
 

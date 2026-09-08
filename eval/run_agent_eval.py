@@ -36,6 +36,7 @@ import yaml
 from langgraph.types import Command
 
 from ask_your_library.graph import build_graph
+from ask_your_library.library import title_of
 from ask_your_library.i18n import t
 from ask_your_library.config import (CHAPTER_HIT_CHARS, MAX_CLARIFY_CANDIDATES, MAX_EMPTY_STREAK, MAX_STEPS,
                                      PRICE_IN_PER_MTOK, PRICE_OUT_PER_MTOK, QUESTION_DEADLINE_S, SEARCH_HIT_CHARS)
@@ -202,6 +203,12 @@ def run_one(graph, item: dict) -> dict:
         # the catalogue path (ADR-016): op, count (= len(books)), total, books, resolved;
         # empty for every run that went through the research loop
         "catalog": final.get("catalog") or {},
+        # the hybrid and its fallbacks (ADR-016): a book the question named, resolved to
+        # a retrieval filter; a name that matched nothing; a catalogue request that
+        # took the research loop — each visible in the report row
+        "book_filter": final.get("book_filter") or "",
+        "book_unresolved": final.get("book_unresolved") or "",
+        "catalog_fallback": final.get("catalog_fallback") or "",
         "seconds": round(time.time() - started),
         "steps_log": steps_log,
     }
@@ -243,7 +250,7 @@ def score(item: dict, r: dict) -> dict:
         # as expected. A catalogue question that took the research loop has no
         # result here and fails.
         listing = r.get("catalog") or {}
-        listed = {fold(k.rsplit(" — ", 1)[0]) for k in listing.get("books") or []}
+        listed = {fold(title_of(k)) for k in listing.get("books") or []}
         wanted = {fold(b) for b in expected}
         ok = bool(listing) and listed == wanted and listing.get("count") == len(listing.get("books") or [])
         if "expected_count" in item:
@@ -256,6 +263,11 @@ def score(item: dict, r: dict) -> dict:
         # Evidence-free answers are NOT automatically refusals: the model may
         # have answered from its own knowledge. Only an explicit refusal passes.
         ok = any(m in answer for m in REFUSAL_MARKERS)
+    elif behavior == "research":
+        # Routing only: a question that reads like a listing but needs the books'
+        # content must take the research loop (at least one search, no catalogue
+        # result); which books it names is not scored.
+        ok = not r.get("catalog") and r.get("steps_taken", 0) >= 1
     elif behavior == "clarify":
         ok = r["clarify_asked"]
     elif behavior == "clarify_or_answer":
@@ -299,6 +311,12 @@ def score(item: dict, r: dict) -> dict:
         # answer whatever it lists (a full listing names every expected title).
         ok = False
         out["catalog_misroute"] = True
+    if item.get("expected_book_filter"):
+        # The hybrid: the named book must have been resolved to exactly that
+        # book's key and retrieval limited to it (a wrong single resolve is the
+        # silent failure this catches).
+        out["book_filter_ok"] = fold(title_of(r.get("book_filter") or "")) == fold(item["expected_book_filter"])
+        ok = ok and out["book_filter_ok"]
     out["behavior_ok"] = ok
     return out
 
@@ -393,6 +411,14 @@ def main() -> None:
             if r.get("catalog"):
                 drill += (f", catalog {r['catalog']['op']}: {r['catalog']['count']} of {r['catalog']['total']}"
                           + (" — MISROUTED content question" if sc.get("catalog_misroute") else ""))
+            if r.get("book_filter"):
+                drill += f", named book -> retrieval filter {r['book_filter']}"
+                if "book_filter_ok" in sc:
+                    drill += f" ({'expected' if sc['book_filter_ok'] else 'NOT the expected book'})"
+            if r.get("book_unresolved"):
+                drill += f", named book not in the catalogue: {r['book_unresolved']}"
+            if r.get("catalog_fallback"):
+                drill += f", catalogue fallback ({r['catalog_fallback']})"
             if r.get("stop_reason"):
                 drill += f", stop: {r['stop_reason']}"
             out.write(f"\n## {r['id']} ({r['type']}, {r['steps_taken']} steps, "

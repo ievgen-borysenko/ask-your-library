@@ -313,3 +313,20 @@ def test_a_content_question_answered_by_the_catalogue_fails_whatever_it_lists():
     verdict = harness.score(item, listed)
     assert verdict["behavior_ok"] is False and verdict["catalog_misroute"] is True
 
+
+def test_a_research_control_is_scored_on_routing_alone():
+    item = {"type": "answer", "expected_behavior": "research", "expected_books": []}
+    routed = {**run("whatever it names"), "steps_taken": 1}
+    assert harness.score(item, routed)["behavior_ok"]
+    assert not harness.score(item, {**routed, "catalog": {"op": "list", "count": 33, "total": 33, "books": []}})["behavior_ok"]
+    assert not harness.score(item, {**routed, "steps_taken": 0})["behavior_ok"]
+
+
+def test_the_hybrid_filter_must_be_the_expected_book():
+    item = {"type": "answer", "expected_books": ["Dracula"], "expected_book_filter": "Dracula"}
+    good = {**run("Harker stays because [Dracula, Chapter 2]"), "book_filter": "Dracula — Bram Stoker"}
+    assert harness.score(item, good)["behavior_ok"] and harness.score(item, good)["book_filter_ok"]
+    wrong = {**good, "book_filter": "The Time Machine — H. G. Wells"}
+    assert not harness.score(item, wrong)["behavior_ok"]
+    assert not harness.score(item, {**good, "book_filter": ""})["behavior_ok"]
+

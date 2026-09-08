@@ -37,7 +37,7 @@ from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 from ask_your_library.graph import build_graph
 from ask_your_library.i18n import LANG, set_lang, status_word, t
 from ask_your_library.preflight import check_api_key, check_environment
-from ask_your_library.runner import run_question
+from ask_your_library.runner import history_entry, run_question
 
 PROFILE_EN = "English"
 PROFILE_UA = "Українська"
@@ -284,6 +284,9 @@ class RunView:
 
     def __init__(self):
         self.passages: dict[str, str] = {}
+        # the catalogue result when the question took that path: the conversation
+        # memory keeps its shape, never the list of titles (runner.history_entry)
+        self.catalog: dict | None = None
 
 
 def safe_html(text: str) -> str:
@@ -373,7 +376,7 @@ def render_event(node_name: str, update: dict, view: RunView | None = None) -> N
             for query in queries:
                 lines.append(f"- {query}")
         if update.get("catalog_fallback"):
-            lines.append(t("ui_catalog_fallback"))
+            lines.append(t("ui_catalog_fallback_" + update["catalog_fallback"]))
         if update.get("book_filter"):
             lines.append(t("ui_book_filter", book=update["book_filter"]))
         if update.get("book_unresolved"):
@@ -424,10 +427,15 @@ def render_event(node_name: str, update: dict, view: RunView | None = None) -> N
 
     elif node_name == "catalog":
         listing = update["catalog"]
+        view.catalog = listing
         cl.run_sync(show_step("catalog", t("ui_catalog_step", op=listing["op"], n=listing["count"],
                                            total=listing["total"])))
         # Titles are index metadata, i.e. data: rendered as text like a model answer.
-        cl.run_sync(cl.Message(content=neutralize_markdown(html.escape(update["answer"], quote=False))).send())
+        # The shape of the result travels with the persisted message, so a resumed
+        # chat rebuilds its memory without the list (on_chat_resume).
+        shape = {key: listing[key] for key in ("op", "count", "total", "query", "resolved")}
+        cl.run_sync(cl.Message(content=neutralize_markdown(html.escape(update["answer"], quote=False)),
+                               metadata={"catalog": shape}).send())
 
     elif node_name == "synthesize":
         # The answer is model output over corpus text: poisoned corpus HTML
@@ -542,7 +550,16 @@ async def on_chat_resume(thread) -> None:
             if step_output.startswith("<div") or step_output.startswith("Ask Your Library —"):
                 continue
             if last_question:
-                history.append(f"Q: {last_question}\nA: {step_output[:500]}")
+                # A catalogue answer is remembered by its shape only (never the
+                # titles): the shape rides on the persisted message's metadata.
+                meta = step.get("metadata") or {}
+                if isinstance(meta, str):
+                    try:
+                        meta = json.loads(meta)
+                    except ValueError:
+                        meta = {}
+                catalog_shape = meta.get("catalog") if isinstance(meta, dict) else None
+                history.append(history_entry(last_question, step_output, catalog_shape))
                 last_question = ""
     cl.user_session.set("history", history)
     cl.user_session.set("session_cost", 0.0)
@@ -563,10 +580,11 @@ async def on_message(message: cl.Message) -> None:
             return
         cl.user_session.set("ready", True)
     history = cl.user_session.get("history")
+    view = RunView()
     try:
         answer = await cl.make_async(run_question)(
             GRAPH, message.content, history, SCRATCH_DIR,
-            on_event=functools.partial(render_event, view=RunView()), on_clarify=ask_user_in_chat)
+            on_event=functools.partial(render_event, view=view), on_clarify=ask_user_in_chat)
     except Exception as error:
         # Class + short message only: a raw exception can leak paths and
         # provider details into the chat.
@@ -574,5 +592,6 @@ async def on_message(message: cl.Message) -> None:
         await cl.Message(content=html.escape(t("ui_error", e=short), quote=False)).send()
         return
 
-    # Conversation memory: the question plus a truncated answer.
-    history.append(f"Q: {message.content}\nA: {answer[:500]}")
+    # Conversation memory: the question plus a truncated answer; a catalogue
+    # answer only as its shape, never the list of titles.
+    history.append(history_entry(message.content, answer, view.catalog))

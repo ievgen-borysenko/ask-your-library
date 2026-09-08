@@ -86,6 +86,18 @@ def test_a_canary_is_excluded_by_its_source_column_not_by_its_name(index):
     assert [b.key for b in list_books()] == [CANARY]
 
 
+def test_a_book_with_a_canary_row_among_real_rows_is_still_a_book(index):
+    # A stray `source: canary` on one card must not delete a real book from the catalogue:
+    # a canary row counts for nothing, the other rows make it a book.
+    index(cards=[row(MOBY, "canary")], transcripts=[row(MOBY, "pg:2701"), row(CANARY, "canary")])
+    assert [b.key for b in list_books()] == [MOBY]
+
+
+def test_a_row_without_a_book_key_is_skipped(index):
+    index(cards=[], transcripts=[row(MOBY), {**row(GULLIVER, n=2), "book": None}])
+    assert [b.key for b in list_books()] == [MOBY]
+
+
 def test_a_missing_corpus_is_skipped_and_the_other_one_is_listed(index, caplog):
     index(cards=[row(IVANHOE, "x")], transcripts=[])
     library._reported_missing.clear()
@@ -151,6 +163,19 @@ def test_a_title_that_is_not_there_resolves_to_nothing_with_at_most_three_sugges
     assert resolve_title("   ", ALL) == ([], [])
 
 
+def test_strict_resolution_refuses_a_fragment_of_a_longer_title():
+    """The hybrid's retrieval filter: a one-word fragment inside a longer title
+    ("Time" for The Time Machine) must not silently limit the search to one
+    book; several words, most of a title, an exact title or a typo still do."""
+    library_with_time = ALL + entries(key("The Time Machine", "H. G. Wells"))
+    assert resolve_title("Time", library_with_time, strict=True)[0] == []
+    assert [m.title for m in resolve_title("Time", library_with_time)[0]] == ["The Time Machine"]
+    assert [m.title for m in resolve_title("Time Machine", library_with_time, strict=True)[0]] == ["The Time Machine"]
+    assert [m.title for m in resolve_title("Scarlet", ALL, strict=True)[0]] == []          # 7 of 18 chars
+    assert sorted(m.key for m in resolve_title("Sherlock Holmes", ALL, strict=True)[0]) == sorted([HOLMES_A, HOLMES_B])
+    assert [m.key for m in resolve_title("Ivanho", ALL, strict=True)[0]] == [IVANHOE]
+
+
 def test_an_author_resolves_by_full_name_surname_or_typo():
     assert [m.key for m in resolve_author("Herman Melville", ALL)[0]] == [MOBY]
     assert [m.key for m in resolve_author("melville", ALL)[0]] == [MOBY]
@@ -203,7 +228,7 @@ def test_an_operation_that_is_not_ours_sends_the_question_to_the_research_loop(m
     monkeypatch.setattr(llm, "ask_json", lambda system, user, role: {"mode": "catalog",
                                                                      "catalog": {"op": "delete_all"}, "queries": []})
     result = nodes.plan(fresh_state())
-    assert result["mode"] == "answer" and result["catalog_fallback"] is True
+    assert result["mode"] == "answer" and result["catalog_fallback"] == "invalid_op"
     assert result["current_query"] == "How many books do I have?" and result["plan_fallback"] is True
     assert "catalog_request" not in result
     assert nodes.route_after_plan({**fresh_state(), **result}) == "act"
@@ -220,7 +245,7 @@ def test_a_catalogue_request_after_a_clarify_reply_is_not_honoured(monkeypatch):
                         clarify_candidates=[MOBY, GULLIVER])
     result = nodes.plan(state)
     assert result["mode"] == "answer" and result["clarify_chosen"] == MOBY
-    assert result["catalog_fallback"] is True and result["current_query"] == "which one?"
+    assert result["catalog_fallback"] == "after_clarify" and result["current_query"] == "which one?"
 
 
 def test_a_named_book_is_resolved_by_code_into_a_retrieval_filter(monkeypatch):

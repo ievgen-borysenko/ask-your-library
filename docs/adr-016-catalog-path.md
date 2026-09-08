@@ -43,9 +43,12 @@ A separate, deterministic path for questions about what the library holds:
   `book` field; the same resolver turns it into an index key and retrieval is limited to it
   (`act`, like the filter after a resolved clarify, ADR-013). No match: the whole library is
   searched and the answer starts by saying so. Several matches: no filter, no note.
-- Never the other way round: a content question cannot be pushed into the catalogue by an
-  invalid operation, and a catalogue request after a clarify reply is not honoured (the reply
-  settled a book of the research loop).
+- Code refuses an invalid operation and a catalogue request after a clarify reply (the reply
+  settled a book of the research loop), and the event says which happened. Code cannot tell a
+  content question the planner labelled "catalog" from a real catalogue question: that routing
+  is the planner's reading, measured by the negative controls of the catalogue eval set.
+- The list never reaches the model: the answer is a template, and the conversation memory that
+  the next turn's planner sees keeps only the operation, the counts and the name asked about.
 
 ## Options considered
 

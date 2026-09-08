@@ -77,9 +77,13 @@ question -> planner queries (2-4, English) -> LanceDB hybrid search (vectors + B
   the distinct book keys of both tables (the demo's canary fixtures excluded by their `source`
   column); code validates the operation, resolves a title or an author against that list
   (exact, contained as whole words, or a close match for a typo) and formats the answer, so
-  nothing can be listed that is not in the index and the count is `len()` of the list shown.
-  The same resolver limits a content question that names one book to that book. An operation
-  the planner invents falls back to the research loop, never the other way round.
+  nothing can be listed that is not in the index and a count is the length of the same list a
+  listing shows. The same resolver limits a content question that names one book to that book
+  (a name that fits several books, or only a fragment of a title, sets no filter). An operation
+  the planner invents falls back to the research loop; whether a content question gets labelled
+  a catalogue question is the planner's reading, which the catalogue eval set measures with
+  negative controls rather than code enforcing it. The list never reaches the model: not in the
+  answer, and not on a later turn (the conversation memory keeps only the operation and counts).
 - **Only `observe` sees retrieved text, sanitized and cut to a fixed budget.** `act` writes the
   sanitized passages, cut to the same budget, to a per-run scratchpad (a human-readable log) and
   keeps each passage, as observe saw it, in state under a stable hit id; plan, reflect and synthesize work on the distilled evidence,
@@ -432,12 +436,14 @@ eleven-question set (see the note under the table).
 (`eval/golden/en-demo-extended.yaml`, 21 questions) is the former v3 draft with near-duplicates
 removed; its notes were checked against the source text by an AI session only, so its numbers are
 exploratory.
-**Catalogue** (`eval/golden/en-demo-catalog.yaml`, 7 questions): six questions about what the
+**Catalogue** (`eval/golden/en-demo-catalog.yaml`, 10 questions): six questions about what the
 library holds (count, the full list, a title that is there, one that is not, an author, the count
-in Ukrainian), scored on the structured result against the manifest, and one content question
-that looks like a listing as the negative control. First run on `7060129` (08.09, single run):
-7/7, the six catalogue items with 0 search steps and one model call each, the control through
-the research loop; $0.034 for the set.
+in Ukrainian), scored on the structured result against the manifest; three content questions
+that look like listings as negative controls (one scored on routing alone); and one hybrid item
+that pins the named-book retrieval filter. First run of the first seven on `7060129` (08.09,
+single run): 7/7, the six catalogue items with 0 search steps and one model call each, the
+control through the research loop; $0.034 for the set. The three items added after the review
+round are measured in the pull request.
 
 Two measured trees, both single runs, clean tree (`--require-clean`), strict hit-id mode, the same
 bge-m3 index: **v0.1.0**, 2026-09-05 on code `88881ee` (the last code commit before tag `v0.1.0`;
@@ -607,6 +613,9 @@ Yellow boxes leave the machine (the LLM provider, optionally LangSmith); everyth
   OpenRouter by default, and on to the model vendor. Point `OPENROUTER_BASE_URL` elsewhere to
   change that, or set `LLM_BACKEND=ollama`: with local embeddings (the default) and tracing off,
   nothing leaves the machine at all.
+- A catalogue answer (the list of your books) is computed locally from the index tables and is
+  not sent to the provider; the conversation memory keeps only its shape (the operation and the
+  counts, and the name you asked about), so a later question does not carry the titles either.
 - Embeddings are computed **locally** by Ollama by default; nothing leaves the machine for
   retrieval. `EMBED_BACKEND=openrouter` sends chunk text to the embedding API too.
 - Every run writes a scratchpad with the **retrieved passages as the model saw them** (sanitized,

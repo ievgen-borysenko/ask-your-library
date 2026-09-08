@@ -227,28 +227,29 @@ class BookEntry:
 def list_books() -> list[BookEntry]:
     """Every book in the index, once, sorted by title: the distinct `book` keys
     of both corpora. The canaries the demo ingest plants for the injection
-    tests are excluded by their `source` column, never by name, so a real book
-    that happens to share a title with a fixture is still listed. Read from the
-    tables each time (an `ayl-add` while a server runs is seen at once); only
-    the two metadata columns are loaded, and the embedding fingerprint is not
-    checked because no vector is involved."""
+    tests are excluded by their `source` column, never by name: a canary row
+    counts for nothing, so a key whose every row is a canary is a fixture and a
+    key with any other row is a book (a real book that shares a title with a
+    fixture, or carries a stray `source: canary` in one card, stays listed).
+    A row without a key is not a book. Read from the tables each time (an
+    `ayl-add` while a server runs is seen at once); only the two metadata
+    columns are loaded, and the embedding fingerprint is not checked because
+    no vector is involved."""
     db = lancedb.connect(DB_PATH)
     present: dict[str, dict[str, bool]] = {}
-    canary: set[str] = set()
     for corpus in ("cards", "transcripts"):
         if not has_table(db, TABLES[corpus]):
             continue
         table = db.open_table(TABLES[corpus])
         rows = table.search().select(["book", "source"]).limit(max(table.count_rows(), 1)).to_list()
         for row in rows:
-            key = row["book"]
-            if row.get("source") == CANARY_SOURCE:
-                canary.add(key)
+            key = row.get("book")
+            if not key or row.get("source") == CANARY_SOURCE:
                 continue
             present.setdefault(key, {"cards": False, "transcripts": False})[corpus] = True
     entries = [BookEntry(key=key, title=title_of(key), author=author_of(key),
                          has_cards=flags["cards"], has_text=flags["transcripts"])
-               for key, flags in present.items() if key not in canary]
+               for key, flags in present.items()]
     return sorted(entries, key=lambda e: (e.title.casefold(), e.author.casefold()))
 
 
