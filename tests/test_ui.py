@@ -1,10 +1,13 @@
 """UI rendering contracts that do not need a running Chainlit server.
 Skipped when the ui extra is not installed (a plain `uv sync` clone)."""
+import asyncio
 import importlib
+import logging
 import os
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -273,3 +276,67 @@ def test_badge_broken_quotes_are_neutralized_and_single_line(ui):
         "checked": 1, "confirmed": 0, "unattributed": 0, "broken": 1, "unused": 0,
         "broken_items": [{"hit_id": "s1h1", "book": "B", "section": "s", "quote": "line one\n\n![x](http://evil/x.png)"}]}})
     assert "line one<br><br>[image removed]" in badge and "![x]" not in badge
+
+
+# --- chat persistence: the thread insert that carries the title -----------------
+
+CHAINLIT_CONFIG = REPO / ".chainlit" / "config.toml"
+
+
+def _tags_as_the_emitter_sends_them(profile: str) -> list[str] | None:
+    """chainlit.emitter.flush_thread_queues: the insert that saves a chat's title on
+    its first message also carries tags=[chat profile] when features.auto_tag_thread
+    is on. Read from the repo's config file, not from chainlit's loaded config, so
+    the test describes the shipped file whatever the working directory is."""
+    features = tomllib.loads(CHAINLIT_CONFIG.read_text(encoding="utf-8"))["features"]
+    return [profile] if features.get("auto_tag_thread", True) else None
+
+
+async def _thread_row(layer, thread_id: str):
+    rows = await layer.execute_sql('SELECT "name", "tags" FROM threads WHERE "id" = :id',
+                                   {"id": thread_id})
+    return rows[0] if rows else None
+
+
+def _insert_and_read(layer, thread_id: str, tags) -> dict | None:
+    """One thread insert through the layer, then the row; the layer's engine is
+    disposed in the same loop, so no aiosqlite connection outlives the test."""
+    async def go():
+        try:
+            await layer.update_thread(thread_id=thread_id, name="How many books do I have?",
+                                      tags=tags, metadata={})
+            return await _thread_row(layer, thread_id)
+        finally:
+            await layer.close()
+    return asyncio.run(go())
+
+
+def test_first_message_persists_the_chat_title(ui):
+    """The data layer as ui.py builds it, the schema as ui.py creates it, the
+    title-carrying insert of a chat's first message with the tags the shipped
+    config makes the emitter send (the emitter also passes the user; that
+    needs a session and changes nothing about the tags column): the title must
+    land in the table the sidebar lists."""
+    row = _insert_and_read(ui.data_layer(), "t1", _tags_as_the_emitter_sends_them(ui.PROFILE_EN))
+    assert row == {"name": "How many books do I have?", "tags": None}
+
+
+def test_sqlite_still_rejects_a_tag_list_so_auto_tag_thread_stays_off(ui, caplog):
+    """Why the flag is off: the data layer binds the list as-is, SQLite refuses it,
+    and execute_sql only logs the failure, so the whole insert, title included,
+    is lost. Both halves are pinned: no row, AND the logged reason is the list
+    binding (execute_sql swallows every error, so the missing row alone would
+    also pass on an unrelated breakage). The day this test fails, upstream
+    serializes tags for SQLite and auto_tag_thread can go back on."""
+    with caplog.at_level(logging.WARNING, logger="chainlit"):
+        row = _insert_and_read(ui.data_layer(), "t2", [ui.PROFILE_EN])
+    assert row is None
+    assert "type 'list' is not supported" in caplog.text
+
+
+def test_config_keeps_auto_tag_thread_off():
+    features = tomllib.loads(CHAINLIT_CONFIG.read_text(encoding="utf-8"))["features"]
+    assert features["auto_tag_thread"] is False, (
+        "auto_tag_thread = true loses every chat title on SQLite; see "
+        "test_sqlite_still_rejects_a_tag_list_so_auto_tag_thread_stays_off")
+
