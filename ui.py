@@ -27,6 +27,7 @@ import json
 import os
 import re
 import secrets
+import contextlib
 import sqlite3
 import stat
 from pathlib import Path
@@ -172,8 +173,10 @@ CREATE TABLE IF NOT EXISTS feedbacks (
 """
 
 CHAINLIT_DIR.mkdir(exist_ok=True)
-with sqlite3.connect(CHAT_DB_PATH) as _connection:
-    _connection.executescript(CHAT_DB_SCHEMA)
+with contextlib.closing(sqlite3.connect(CHAT_DB_PATH)) as _connection:
+    # `closing`: a `with` on a sqlite3 connection commits but does not close it
+    with _connection:
+        _connection.executescript(CHAT_DB_SCHEMA)
 
 
 @cl.data_layer

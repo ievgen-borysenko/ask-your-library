@@ -287,6 +287,7 @@ def test_a_pure_holdings_question_carries_no_content_clue(question):
     ("How does Ivanhoe end?", "how"),
     ("Чи є в мене Дракула, і чому Гаркер лишається в замку?", "чому"),
     ("Що в мене є про китів?", "про"),
+    ("Чи є Дракула, йдеться там про замок?", "йдеться"),     # a breve survives: the gate must not accent-fold
 ])
 def test_a_question_that_also_asks_about_content_is_flagged(question, clue):
     assert content_clue(question) == clue
@@ -338,6 +339,7 @@ def test_a_catalogue_request_after_a_clarify_reply_is_not_honoured(monkeypatch):
     result = nodes.plan(state)
     assert result["mode"] == "answer" and result["clarify_chosen"] == MOBY
     assert result["catalog_fallback"] == "after_clarify" and result["current_query"] == "which one?"
+    assert "plan_fallback" not in result        # the raw question by design, not for want of a plan
 
 
 def test_a_named_book_is_resolved_by_code_into_a_retrieval_filter(monkeypatch):

@@ -45,8 +45,10 @@ CONTENT_CLUES = re.compile(
 
 def content_clue(question: str) -> str:
     """The first content word of a question, or "" when it reads as a pure
-    holdings question (how many, which titles, do I have X, what do I have by Y)."""
-    found = CONTENT_CLUES.search(fold(question))
+    holdings question (how many, which titles, do I have X, what do I have by Y).
+    Case-folded only: `fold` would strip the breve off "й" and the pattern's
+    Ukrainian words would never match."""
+    found = CONTENT_CLUES.search(" ".join(question.casefold().split()))
     return found.group(0) if found else ""
 
 

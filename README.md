@@ -82,7 +82,8 @@ question -> planner queries (2-4, English) -> LanceDB hybrid search (vectors + B
   (a name that fits several books, or only a fragment of a title, sets no filter). An operation
   the planner invents falls back to the research loop, and so does a question that also asks
   about content ("Do I have Dracula, and why does Harker stay?"): a conservative gate on content
-  vocabulary sends it to the research loop with the named book as the filter. The gate knows
+  vocabulary sends it to the research loop, with the named book as the filter when the request
+  carries a title that resolves to one book. The gate knows
   words, not titles hidden in a question, so that routing stays the planner's reading, which
   the catalogue eval set measures with negative controls. The list never reaches the model: not
   in the answer, and not on a later turn (the conversation memory keeps only the operation and

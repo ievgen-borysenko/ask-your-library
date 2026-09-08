@@ -19,8 +19,8 @@
   after a clarify reply, takes the research loop and the event says which; so does a question
   that also asks about content ("Do I have Dracula, and why does Harker stay?"), through a
   conservative gate on content vocabulary, with the named book as the retrieval filter (the
-  gate knows words, not titles hidden in a question: that routing stays the planner's reading,
-  measured by the set's negative controls). The list never reaches the model: the conversation memory keeps only the
+  gate knows words, not titles hidden in a question: routing beyond that vocabulary stays the
+  planner's reading, measured by the set's negative controls). The list never reaches the model: the conversation memory keeps only the
   shape of a catalogue answer (operation, counts, the name asked about), never the titles, in
   the CLI, the web UI and a resumed chat. A book that also carries a canary-sourced row stays
   listed: only a key whose every row is a canary is a fixture. New eval set
@@ -29,13 +29,11 @@
   the list), three content questions as negative controls (one scored on routing alone) and one
   hybrid item that pins the named-book filter; a research question answered by the catalogue
   path fails its item. Tests: `tests/test_catalog.py` (`list_books` on a real index
-  in tmp, the resolver, the answers in both languages, the planner-side guards) and five
-  end-to-end runs of the graph. Measured on `3a0fb9d` (single run): 10/10, the six catalogue
-  items with 0 search steps and one model call each, the three controls through the research
-  loop, the hybrid item with retrieval limited to Dracula; $0.19 for the set. An earlier run of
-  the same set routed the hybrid item to the catalogue ("has Dracula: yes", the content part
-  unanswered), which one sentence in the planner prompt closed; routing is measured, not
-  enforced.
+  in tmp, the resolver, the answers in both languages, the planner-side guards) and seven
+  end-to-end runs of the graph. An earlier run of the set routed the hybrid item to the
+  catalogue ("has Dracula: yes", the content part unanswered): one sentence in the planner
+  prompt and the gate above closed it; routing beyond the gate's vocabulary is measured, not
+  enforced. The set's measured numbers are in the README's Evaluation section.
 - **Chat titles in the sidebar.** `auto_tag_thread` is now off in `.chainlit/config.toml`. With it
   on, the first message of every chat asked the SQLAlchemy data layer to insert the thread with
   `tags=[chat profile]`; SQLite refuses a Python list, the data layer only logs the failure, and the

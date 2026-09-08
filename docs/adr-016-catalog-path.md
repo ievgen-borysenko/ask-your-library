@@ -45,8 +45,9 @@ A separate, deterministic path for questions about what the library holds:
   searched and the answer starts by saying so. Several matches: no filter, no note.
 - Code refuses an invalid operation and a catalogue request after a clarify reply (the reply
   settled a book of the research loop), and sends a question that also asks about content
-  ("Do I have Dracula, and why does Harker stay?") to the research loop with the named book as
-  the filter: a conservative gate on content vocabulary (why, how, who, about, mention, ...),
+  ("Do I have Dracula, and why does Harker stay?") to the research loop, with the named book as
+  the filter when the request carries a title that resolves to one book: a conservative gate on
+  content vocabulary (why, how, who, about, mention, ...),
   because the planner labelled exactly that question "has" once. The event says which happened.
   The gate knows words, not titles: "the names of the three musketeers" is beyond it, so that
   routing stays the planner's reading, measured by the controls of the catalogue eval set.

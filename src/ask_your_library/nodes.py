@@ -149,7 +149,7 @@ def plan(state: AgentState) -> dict:
     # Strict resolution: a fragment of a title ("Time" for The Time Machine)
     # sets no filter either — a silent wrong filter would hide a whole library.
     book_filter = book_unresolved = ""
-    named = llm.str_field(decision, "book") or (catalog_request["title"] if mixed and catalog_request else "")
+    named = llm.str_field(decision, "book") or (catalog_request["title"] if catalog_fallback == "mixed_intent" else "")
     if named and mode == "answer" and not chosen:
         matches, _ = resolve_title(named, list_books(), strict=True)
         if len(matches) == 1:
@@ -164,9 +164,11 @@ def plan(state: AgentState) -> dict:
         "book_filter": book_filter, "book_unresolved": book_unresolved,
         **common,
     }
-    if fallback and catalog_fallback != "mixed_intent":
-        # present only when it happened: the interfaces and the eval show it (a
-        # mixed intent searches the raw question by design, not for want of a plan)
+    if fallback and catalog_fallback not in ("mixed_intent", "after_clarify"):
+        # present only when it happened: the interfaces and the eval show it. A
+        # catalogue decision carries no queries by contract, so a mixed intent or
+        # a request after a clarify searches the raw question by design, not for
+        # want of a plan; only an invented operation without queries is a fallback.
         update["plan_fallback"] = True
     if catalog_fallback:
         update["catalog_fallback"] = catalog_fallback
