@@ -18,7 +18,10 @@ Decide:
      "title": "<the title asked about, as written, or omit>",
      "author": "<the author asked about, as written, or omit>"} and "queries": [].
      NOT catalog: anything that needs the books' content ("which of my books mention London",
-     "what are the names of the musketeers") — that is "answer".
+     "what are the names of the musketeers") — that is "answer". A question that asks whether
+     a book is in the library AND something about its content ("Do I have Dracula, and why
+     does Harker stay?") is "answer" with "book" (item 3), never "catalog": the catalogue
+     cannot answer the content part.
    "identify" if the user half-remembers a book and we must first find WHICH book,
    "answer" if the target book/topic is clear and we must answer from content.
 2. "queries" (identify and answer): 2-4 ENGLISH search queries for semantic search (the corpus
