@@ -444,10 +444,10 @@ exploratory.
 library holds (count, the full list, a title that is there, one that is not, an author, the count
 in Ukrainian), scored on the structured result against the manifest; three content questions
 that look like listings as negative controls (one scored on routing alone); and one hybrid item
-that pins the named-book retrieval filter. Measured on `3a0fb9d` (08.09, single run): 10/10;
+that pins the named-book retrieval filter. Measured on `b0d1321` (09.09, single run): 10/10;
 the six catalogue items with 0 search steps and one model call each; the three controls through
-the research loop (1, 2 and 4 steps); the hybrid item with retrieval limited to Dracula; 24/24
-quotes confirmed; $0.19 for the set, of which the six catalogue items cost $0.013 together.
+the research loop (1, 1 and 3 steps); the hybrid item with retrieval limited to Dracula; 17/17
+quotes confirmed; $0.16 for the set, of which the six catalogue items cost $0.014 together.
 
 Two measured trees, both single runs, clean tree (`--require-clean`), strict hit-id mode, the same
 bge-m3 index: **v0.1.0**, 2026-09-05 on code `88881ee` (the last code commit before tag `v0.1.0`;
