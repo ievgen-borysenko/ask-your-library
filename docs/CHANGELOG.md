@@ -22,7 +22,9 @@
   the list), plus one content question as the negative control; a research question answered by
   the catalogue path fails its item. Tests: `tests/test_catalog.py` (`list_books` on a real index
   in tmp, the resolver, the answers in both languages, the planner-side guards) and five
-  end-to-end runs of the graph.
+  end-to-end runs of the graph. First live run of the set on `7060129` (single run): 7/7, the six
+  catalogue items with 0 search steps and one model call each, the control through the research
+  loop; $0.034 for the set.
 - **Chat titles in the sidebar.** `auto_tag_thread` is now off in `.chainlit/config.toml`. With it
   on, the first message of every chat asked the SQLAlchemy data layer to insert the thread with
   `tags=[chat profile]`; SQLite refuses a Python list, the data layer only logs the failure, and the

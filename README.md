@@ -413,12 +413,14 @@ through the whole graph (clarify interrupts are auto-answered, so the run is non
 scored on: expected titles mentioned in the answer (accent-folded substring, not a citation
 check), refusal questions answering with an explicit refusal (an evidence-free answer told from
 model knowledge fails), `expected_behavior: clarify` questions actually triggering a clarify
-interrupt, and `expects_chapter_read` questions actually drilling into a chapter of an expected
-book. Quote provenance totals come from `validate`. Scoring is heuristic, no LLM judge -
+interrupt, `expects_chapter_read` questions actually drilling into a chapter of an expected
+book, and `catalog` questions on their structured result (the set of books the code listed must
+equal the expected set, the count must be the length of that list; a research question answered
+by the catalogue path fails). Quote provenance totals come from `validate`. Scoring is heuristic, no LLM judge -
 **answer correctness is still a manual read**, which is why the harness writes every answer
 into a report with a per-question correctness checkbox.
 
-Two golden sets, reported separately. **Core** (`eval/golden/en-demo.yaml`, 11 questions, the
+Three golden sets, reported separately. **Core** (`eval/golden/en-demo.yaml`, 11 questions, the
 default `GOLDEN_PATH`): eight questions on books the golden author has read and a two-book
 comparison of two of them (Ivanhoe and Don Quixote), all nine reader-verified; h06, one of the two
 questions the example traces are built on, verified against the source text by an AI session only;
@@ -430,6 +432,12 @@ eleven-question set (see the note under the table).
 (`eval/golden/en-demo-extended.yaml`, 21 questions) is the former v3 draft with near-duplicates
 removed; its notes were checked against the source text by an AI session only, so its numbers are
 exploratory.
+**Catalogue** (`eval/golden/en-demo-catalog.yaml`, 7 questions): six questions about what the
+library holds (count, the full list, a title that is there, one that is not, an author, the count
+in Ukrainian), scored on the structured result against the manifest, and one content question
+that looks like a listing as the negative control. First run on `7060129` (08.09, single run):
+7/7, the six catalogue items with 0 search steps and one model call each, the control through
+the research loop; $0.034 for the set.
 
 Two measured trees, both single runs, clean tree (`--require-clean`), strict hit-id mode, the same
 bge-m3 index: **v0.1.0**, 2026-09-05 on code `88881ee` (the last code commit before tag `v0.1.0`;
