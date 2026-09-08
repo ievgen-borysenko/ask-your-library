@@ -82,6 +82,38 @@ def test_badge_is_green_only_when_nothing_is_broken_or_unattributed(ui):
     assert ui.GRAY in badge(checked=0, confirmed=0, broken=0, unattributed=0)
 
 
+def test_a_catalogue_answer_is_one_step_and_the_titles_render_as_text(ui, monkeypatch):
+    shown, sent = [], []
+    monkeypatch.setattr(ui, "show_step", lambda name, text: shown.append((name, text)))
+
+    class Msg:
+        def __init__(self, content):
+            sent.append(content)
+
+        def send(self):
+            return None
+
+    monkeypatch.setattr(ui.cl, "Message", Msg)
+    ui.render_event("plan", {"mode": "catalog", "catalog_request": {"op": "list", "title": "", "author": ""},
+                             "current_query": "", "queries": []})
+    assert shown[-1][0] == "plan" and "operation: list" in shown[-1][1] and "search queries" not in shown[-1][1]
+    ui.render_event("catalog", {"answer": "2 books:\n- <b>Moby Dick</b> — Herman Melville",
+                                "catalog": {"op": "list", "count": 2, "total": 2}, "stop_reason": "catalog"})
+    assert shown[-1] == ("catalog", "list: 2 of 2 books, from the index tables")
+    assert "&lt;b&gt;Moby Dick&lt;/b&gt;" in sent[-1]                  # a crafted title is text, not DOM
+    ui.render_event("plan", {"mode": "answer", "current_query": "q", "queries": [],
+                             "book_filter": "Moby Dick — Herman Melville", "book_unresolved": ""})
+    assert "retrieval limited to it" in shown[-1][1]
+
+
+def test_the_badge_of_a_catalogue_answer_is_green_and_names_the_source(ui):
+    badge = ui.verification_badge({"verification": "v", "provenance": {
+        "checked": 0, "confirmed": 0, "broken": 0, "unattributed": 0,
+        "catalog": {"op": "count", "count": 33, "total": 33}}})
+    assert ui.GREEN in badge and "Catalogue answer" in badge and "33 of 33 books" in badge
+    assert "Quote provenance" not in badge
+
+
 def test_ui_import_writes_only_into_its_configured_dir(ui, tmp_path):
     assert (tmp_path / "chainlit" / "chat.db").exists()
     assert ui.CHAINLIT_DIR == tmp_path / "chainlit"

@@ -17,7 +17,7 @@ import pytest
 from ask_your_library import config, llm, nodes, provenance
 from ask_your_library.graph import build_graph
 from ask_your_library.i18n import t
-from ask_your_library.library import TITLE_SEPARATOR
+from ask_your_library.library import TITLE_SEPARATOR, BookEntry, author_of, title_of
 from ask_your_library.prompts import OBSERVE_RULES, PLAN_RULES, REFLECT_RULES, SYNTHESIZE_RULES
 from ask_your_library.runner import run_question
 
@@ -63,6 +63,10 @@ class FakeLibrary:
         self.searches.append((query, book))
         books = [book] if book else self.books_for_query(query)
         return [hit(b, c, self.texts.get((b, c))) for b in books for c in ("cards", "transcripts") if b in CORPUS]
+
+    def list_books(self) -> list[BookEntry]:
+        return sorted((BookEntry(k, title_of(k), author_of(k), True, True) for k in CORPUS),
+                      key=lambda e: e.title.casefold())
 
     def read_chapter(self, book: str, section: str, max_chars: int = 12000):
         self.reads.append((book, section))
@@ -134,6 +138,7 @@ def run(monkeypatch, tmp_path):
         monkeypatch.setattr(llm, "llm", lambda: model)
         monkeypatch.setattr(nodes, "search_both", library.search_both)
         monkeypatch.setattr(nodes, "read_chapter", library.read_chapter)
+        monkeypatch.setattr(nodes, "list_books", library.list_books)
         events: list[tuple[str, dict]] = []
         clarify_questions: list[str] = []
 
@@ -580,3 +585,97 @@ def test_the_planner_fallback_is_announced_once_not_again_after_a_clarify(run):
     first_plan, second_plan = by_name(events, "plan")
     assert first_plan["plan_fallback"] is True and first_plan["current_query"] == "Which book has a stranded traveller?"
     assert "plan_fallback" not in second_plan and second_plan["current_query"] == "Lilliput"
+
+
+# ---------------------------------------------------------------- the catalogue path (ADR-016)
+def test_a_catalogue_count_is_computed_by_code_with_no_search_and_one_model_call(run):
+    model = ScriptedModel(plan=[{"mode": "catalog", "queries": [], "catalog": {"op": "count"}}])
+    library = FakeLibrary()
+    answer, events, asked = run(model, library, "How many books do I have?")
+
+    assert names(events) == ["plan", "catalog", "validate", "metrics"]
+    assert model.roles() == ["plan"] and library.searches == [] and asked == []
+    plan = by_name(events, "plan")[0]
+    assert plan["mode"] == "catalog" and plan["catalog_request"] == {"op": "count", "title": "", "author": ""}
+    assert plan["current_query"] == "" and plan["queries"] == []
+    listing = by_name(events, "catalog")[0]
+    assert listing["catalog"] == {"op": "count", "count": 2, "total": 2, "books": [GULLIVER, MOBY],
+                                  "query": "", "resolved": True, "suggestions": []}
+    assert listing["stop_reason"] == t("stop_catalog")
+    assert answer == t("catalog_count", n=2)
+    validate = by_name(events, "validate")[0]
+    assert validate["verification"] == t("verif_catalog", n=2, total=2)
+    assert validate["provenance"]["checked"] == 0 and validate["provenance"]["catalog"] == {"op": "count", "count": 2, "total": 2}
+    metrics = by_name(events, "metrics")[0]
+    assert metrics["llm_calls"] == 1 and metrics["steps_taken"] == 0 and metrics["hits_seen"] == 0
+    assert metrics["stop_reason"] == t("stop_catalog")
+
+
+def test_list_has_and_by_author_answer_from_the_same_list(run):
+    library = FakeLibrary()
+    listing = ScriptedModel(plan=[{"mode": "catalog", "catalog": {"op": "list"}}])
+    answer, events, _ = run(listing, library, "What are all my books called?")
+    assert answer == t("catalog_list", n=2, items=f"- {GULLIVER}\n- {MOBY}")
+    assert by_name(events, "catalog")[0]["catalog"]["count"] == 2 == answer.count("\n- ")
+
+    typo = ScriptedModel(plan=[{"mode": "catalog", "catalog": {"op": "has", "title": "Moby Dik"}}])
+    answer, events, _ = run(typo, library, "Do I have Moby Dik?")
+    assert answer == t("catalog_has_yes", items=f"- {MOBY}")
+    assert by_name(events, "catalog")[0]["catalog"]["resolved"] is True
+
+    absent = ScriptedModel(plan=[{"mode": "catalog", "catalog": {"op": "has", "title": "War and Peace"}}])
+    answer, events, _ = run(absent, library, "Is War and Peace in my library?")
+    assert answer.startswith(t("catalog_has_no", q="War and Peace"))
+    assert by_name(events, "catalog")[0]["catalog"] == {"op": "has", "count": 0, "total": 2, "books": [],
+                                                        "query": "War and Peace", "resolved": False, "suggestions": []}
+
+    surname = ScriptedModel(plan=[{"mode": "catalog", "catalog": {"op": "by_author", "author": "Melville"}}])
+    answer, _, _ = run(surname, library, "What do I have by Melville?")
+    assert answer == t("catalog_by_author", n=1, author="Herman Melville", items=f"- {MOBY}")
+    assert library.searches == []
+
+
+def test_an_operation_that_is_not_ours_takes_the_research_loop_and_says_so(run):
+    model = ScriptedModel(
+        plan=[{"mode": "catalog", "catalog": {"op": "delete_all"}, "queries": ["Ishmael sails"]}],
+        observe=[{"evidence": [evidence(MOBY, "transcripts", "s1h2")]}],
+        reflect=[{"decision": "enough"}],
+        synthesize=["Ishmael sails on the Pequod [Moby Dick, Chapter 1]."],
+    )
+    _, events, _ = run(model, FakeLibrary(lambda q: [MOBY]), "Who narrates Moby Dick?")
+    assert names(events) == ["plan", "act", "observe", "reflect", "synthesize", "validate", "metrics"]
+    plan = by_name(events, "plan")[0]
+    assert plan["mode"] == "answer" and plan["catalog_fallback"] is True and plan["current_query"] == "Ishmael sails"
+    assert "plan_fallback" not in plan and "catalog" not in by_name(events, "validate")[0]["provenance"]
+
+
+def test_a_content_question_that_names_one_book_is_answered_from_that_book(run):
+    model = ScriptedModel(
+        plan=[{"mode": "answer", "queries": ["why Harker stays"], "book": "moby dick"}],
+        observe=[{"evidence": [evidence(MOBY, "transcripts", "s1h2")]}],
+        reflect=[{"decision": "enough"}],
+        synthesize=["Because [Moby Dick, Chapter 1]."],
+    )
+    library = FakeLibrary()
+    answer, events, _ = run(model, library, "Do I have Moby Dick, and who narrates it?")
+    plan = by_name(events, "plan")[0]
+    assert plan["book_filter"] == MOBY and plan["book_unresolved"] == ""
+    assert library.searches == [("why Harker stays", MOBY)]          # retrieval limited to the resolved key
+    assert answer == "Because [Moby Dick, Chapter 1]."
+
+
+def test_a_named_book_the_catalogue_does_not_hold_is_searched_everywhere_and_the_answer_says_so(run):
+    model = ScriptedModel(
+        plan=[{"mode": "answer", "queries": ["Harker stays"], "book": "War and Peace"}],
+        observe=[{"evidence": [evidence(MOBY, "transcripts", "s1h2")]}],
+        reflect=[{"decision": "enough"}],
+        synthesize=["Something from Moby Dick [Moby Dick, Chapter 1]."],
+    )
+    library = FakeLibrary()
+    answer, events, _ = run(model, library, "In War and Peace, why does Harker stay?")
+    plan = by_name(events, "plan")[0]
+    assert plan["book_filter"] == "" and plan["book_unresolved"] == "War and Peace"
+    assert library.searches == [("Harker stays", None)]
+    assert answer == t("book_not_in_catalog", q="War and Peace") + "\n\nSomething from Moby Dick [Moby Dick, Chapter 1]."
+    assert by_name(events, "validate")[0]["provenance"]["confirmed"] == 1     # the note changes no verdict
+

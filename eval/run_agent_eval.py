@@ -3,7 +3,8 @@ the observable behaviour against the golden set.
 
 Clarify interrupts are answered automatically, so the run is non-interactive.
 Scored per question (no LLM judge; heuristics, not proof):
-  titles_mentioned  every expected book title occurs in the answer text
+  titles_mentioned  every expected book title occurs in the answer text (type catalog:
+                    the expected titles the code listed; strict set equality is the verdict)
                     (accent-folded substring) - NOT a citation check
   behavior  refusal -> the answer carries an explicit refusal marker
             ("not in the library", "cannot answer", "не знаю", ...); an answer
@@ -198,6 +199,9 @@ def run_one(graph, item: dict) -> dict:
         # an answer cut by the deadline and one written after "enough" must not
         # read the same in the report
         "stop_reason": final.get("stop_reason", "") or "",
+        # the catalogue path (ADR-016): op, count (= len(books)), total, books, resolved;
+        # empty for every run that went through the research loop
+        "catalog": final.get("catalog") or {},
         "seconds": round(time.time() - started),
         "steps_log": steps_log,
     }
@@ -231,6 +235,23 @@ def score(item: dict, r: dict) -> dict:
     answer = fold(r["answer"])
     mentioned = [b for b in expected if fold(b) in answer]
     behavior = item.get("expected_behavior")
+    if item["type"] == "catalog":
+        # The catalogue path is scored on its structured result, not on wording:
+        # the set of books the code listed must EQUAL the expected set (strict,
+        # by title: one book too many fails), the count carried in the state
+        # must be the length of that list, and "has"/"by_author" must resolve
+        # as expected. A catalogue question that took the research loop has no
+        # result here and fails.
+        listing = r.get("catalog") or {}
+        listed = {fold(k.rsplit(" — ", 1)[0]) for k in listing.get("books") or []}
+        wanted = {fold(b) for b in expected}
+        ok = bool(listing) and listed == wanted and listing.get("count") == len(listing.get("books") or [])
+        if "expected_count" in item:
+            ok = ok and listing.get("count") == item["expected_count"]
+        if "expected_resolved" in item:
+            ok = ok and bool(listing.get("resolved")) == bool(item["expected_resolved"])
+        return {"titles_mentioned": len(listed & wanted), "titles_expected": len(wanted),
+                "catalog_listed": len(listed), "behavior_ok": ok}
     if item["type"] == "refusal":
         # Evidence-free answers are NOT automatically refusals: the model may
         # have answered from its own knowledge. Only an explicit refusal passes.
@@ -273,6 +294,11 @@ def score(item: dict, r: dict) -> dict:
         out["drilldown_ok"] = any(fold(b) in fold(c.split("|", 1)[0])
                                   for c in read if counts(c) for b in expected)
         ok = ok and out["drilldown_ok"]
+    if r.get("catalog"):
+        # A content question sent down the catalogue path is the wrong kind of
+        # answer whatever it lists (a full listing names every expected title).
+        ok = False
+        out["catalog_misroute"] = True
     out["behavior_ok"] = ok
     return out
 
@@ -364,6 +390,9 @@ def main() -> None:
                 drill += ", clarify reply unresolved"
             if r.get("plan_fallback"):
                 drill += ", planner fallback (raw question searched)"
+            if r.get("catalog"):
+                drill += (f", catalog {r['catalog']['op']}: {r['catalog']['count']} of {r['catalog']['total']}"
+                          + (" — MISROUTED content question" if sc.get("catalog_misroute") else ""))
             if r.get("stop_reason"):
                 drill += f", stop: {r['stop_reason']}"
             out.write(f"\n## {r['id']} ({r['type']}, {r['steps_taken']} steps, "

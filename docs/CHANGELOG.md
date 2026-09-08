@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- **Catalogue questions are answered by code (ADR-016).** "How many books do I have, and what
+  are they called?" went through the research loop and came back with a sample: fourteen titles
+  under a heading that said seventeen, of thirty-three, after four searches (the owner's first
+  question to the web UI on 08.09). The planner has a third mode, `catalog`, in which it only
+  names the operation (`count`, `list`, `has` a title, `by_author`); code reads the distinct book
+  keys of both index tables (`library.list_books`, the demo's canary fixtures excluded by their
+  `source` column), validates the operation, resolves a title or an author against that list
+  (exact, contained as whole words, or a close match for a typo) and formats the answer, so the
+  number in the answer is the length of the list under it and nothing can be listed that is not
+  in the index. One model call, no search step; the CLI and the web UI show one `catalog` step
+  and a "catalogue answer" badge instead of a quote count. A content question that names one
+  book is answered from that book: the planner repeats the name, code resolves it, and retrieval
+  is limited to the resolved key, as after a clarify; a name that matches nothing is searched
+  everywhere and the answer says so; an operation the planner invents, or a catalogue request
+  after a clarify reply, takes the research loop and the event says so. New eval set
+  `eval/golden/en-demo-catalog.yaml`: type `catalog`, scored on the structured result with strict
+  set equality against the manifest (one book too many fails, the count must be the length of
+  the list), plus one content question as the negative control; a research question answered by
+  the catalogue path fails its item. Tests: `tests/test_catalog.py` (`list_books` on a real index
+  in tmp, the resolver, the answers in both languages, the planner-side guards) and five
+  end-to-end runs of the graph.
 - **Chat titles in the sidebar.** `auto_tag_thread` is now off in `.chainlit/config.toml`. With it
   on, the first message of every chat asked the SQLAlchemy data layer to insert the thread with
   `tags=[chat profile]`; SQLite refuses a Python list, the data layer only logs the failure, and the

@@ -1,0 +1,92 @@
+# Catalogue set: questions about what the library HOLDS, answered by the deterministic
+# catalogue path (ADR-016). Scored on the structured result, not on the answer's wording
+# (eval/run_agent_eval.py, type catalog): the set of books the code listed must EQUAL
+# expected_books (strict set equality, by title), the count carried in the state must be
+# len() of that list, and a "has" question must resolve (or not) as expected_resolved says.
+# The one research-type item is the negative control: a content question that looks like a
+# listing must NOT take the catalogue path (a catalogue result on it fails the item).
+# Titles are the demo manifest's (CI guard: tests/test_golden_books_in_manifest.py).
+# Run: GOLDEN_PATH=eval/golden/en-demo-catalog.yaml uv run python eval/run_agent_eval.py
+all_titles: &all_titles
+- "Robinson Crusoe"
+- "Frankenstein"
+- "Treasure Island"
+- "The Time Machine"
+- "The War of the Worlds"
+- "Dracula"
+- "Meditations"
+- "Seneca's Morals"
+- "Pride and Prejudice"
+- "Moby Dick"
+- "The Adventures of Sherlock Holmes"
+- "Alice's Adventures in Wonderland"
+- "The Call of the Wild"
+- "The Odyssey"
+- "The Hound of the Baskervilles"
+- "A Study in Scarlet"
+- "The Extraordinary Adventures of Arsène Lupin"
+- "The Secret Adversary"
+- "Wuthering Heights"
+- "Jane Eyre"
+- "The Picture of Dorian Gray"
+- "Twenty Thousand Leagues Under the Sea"
+- "Around the World in Eighty Days"
+- "A Journey to the Interior of the Earth"
+- "Ivanhoe"
+- "Adventures of Huckleberry Finn"
+- "Gulliver's Travels"
+- "The Three Musketeers"
+- "Don Quixote"
+- "Romeo and Juliet"
+- "Celebrated Crimes"
+- "Memoirs of Napoleon Bonaparte"
+- "The Kobzar of the Ukraine"
+questions:
+- id: k01-count
+  question: How many books do I have in my library?
+  type: catalog
+  expected_count: 33
+  expected_books: *all_titles
+  notes: The number must be len() of the list the code produced, and that list must be the
+    whole manifest (canaries excluded by their source column). No search step, one model call.
+- id: k02-list
+  question: What are the names of all the books in my library?
+  type: catalog
+  expected_count: 33
+  expected_books: *all_titles
+  notes: Strict set equality against the manifest; a sample of 14 with a heading that says 17
+    (the owner's smoke of 08.09 through the research loop) is exactly what this item rejects.
+- id: k03-has-yes
+  question: Do I have Ivanhoe?
+  type: catalog
+  expected_resolved: true
+  expected_books:
+  - Ivanhoe
+- id: k04-has-no
+  question: Is War and Peace in my library?
+  type: catalog
+  expected_resolved: false
+  expected_books: []
+  notes: Not in the demo corpus; the answer says so (closest titles may follow), nothing is
+    searched, and no title is listed.
+- id: k05-by-author
+  question: What do I have by Jules Verne?
+  type: catalog
+  expected_resolved: true
+  expected_books:
+  - "Twenty Thousand Leagues Under the Sea"
+  - "Around the World in Eighty Days"
+  - "A Journey to the Interior of the Earth"
+- id: k06-count-ua
+  question: Скільки книжок у моїй бібліотеці?
+  type: catalog
+  expected_count: 33
+  expected_books: *all_titles
+  notes: The same intent in Ukrainian; the planner recognises it, the code answers.
+- id: k07-content-not-catalog
+  question: What are the names of the three musketeers?
+  type: answer
+  expected_books:
+  - The Three Musketeers
+  notes: 'Negative control: "names" is not a catalogue question; the answer needs the book''s
+    content (Athos, Porthos, Aramis). A catalogue listing on this item is a misroute and fails.'

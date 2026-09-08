@@ -7,6 +7,7 @@ rank of a chunk in each list matters, never the raw distance / BM25 score, so
 the two scales need no calibration against each other.
 """
 import logging
+from dataclasses import dataclass
 
 import lancedb
 from lancedb.expr import col, lit
@@ -199,6 +200,56 @@ CHAPTER_ROW_CAP = 1000
 def title_of(book_key: str) -> str:
     """'Moby Dick' for the index key 'Moby Dick — Herman Melville'."""
     return book_key.rsplit(TITLE_SEPARATOR, 1)[0].strip()
+
+
+def author_of(book_key: str) -> str:
+    """'Herman Melville' for 'Moby Dick — Herman Melville'; "" for a key without the separator."""
+    return book_key.rsplit(TITLE_SEPARATOR, 1)[1].strip() if TITLE_SEPARATOR in book_key else ""
+
+
+# --- the catalogue: what the index holds, as data --------------------------------
+
+CANARY_SOURCE = "canary"    # the demo ingest's marker on its test fixtures (corpus/manifest.yaml, `source: canary`)
+
+
+@dataclass(frozen=True)
+class BookEntry:
+    """One book as the index knows it: the key both tables cite, split for
+    display, and which corpora hold it (a book added with `ayl-add` has text
+    and no cards)."""
+    key: str
+    title: str
+    author: str
+    has_cards: bool
+    has_text: bool
+
+
+def list_books() -> list[BookEntry]:
+    """Every book in the index, once, sorted by title: the distinct `book` keys
+    of both corpora. The canaries the demo ingest plants for the injection
+    tests are excluded by their `source` column, never by name, so a real book
+    that happens to share a title with a fixture is still listed. Read from the
+    tables each time (an `ayl-add` while a server runs is seen at once); only
+    the two metadata columns are loaded, and the embedding fingerprint is not
+    checked because no vector is involved."""
+    db = lancedb.connect(DB_PATH)
+    present: dict[str, dict[str, bool]] = {}
+    canary: set[str] = set()
+    for corpus in ("cards", "transcripts"):
+        if not has_table(db, TABLES[corpus]):
+            continue
+        table = db.open_table(TABLES[corpus])
+        rows = table.search().select(["book", "source"]).limit(max(table.count_rows(), 1)).to_list()
+        for row in rows:
+            key = row["book"]
+            if row.get("source") == CANARY_SOURCE:
+                canary.add(key)
+                continue
+            present.setdefault(key, {"cards": False, "transcripts": False})[corpus] = True
+    entries = [BookEntry(key=key, title=title_of(key), author=author_of(key),
+                         has_cards=flags["cards"], has_text=flags["transcripts"])
+               for key, flags in present.items() if key not in canary]
+    return sorted(entries, key=lambda e: (e.title.casefold(), e.author.casefold()))
 
 
 def rows_for_book(rows: list[dict], book: str) -> list[dict]:

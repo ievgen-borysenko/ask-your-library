@@ -282,3 +282,34 @@ def test_the_report_row_and_line_carry_the_stop_reason(monkeypatch, tmp_path):
     r = harness.run_one(DeadlineGraph(), item)
     assert r["stop_reason"] == "question deadline (30 s) reached"
     assert "reflect -> stop: question deadline (30 s) reached" in r["steps_log"]
+
+
+def test_catalog_items_are_scored_on_the_listed_set_not_on_wording():
+    item = {"type": "catalog", "expected_books": ["Moby Dick", "Dracula"], "expected_count": 2}
+    books = ["Moby Dick — Herman Melville", "Dracula — Bram Stoker"]
+    good = {**run("whatever the text says"), "catalog": {"op": "list", "count": 2, "total": 2, "books": books, "resolved": True}}
+    assert harness.score(item, good)["behavior_ok"]
+    short = {**good, "catalog": {**good["catalog"], "books": books[:1], "count": 1}}
+    assert not harness.score(item, short)["behavior_ok"]
+    extra = {**good, "catalog": {**good["catalog"], "books": books + ["Ivanhoe — Walter Scott"], "count": 3}}
+    assert not harness.score(item, extra)["behavior_ok"]             # one book too many fails: strict equality
+    miscounted = {**good, "catalog": {**good["catalog"], "count": 3}}
+    assert not harness.score(item, miscounted)["behavior_ok"]        # the number must be the length of the list
+    assert not harness.score(item, run("Moby Dick and Dracula"))["behavior_ok"]   # the research loop: no result
+
+
+def test_a_has_question_must_resolve_as_the_golden_says():
+    absent = {"type": "catalog", "expected_books": [], "expected_resolved": False}
+    r = {**run(""), "catalog": {"op": "has", "count": 0, "total": 2, "books": [], "resolved": False}}
+    assert harness.score(absent, r)["behavior_ok"]
+    assert not harness.score({**absent, "expected_resolved": True}, r)["behavior_ok"]
+
+
+def test_a_content_question_answered_by_the_catalogue_fails_whatever_it_lists():
+    item = {"type": "answer", "expected_books": ["The Three Musketeers"]}
+    assert harness.score(item, run("The Three Musketeers: Athos, Porthos, Aramis"))["behavior_ok"]
+    listed = {**run("The Three Musketeers and 32 others"),
+              "catalog": {"op": "list", "count": 33, "total": 33, "books": [], "resolved": True}}
+    verdict = harness.score(item, listed)
+    assert verdict["behavior_ok"] is False and verdict["catalog_misroute"] is True
+

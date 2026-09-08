@@ -33,7 +33,8 @@ open ones often refer to them.
 - **Comparative / aggregation questions do not query every work.** h17 (and q15, since retired
   from the extended set as a duplicate) ask for a Doyle-side contrast; the planner issues
   Lupin-centric queries and the Doyle book is never retrieved. Decompose comparative questions
-  into one query per implied work.
+  into one query per implied work. The catalogue resolver (ADR-016) can give that decomposition
+  both works' keys; the gate itself is still open.
 - **"How exactly / what happens" questions answered from card summaries.** h13 (Moby Dick ending)
   passes on facts but skips the chapter drill-down the golden expects; reflect should prefer
   read_chapter when evidence for a detail question comes only from cards.
@@ -48,6 +49,15 @@ open ones often refer to them.
   q15/h17 Doyle side, h13 drill-down; h05 and q15 since retired as duplicates) unchanged. Next
   attempts: require one query per implied work before "enough" on comparative questions; force
   read_chapter for "how exactly" questions whose evidence is cards-only.
+- **Exhaustive content questions are best-effort.** "Which of my books mention London?" reads
+  like a catalogue question but needs the books' content: it goes through the research loop, and
+  top-k retrieval cannot prove that no other book matches. The catalogue path (ADR-016) answers
+  what the library holds, not what the books say. Next: honest marking in the synthesis ("found
+  in these N books; no full scan was run") and, separately, a full scan per book as an explicit,
+  priced decision.
+- **No ingest ledger.** `ayl-add` rewrites the table; nothing records requested / indexed /
+  failed per file, so "which of my files did not index" cannot be answered (`list_books` shows
+  what is there, never what is missing).
 - Trust boundary: synthesize consumes evidence before validate runs; a "verifying" state in the
   UI, or validation before synthesis.
 - Behavioural scoring is heuristic (substring titles, refusal phrase markers); refusal markers are

@@ -225,8 +225,17 @@ def verification_badge(update: dict) -> str:
     verification = update.get("verification", "")
     numbers = update.get("provenance") or {}
     tooltip = html.escape(verification, quote=True)
+    title = t("ui_badge_title")
 
-    if not numbers:
+    if numbers.get("catalog"):
+        # The catalogue path (ADR-016): a list computed by code from the index
+        # tables, nothing to trace; the badge says what it is instead of "0/0".
+        listing = numbers["catalog"]
+        color = GREEN
+        title = t("ui_badge_catalog_title")
+        headline = t("ui_badge_catalog", n=listing["count"], total=listing["total"])
+        details = ""
+    elif not numbers:
         # Event without numbers (shouldn't happen with the current runner):
         # neutral badge, no locale-bound text sniffing.
         color = GRAY
@@ -264,7 +273,7 @@ def verification_badge(update: dict) -> str:
 
     return (f'<div title="{tooltip}" style="border-left: 4px solid {color}; '
             f'background: {color}1a; padding: 8px 12px; border-radius: 4px;">'
-            f'<b>{t("ui_badge_title")}</b><br>{headline}{unused_note}{details}</div>')
+            f'<b>{title}</b><br>{headline}{unused_note}{details}</div>')
 
 
 class RunView:
@@ -356,10 +365,19 @@ def render_event(node_name: str, update: dict, view: RunView | None = None) -> N
     question's memory (on_message makes one per question)."""
     view = view if view is not None else RunView()
     if node_name == "plan":
-        queries = [update["current_query"]] + update["queries"]
-        lines = [t("ui_mode", mode=update["mode"]), t("ui_queries")]
-        for query in queries:
-            lines.append(f"- {query}")
+        if update["mode"] == "catalog":
+            lines = [t("ui_plan_catalog", op=update["catalog_request"]["op"])]
+        else:
+            queries = [update["current_query"]] + update["queries"]
+            lines = [t("ui_mode", mode=update["mode"]), t("ui_queries")]
+            for query in queries:
+                lines.append(f"- {query}")
+        if update.get("catalog_fallback"):
+            lines.append(t("ui_catalog_fallback"))
+        if update.get("book_filter"):
+            lines.append(t("ui_book_filter", book=update["book_filter"]))
+        if update.get("book_unresolved"):
+            lines.append(t("ui_book_unresolved", q=update["book_unresolved"]))
         if update.get("clarify_unresolved"):
             lines.append(t("ui_clarify_unresolved"))
         if update.get("plan_fallback"):
@@ -403,6 +421,13 @@ def render_event(node_name: str, update: dict, view: RunView | None = None) -> N
     elif node_name == "clarify":
         cl.run_sync(show_step("clarify",
                               t("ui_user_clarified", a=update["clarification"])))
+
+    elif node_name == "catalog":
+        listing = update["catalog"]
+        cl.run_sync(show_step("catalog", t("ui_catalog_step", op=listing["op"], n=listing["count"],
+                                           total=listing["total"])))
+        # Titles are index metadata, i.e. data: rendered as text like a model answer.
+        cl.run_sync(cl.Message(content=neutralize_markdown(html.escape(update["answer"], quote=False))).send())
 
     elif node_name == "synthesize":
         # The answer is model output over corpus text: poisoned corpus HTML

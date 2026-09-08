@@ -15,11 +15,12 @@ Budgets (MAX_STEPS, MAX_EMPTY_STREAK, the per-hit windows) come from config.
 from langgraph.types import interrupt
 
 from . import llm
+from .catalog import parse_catalog_request, render_catalog, resolve_title, run_catalog
 from .clarify import _chosen_book, _clarify_candidates, _evidence_after_clarify
 from .config import CHAPTER_HIT_CHARS, MAX_CLARIFY_CANDIDATES, MAX_EMPTY_STREAK, MAX_STEPS, SEARCH_HIT_CHARS
 from .coverage import coverage_probe
 from .i18n import t
-from .library import TITLE_SEPARATOR, chapter_is_cut, read_chapter, search_both, title_of
+from .library import TITLE_SEPARATOR, chapter_is_cut, list_books, read_chapter, search_both, title_of
 from .llm import data_block
 from .prompts import OBSERVE_RULES, PLAN_RULES, REFLECT_RULES, SYNTHESIZE_RULES
 from .provenance import _valid_evidence, validate  # noqa: F401  (validate is wired by graph.py)
@@ -95,6 +96,23 @@ def plan(state: AgentState) -> dict:
         # the event says so. A planner failure must not end the question.
         decision = {}
 
+    mode = llm.str_field(decision, "mode", ("identify", "answer", "catalog")) or "answer"
+    common = {"evidence": evidence, "clarify_unresolved": unresolved, "clarify_chosen": chosen,
+              "steps_taken": state.get("steps_taken", 0), "empty_streak": 0}
+    catalog_request = parse_catalog_request(decision) if mode == "catalog" else None
+    if catalog_request and not _after_clarify(state):
+        # The catalogue path (ADR-016): the planner named an operation of ours
+        # and code runs it; no query, no search step. Never after a clarify:
+        # the reader's reply settled a book of the research loop, not a listing.
+        return {"mode": "catalog", "catalog_request": catalog_request, "queries": [],
+                "current_query": "", **common}
+    # "catalog" without a usable operation (or after a clarify) is the research
+    # loop with the raw question or the planner's queries, and the event says so;
+    # a content question can never be pushed the other way, into the catalogue.
+    catalog_fallback = mode == "catalog"
+    if catalog_fallback:
+        mode = "answer"
+
     # Valid JSON is not necessarily our schema; degrade instead of raising —
     # the raw question is always a usable search query. A query that looks like
     # one of the loop's own markers is not a query: only reflect may decide a
@@ -109,25 +127,50 @@ def plan(state: AgentState) -> dict:
     fallback = not queries      # no JSON, no queries, or nothing usable: the planner gave no plan
     if fallback:
         queries = [state["question"].lstrip("_ ") or state["question"]]
-    mode = llm.str_field(decision, "mode", ("identify", "answer")) or "answer"
     if chosen:
         # The book is settled by the reader's choice; from here on the loop
         # answers from it. Code decides this, not the planner (06.09 demo: the
         # planner kept "identify" and searched every book again).
         mode = "answer"
 
+    # The hybrid of ADR-016: a content question that names ONE book is answered
+    # from that book. The planner only repeats the name; code resolves it
+    # against the catalogue (the same resolver as "do I have X"), and retrieval
+    # is limited to the resolved key (act, like the filter after a clarify).
+    # No match: the whole library is searched and the answer says so. Several
+    # matches ("Holmes"): no filter, the loop's own clarify may sort it out.
+    book_filter = book_unresolved = ""
+    named = llm.str_field(decision, "book")
+    if named and mode == "answer" and not chosen:
+        matches, _ = resolve_title(named, list_books())
+        if len(matches) == 1:
+            book_filter = matches[0].key
+        elif not matches:
+            book_unresolved = named
+
     update = {
         "mode": mode,
         "queries": queries[1:],
         "current_query": queries[0],
-        "evidence": evidence, "clarify_unresolved": unresolved,
-        "clarify_chosen": chosen,
-        "steps_taken": state.get("steps_taken", 0),
-        "empty_streak": 0,
+        "book_filter": book_filter, "book_unresolved": book_unresolved,
+        **common,
     }
     if fallback:
         update["plan_fallback"] = True     # present only when it happened: the interfaces and the eval show it
+    if catalog_fallback:
+        update["catalog_fallback"] = True
     return update
+
+
+def catalog(state: AgentState) -> dict:
+    """The catalogue path (ADR-016): the operation the planner named, run by
+    code over library.list_books(); the number in the answer is len() of the
+    list under it. No model call and no search step, so steps_taken stays
+    where it is (0 on a fresh run) and the stop reason names the path;
+    validate reports a catalogue answer instead of a quote check."""
+    result = run_catalog(state["catalog_request"], list_books())
+    return {"answer": render_catalog(result), "catalog": result.as_state(),
+            "queries": [], "current_query": "", "stop_reason": t("stop_catalog")}
 
 
 READ_STATUSES = ("complete", "partial", "empty", "ambiguous")
@@ -220,8 +263,10 @@ def act(state: AgentState) -> dict:
         read_chapters = state.get("read_chapters", [])
     else:
         # After a resolved clarify, retrieval itself is limited to the chosen
-        # book (ADR-013), not only the evidence that survives observe.
-        hits = search_both(state["current_query"], k=4, book=state.get("clarify_chosen") or None)
+        # book (ADR-013), not only the evidence that survives observe; a book
+        # the question named and the catalogue resolved works the same way (ADR-016).
+        hits = search_both(state["current_query"], k=4,
+                           book=state.get("clarify_chosen") or state.get("book_filter") or None)
         empty_read_note = ""
         read_chapters = state.get("read_chapters", [])
 
@@ -386,6 +431,8 @@ def route_after_plan(state: AgentState) -> str:
     plan produced, not on a second reading of the clock: a deadline that lapses
     during plan's own call still gets its one more step, and reflect then
     stops it with the honest reason."""
+    if state.get("mode") == "catalog" and state.get("catalog_request"):
+        return "catalog"
     if not state.get("current_query") or state["steps_taken"] >= MAX_STEPS:
         return "synthesize"
     return "act"
@@ -411,8 +458,11 @@ def clarify(state: AgentState) -> dict:
 
 # ---------------------------------------------------------------- synthesize
 def synthesize(state: AgentState) -> dict:
+    # The question named a book the catalogue does not hold: the answer comes
+    # from the whole library and must say so before anything else (ADR-016).
+    note = t("book_not_in_catalog", q=state["book_unresolved"]) + "\n\n" if state.get("book_unresolved") else ""
     if not state["evidence"]:
-        return {"answer": t("refusal_answer")}
+        return {"answer": note + t("refusal_answer")}
 
     evidence_text = "\n".join(f"- {e['book']} — {e['section']}: \"{e['quote']}\""
                               for e in state["evidence"])
@@ -425,5 +475,5 @@ def synthesize(state: AgentState) -> dict:
 
     reply = llm.llm_invoke(SYNTHESIZE_RULES.format(lang=t("answer_lang_instruction")),
                        "\n".join(data), role="synthesize").content
-    return {"answer": reply}
+    return {"answer": note + reply}
 

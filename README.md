@@ -23,6 +23,12 @@ with the mechanism explained, in
   chapter-aware full-text chunks. Answers cite `[book, chapter]`; a code-based guard verifies
   each evidence quote the agent collected against the exact passage it was copied from (the
   answer's own sentences are not checked claim by claim).
+- **Knows what it holds.** Questions about the library itself (how many books, which titles,
+  whether a title or an author is in it) are answered by code from the index tables,
+  exhaustively: the planner only names the operation, the list is read from the tables and the
+  number in the answer is the length of that list (ADR-016). A content question that names one
+  book is answered from that book. Content questions stay evidence-based and may be incomplete:
+  a search cannot prove that nothing else matches.
 - **Behaves like an agent, not a pipeline.** plan / act / observe / reflect loop with a step
   budget, a CRAG-style early stop after consecutive dry steps, chapter drill-down for detail
   questions, and a human-in-the-loop clarify interrupt when a half-remembered book matches
@@ -41,6 +47,8 @@ flowchart TD
     Q([question]) --> P[plan: mode + 2-4 English queries]
     P -->|steps left| A[act: hybrid search, or read a chapter<br/>hit ids s&lt;step&gt;h&lt;n&gt;, raw text to the scratchpad]
     P -->|step budget used up after a clarify| S
+    P -->|catalogue question: count, titles, a title or an author| K[catalog: the book list read from the index tables,<br/>count = length of that list; no search, no second model call]
+    K --> V
     A --> O[observe: distill verbatim quotes, each pinned to a hit id]
     O --> R{reflect}
     R -->|search: next query, steps left| A
@@ -64,6 +72,14 @@ question -> planner queries (2-4, English) -> LanceDB hybrid search (vectors + B
   and score-scale free: only a chunk's rank in each list matters, so cosine distance and BM25
   never have to be calibrated against each other. A broken FTS index degrades to vector-only
   with a warning rather than silently.
+- **Catalogue questions bypass retrieval (ADR-016).** `plan` recognises them in its one call and
+  names the operation (`count`, `list`, `has` a title, `by_author`); `library.list_books()` reads
+  the distinct book keys of both tables (the demo's canary fixtures excluded by their `source`
+  column); code validates the operation, resolves a title or an author against that list
+  (exact, contained as whole words, or a close match for a typo) and formats the answer, so
+  nothing can be listed that is not in the index and the count is `len()` of the list shown.
+  The same resolver limits a content question that names one book to that book. An operation
+  the planner invents falls back to the research loop, never the other way round.
 - **Only `observe` sees retrieved text, sanitized and cut to a fixed budget.** `act` writes the
   sanitized passages, cut to the same budget, to a per-run scratchpad (a human-readable log) and
   keeps each passage, as observe saw it, in state under a stable hit id; plan, reflect and synthesize work on the distilled evidence,
@@ -626,6 +642,12 @@ From `docs/backlog.md`, confirmed by the runs of 2026-09-05, 06 and 07 (`v0.2.0-
 - **Comparative and aggregation questions may miss a work.** The planner issues queries centred
   on one side of the comparison and the other book is never retrieved. Decomposition per implied
   work is v0.2.
+- **Exhaustive content questions are best-effort.** "Which of my books mention London?" reads
+  like a catalogue question but needs the books' content: it goes through the research loop, and
+  top-k retrieval cannot prove that no other book matches. The catalogue path (ADR-016) covers
+  what the library holds (count, titles, a title or an author), not what the books say. A content
+  question that names one book is limited to it only when the name resolves to exactly one
+  catalogue entry; a name that fits several ("Holmes") gets the whole library.
 - **Detail questions may skip drill-down** and be answered from card summaries instead of
   reading the chapter.
 - **The time budget is coarse, and there is no hard deadline.** `QUESTION_DEADLINE_S` (300 s)
@@ -694,7 +716,7 @@ corpus/                manifest.yaml (checksums), book cards, canaries, audio tr
                        toc/ (committed chapter titles; the card-grounding test uses them)
 eval/                  retrieval eval, agent eval, injection canary, golden sets, report summarizer
 tests/                 unit tests and the golden-set / manifest CI guard
-docs/                  backlog.md (known gaps, v0.2), CHANGELOG.md, eval-results/, examples/
+docs/                  backlog.md (known gaps, v0.2), CHANGELOG.md, adr-016-catalog-path.md, eval-results/, examples/
 .github/workflows/     CI: unit tests on every push, UI contracts with the chainlit extra
 ui.py                  Chainlit web chat
 ```

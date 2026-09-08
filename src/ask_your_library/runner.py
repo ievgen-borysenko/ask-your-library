@@ -9,7 +9,16 @@ An interface plugs in with two callbacks:
 Event contract (node_name -> keys present in update):
   plan       mode, current_query, queries, clarify_unresolved (after a clarify reply),
              plan_fallback (present, True, only when the planner returned no valid JSON
-             twice and the raw question became the one query)
+             twice and the raw question became the one query);
+             mode "catalog": catalog_request {op, title, author} and no query (ADR-016);
+             book_filter (a book the question names, resolved against the catalogue:
+             retrieval is limited to it) or book_unresolved (the name matched nothing:
+             the whole library is searched and the answer says so); catalog_fallback
+             (present, True, only when the planner said catalog without a usable operation)
+  catalog    answer, catalog {op, count (= len(books)), total, books (index keys), query,
+             resolved, suggestions}, stop_reason — the catalogue path: code over the index
+             tables, no model call, no search step; validate then reports a catalogue answer
+             (provenance carries `catalog` {op, count, total} next to the zero quote counts)
   act        steps_taken, hits (list[dict], each with hit_id), hits_log (THIS step's
              passages only; the graph state append-reduces them across steps)
   observe    evidence (accumulated), empty_streak
@@ -50,9 +59,10 @@ def initial_state(question: str, history: list[str], scratchpad: Path) -> dict:
         "mode": "", "queries": [], "current_query": "",
         "hits": [], "hits_log": [], "evidence": [], "steps_taken": 0,
         "empty_streak": 0, "clarification": "", "clarify_asked": False, "coverage_probed": False,
-        "plan_fallback": False,
+        "plan_fallback": False, "catalog_fallback": False,
         "clarify_candidates": [], "clarify_unresolved": False, "clarify_chosen": "",
         "read_chapters": [],
+        "catalog_request": {}, "catalog": {}, "book_filter": "", "book_unresolved": "",
         "scratchpad_path": str(scratchpad),
         "answer": "", "verification": "", "provenance": {}, "stop_reason": "",
     }

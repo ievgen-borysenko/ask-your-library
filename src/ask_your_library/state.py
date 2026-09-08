@@ -14,7 +14,15 @@ def is_loop_marker(query) -> bool:
 class AgentState(TypedDict):
     question: str          # the user's original question
     history: list[str]     # prior chat turns: "Q: ... -> A: ..." (context for follow-ups)
-    mode: str              # "identify" (find which book) or "answer" (answer from content)
+    mode: str              # "identify" (find which book), "answer" (answer from content)
+                           # or "catalog" (what the library holds, answered by code: ADR-016)
+    catalog_request: dict  # plan, mode catalog: the validated operation {op, title, author}
+    catalog: dict          # catalog node: op, count (= len(books)), total, books (index keys),
+                           # query, resolved, suggestions; empty on every other path
+    book_filter: str       # the one book the question names, resolved by code against the
+                           # catalogue: retrieval is limited to it (the hybrid of ADR-016)
+    book_unresolved: str   # the book name the question gave that is in no catalogue entry:
+                           # the whole library is searched and the answer says so
     queries: list[str]     # queue of search queries from plan
     current_query: str     # the query being executed right now
     hits: list[dict]       # raw results of the last search (live for one step), each with hit_id
@@ -32,6 +40,7 @@ class AgentState(TypedDict):
     clarify_asked: bool    # a clarify interrupt already happened this run (one allowed)
     coverage_probed: bool  # the one forced query at an uncovered candidate book has run (ADR-013)
     plan_fallback: bool    # the planner returned no valid JSON twice; the raw question became the one query
+    catalog_fallback: bool # the planner said catalog without a usable operation: the research loop ran instead
     scratchpad_path: str   # file the raw hits are written to (kept out of the LLM context)
     answer: str            # the final answer
     verification: str      # quote-provenance report on quotes (text, for humans)

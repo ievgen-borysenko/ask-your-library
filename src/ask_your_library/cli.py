@@ -47,8 +47,17 @@ def terminal_safe(text: str) -> str:
 def print_event(node_name: str, update: dict) -> None:
     """One line per graph event (language: ASK_LANG)."""
     if node_name == "plan":
-        print(t("ev_plan", mode=update["mode"],
-                queries=[update["current_query"]] + update["queries"]))
+        if update["mode"] == "catalog":
+            print(t("ev_plan_catalog", op=update["catalog_request"]["op"]))
+        else:
+            print(t("ev_plan", mode=update["mode"],
+                    queries=[update["current_query"]] + update["queries"]))
+        if update.get("catalog_fallback"):
+            print(t("ev_catalog_fallback"))
+        if update.get("book_filter"):
+            print(t("ev_book_filter", book=terminal_safe(update["book_filter"])))
+        if update.get("book_unresolved"):
+            print(t("ev_book_unresolved", q=terminal_safe(update["book_unresolved"])))
         if update.get("clarify_unresolved"):
             print(t("ev_clarify_unresolved"))
         if update.get("plan_fallback"):
@@ -79,6 +88,12 @@ def print_event(node_name: str, update: dict) -> None:
             print(t("ev_reflect_enough"))
     elif node_name == "clarify":
         print(t("ev_clarify", a=update["clarification"]))
+    elif node_name == "catalog":
+        listing = update["catalog"]
+        print(t("ev_catalog", op=listing["op"], n=listing["count"], total=listing["total"]))
+        # Titles are index metadata (file names and frontmatter for ayl-add books):
+        # control characters are stripped as for every other passage the CLI prints.
+        print(t("ev_answer_header", a=terminal_safe(update["answer"])))
     elif node_name == "synthesize":
         print(t("ev_answer_header", a=update["answer"]))
     elif node_name == "validate":
