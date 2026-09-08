@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Chat titles in the sidebar.** `auto_tag_thread` is now off in `.chainlit/config.toml`. With it
+  on, the first message of every chat asked the SQLAlchemy data layer to insert the thread with
+  `tags=[chat profile]`; SQLite refuses a Python list, the data layer only logs the failure, and the
+  insert that carried the title was lost with it, so every chat saved so far is untitled in the
+  sidebar (the chat profile itself was never lost: it lives in the thread's metadata, which
+  `on_chat_resume` reads). Not a 2.12.0 regression: the data layer's code is the same in 2.11.1
+  (upstream Chainlit issue 2528). Two tests in `tests/test_ui.py` pin the reason: the title must
+  persist with the shipped config, and the flag stays off while SQLite still rejects the list.
+  Chats saved before this change keep no title; rename them from the sidebar.
 - **Chainlit 2.12.0.** The `ui` extra now requires `chainlit>=2.12` and the lockfile moves from
   2.11.1 to 2.12.0 (the only other change is the removal of `audioop-lts`, a transitive
   dependency the new release no longer needs; nothing the agent runs changes). 2.12.0 is the
