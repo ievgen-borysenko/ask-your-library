@@ -2,9 +2,10 @@
 
 ## Unreleased
 
-- **Security CI.** `.github/workflows/security.yml`: gitleaks over the commits a change adds (the
-  weekly scheduled run covers the whole history reachable from `main`) and OSV-Scanner over
-  `uv.lock`, on every pull request, every push to `main` and once a week. Neither job is
+- **Security CI.** `.github/workflows/security.yml`: gitleaks over a pull request's commits and
+  over the first-parent range of a push (the weekly scheduled run scans the whole history
+  reachable from `main`, which is what covers long pull requests and merged branches) and
+  OSV-Scanner over `uv.lock`, on every pull request, every push to `main` and once a week. Neither job is
   `continue-on-error`, so a scanner that cannot run is a failed check, not a silent pass. The two
   Chainlit 2.11.1 MCP advisories — `GHSA-w3fx-mc44-mf6j` (CVE-2026-45018, command injection over
   stdio) and `GHSA-hvfh-5mj3-5f3j` (CVE-2026-45019, SSRF over SSE and streamable-http) — are

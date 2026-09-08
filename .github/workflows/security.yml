@@ -29,6 +29,9 @@ jobs:
           # the push and pull-request runs need the parent of their range's
           # first commit; a shallow clone silently narrows both.
           fetch-depth: 0
+          # gitleaks takes its token from the environment; nothing that runs
+          # after this step needs one in .git/config.
+          persist-credentials: false
       - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -44,6 +47,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The SHA pins the action's code; the action itself runs the scanner from
+      # a container image referenced by version tag, which the pin does not
+      # cover (the same is true of the gitleaks binary the other job downloads).
       - uses: google/osv-scanner-action/osv-scanner-action@6e4298ebc4db23e847df9b2e2de2939d6f066c67 # v2.5.1
         with:
           # uv.lock is the resolved set CI installs from; the ranges in

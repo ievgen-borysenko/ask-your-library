@@ -9,8 +9,14 @@ updates:
     open-pull-requests-limit: 3
     groups:
       # One pull request for the whole lockfile: it is resolved as a unit, and
-      # per-package branches would each re-resolve it and conflict.
+      # per-package branches would each re-resolve it and conflict. A group
+      # applies to version updates unless told otherwise, and security updates
+      # ignore the open-pull-requests limit, so they get a group of their own.
       python:
+        applies-to: version-updates
+        patterns: ["*"]
+      python-security:
+        applies-to: security-updates
         patterns: ["*"]
 
   # Both workflows pin actions to commit SHAs, which nothing but this bumps:
@@ -23,4 +29,8 @@ updates:
     open-pull-requests-limit: 3
     groups:
       actions:
+        applies-to: version-updates
+        patterns: ["*"]
+      actions-security:
+        applies-to: security-updates
         patterns: ["*"]
