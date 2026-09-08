@@ -1,8 +1,8 @@
 # ADR-016: The catalogue path — what the library holds is answered by code
 
-Status: accepted, 2026-09-09. Earlier decisions (ADR-001 to ADR-015) are summarised in the
-README's Architecture section; this one is written out because it changes the planner's
-contract and adds a node to the graph.
+Status: accepted, 2026-09-08 (the pull request that adds this file). Earlier decisions
+(ADR-001 to ADR-015) are summarised in the README's Architecture section; this one is written
+out because it changes the planner's contract and adds a node to the graph.
 
 ## Context
 
@@ -44,9 +44,12 @@ A separate, deterministic path for questions about what the library holds:
   (`act`, like the filter after a resolved clarify, ADR-013). No match: the whole library is
   searched and the answer starts by saying so. Several matches: no filter, no note.
 - Code refuses an invalid operation and a catalogue request after a clarify reply (the reply
-  settled a book of the research loop), and the event says which happened. Code cannot tell a
-  content question the planner labelled "catalog" from a real catalogue question: that routing
-  is the planner's reading, measured by the negative controls of the catalogue eval set.
+  settled a book of the research loop), and sends a question that also asks about content
+  ("Do I have Dracula, and why does Harker stay?") to the research loop with the named book as
+  the filter: a conservative gate on content vocabulary (why, how, who, about, mention, ...),
+  because the planner labelled exactly that question "has" once. The event says which happened.
+  The gate knows words, not titles: "the names of the three musketeers" is beyond it, so that
+  routing stays the planner's reading, measured by the controls of the catalogue eval set.
 - The list never reaches the model: the answer is a template, and the conversation memory that
   the next turn's planner sees keeps only the operation, the counts and the name asked about.
 
@@ -67,9 +70,10 @@ every number and every list into code.
 - Exhaustive content questions ("which of my books mention London?") are not covered: they
   need the books' content and stay best-effort in the research loop, recorded as a known limit.
 - The eval gains a set of its own, `eval/golden/en-demo-catalog.yaml`, scored on the structured
-  result with strict set equality against the manifest, plus a negative control (a content
-  question that looks like a listing); a research question answered by the catalogue path
-  fails its item.
+  result with strict set equality against the manifest, plus three negative controls (content
+  questions that look like listings; one scored on routing alone) and one hybrid item that
+  pins the named-book filter; a research question answered by the catalogue path fails its
+  item.
 
 ## Not in scope
 

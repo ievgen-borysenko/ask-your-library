@@ -10,7 +10,7 @@ import lancedb
 import pytest
 
 from ask_your_library import i18n, library, llm, nodes, provenance
-from ask_your_library.catalog import (CatalogResult, parse_catalog_request, render_catalog,
+from ask_your_library.catalog import (CatalogResult, content_clue, parse_catalog_request, render_catalog,
                                       resolve_author, resolve_title, run_catalog)
 from ask_your_library.i18n import t
 from ask_your_library.library import TITLE_SEPARATOR, BookEntry, list_books
@@ -96,6 +96,69 @@ def test_a_book_with_a_canary_row_among_real_rows_is_still_a_book(index):
 def test_a_row_without_a_book_key_is_skipped(index):
     index(cards=[], transcripts=[row(MOBY), {**row(GULLIVER, n=2), "book": None}])
     assert [b.key for b in list_books()] == [MOBY]
+
+
+class RecordingQuery:
+    def __init__(self, query, record):
+        self._query, self._record = query, record
+
+    def select(self, columns):
+        self._record["select"] = list(columns)
+        return RecordingQuery(self._query.select(columns), self._record)
+
+    def limit(self, n):
+        self._record["limit"] = n
+        return RecordingQuery(self._query.limit(n), self._record)
+
+    def to_list(self):
+        return self._query.to_list()
+
+
+class RecordingTable:
+    def __init__(self, table, record):
+        self._table, self._record = table, record
+
+    def search(self, *args, **kwargs):
+        return RecordingQuery(self._table.search(*args, **kwargs), self._record)
+
+    def count_rows(self):
+        return self._table.count_rows()
+
+
+class RecordingDB:
+    """The real database; every table opened is wrapped so the query the
+    catalogue runs (projection, limit) is recorded next to its results."""
+
+    def __init__(self, db, records):
+        self._db, self._records = db, records
+
+    def table_names(self):
+        return self._db.table_names()
+
+    def list_tables(self):
+        return self._db.list_tables()
+
+    def open_table(self, name):
+        record = self._records.setdefault(name, {})
+        return RecordingTable(self._db.open_table(name), record)
+
+
+def test_the_catalogue_reads_every_row_through_a_two_column_projection(index, monkeypatch):
+    """More books than LanceDB's default result limit of ten, split over both
+    tables: the listing must be complete, loaded through the two metadata columns
+    only, with a limit that covers every row of each table."""
+    books = [key(f"Book {i:02d}", f"Author {i}") for i in range(1, 15)]
+    index(cards=[row(b, "frontmatter") for b in books[:8]],
+          transcripts=[row(b, f"pg:{i}", n=n) for i, b in enumerate(books) for n in (1, 2)])
+    records: dict[str, dict] = {}
+    real_connect = library.lancedb.connect
+    monkeypatch.setattr(library.lancedb, "connect", lambda path: RecordingDB(real_connect(path), records))
+    listed = list_books()
+    assert [b.key for b in listed] == books                       # 14 of 14, sorted by title
+    assert [b.has_cards for b in listed] == [True] * 8 + [False] * 6
+    for name, record in records.items():
+        assert record["select"] == ["book", "source"], name
+        assert record["limit"] >= (8 if name == library.TABLES["cards"] else 28), name
 
 
 def test_a_missing_corpus_is_skipped_and_the_other_one_is_listed(index, caplog):
@@ -205,6 +268,35 @@ def test_the_answers_follow_the_session_language():
     assert render_catalog(count) == "Your library holds 6 books (by the index tables)."
 
 
+# ---------------------------------------------------------------- the content-clue gate
+
+@pytest.mark.parametrize("question", [
+    "How many books do I have in my library?", "What are the names of all the books in my library?",
+    "Do I have Ivanhoe?", "Is War and Peace in my library?", "What do I have by Jules Verne?",
+    "Скільки книжок у моїй бібліотеці?", "Які книжки в мене є?", "Чи є в мене Айвенго?",
+])
+def test_a_pure_holdings_question_carries_no_content_clue(question):
+    assert content_clue(question) == ""
+
+
+@pytest.mark.parametrize("question, clue", [
+    ("Do I have Dracula, and why does Jonathan Harker stay at the castle?", "why"),
+    ("What do I have about whaling?", "about"),
+    ("Which of my books mention London?", "mention"),
+    ("Is Moby Dick in my library, and who narrates it?", "who"),
+    ("How does Ivanhoe end?", "how"),
+    ("Чи є в мене Дракула, і чому Гаркер лишається в замку?", "чому"),
+    ("Що в мене є про китів?", "про"),
+])
+def test_a_question_that_also_asks_about_content_is_flagged(question, clue):
+    assert content_clue(question) == clue
+
+
+def test_a_title_inside_a_question_is_beyond_the_gate():
+    # Known limit, recorded in the ADR: the gate knows words, not titles.
+    assert content_clue("What are the names of the three musketeers?") == ""
+
+
 # ---------------------------------------------------------------- the planner-side guards (nodes.plan, no graph)
 
 def fresh_state(**over):
@@ -262,6 +354,21 @@ def test_a_named_book_is_resolved_by_code_into_a_retrieval_filter(monkeypatch):
     several = plan_with("Sherlock Holmes")
     assert several["book_filter"] == "" and several["book_unresolved"] == ""            # several: no filter, no note
     assert plan_with("")["book_filter"] == "" and plan_with(None)["book_unresolved"] == ""
+
+
+def test_a_mixed_question_the_planner_labelled_catalogue_takes_the_research_loop_with_the_filter(monkeypatch):
+    """The planner says `has Dracula`; the question also asks why Harker stays.
+    Code sends it to the research loop, the raw question as the query (not a
+    planner fallback), and the named title becomes the retrieval filter."""
+    monkeypatch.setattr(llm, "ask_json", lambda system, user, role: {"mode": "catalog", "queries": [],
+                                                                     "catalog": {"op": "has", "title": "moby dick"}})
+    monkeypatch.setattr(nodes, "list_books", lambda: ALL)
+    question = "Do I have Moby Dick, and why does Ishmael go to sea?"
+    result = nodes.plan(fresh_state(question=question))
+    assert result["mode"] == "answer" and result["catalog_fallback"] == "mixed_intent"
+    assert result["current_query"] == question and result["queries"] == [] and "plan_fallback" not in result
+    assert result["book_filter"] == MOBY and result["book_unresolved"] == ""
+    assert "catalog_request" not in result and nodes.route_after_plan({**fresh_state(), **result}) == "act"
 
 
 def test_the_catalog_node_answers_from_the_list_and_validate_reports_it(monkeypatch):

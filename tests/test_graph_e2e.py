@@ -679,3 +679,43 @@ def test_a_named_book_the_catalogue_does_not_hold_is_searched_everywhere_and_the
     assert answer == t("book_not_in_catalog", q="War and Peace") + "\n\nSomething from Moby Dick [Moby Dick, Chapter 1]."
     assert by_name(events, "validate")[0]["provenance"]["confirmed"] == 1     # the note changes no verdict
 
+
+def test_a_mixed_question_forced_into_the_catalogue_by_the_planner_is_searched_with_the_filter(run):
+    """The planner's misclassification of the golden hybrid item, replayed: `has`
+    on a question that also asks about content. The gate in code sends it to
+    the research loop with the named book as the retrieval filter; no
+    catalogue result, no planner-fallback flag."""
+    question = "Do I have Moby Dick, and why does Ishmael go to sea?"
+    model = ScriptedModel(
+        plan=[{"mode": "catalog", "queries": [], "catalog": {"op": "has", "title": "Moby Dick"}}],
+        observe=[{"evidence": [evidence(MOBY, "transcripts", "s1h2")]}],
+        reflect=[{"decision": "enough"}],
+        synthesize=["Because he has little money [Moby Dick, Chapter 1]."],
+    )
+    library = FakeLibrary()
+    answer, events, _ = run(model, library, question)
+    assert names(events) == ["plan", "act", "observe", "reflect", "synthesize", "validate", "metrics"]
+    plan = by_name(events, "plan")[0]
+    assert plan["mode"] == "answer" and plan["catalog_fallback"] == "mixed_intent"
+    assert plan["book_filter"] == MOBY and plan["current_query"] == question and "plan_fallback" not in plan
+    assert library.searches == [(question, MOBY)]
+    assert "catalog" not in by_name(events, "validate")[0]["provenance"]
+    assert answer == "Because he has little money [Moby Dick, Chapter 1]."
+
+
+def test_a_topic_question_forced_into_a_listing_is_searched_everywhere(run):
+    """`list` on "what do I have about whaling": the gate sees "about", the whole
+    library is searched (no title to filter on) and the event says why."""
+    question = "What do I have about whaling?"
+    model = ScriptedModel(
+        plan=[{"mode": "catalog", "catalog": {"op": "list"}}],
+        observe=[{"evidence": [evidence(MOBY, "cards", "s1h1")]}],
+        reflect=[{"decision": "enough"}],
+        synthesize=["Moby Dick [Moby Dick, Summary]."],
+    )
+    library = FakeLibrary()
+    _, events, _ = run(model, library, question)
+    plan = by_name(events, "plan")[0]
+    assert plan["catalog_fallback"] == "mixed_intent" and plan["book_filter"] == "" and plan["book_unresolved"] == ""
+    assert library.searches == [(question, None)]
+

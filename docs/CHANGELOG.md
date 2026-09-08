@@ -16,9 +16,11 @@
   book is answered from that book: the planner repeats the name, code resolves it, and retrieval
   is limited to the resolved key, as after a clarify; a name that matches nothing is searched
   everywhere and the answer says so; an operation the planner invents, or a catalogue request
-  after a clarify reply, takes the research loop and the event says which (whether a content
-  question gets labelled a catalogue question is the planner's reading, measured by the set's
-  negative controls). The list never reaches the model: the conversation memory keeps only the
+  after a clarify reply, takes the research loop and the event says which; so does a question
+  that also asks about content ("Do I have Dracula, and why does Harker stay?"), through a
+  conservative gate on content vocabulary, with the named book as the retrieval filter (the
+  gate knows words, not titles hidden in a question: that routing stays the planner's reading,
+  measured by the set's negative controls). The list never reaches the model: the conversation memory keeps only the
   shape of a catalogue answer (operation, counts, the name asked about), never the titles, in
   the CLI, the web UI and a resumed chat. A book that also carries a canary-sourced row stays
   listed: only a key whose every row is a canary is a fixture. New eval set

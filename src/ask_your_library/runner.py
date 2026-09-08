@@ -15,8 +15,9 @@ Event contract (node_name -> keys present in update):
              retrieval is limited to it) or book_unresolved (the name matched nothing:
              the whole library is searched and the answer says so); catalog_fallback (present
              only when it happened: "invalid_op" — the planner said catalog without a usable
-             operation; "after_clarify" — a catalogue request after a clarify reply; the
-             research loop ran instead)
+             operation; "after_clarify" — a catalogue request after a clarify reply;
+             "mixed_intent" — the question also asks about content, so the research loop
+             ran, with the named book as the filter when it resolves)
   catalog    answer, catalog {op, count (= len(books)), total, books (index keys), query,
              resolved, suggestions}, stop_reason — the catalogue path: code over the index
              tables, no model call, no search step; validate then reports a catalogue answer

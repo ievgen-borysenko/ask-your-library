@@ -27,6 +27,29 @@ MIN_CONTAINED_CHARS = 4       # "It" must not resolve by being contained in ever
 STRICT_CONTAINED_SHARE = 0.6  # strict mode: a one-word name inside a longer title must be most of it
 
 
+# Words a question about HOLDINGS does not carry: they ask about content. The
+# planner may still label such a question "catalog" (it did, once, for "Do I have
+# Dracula, and why does Harker stay?"); code then sends it to the research loop
+# as a mixed intent, with the named book as the retrieval filter. Conservative
+# on purpose: a false positive costs a search where a listing would have done,
+# never the reverse. A title hidden inside a question ("the names of the three
+# musketeers") is beyond this gate: that routing stays the planner's reading,
+# measured by the controls of the catalogue eval set.
+CONTENT_CLUES = re.compile(
+    r"(?<!\w)(?:why|how(?!\s+many)|who|whom|whose|where|when|what happens|explain|describe|"
+    r"tell me about|summar\w*|plot|character\w*|about|mention\w*|discuss\w*|deals? with|"
+    r"чому|як(?!\s+багато)|хто|кого|де|коли|про що|про|поясни|розкажи|опиши|сюжет|згаду\w*|йдеться)(?!\w)",
+    re.I,
+)
+
+
+def content_clue(question: str) -> str:
+    """The first content word of a question, or "" when it reads as a pure
+    holdings question (how many, which titles, do I have X, what do I have by Y)."""
+    found = CONTENT_CLUES.search(fold(question))
+    return found.group(0) if found else ""
+
+
 def parse_catalog_request(decision: dict) -> dict | None:
     """The planner's "catalog" object, validated by CODE: {"op": one of
     CATALOG_OPS, "title": str, "author": str}. None when it is absent, not an

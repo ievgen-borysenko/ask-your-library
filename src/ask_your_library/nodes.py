@@ -15,7 +15,7 @@ Budgets (MAX_STEPS, MAX_EMPTY_STREAK, the per-hit windows) come from config.
 from langgraph.types import interrupt
 
 from . import llm
-from .catalog import parse_catalog_request, render_catalog, resolve_title, run_catalog
+from .catalog import content_clue, parse_catalog_request, render_catalog, resolve_title, run_catalog
 from .clarify import _chosen_book, _clarify_candidates, _evidence_after_clarify
 from .config import CHAPTER_HIT_CHARS, MAX_CLARIFY_CANDIDATES, MAX_EMPTY_STREAK, MAX_STEPS, SEARCH_HIT_CHARS
 from .coverage import coverage_probe
@@ -100,21 +100,24 @@ def plan(state: AgentState) -> dict:
     common = {"evidence": evidence, "clarify_unresolved": unresolved, "clarify_chosen": chosen,
               "steps_taken": state.get("steps_taken", 0), "empty_streak": 0}
     catalog_request = parse_catalog_request(decision) if mode == "catalog" else None
-    if catalog_request and not _after_clarify(state):
+    mixed = bool(catalog_request) and content_clue(state["question"]) != ""
+    if catalog_request and not mixed and not _after_clarify(state):
         # The catalogue path (ADR-016): the planner named an operation of ours
         # and code runs it; no query, no search step. Never after a clarify:
         # the reader's reply settled a book of the research loop, not a listing.
         return {"mode": "catalog", "catalog_request": catalog_request, "queries": [],
                 "current_query": "", **common}
-    # "catalog" without a usable operation, or after a clarify reply, is the
-    # research loop with the planner's queries or the raw question, and the
-    # event says which. Code refuses an invalid operation; it cannot tell a
-    # content question the planner labelled "catalog" from a real catalogue
-    # question: that routing is the planner's reading, measured by the negative
-    # controls of the catalogue eval set, not enforced here.
+    # "catalog" without a usable operation, after a clarify reply, or on a
+    # question that also asks about content (a content word the gate in
+    # catalog.py knows), is the research loop with the planner's queries or the
+    # raw question, and the event says which. The gate is a vocabulary check,
+    # not an understanding: a title hidden inside a question is beyond it, so
+    # that routing stays the planner's reading, measured by the eval set's
+    # controls rather than enforced here.
     catalog_fallback = ""
     if mode == "catalog":
-        catalog_fallback = "after_clarify" if catalog_request else "invalid_op"
+        catalog_fallback = ("after_clarify" if catalog_request and _after_clarify(state)
+                            else "mixed_intent" if mixed else "invalid_op")
         mode = "answer"
 
     # Valid JSON is not necessarily our schema; degrade instead of raising —
@@ -146,7 +149,7 @@ def plan(state: AgentState) -> dict:
     # Strict resolution: a fragment of a title ("Time" for The Time Machine)
     # sets no filter either — a silent wrong filter would hide a whole library.
     book_filter = book_unresolved = ""
-    named = llm.str_field(decision, "book")
+    named = llm.str_field(decision, "book") or (catalog_request["title"] if mixed and catalog_request else "")
     if named and mode == "answer" and not chosen:
         matches, _ = resolve_title(named, list_books(), strict=True)
         if len(matches) == 1:
@@ -161,8 +164,10 @@ def plan(state: AgentState) -> dict:
         "book_filter": book_filter, "book_unresolved": book_unresolved,
         **common,
     }
-    if fallback:
-        update["plan_fallback"] = True     # present only when it happened: the interfaces and the eval show it
+    if fallback and catalog_fallback != "mixed_intent":
+        # present only when it happened: the interfaces and the eval show it (a
+        # mixed intent searches the raw question by design, not for want of a plan)
+        update["plan_fallback"] = True
     if catalog_fallback:
         update["catalog_fallback"] = catalog_fallback
     return update

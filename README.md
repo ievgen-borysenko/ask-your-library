@@ -80,10 +80,13 @@ question -> planner queries (2-4, English) -> LanceDB hybrid search (vectors + B
   nothing can be listed that is not in the index and a count is the length of the same list a
   listing shows. The same resolver limits a content question that names one book to that book
   (a name that fits several books, or only a fragment of a title, sets no filter). An operation
-  the planner invents falls back to the research loop; whether a content question gets labelled
-  a catalogue question is the planner's reading, which the catalogue eval set measures with
-  negative controls rather than code enforcing it. The list never reaches the model: not in the
-  answer, and not on a later turn (the conversation memory keeps only the operation and counts).
+  the planner invents falls back to the research loop, and so does a question that also asks
+  about content ("Do I have Dracula, and why does Harker stay?"): a conservative gate on content
+  vocabulary sends it to the research loop with the named book as the filter. The gate knows
+  words, not titles hidden in a question, so that routing stays the planner's reading, which
+  the catalogue eval set measures with negative controls. The list never reaches the model: not
+  in the answer, and not on a later turn (the conversation memory keeps only the operation and
+  counts).
 - **Only `observe` sees retrieved text, sanitized and cut to a fixed budget.** `act` writes the
   sanitized passages, cut to the same budget, to a per-run scratchpad (a human-readable log) and
   keeps each passage, as observe saw it, in state under a stable hit id; plan, reflect and synthesize work on the distilled evidence,
