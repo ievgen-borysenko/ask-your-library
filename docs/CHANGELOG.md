@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- **Security CI.** `.github/workflows/security.yml`: gitleaks (a release binary verified against
+  a pinned SHA-256) over the complete range of a pull request (merge base to head, merged
+  branches included), over the pushed range on `main`, and over the whole history once a week;
+  OSV-Scanner over `uv.lock`, on every pull request, every push to `main` and once a week. Neither job is
+  `continue-on-error`, so a scanner that cannot run is a failed check, not a silent pass. The two
+  Chainlit 2.11.1 MCP advisories — `GHSA-w3fx-mc44-mf6j` (CVE-2026-45018, command injection over
+  stdio) and `GHSA-hvfh-5mj3-5f3j` (CVE-2026-45019, SSRF over SSE and streamable-http) — are
+  recorded in `osv-scanner.toml` with the mitigation already shipped (MCP and every transport off
+  in `.chainlit/config.toml`), an owner and a 2026-10-08 review date; a third advisory fails the
+  job. Every third-party action in both workflows is pinned to a commit SHA with its version in a
+  comment, and `.github/dependabot.yml` proposes weekly grouped updates for the uv lockfile and
+  for the actions. `SECURITY.md` gains an "Automated checks" section with the policy.
+
 ## 0.2.0-rc1 (2026-09-07) — release candidate
 
 - **Measured.** Tag `v0.2.0-rc1` = `33dba3f` (the merge of #74), single runs on 07.09 with

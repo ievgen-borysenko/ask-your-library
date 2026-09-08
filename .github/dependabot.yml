@@ -1,0 +1,36 @@
+version: 2
+updates:
+  # uv.lock is the file CI installs from, so it is the file that has to move;
+  # Dependabot's "uv" ecosystem updates it together with pyproject.toml.
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      # One pull request for the whole lockfile: it is resolved as a unit, and
+      # per-package branches would each re-resolve it and conflict. A group
+      # applies to version updates unless told otherwise, and security updates
+      # ignore the open-pull-requests limit, so they get a group of their own.
+      python:
+        applies-to: version-updates
+        patterns: ["*"]
+      python-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  # Both workflows pin actions to commit SHAs, which nothing but this bumps:
+  # unpinned tags move on their own, a SHA has to be rewritten by a pull
+  # request that says which version it now points at.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        applies-to: version-updates
+        patterns: ["*"]
+      actions-security:
+        applies-to: security-updates
+        patterns: ["*"]

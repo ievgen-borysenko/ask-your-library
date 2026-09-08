@@ -1,0 +1,89 @@
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Both scanners answer to the outside world, not to this repository: a
+    # secret can be published after the commit that leaked it, and an advisory
+    # after the release that shipped the dependency. Weekly is the floor.
+    - cron: "17 5 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Every range below is walked with git; a shallow clone would cut it
+          # short without saying so. gitleaks needs no token, so none is kept.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install gitleaks (release tarball, SHA-256 verified)
+        # The action wrapper was not used: it reads at most thirty commits of a
+        # pull request from the API and walks only the first parent of a push,
+        # so a token in a later or merged commit could pass. A pinned binary
+        # over an explicit range has neither limit, and the checksum is the
+        # pin the action lacked for the binary it downloads.
+        run: |
+          set -euo pipefail
+          version=8.30.1
+          sha256=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+          curl -sSfL -o gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${version}/gitleaks_${version}_linux_x64.tar.gz"
+          echo "${sha256}  gitleaks.tgz" | sha256sum -c -
+          tar -xzf gitleaks.tgz gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      - name: Scan the complete range for this event
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        # A pull request: every commit between its merge base with the target
+        # branch and its head, merged branches included. A push: the pushed
+        # range. Anything else (the weekly schedule, a first push): the whole
+        # history reachable from HEAD. A range git cannot resolve fails the
+        # step, which is the right outcome for a scan that could not be done.
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            pull_request)
+              base=$(git merge-base "origin/${BASE_REF}" HEAD)
+              range="${base}..HEAD" ;;
+            push)
+              if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then range=""; else range="${BEFORE}..${AFTER}"; fi ;;
+            *)
+              range="" ;;
+          esac
+          if [ -n "$range" ]; then
+            echo "scanning ${range}: $(git rev-list --count "$range") commit(s)"
+            gitleaks git . --no-banner --redact --exit-code 1 --log-opts="$range"
+          else
+            echo "scanning the whole history reachable from HEAD: $(git rev-list --count HEAD) commit(s)"
+            gitleaks git . --no-banner --redact --exit-code 1
+          fi
+
+  dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The SHA pins the action's code; the action itself runs the scanner from
+      # a container image referenced by version tag, which the pin does not
+      # cover.
+      - uses: google/osv-scanner-action/osv-scanner-action@6e4298ebc4db23e847df9b2e2de2939d6f066c67 # v2.5.1
+        with:
+          # uv.lock is the resolved set CI installs from; the ranges in
+          # pyproject.toml are not what ships. Table output, no SARIF upload:
+          # the Code Scanning API would need `security-events: write`, and the
+          # finding is already the failing job.
+          scan-args: |-
+            --lockfile=./uv.lock
+            --config=./osv-scanner.toml
+            --format=table
