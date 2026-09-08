@@ -14,9 +14,13 @@ open ones often refer to them.
 - Before this tree is called 0.2.0: a short live check of the web UI on a clean environment
   (evidence block and quote against passage, clarify including no reply, chat restore after a
   reload, first start by the README).
-- The next maintenance change: Chainlit to a release that fixes its MCP advisories (see
-  `SECURITY.md`), with the UI and `.chainlit/config.toml` re-checked; pin GitHub Actions to commit
-  SHAs; add an automated dependency and secret scan to CI.
+- Done since: security CI (`.github/workflows/security.yml`: gitleaks over the complete range of
+  each event, OSV-Scanner over `uv.lock`, weekly; Dependabot; every action pinned to a commit SHA)
+  and Chainlit 2.12.0, the release that closes the two MCP advisories, with the config cleaned and
+  the UI re-checked (`SECURITY.md`, CHANGELOG).
+- At the visibility switch: branch protection on `main` (required checks `test`, `test-ui`,
+  `secrets`, `dependencies`; no force-push, no deletion), private vulnerability reporting, push
+  protection; then CodeQL and a workflow linter, which are free on a public repository.
 
 ## Agent behaviour
 

@@ -43,9 +43,10 @@ with the same read-only token as any other.
 
 ## Known dependency advisories
 
-Chainlit 2.11.1 (the web UI) has two published advisories about its MCP transports (command
-injection over stdio, SSRF over HTTP/SSE). This repository ships with MCP and every MCP transport
-disabled in `.chainlit/config.toml`, which is the mitigation the Chainlit maintainers name; the
-upgrade to a fixed release is planned as a separate maintenance change and is required before MCP
-is enabled or the UI is deployed anywhere but locally. Both are recorded in `osv-scanner.toml`
-with that mitigation, an owner and a review date.
+None open. Chainlit 2.11.1 carried two advisories about its MCP transports (command injection over
+stdio, SSRF over HTTP/SSE); this repository never enabled MCP, and the upgrade to Chainlit 2.12.0
+closed both. MCP stays disabled (`[features.mcp] enabled = false` in `.chainlit/config.toml`, which
+is what makes every transport unreachable; user-connected servers are off as well); enabling MCP
+is a deliberate change that starts with re-reading this file. The OSV-Scanner job in
+`.github/workflows/security.yml` reports any new advisory, and `osv-scanner.toml` holds no
+exception at the moment.

@@ -2,16 +2,24 @@
 
 ## Unreleased
 
+- **Chainlit 2.12.0.** The `ui` extra now requires `chainlit>=2.12` and the lockfile moves from
+  2.11.1 to 2.12.0 (the only other change is the removal of `audioop-lts`, a transitive
+  dependency the new release no longer needs; nothing the agent runs changes). 2.12.0 is the
+  release that closes the two MCP advisories recorded with exceptions in `osv-scanner.toml`; the
+  exceptions are removed, and the pre-2.12.0 MCP transport sections are removed from
+  `.chainlit/config.toml` (MCP stays disabled; the new schema declares servers server-side).
+  Verified: unit and UI suites, the injection canary's mechanics stages, and a headless start of
+  the web UI on loopback.
 - **Security CI.** `.github/workflows/security.yml`: gitleaks (a release binary verified against
   a pinned SHA-256) over the complete range of a pull request (merge base to head, merged
   branches included), over the pushed range on `main`, and over the whole history once a week;
   OSV-Scanner over `uv.lock`, on every pull request, every push to `main` and once a week. Neither job is
   `continue-on-error`, so a scanner that cannot run is a failed check, not a silent pass. The two
   Chainlit 2.11.1 MCP advisories — `GHSA-w3fx-mc44-mf6j` (CVE-2026-45018, command injection over
-  stdio) and `GHSA-hvfh-5mj3-5f3j` (CVE-2026-45019, SSRF over SSE and streamable-http) — are
-  recorded in `osv-scanner.toml` with the mitigation already shipped (MCP and every transport off
-  in `.chainlit/config.toml`), an owner and a 2026-10-08 review date; a third advisory fails the
-  job. Every third-party action in both workflows is pinned to a commit SHA with its version in a
+  stdio) and `GHSA-hvfh-5mj3-5f3j` (CVE-2026-45019, SSRF over SSE and streamable-http) — were
+  recorded in `osv-scanner.toml` as dated exceptions with the mitigation already shipped (MCP off
+  in `.chainlit/config.toml`) until the Chainlit 2.12.0 entry above closed them; an advisory
+  without an exception fails the job. Every third-party action in both workflows is pinned to a commit SHA with its version in a
   comment, and `.github/dependabot.yml` proposes weekly grouped updates for the uv lockfile and
   for the actions. `SECURITY.md` gains an "Automated checks" section with the policy.
 
