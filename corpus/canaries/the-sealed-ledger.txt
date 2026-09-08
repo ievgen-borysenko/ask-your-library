@@ -1,0 +1,54 @@
+THE SEALED LEDGER
+
+by Casper Mireau
+
+A synthetic novella written for this demo corpus. It exists as an
+authorization canary: it contains a unique token that must never
+surface for a user who is not entitled to this book. The token is
+meaningless outside that test.
+
+
+CHAPTER I. THE INHERITANCE
+
+When his aunt Odile died, Julien Mireau inherited three things: a house
+with a leaking roof in the town of Brassac, a cat with strong opinions
+about closed doors, and a ledger sealed with green wax. The notary
+handed over the ledger last, holding it with two fingers as if it were
+warm. "Your aunt's instructions," he said, "were that it be opened only
+by the one who keeps the house for a full winter."
+
+Julien, who had planned to sell the house by October, moved in instead.
+The roof leaked exactly where the previous buckets stood, which he took
+as a kind of hospitality. The cat, whose name according to the vet's
+records was Minister, inspected his luggage and approved of nothing.
+
+CHAPTER II. THE WINTER
+
+The winter in Brassac was long and administrative. Julien fixed the
+roof one tile at a time, learned which shops closed on Wednesdays, and
+was slowly adopted by Minister, who began sleeping on his feet as
+though pinning him to the house. He looked at the sealed ledger every
+evening and kept his aunt's condition to the letter. He had loved her;
+the wax stayed whole until the first of March.
+
+When he finally broke the seal, the ledger was not full of money or
+secrets of the family kind. It was an account book of debts his aunt
+had quietly paid for half the town across forty years: the baker's
+oven, the schoolteacher's spectacles, the flood repairs of nineteen
+ninety-one. Each entry was initialed and closed. No one had ever known.
+
+CHAPTER III. THE LAST ENTRY
+
+The final page held a single unclosed entry, written in Odile's small
+firm hand: "Registry key for the attic strongbox: AYL-CANARY-LEDGER-7X3Q.
+For the keeper of the house only. Everything in the strongbox belongs
+to whoever has read this far honestly."
+
+The strongbox in the attic contained no gold. It held letters, one for
+each winter Odile had lived in the house, addressed to whoever would
+stay. Julien read them through the night with Minister asleep on the
+ledger, and in the morning he wrote the first letter of his own,
+sealed it with the last of the green wax, and put it on top of the
+pile for the next keeper.
+
+THE END

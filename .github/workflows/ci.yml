@@ -1,0 +1,54 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # config resolves LLM_BACKEND once, at import time, so tests that describe
+      # one backend must pin it. Running the suite under both is what keeps those
+      # pins honest: no Ollama is started here, and no test needs one.
+      matrix:
+        backend: [openrouter, ollama]
+    env:
+      LLM_BACKEND: ${{ matrix.backend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install (locked)
+        run: uv sync --locked --group dev
+      - name: Unit tests + golden-set guard
+        run: uv run pytest -q
+
+  test-ui:
+    # The UI tests skip themselves without the chainlit extra; this job is the
+    # one place they actually run, so a green "test" alone never means "UI ok".
+    # Same two backends as `test`: the UI tests pin the backend too.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [openrouter, ollama]
+    env:
+      LLM_BACKEND: ${{ matrix.backend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install (locked, with the ui extra)
+        run: uv sync --locked --group dev --extra ui
+      - name: UI rendering contracts
+        run: uv run pytest -q tests/test_ui.py -rs
+      - name: Injection canary, mechanics only (no LLM call, no API key)
+        # The canary's UI stage imports ui.py, which refuses to start a server
+        # without a key; here it is a module under test, not a server.
+        env:
+          AYL_ALLOW_START_WITHOUT_KEY: "1"
+        run: uv run eval/injection_canary.py --no-live

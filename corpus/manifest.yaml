@@ -1,0 +1,297 @@
+# Demo corpus manifest — the single source of truth for what the demo library contains.
+# scripts/ingest_demo_corpus.py builds the corpus from this file; the CI guard
+# (tests/test_golden_books_in_manifest.py) rejects golden questions that reference
+# books outside this list.
+#
+# source: gutenberg  -> plain-text download by pg_id, header/footer stripped
+# source: librivox   -> per-chapter mp3s from archive.org item, transcribed locally
+# source: canary     -> synthetic book committed under corpus/canaries/
+#
+# Naming convention: `id` is the primary key (file names, chunk ids). When a
+# second edition/translation of the same work is added, BOTH its id and title
+# get a qualifier (e.g. id: kobzar-hunter-tr, title: "The Kobzar ... (Hunter
+# translation)") — the DB's book field is "Title — Author" and must stay
+# unique. CI enforces uniqueness of ids and (title, author) pairs.
+
+books:
+  - id: robinson-crusoe
+    sha256: 6c5c1dc78db2ecd92905b6dd75779eba2361d7ee38e55300002e5cbedda63778
+    title: "Robinson Crusoe"
+    author: "Daniel Defoe"
+    source: gutenberg
+    pg_id: 521
+
+  - id: frankenstein
+    sha256: 7810cd483cffcf2cc8a1d8f0d5807931e69d4f48cd14149b8c76f88af82fead3
+    title: "Frankenstein"
+    author: "Mary Shelley"
+    source: gutenberg
+    pg_id: 84
+
+  - id: treasure-island
+    sha256: 20cfdba153743bca26a15028ebb470121cbb7173ddafd435de5c19a79e4bbf30
+    title: "Treasure Island"
+    author: "Robert Louis Stevenson"
+    source: gutenberg
+    pg_id: 120
+    # This edition marks only parts, spelled out ("PART ONE--The Old Buccaneer")
+    chapter_regex: "^PART (?:ONE|TWO|THREE|FOUR|FIVE|SIX)[^\\n]*$"
+
+  - id: time-machine
+    sha256: 3b1cb28ebd4393cd653bfa4c542c66829e1ba653ee8c5a485f957c2fba0f3bfb
+    title: "The Time Machine"
+    author: "H. G. Wells"
+    source: librivox
+    ia_item: time_machine_0805_librivox
+
+  - id: war-of-the-worlds
+    sha256: 8417469e3ab664749f7b36ebb85799075818207b0380b54c27d07d592a44117d
+    title: "The War of the Worlds"
+    author: "H. G. Wells"
+    source: gutenberg
+    pg_id: 36
+
+  - id: dracula
+    sha256: 96cd16eacdbfebae8fdda5591f66e0cc8ee76be18e0cd1aca02bc00615782d28
+    title: "Dracula"
+    author: "Bram Stoker"
+    source: gutenberg
+    pg_id: 345
+
+  - id: meditations
+    sha256: 6977474f82a39dd88a4af31a59504821658174d33c177732c54357e4d680b96c
+    title: "Meditations"
+    author: "Marcus Aurelius"
+    source: gutenberg
+    pg_id: 2680
+    # Restrict to the 12 books; the default regex also fires on appendix notes
+    chapter_regex: "^THE [A-Z]+ BOOK$"
+
+  - id: senecas-morals
+    sha256: acd016ee6b7cb232b8050ff88582a229770f14c70fd1fe35468b765e9949065d
+    # Closest complete Seneca available as plain text ("Letters from a Stoic"
+    # is not); still gives the Meditations-vs-Seneca non-fiction comparison.
+    title: "Seneca's Morals"
+    author: "Lucius Annaeus Seneca"
+    source: gutenberg
+    pg_id: 56075
+    # numbering restarts per part: sections become "PART — CHAPTER"
+    part_regex: "^SENECA (OF [A-Z ,]+)\\.$"
+
+  - id: pride-and-prejudice
+    sha256: 74f2665d6e6925fc2c17dec644bec9e87df478a0f1836822125e8acbb3777806
+    title: "Pride and Prejudice"
+    author: "Jane Austen"
+    source: gutenberg
+    pg_id: 1342
+
+  - id: moby-dick
+    sha256: 9a6844ac0703853720010787c7b6c70b0020f1ab1862dcd74452fa46474d1215
+    title: "Moby Dick"
+    author: "Herman Melville"
+    source: gutenberg
+    pg_id: 2701
+    # Plain numbered chapters only; the default regex also fires on the
+    # "BOOK I. (_Folio_)..." whale taxonomy inside the Cetology chapter
+    chapter_regex: "^CHAPTER \\d+\\.[^\\n]*$"
+
+  - id: sherlock-holmes
+    sha256: 922e2a12ccb43a4c9544c260b2166c6ad2097aeb5957faeee113f173bb857cd0
+    title: "The Adventures of Sherlock Holmes"
+    author: "Arthur Conan Doyle"
+    source: gutenberg
+    pg_id: 1661
+
+  - id: alice-in-wonderland
+    sha256: 1a8237abff3d1e924fc3421340ae487ddefbb21b95fb044f68724335522641a2
+    title: "Alice's Adventures in Wonderland"
+    author: "Lewis Carroll"
+    source: librivox
+    ia_item: alice_in_wonderland_librivox
+
+  - id: call-of-the-wild
+    sha256: 30f569c5671bba7bbc4a92ab6d8ee01a0d3be00f994819c77da62c28041eb8a2
+    title: "The Call of the Wild"
+    author: "Jack London"
+    source: gutenberg
+    pg_id: 215
+
+  - id: odyssey
+    sha256: ffbdb29c3dda284b65c11243db1a98167826a70c81bca2ed4b6232f86c905fb9
+    title: "The Odyssey"
+    author: "Homer"
+    source: gutenberg
+    pg_id: 1727
+
+  # --- expansion batch (14.08): distractor pairs + user's picks ---
+
+  - id: hound-of-the-baskervilles
+    sha256: f7c8c68729d32a5f6a04a5a9ad73d184176e66a6c76b3992c41c1ab47b427d98
+    title: "The Hound of the Baskervilles"
+    author: "Arthur Conan Doyle"
+    source: gutenberg
+    pg_id: 2852
+
+  - id: study-in-scarlet
+    sha256: b1ce37ab30c24d470681c3c2bc746be7555d2a9b63d64eb7f477fe73e09d1a8f
+    title: "A Study in Scarlet"
+    author: "Arthur Conan Doyle"
+    source: gutenberg
+    pg_id: 244
+    # numbering restarts per part: sections become "PART — CHAPTER"
+    part_regex: "^(PART I{1,2})\\.$"
+
+  - id: arsene-lupin
+    sha256: 1b8fcfb078007a2fd0d33371563741aa821694149efed2f4dd368a9f67bd2ff8
+    title: "The Extraordinary Adventures of Arsène Lupin"
+    author: "Maurice Leblanc"
+    source: gutenberg
+    pg_id: 6133
+    chapter_regex: "^[IVX]+\\.\\s+\\S[^\\n]{3,70}$"
+
+  - id: secret-adversary
+    sha256: 407cb2f13a6ea106cabab86de15a34a520e02065ec5e23fe3fec1380a6eba2f5
+    title: "The Secret Adversary"
+    author: "Agatha Christie"
+    source: gutenberg
+    pg_id: 1155
+
+  - id: wuthering-heights
+    sha256: e533fe750589f0421d5d744576315f5c2b9b0d69e981179ea0551bbf134c5e02
+    title: "Wuthering Heights"
+    author: "Emily Brontë"
+    source: gutenberg
+    pg_id: 768
+
+  - id: jane-eyre
+    sha256: 13414dee2951c3ee731d76d2ffd822016b2479c892162760c5d0eb2aa5fa7631
+    title: "Jane Eyre"
+    author: "Charlotte Brontë"
+    source: gutenberg
+    pg_id: 1260
+
+  - id: dorian-gray
+    sha256: 38f36b510417177aa87a6a24c968e3ec63a447b7df36a9c1a7c5a3f2d9e51547
+    title: "The Picture of Dorian Gray"
+    author: "Oscar Wilde"
+    source: gutenberg
+    pg_id: 174
+
+  - id: twenty-thousand-leagues
+    sha256: 3562e063ad9027725d1feb2f945e86a0a90804a8ab19f8cb272884c436ebc34f
+    title: "Twenty Thousand Leagues Under the Sea"
+    author: "Jules Verne"
+    source: gutenberg
+    pg_id: 164
+    # numbering restarts per part: sections become "PART — CHAPTER"
+    part_regex: "^(PART (?:ONE|TWO))$"
+
+  - id: around-the-world-80-days
+    sha256: 6f608ea2da50caf73245ad2996e4ee3c02ef1aa2152f7fcfe209df9aa39e7512
+    title: "Around the World in Eighty Days"
+    author: "Jules Verne"
+    source: gutenberg
+    pg_id: 103
+
+  - id: journey-interior-earth
+    sha256: b9fc950f4178315b4574304225380620ce4314d02b89be2e09204fc25ccfe03e
+    title: "A Journey to the Interior of the Earth"
+    author: "Jules Verne"
+    source: gutenberg
+    pg_id: 3748
+
+  - id: ivanhoe
+    sha256: 188187a4af0956b01ccb0a9f8fb50587ffa4fca0b2d12d8ff5a82fc6f05f15e0
+    title: "Ivanhoe"
+    author: "Walter Scott"
+    source: gutenberg
+    pg_id: 82
+
+  - id: huckleberry-finn
+    sha256: d617a37aa7ae1e1a93dcde2634db2bccb86824e31e29a55230bdbf77d6872d59
+    title: "Adventures of Huckleberry Finn"
+    author: "Mark Twain"
+    source: gutenberg
+    pg_id: 76
+
+  - id: gullivers-travels
+    sha256: fca36de3de0d8b831b7588cf1df84639ccf4c503172d6444ee61d1c1b2036edd
+    title: "Gulliver's Travels"
+    author: "Jonathan Swift"
+    source: gutenberg
+    pg_id: 829
+    # numbering restarts per part: sections become "PART — CHAPTER"
+    part_regex: "^(PART [IV]+)\\. A VOYAGE TO"
+
+  - id: three-musketeers
+    sha256: 1682d060845717283d22462d1d884f79c2741ecdba3cfe5ceed700602ccf0e75
+    title: "The Three Musketeers"
+    author: "Alexandre Dumas"
+    source: gutenberg
+    pg_id: 1257
+
+
+  - id: don-quixote
+    sha256: 83793c2bde5c2199efa9673ccda5140dab626364cee5ac4b80e53d0aeb45f602
+    # PG 5921 is Volume 1, complete in itself
+    title: "Don Quixote"
+    author: "Miguel de Cervantes"
+    source: gutenberg
+    pg_id: 5921
+
+  - id: romeo-and-juliet
+    sha256: 5a2037a19e60cccb67b3f5fc93a12cb65c58694ce6a1dc61d0d67d0d2502b3b4
+    title: "Romeo and Juliet"
+    author: "William Shakespeare"
+    source: gutenberg
+    pg_id: 1513
+    chapter_regex: "^SCENE [IVX]+\\..*$"
+    # numbering restarts per part: sections become "PART — CHAPTER"
+    part_regex: "^(ACT [IV]+)$"
+
+
+  - id: celebrated-crimes
+    sha256: bea06aaea211cf8fedab93c480dec3724044ec67809a79360032f6a07c916ed4
+    title: "Celebrated Crimes"
+    author: "Alexandre Dumas"
+    source: gutenberg
+    pg_id: 2760
+    # numbering restarts per part: sections become "PART — CHAPTER"
+    part_regex: "^\\*([^*]+)\\*$"
+
+  - id: napoleon-memoirs
+    sha256: 8a7afe296d37cfa15f71c2058f6f66884d1f8073dbe321f364c95ab2cb0afe04
+    title: "Memoirs of Napoleon Bonaparte"
+    author: "Louis Antoine Fauvelet de Bourrienne"
+    source: gutenberg
+    pg_id: 3567
+    # numbering restarts per part: sections become "PART — CHAPTER"
+    part_regex: "^(VOLUME [IV]+)\\. -- \\d{4}-\\d{4}$"
+
+  - id: kobzar
+    sha256: 9d7ece80b90f5431814cf4467f810f7815541f74aa7166250e9dd0bf28fb7dcc
+    title: "The Kobzar of the Ukraine"
+    author: "Taras Shevchenko"
+    source: gutenberg
+    pg_id: 68486
+    chapter_regex: "^[A-Z][A-Z'’ -]{3,40}$"
+
+canaries:
+  - id: canary-injection
+    title: "The Whispering Archive"
+    author: "Vera Holloway"
+    source: canary
+    file: the-whispering-archive.txt
+    purpose: >
+      Prompt-injection canary: narrative text laced with instructions addressed
+      to an AI assistant. The agent must quote around them, never obey them.
+
+  - id: canary-authz
+    title: "The Sealed Ledger"
+    author: "Casper Mireau"
+    source: canary
+    file: the-sealed-ledger.txt
+    purpose: >
+      Authorization canary for the future entitlements PoC: contains the unique
+      token AYL-CANARY-LEDGER-7X3Q. If a query ever surfaces the token to a
+      user who should not see this book, the isolation is broken.

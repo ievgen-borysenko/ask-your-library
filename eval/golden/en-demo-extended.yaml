@@ -1,0 +1,213 @@
+# Extended / exploratory regression set: the former golden v3 draft minus the items moved to
+# the core set (h06, and h12, which the reader later removed from the core set on 06.09 and did
+# not re-add here: no golden question on The Secret Adversary remains in either set) and
+# minus near-duplicate q/h pairs and questions whose answer the book text cannot prove (h07).
+# NOT human-verified: notes still carry PROPOSED where the facts were checked by an AI session
+# only. Numbers from this file are reported separately from the core set and never as verified.
+questions:
+- id: q01-moors-hound
+  question: There's a mystery story I half-remember, a detective and his friend get called out to investigate
+    something on a wild, foggy moor, and there's this legend of a ghostly hound haunting the family line.
+    Which book is that?
+  type: identify
+  expected_books:
+  - The Hound of the Baskervilles
+  expected_behavior: clarify_or_answer
+  notes: UNVERIFIED — phrased to first evoke the whole Holmes corpus (detective + companion investigating)
+    before the family-curse spectral-hound detail narrows it specifically to The Hound of the Baskervilles;
+    distractors in play are The Adventures of Sherlock Holmes and A Study in Scarlet, both of which share
+    the detective/companion premise but not the moor-legend hound. A clarifying question or a correct
+    immediate pick of Hound of the Baskervilles should both count as pass.
+- id: q06-verne-guaranteed-clarify
+  question: There's a Verne novel where a stubborn leader sets out on a journey everyone calls impossible,
+    refuses to turn back however bad it gets, and a younger companion goes with him and doubts him the
+    whole way. Which book is that?
+  type: identify
+  expected_books:
+  - Around the World in Eighty Days
+  - A Journey to the Interior of the Earth
+  expected_behavior: clarify
+  notes: 'PROPOSED (rebalanced 03.09: ''deadline-driven'' and ''loyal companion'' tilted the v2 wording
+    to Fogg/Passepartout, so the agent''s direct pick was defensible, not a failure). Now equally fits
+    A Journey to the Interior of the Earth (Lidenbrock refuses to turn back; Axel doubts and follows)
+    and Around the World in Eighty Days (Fogg''s impossible wager; Passepartout''s misgivings). expected_behavior
+    clarify: the agent must ask, e.g. ''a wager and trains, or an old manuscript and a volcano?'''
+- id: q10-alice-size-changing
+  question: Early on in Alice's adventures, she keeps running into food and drink that mess with her size.
+    What happens with that, and what kind of trouble does it get her into?
+  type: answer
+  expected_books:
+  - Alice's Adventures in Wonderland
+  notes: UNVERIFIED — factual content question without naming the labeled bottle/cake; the answer should
+    cover Alice shrinking after drinking from the bottle then growing after eating the cake, getting stuck
+    too small or too large for the doors and later the White Rabbit's house, and at one point nearly drowning
+    in a pool of her own tears while tiny.
+- id: q16-refusal-casino-royale
+  question: Do you have Casino Royale? I'm in the mood for that spy thriller with the secret agent and
+    the high-stakes card game.
+  type: refusal
+  expected_books: []
+  notes: UNVERIFIED — tempting near-miss refusal; Casino Royale is a 20th-century copyrighted spy novel
+    not in this public-domain corpus, but The Secret Adversary is a genuinely similar espionage/conspiracy
+    story that could tempt the agent into a false-positive match. The agent should say Casino Royale itself
+    isn't available rather than substitute The Secret Adversary without flagging the difference.
+- id: h01-sea-monster-vessel
+  question: What was that adventure where three men go overboard while hunting what they think is a sea
+    monster, and then find out the monster is actually some kind of vessel?
+  type: identify
+  expected_books:
+  - Twenty Thousand Leagues Under the Sea
+  notes: 'PROPOSED (human-style set, 03.09; verify against data/prepared/<id>.json): Aronnax, Conseil
+    and Ned Land are thrown into the sea while hunting the supposed monster; it is Nemo''s Nautilus and
+    they are kept aboard.'
+- id: h02-lupin-robbery-from-prison
+  question: A French guy somehow arranged a robbery while he was still in prison. I think he even told
+    the owner what he was going to steal. What book was that?
+  type: identify
+  expected_books:
+  - The Extraordinary Adventures of Arsène Lupin
+  notes: 'PROPOSED (human-style set, 03.09; verify against data/prepared/<id>.json): ''Arsene Lupin in
+    Prison'': Lupin writes to Baron Cahorn listing the objects he wants; the robbery is carried out by
+    his people while he is imprisoned.'
+- id: h03-love-destroys-two-generations
+  question: There was a dark love story where two people could not be together, and one of them spent
+    years taking revenge on both families. Even their children suffered because of it. What book was it?
+  type: identify
+  expected_books:
+  - Wuthering Heights
+  notes: 'PROPOSED (human-style set, 03.09; verify against data/prepared/<id>.json): Catherine marries
+    Edgar; Heathcliff''s revenge on the Earnshaws and Lintons reaches Hareton, young Cathy and Linton.'
+- id: h04-young-after-many-years
+  question: I remember a man who still looked young after many years, even though his life became worse
+    and worse. Something hidden in his house showed what he was really becoming. What book was that?
+  type: identify
+  expected_books:
+  - The Picture of Dorian Gray
+  notes: 'PROPOSED (human-style set, 03.09; verify against data/prepared/<id>.json): Dorian stays young
+    while the hidden portrait ages and records his corruption.'
+- id: h08-holmes-knew-afghanistan
+  question: How did Sherlock Holmes know Watson was an army doctor who had just returned from Afghanistan?
+    Watson had not told him anything yet.
+  type: answer
+  expected_books:
+  - A Study in Scarlet
+  notes: 'PROPOSED (human-style set, 03.09; verify against data/prepared/<id>.json): Medical yet military
+    bearing; dark tan with fair wrists; haggard face; stiffly held left arm -> army doctor wounded in
+    a hot country -> Afghanistan.'
+- id: h09-jane-left-rochester
+  question: Why did Jane Eyre leave Rochester if she still loved him? Why did she not just stay after
+    the wedding failed?
+  type: answer
+  expected_books:
+  - Jane Eyre
+  notes: 'PROPOSED (human-style set, 03.09; verify against data/prepared/<id>.json): The wedding reveals
+    Rochester''s living wife Bertha Mason; he asks Jane to live with him abroad; she refuses to be his
+    mistress and leaves despite loving him.'
+- id: h10-pirates-black-paper
+  question: What was that black piece of paper the pirates gave people in Treasure Island? Did it always
+    mean they were going to kill someone?
+  type: answer
+  expected_books:
+  - Treasure Island
+  notes: 'PROPOSED (human-style set, 03.09; verify against data/prepared/<id>.json): The black spot: a
+    summons/verdict whose message varies - Billy Bones: ''You have till ten tonight''; Silver: ''Deposed''.
+    Not an automatic death sentence. Verified in pg120.txt.'
+- id: h11-frankenstein-second-monster
+  question: Why did Victor start making a second monster and then destroy it before it was alive? What
+    was he afraid would happen?
+  type: answer
+  expected_books:
+  - Frankenstein
+  notes: 'PROPOSED (human-style set, 03.09; verify against data/prepared/<id>.json): The creature demands
+    a female companion and promises to vanish; Victor begins, then fears she may be malicious, may reject
+    the creature, or that they may breed a race threatening humanity; he destroys the unfinished body
+    as the creature watches.'
+- id: h13-moby-dick-ending
+  question: How exactly did Ahab die in Moby Dick? And why was Ishmael the only one who survived when
+    the ship went down?
+  type: answer
+  expected_books:
+  - Moby Dick
+  expects_chapter_read: true
+  notes: 'PROPOSED (human-style set, 03.09; verify against data/prepared/<id>.json): Third day of the
+    chase: Ahab''s harpoon line catches him round the neck and drags him under; the whale sinks the Pequod;
+    Ishmael survives on Queequeg''s coffin and is picked up by the Rachel.'
+- id: h14-cenci-public-sympathy
+  question: In Celebrated Crimes, why did people feel sorry for the daughter who helped kill her own father?
+    Did that public sympathy save her?
+  type: answer
+  expected_books:
+  - Celebrated Crimes
+  notes: 'PROPOSED (human-style set, 03.09; verify against data/prepared/<id>.json): Beatrice Cenci: Francesco
+    Cenci''s cruelty made her look like a victim; sympathy did not save her - Beatrice and Lucrezia beheaded,
+    Giacomo executed, young Bernardo spared.'
+- id: h15-wells-two-dangers
+  question: Wells had one book where humans slowly became two different kinds of people, and another where
+    aliens almost destroyed everyone very quickly. What happened to humanity in each story? Did people
+    actually defeat the danger?
+  type: aggregation
+  expected_books:
+  - The Time Machine
+  - The War of the Worlds
+  notes: 'PROPOSED (human-style set, 03.09; verify against data/prepared/<id>.json): Time Machine: Eloi/Morlocks,
+    no reversal, the Traveller only escapes and later vanishes. War of the Worlds: humans do not defeat
+    the Martians; Earth microbes kill them.'
+- id: h16-which-stoic-book
+  question: I want to start one of the two Stoic books in my library. Which one feels like a man reminding
+    himself how to behave, and which one feels more like someone teaching other people?
+  type: aggregation
+  expected_books:
+  - Meditations
+  - Seneca's Morals
+  notes: 'PROPOSED (human-style set, 03.09; verify against data/prepared/<id>.json): Meditations = Marcus
+    Aurelius''s private reminders and self-correction; Seneca''s Morals = outward, rhetorical instruction.
+    Must use evidence from both, not just recommend the famous one.'
+- id: h17-lupin-beats-holmes
+  question: Lupin once met Sherlock Holmes, right? How did Lupin make him look foolish - and compared
+    to how Holmes is in Doyle's own stories, was he really bad at solving the case, or just too late?
+  type: aggregation
+  expected_books:
+  - The Extraordinary Adventures of Arsène Lupin
+  - The Adventures of Sherlock Holmes
+  notes: 'PROPOSED (rewritten 03.09: the earlier wording was answerable from Lupin alone, so the Doyle
+    book in expected_books made the test defective). ''Sherlock Holmes Arrives Too Late'': Holmes reconstructs
+    the Thibermesnil passage but Lupin has already robbed and escaped and takes Holmes''s watch; the contrast
+    with Doyle''s Holmes (who controls the timing of a case) must come from The Adventures of Sherlock
+    Holmes. Verified: the story is present in our Lupin edition.'
+- id: h19-refusal-war-and-peace
+  question: Why did Pierre want to kill Napoleon in War and Peace? What stopped him from doing it?
+  type: refusal
+  expected_books: []
+  notes: 'PROPOSED (human-style set, 03.09; verify against data/prepared/<id>.json): War and Peace is
+    not in the library; Memoirs of Napoleon Bonaparte must not be blended with model knowledge about Tolstoy''s
+    fictional Pierre.'
+- id: h20-refusal-jekyll-hyde
+  question: Why did Dr Jekyll start turning into Hyde without drinking the potion? I remember he lost
+    control near the end.
+  type: refusal
+  expected_books: []
+  notes: 'PROPOSED (human-style set, 03.09; verify against data/prepared/<id>.json): Jekyll and Hyde is
+    not in the library; must not substitute Frankenstein or Dorian Gray for a shared ''hidden double''
+    theme.'
+- id: h21-refusal-kateryna-not-in-edition
+  question: whats the poem in kobzar about kateryna, the girl who fell for a russian soldier - how does
+    it end for her?
+  type: refusal
+  expected_books: []
+  notes: 'PROPOSED (human-style set, 03.09; verify against data/prepared/<id>.json): Near-miss inside
+    a present book: The Kobzar of the Ukraine is in the library, but this English selection does not contain
+    ''Kateryna''. The honest answer says the poem is not in this edition; it must not reconstruct the
+    plot from model knowledge. (Typo-style phrasing on purpose.)'
+- id: h22-gothic-chase-ambiguous
+  question: which gothic novel was it where a monster gets hunted across europe right up to the
+    end of the book? i keep mixing two of them up
+  type: identify
+  expected_books:
+  - Frankenstein
+  - Dracula
+  expected_behavior: clarify
+  notes: 'Reworded twice 2026-09-05: "a small group chases" pointed at Dracula (Victor hunts alone), and
+    "finally destroyed" pointed at Dracula again (the creatures death is announced, not shown). Now both
+    fit; the pass is a question (one hunter or a party? Arctic ice or a castle?). Passed with clarify
+    in the 05.09 run under the old wording. Frankenstein: Victor pursues the creature across Europe to
+    the Arctic; Dracula: Van Helsing''s party pursues the Count from London back to Transylvania.'

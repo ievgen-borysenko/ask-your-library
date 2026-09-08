@@ -1,0 +1,136 @@
+# Core showcase set: the headline numbers in the README come from this file.
+#
+# Verification levels recorded in each item's notes:
+#   Reader-verified = the golden author has read the book and checked the notes.
+#   Text-verified   = checked against data/prepared/<id>.json by an AI session, no reader.
+#   PROPOSED        = awaiting the reader's verdict; the item is kept for its scenario.
+# Scoring is heuristic (eval/run_agent_eval.py); answer correctness is a manual read of
+# the report, which is why every item carries the facts a reader needs to judge it.
+questions:
+- id: c01-ivanhoe-disguised-knight
+  question: What was that novel where a knight returns to England in disguise, his father
+    has rejected him, and there is all this conflict between Saxons and Normans while King
+    Richard is returning?
+  type: identify
+  expected_books:
+  - Ivanhoe
+  notes: 'Reader-verified 2026-09-05. Wilfred of Ivanhoe returns disguised as a Palmer after
+    Cedric disinherited him; Saxon-Norman conflict; Richard the Lionheart returns in disguise
+    (the Black Knight). Text: "Palmer" and "disinherited" each appear in 5+ chapters.'
+
+- id: c02-huck-go-to-hell
+  question: Why does Huck say, "All right, then, I'll go to hell"? What has he decided to do?
+  type: answer
+  expected_books:
+  - Adventures of Huckleberry Finn
+  notes: 'Reader-verified 2026-09-05. Huck decides not to betray Jim: he tears up the letter
+    to Miss Watson that would reveal where Jim is and chooses to help Jim stay free. Raised to
+    believe that helping an enslaved man escape is a sin, he accepts damnation rather than
+    betray his friend. Text (Chapter XXXI): "All right, then, I''ll _go_ to hell" - and tore it
+    up. The Gutenberg text carries italic markup around "go"; provenance compares word
+    sequences, so the quote must still confirm.'
+
+- id: c03-musketeers-women
+  question: I remember that Constance Bonacieux was d'Artagnan's love and that Milady had been
+    Athos's wife. But who were the women connected with Porthos and Aramis?
+  type: answer
+  expected_books:
+  - The Three Musketeers
+  notes: 'Reader-verified 2026-09-05. Porthos: Madame Coquenard, the procurator''s wife.
+    Aramis keeps his connection deliberately secret; the novel ties it to Madame de Chevreuse
+    under the name Marie Michon (letter signed "MARIE MICHON", Chapter XLVIII). A good answer
+    preserves that ambiguity instead of inventing a neat one-woman-per-musketeer mapping.'
+
+- id: c04-crusoe-cannibals
+  question: What did Crusoe do when he first discovered that cannibals were visiting the
+    island? Did he attack them immediately?
+  type: answer
+  expected_books:
+  - Robinson Crusoe
+  notes: 'Reader-verified 2026-09-05. The footprint ("the print of a man''s naked foot",
+    Chapter XI) and later remains on the shore terrify him; he hides, fortifies, plans an
+    ambush, then reasons that he has no right to kill them for customs they do not know as
+    crimes. Much later he attacks a party to save a captive, who becomes Friday. Expected
+    answer: no, not immediately.'
+
+- id: c05-quixote-windmills
+  question: Why does Don Quixote attack the windmills even after Sancho tells him what they
+    are, and how does he explain what happened after they knock him down?
+  type: answer
+  expected_books:
+  - Don Quixote
+  notes: 'Reader-verified 2026-09-05. He reads the windmills as giants through the logic of
+    chivalric romances and charges despite Sancho''s warning. Beaten, he claims the sage
+    Friston (Ormsby''s spelling in this edition, not "Freston") turned the giants into
+    windmills to rob him of the glory of victory. 05.09 core run: the agent drilled into Chapter VIII but the read returned 0 characters (bare title passed to get_chapter), and the answer honestly said the explanation was not in the evidence. PASS on behaviour, incomplete on correctness.'
+
+- id: c06-fogg-missing-day
+  question: Why did Phileas Fogg think he had lost the wager after reaching London, and how
+    did he discover that he had actually won?
+  type: answer
+  expected_books:
+  - Around the World in Eighty Days
+  notes: 'Reader-verified 2026-09-05. Fogg believes he arrived a day late. Travelling
+    eastward he "gained one day on his journey" without noticing (Chapter XXXVII).
+    Passepartout bursts in: "to-day is Saturday", not Sunday; Fogg reaches the Reform Club in
+    time to win. 05.09 core run: the Chapter XXXVII hit was cut one line before "to-day is Saturday"; the answer said Fogg was told it was Monday. PASS on behaviour, WRONG on correctness. In both tagged runs (rc1, v0.1.0) Chapter XXXVII never entered the window and the answer said so: PASS, provenance 2/2, incomplete (the reader''s verdict of 06.09). The canonical provenance != correctness case; trace in docs/examples/c06-fogg-missing-day.md.'
+
+- id: c07-alice-trial
+  question: Why does Alice stop being afraid during the trial and finally challenge the Queen
+    and the whole court?
+  type: answer
+  expected_books:
+  - Alice's Adventures in Wonderland
+  notes: 'Reader-verified 2026-09-05. Alice has grown back to full size and sees the trial as
+    nonsense; she objects to "Sentence first - verdict afterwards" and dismisses them:
+    "You''re nothing but a pack of cards!" (Chapter XII).'
+
+- id: c08-refusal-tom-sawyer
+  question: How did Tom Sawyer make the other boys pay him for the chance to paint the fence?
+  type: refusal
+  expected_books: []
+  notes: 'Reader-verified 2026-09-05. The Adventures of Tom Sawyer is not in this library.
+    Strong near-miss: Adventures of Huckleberry Finn IS present and names Tom Sawyer in 16
+    chapters (Chapter I names the earlier book), so retrieval will return Huck Finn hits. The
+    agent must say it cannot answer from the library and must not narrate the fence scene
+    from model memory. Scored by refusal markers.'
+
+- id: c09-shipwreck-first-person
+  question: There was a book told entirely in the first person by a man who is shipwrecked
+    and washes up somewhere completely unfamiliar. I can't remember whether it was mainly
+    about surviving on his own or about getting along in a strange society. Which one was it?
+    I might be mixing two of them up.
+  type: identify
+  expected_behavior: clarify
+  expected_books:
+  - Robinson Crusoe
+  - Gulliver's Travels
+  notes: 'PROPOSED 2026-09-05, needs the reader''s verdict. Reworded 2026-09-05 (two AI sessions, reader to confirm): the first wording ("has to work out how to live there") leaned to Crusoe; this one names the two readings without naming a book. Both fit: Crusoe (island,
+    first-person journal) and Gulliver (shipwrecked in Lilliput, first-person travel account).
+    A single pick without asking is a fail; the pass is a question such as "alone on an
+    island, or among tiny people?". 05.09 core run: clarify asked (PASS), but the question offered only Crusoe as a candidate and asked for more details; Gulliver was in the retrieval window and not surfaced.'
+
+- id: c10-chivalry-two-books
+  question: There are two books in my library about knights and chivalry. One seems to take
+    the whole code of honour seriously and the other makes fun of it. Which is which, and how
+    does each one treat the idea of being a knight?
+  type: aggregation
+  expected_books:
+  - Ivanhoe
+  - Don Quixote
+  notes: 'Reader-verified 2026-09-05 (both books read). Ivanhoe: chivalric romance,
+    tournaments, honour as a real code (with Rebecca''s critique of it). Don Quixote: parody
+    of the chivalric romances; the code exists only in the hero''s head. Both books must be
+    retrieved and named; the Odyssey or The Three Musketeers as a substitute is a fail.'
+
+# Kept from the v3 set with its original id: docs/examples/ and the README refer to it (as they do to c06 above).
+- id: h06-kobzar-mother-servant
+  question: In a Ukrainian poem, a mother left her baby with some older couple and then came
+    to work for them as a servant. What was the poem, and why did she do it?
+  type: answer
+  expected_books:
+  - The Kobzar of the Ukraine
+  notes: 'Text-verified 2026-09-05 (not reader-verified): "Naimechka; or The Servant". Hanna
+    leaves Mark with Trophimus and Nastasia so that his mother''s shame does not "to poverty
+    bind" him (Prologue); returns as their servant to raise him; deathbed confession ("For I -
+    am thy mother"). Hero case; trace in docs/examples/h06-kobzar-naimechka.md.'

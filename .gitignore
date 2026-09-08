@@ -1,0 +1,35 @@
+# Working / scratch files (never committed)
+.scratch/
+
+# Data: demo corpus is rebuilt on demand by scripts/ingest_demo_corpus.py
+data/
+*.lance
+
+# Secrets: every .env variant except the committed example
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Chainlit runtime state (config.toml IS tracked: the UI needs unsafe_allow_html)
+.chainlit/chat.db
+.chainlit/chat.db-*
+.chainlit/auth-secret
+.chainlit/translations/
+.files/
+
+# Eval run outputs (numbers are recorded in docs/)
+eval/results/
+
+# Private session handoffs (never committed)
+docs/phase*-notes.md
+
+# local agent tooling
+.claude/
+
+# OS
+.DS_Store

