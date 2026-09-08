@@ -45,7 +45,8 @@ with the same read-only token as any other.
 
 None open. Chainlit 2.11.1 carried two advisories about its MCP transports (command injection over
 stdio, SSRF over HTTP/SSE); this repository never enabled MCP, and the upgrade to Chainlit 2.12.0
-closed both. MCP and every transport stay disabled in `.chainlit/config.toml`; enabling MCP is a
-deliberate change that starts with re-reading this file. The OSV-Scanner job in
+closed both. MCP stays disabled (`[features.mcp] enabled = false` in `.chainlit/config.toml`, which
+is what makes every transport unreachable; user-connected servers are off as well); enabling MCP
+is a deliberate change that starts with re-reading this file. The OSV-Scanner job in
 `.github/workflows/security.yml` reports any new advisory, and `osv-scanner.toml` holds no
 exception at the moment.

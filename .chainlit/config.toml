@@ -88,8 +88,13 @@ reaction_on_message_received = false
     # with allowed_executables) were removed with the 2.12.0 upgrade: that
     # release replaced them with [[features.mcp.servers]] declared server-side,
     # and only warns about the old keys while MCP is disabled. Enabling MCP
-    # means declaring servers here, upgrading first, and re-reading SECURITY.md.
+    # means declaring servers here and re-reading SECURITY.md first.
     enabled = false
+
+[features.mcp.user_servers]
+    # 2.12.0 lets end users connect their own SSE/HTTP servers; off, like MCP itself.
+    enabled = false
+    allowed_urls = []
 
 [UI]
 # Name of the assistant.
@@ -173,4 +178,4 @@ default_avatar_file_url = ""
 #     target = "_blank" (default)  # Optional: "_self", "_parent", "_top".
 
 [meta]
-generated_by = "2.11.1"
+generated_by = "2.12.0"

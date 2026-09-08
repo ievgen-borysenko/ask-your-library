@@ -16,10 +16,10 @@
   OSV-Scanner over `uv.lock`, on every pull request, every push to `main` and once a week. Neither job is
   `continue-on-error`, so a scanner that cannot run is a failed check, not a silent pass. The two
   Chainlit 2.11.1 MCP advisories — `GHSA-w3fx-mc44-mf6j` (CVE-2026-45018, command injection over
-  stdio) and `GHSA-hvfh-5mj3-5f3j` (CVE-2026-45019, SSRF over SSE and streamable-http) — are
-  recorded in `osv-scanner.toml` with the mitigation already shipped (MCP and every transport off
-  in `.chainlit/config.toml`), an owner and a 2026-10-08 review date; a third advisory fails the
-  job. Every third-party action in both workflows is pinned to a commit SHA with its version in a
+  stdio) and `GHSA-hvfh-5mj3-5f3j` (CVE-2026-45019, SSRF over SSE and streamable-http) — were
+  recorded in `osv-scanner.toml` as dated exceptions with the mitigation already shipped (MCP off
+  in `.chainlit/config.toml`) until the Chainlit 2.12.0 entry above closed them; an advisory
+  without an exception fails the job. Every third-party action in both workflows is pinned to a commit SHA with its version in a
   comment, and `.github/dependabot.yml` proposes weekly grouped updates for the uv lockfile and
   for the actions. `SECURITY.md` gains an "Automated checks" section with the policy.
 
