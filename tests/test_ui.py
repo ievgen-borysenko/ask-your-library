@@ -2,6 +2,7 @@
 Skipped when the ui extra is not installed (a plain `uv sync` clone)."""
 import asyncio
 import importlib
+import logging
 import os
 import subprocess
 import sys
@@ -297,33 +298,40 @@ async def _thread_row(layer, thread_id: str):
     return rows[0] if rows else None
 
 
+def _insert_and_read(layer, thread_id: str, tags) -> dict | None:
+    """One thread insert through the layer, then the row; the layer's engine is
+    disposed in the same loop, so no aiosqlite connection outlives the test."""
+    async def go():
+        try:
+            await layer.update_thread(thread_id=thread_id, name="How many books do I have?",
+                                      tags=tags, metadata={})
+            return await _thread_row(layer, thread_id)
+        finally:
+            await layer.close()
+    return asyncio.run(go())
+
+
 def test_first_message_persists_the_chat_title(ui):
-    """The data layer as ui.py builds it, the schema as ui.py creates it, the insert
-    as the emitter issues it: the title must land in the table the sidebar lists."""
-    layer = ui.data_layer()
-
-    async def first_message():
-        await layer.update_thread(thread_id="t1", name="How many books do I have?",
-                                  tags=_tags_as_the_emitter_sends_them(ui.PROFILE_EN),
-                                  metadata={})
-        return await _thread_row(layer, "t1")
-
-    assert asyncio.run(first_message()) == {"name": "How many books do I have?", "tags": None}
+    """The data layer as ui.py builds it, the schema as ui.py creates it, the
+    title-carrying insert of a chat's first message with the tags the shipped
+    config makes the emitter send (the emitter also passes the user; that
+    needs a session and changes nothing about the tags column): the title must
+    land in the table the sidebar lists."""
+    row = _insert_and_read(ui.data_layer(), "t1", _tags_as_the_emitter_sends_them(ui.PROFILE_EN))
+    assert row == {"name": "How many books do I have?", "tags": None}
 
 
-def test_sqlite_still_rejects_a_tag_list_so_auto_tag_thread_stays_off(ui):
+def test_sqlite_still_rejects_a_tag_list_so_auto_tag_thread_stays_off(ui, caplog):
     """Why the flag is off: the data layer binds the list as-is, SQLite refuses it,
-    and execute_sql only logs the failure, so the whole insert, title included, is
-    lost. The day this test fails, upstream serializes tags for SQLite and
-    auto_tag_thread can go back on."""
-    layer = ui.data_layer()
-
-    async def tagged_insert():
-        await layer.update_thread(thread_id="t2", name="a title", tags=[ui.PROFILE_EN],
-                                  metadata={})
-        return await _thread_row(layer, "t2")
-
-    assert asyncio.run(tagged_insert()) is None
+    and execute_sql only logs the failure, so the whole insert, title included,
+    is lost. Both halves are pinned: no row, AND the logged reason is the list
+    binding (execute_sql swallows every error, so the missing row alone would
+    also pass on an unrelated breakage). The day this test fails, upstream
+    serializes tags for SQLite and auto_tag_thread can go back on."""
+    with caplog.at_level(logging.WARNING, logger="chainlit"):
+        row = _insert_and_read(ui.data_layer(), "t2", [ui.PROFILE_EN])
+    assert row is None
+    assert "type 'list' is not supported" in caplog.text
 
 
 def test_config_keeps_auto_tag_thread_off():
