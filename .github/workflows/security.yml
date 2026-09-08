@@ -1,0 +1,56 @@
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Both scanners answer to the outside world, not to this repository: a
+    # secret can be published after the commit that leaked it, and an advisory
+    # after the release that shipped the dependency. Weekly is the floor.
+    - cron: "17 5 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # gitleaks-action asks the API for the pull request's commit list to work
+      # out the range it scans; on a private repository that call is refused
+      # without this scope and the job dies before gitleaks runs.
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The scheduled run scans every commit reachable from the ref, and
+          # the push and pull-request runs need the parent of their range's
+          # first commit; a shallow clone silently narrows both.
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          # No GITLEAKS_LICENSE: the key is required for organisation accounts
+          # only, and this repository belongs to a personal one.
+          #
+          # Review comments would need `pull-requests: write`, which this job
+          # deliberately does not have and a fork's token could not use anyway.
+          # Findings stay in the job summary, the log and the SARIF artifact.
+          GITLEAKS_ENABLE_COMMENTS: "false"
+
+  dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: google/osv-scanner-action/osv-scanner-action@6e4298ebc4db23e847df9b2e2de2939d6f066c67 # v2.5.1
+        with:
+          # uv.lock is the resolved set CI installs from; the ranges in
+          # pyproject.toml are not what ships. Table output, no SARIF upload:
+          # the Code Scanning API would need `security-events: write`, and the
+          # finding is already the failing job.
+          scan-args: |-
+            --lockfile=./uv.lock
+            --config=./osv-scanner.toml
+            --format=table

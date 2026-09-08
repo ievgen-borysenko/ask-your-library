@@ -1,0 +1,17 @@
+# Exceptions for the OSV-Scanner run in .github/workflows/security.yml. An
+# entry here is an argument, not a mute button: it names why the advisory does
+# not reach this repository and the date the argument expires, after which the
+# scanner reports the vulnerability again and the exception has to be made
+# afresh or the dependency upgraded. Anything not listed here fails the job.
+
+[[IgnoredVulns]]
+# CVE-2026-45018, critical: command injection via the MCP stdio transport.
+id = "GHSA-w3fx-mc44-mf6j"
+ignoreUntil = 2026-10-08
+reason = "chainlit 2.11.1 (the ui extra). The repository ships MCP off: [features.mcp] enabled = false in .chainlit/config.toml, and stdio, sse and streamable-http each disabled beside it, which is the mitigation the Chainlit maintainers name. Fixed in chainlit 2.12.0; the upgrade is a separate maintenance change and is required before MCP is enabled. Owner: Ievgen Borysenko. Review: 2026-10-08."
+
+[[IgnoredVulns]]
+# CVE-2026-45019, high: SSRF via the MCP SSE and streamable-http transports.
+id = "GHSA-hvfh-5mj3-5f3j"
+ignoreUntil = 2026-10-08
+reason = "chainlit 2.11.1 (the ui extra). Same mitigation and same fixed release as GHSA-w3fx-mc44-mf6j: every MCP transport is disabled in .chainlit/config.toml, so neither SSE nor streamable-http is reachable. Owner: Ievgen Borysenko. Review: 2026-10-08."
