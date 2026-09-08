@@ -24,18 +24,18 @@ or enabling features the shipped configuration keeps off (MCP, file uploads, sha
 ## Automated checks
 
 `.github/workflows/security.yml` runs two scanners on every pull request, on every push to `main`
-and once a week. gitleaks: on a pull request it scans that pull request's commits (the action reads
-up to thirty of them from the API, so a longer pull request is only partly scanned there); on a
-push to `main` it scans the first-parent range of the push, which for a merge commit does not
-descend into the merged branch; the weekly scheduled run scans the whole history reachable from
-`main` and is the check that covers both gaps. OSV-Scanner: over `uv.lock`, the resolved
-dependency set CI installs from. A secret, or an advisory without a recorded exception, fails the job and blocks the
-merge — and so does a scanner that cannot run, which is why neither job is marked
-`continue-on-error`. An exception is an `[[IgnoredVulns]]` entry in `osv-scanner.toml` naming the
-advisory, the mitigation that keeps it out of this repository, an owner and a review date after
-which the scanner reports it again. Both workflows pin every third-party action to a commit SHA
-with its version in a comment; the pin covers the action's code, not the container image or
-binary the two scanners fetch at run time by version. `.github/dependabot.yml` proposes those
+and once a week. gitleaks (a release binary verified against a pinned SHA-256, not the action
+wrapper) scans an explicit range: on a pull request every commit between its merge base with the
+target branch and its head, merged branches included; on a push to `main` the pushed range; on the
+weekly run the whole history reachable from `main`. A range git cannot resolve fails the step.
+OSV-Scanner runs over `uv.lock`, the resolved dependency set CI installs from. A secret, or an
+advisory without a recorded exception, fails the job and blocks the merge — and so does a scanner
+that cannot run, which is why neither job is marked `continue-on-error`. An exception is an
+`[[IgnoredVulns]]` entry in `osv-scanner.toml` naming the advisory, the mitigation that keeps it
+out of this repository, an owner and a review date after which the scanner reports it again.
+Both workflows pin every third-party action to a commit SHA
+with its version in a comment; the pin covers the action's code, not the container image the
+OSV action fetches at run time by version. `.github/dependabot.yml` proposes those
 bumps weekly, one grouped pull request per ecosystem for version updates and one for security
 updates. CI holds no credentials — no API key, no provider account, and
 the tests never make a paid call — so a pull request from a fork has nothing to steal: it runs
