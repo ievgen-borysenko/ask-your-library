@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Chainlit 2.12.0.** The `ui` extra now requires `chainlit>=2.12` and the lockfile moves from
+  2.11.1 to 2.12.0 (the only other change is the removal of `audioop-lts`, a transitive
+  dependency the new release no longer needs; nothing the agent runs changes). 2.12.0 is the
+  release that closes the two MCP advisories recorded with exceptions in `osv-scanner.toml`; the
+  exceptions are removed, and the pre-2.12.0 MCP transport sections are removed from
+  `.chainlit/config.toml` (MCP stays disabled; the new schema declares servers server-side).
+  Verified: unit and UI suites, the injection canary's mechanics stages, and a headless start of
+  the web UI on loopback.
 - **Security CI.** `.github/workflows/security.yml`: gitleaks (a release binary verified against
   a pinned SHA-256) over the complete range of a pull request (merge base to head, merged
   branches included), over the pushed range on `main`, and over the whole history once a week;

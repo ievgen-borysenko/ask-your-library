@@ -81,21 +81,15 @@ reaction_on_message_received = false
     sample_rate = 24000
 
 [features.mcp]
-    # Enable Model Context Protocol (MCP) features
+    # Model Context Protocol stays off: the agent's only tools are the library's
+    # search and chapter read, and MCP would add a network-facing surface this
+    # local single-user app does not need. The pre-2.12.0 transport sections
+    # ([features.mcp.sse] / [features.mcp.streamable-http] / [features.mcp.stdio]
+    # with allowed_executables) were removed with the 2.12.0 upgrade: that
+    # release replaced them with [[features.mcp.servers]] declared server-side,
+    # and only warns about the old keys while MCP is disabled. Enabling MCP
+    # means declaring servers here, upgrading first, and re-reading SECURITY.md.
     enabled = false
-
-[features.mcp.sse]
-    enabled = false
-
-[features.mcp.streamable-http]
-    enabled = false
-
-[features.mcp.stdio]
-    enabled = false
-    # Only the executables in the allow list can be used for MCP stdio server.
-    # Only need the base name of the executable, e.g. "npx", not "/usr/bin/npx".
-    # Please don't comment this line for now, we need it to parse the executable name.
-    allowed_executables = [ "npx", "uvx" ]
 
 [UI]
 # Name of the assistant.

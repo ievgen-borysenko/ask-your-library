@@ -29,7 +29,7 @@ Issues = "https://github.com/ievgen-borysenko/ask-your-library/issues"
 
 [project.optional-dependencies]
 # Chainlit web chat (ui.py) and its SQLite persistence layer.
-ui = ["chainlit>=2.0", "sqlalchemy>=2.0", "aiosqlite>=0.20", "greenlet>=3.0"]
+ui = ["chainlit>=2.12", "sqlalchemy>=2.0", "aiosqlite>=0.20", "greenlet>=3.0"]
 
 [project.scripts]
 ask-library = "ask_your_library.cli:main"
