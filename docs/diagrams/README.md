@@ -11,5 +11,19 @@ ones and are the drawings to trust.
 
 They are historical: they were drawn against the author's own audiobook library of 169 books, they
 name the tools that demo ran on, and the loop they show predates the catalogue node and the
-`validate` step as the code now has them. Where an original and a Mermaid diagram disagree, the
-Mermaid one is the one reconciled against the code in this repository.
+`validate` step as the code now has them. Three claims in them belong to the demo, not to the
+product:
+
+- The demo called the check a **faithfulness guard**. It is not one: the step verifies quote
+  provenance — that every quote is verbatim in the passage it cites — and says nothing about
+  whether the answer is faithful or correct ([`docs/architecture.md`](../architecture.md)). That
+  one label was corrected in `ask-library_en_v5.excalidraw`; the rest of the file is the original.
+- The originals name one hosted model (`OpenRouter: Sonnet 4.6`, `AI: Sonnet`), the one that demo
+  ran on. The product lets you configure the answering model, and runs fully locally with no
+  account at all ([`docs/configuration.md`](../configuration.md)).
+- The `~$0.02-0.08 per question` on the simple flow was measured on the author's private 169-book
+  library. The figure measured on the demo corpus is $0.04-0.05 per question at v0.2.0-rc1
+  ([`docs/cost.md`](../cost.md)).
+
+Where an original and a Mermaid diagram disagree, the Mermaid one is the one reconciled against the
+code in this repository.

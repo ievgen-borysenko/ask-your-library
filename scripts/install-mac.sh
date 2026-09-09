@@ -389,8 +389,8 @@ local_env() {
     # modes, and 300 s is the whole wall clock of a question, checked before each
     # next decision. A local model that loads cold can spend that in the plan
     # node alone, so local mode gets twenty minutes — room for four steps of it.
-    # The two tracing lines are uncommented for the same reason the README gives
-    # them: this mode is the one where nothing leaves the machine, and the SDK
+    # The two tracing lines are uncommented for the same reason docs/configuration.md
+    # gives them: this mode is the one where nothing leaves the machine, and the SDK
     # reads a LANGSMITH_/LANGCHAIN_ flag another project's shell exported.
     sed -e 's/^LLM_BACKEND=.*/LLM_BACKEND=ollama/' \
         -e 's/^LLM_TIMEOUT_S=.*/LLM_TIMEOUT_S=600/' \

@@ -16,9 +16,9 @@ used against the passage it was copied from.
 flowchart TB
     R(["you: a half-remembered idea,<br/>asked in your own words"]):::human
     R --> AG["the agent reads the question"]:::ai
-    AG -->|"which book do you mean?"| CQ["it asks back: is it X or Y?"]:::human
-    CQ --> AG
     AG --> SE["it searches the books you own,<br/>in several passes"]:::code
+    SE -->|"still ambiguous after<br/>a pass: which book do you mean?"| CQ["it asks back: is it X or Y?"]:::human
+    CQ --> AG
     SE --> EV["it keeps verbatim quotes<br/>from those books, nothing else"]:::ai
     EV --> CK["code re-checks every quote against<br/>the passage it was copied from"]:::code
     CK --> A(["an answer with book, chapter citations<br/>or an honest 'your books do not cover this'"]):::ai
@@ -55,7 +55,7 @@ flowchart TB
         BK["your .txt / .md books<br/>or the demo corpus"]:::code
         CRD["book cards: one model call<br/>per book, demo corpus only"]:::ai
         BK --> CHK["ayl-add: chapters from headings,<br/>chunks packed from whole sentences"]:::code
-        CHK --> EMB["bge-m3 embeddings,<br/>local Ollama by default"]:::code
+        CHK --> EMB["bge-m3 embeddings,<br/>local Ollama by default"]:::ai
         EMB --> DB[("LanceDB — transcripts, optional cards<br/>hybrid BM25 + vectors, model fingerprint")]:::code
         CRD --> DB
     end
@@ -70,12 +70,12 @@ flowchart TB
         REF -->|"next query, or a<br/>chapter not read yet"| ACT
         REF -->|"ambiguous,<br/>once per run"| CLR["clarify: the run suspends,<br/>candidates go to the reader"]:::human
         CLR --> PLAN
-        REF -->|"enough, step limit, CRAG gate<br/>after 2 dry steps, no usable decision"| SYN["synthesize: answer with<br/>book, chapter citations"]:::ai
+        REF -->|"enough, step limit, deadline,<br/>CRAG gate after 2 dry steps,<br/>no usable decision"| SYN["synthesize: answer with<br/>book, chapter citations"]:::ai
         SYN --> VAL["validate: plain code, no model —<br/>is each quote in the passage it cites?"]:::code
         CAT --> VAL
-        VAL --> OUT(["answer with citations and a provenance badge,<br/>or an honest 'not found'"]):::code
+        VAL --> OUT(["answer with citations and a provenance badge,<br/>or an honest 'not found'"]):::ai
     end
-    subgraph legend["CODE = deterministic code · AI = the answering model you configure · HUMAN = human in the loop"]
+    subgraph legend["CODE = deterministic code · AI = a model call: the answering model you configure, and the embedding model · HUMAN = human in the loop"]
         direction LR
         L1["CODE"]:::code ~~~ L2["AI"]:::ai ~~~ L3["HUMAN"]:::human
     end
@@ -103,18 +103,24 @@ flowchart TB
 | Retriever window, multi-book full coverage | 2/2 | 2/2 | 3/5 | 3/5 |
 | Agent eval, questions completed | 12/12 | 11/11 | 21/21 | 21/21 |
 | Behavioural compliance (heuristic scorer: titles, refusal, clarify, drill-down) | 12/12 | 11/11 | 17/21 | 18/21 |
-| Answer quality, correct / incorrect / incomplete (AI pre-check of that run; the reader's own verdicts on the v0.2.0-rc1 run are in `docs/eval-results/2026-09-07-v0.2.0-rc1-core.md` and confirm the pre-check: 10 correct, c06 incomplete; the v0.1.0 run was not graded by the reader) | 9 / 1 / 2 | 10 / 0 / 1 | not scored | not scored |
+| Answer quality, correct / incorrect / incomplete ([how each run was graded](docs/evaluation.md)) | 9 / 1 / 2 | 10 / 0 / 1 | not scored | not scored |
 | Quote provenance, validator v0.1: confirmed / unattributed / broken | 46 / 0 / 0 | 47 / 0 / 0 | 53 / 0 / 0 | 73 / 0 / 0 |
 | Clarify where the golden requires it | 1/1 | 1/1 | 0/2 | 1/2 |
 | Chapter drill-down where expected | not in set | not in set | 0/1 | 0/1 |
 | Cost per question, mean (Sonnet 4.6 via OpenRouter, configured rates) | $0.035 | $0.049 | $0.027 | $0.043 |
 
-Single runs on tagged trees, what the green numbers do not prove, the ablation that separates the
-loop from the model's own memory, and the catalogue set: [`docs/evaluation.md`](docs/evaluation.md).
-The reports themselves are in [`docs/eval-results/`](docs/eval-results/).
+Quote provenance is not faithfulness, and not correctness: a green row says every quote is
+verbatim in the passage it cites, not that the answer reasons well from it. Single runs on tagged
+trees, what the green numbers do not prove, the ablation that separates the loop from the model's
+own memory, and the catalogue set: [`docs/evaluation.md`](docs/evaluation.md). The reports
+themselves are in [`docs/eval-results/`](docs/eval-results/).
 
 ## Privacy and cost
 
+- **Do you need an API key?** Only for the answering model: the default is hosted (OpenRouter), and
+  a key covers it. Indexing and embeddings are local and need no account, and with
+  `LLM_BACKEND=ollama` nothing needs one at all —
+  [`docs/configuration.md`](docs/configuration.md), [`docs/cost.md`](docs/cost.md).
 - Run this on your own machine, over books you legally own.
 - The question **and retrieved corpus fragments** go to the answering model's provider; embeddings are computed **locally** by Ollama by default.
 - With `LLM_BACKEND=ollama`, local embeddings and tracing off, nothing leaves the machine at all.
@@ -127,18 +133,14 @@ The reports themselves are in [`docs/eval-results/`](docs/eval-results/).
 |---|---|
 | [`docs/overview.md`](docs/overview.md) | What the project is, in full, and what it does |
 | [`docs/quick-start.md`](docs/quick-start.md) | Install on any system, the demo corpus, the CLI, the web UI, the eval commands |
-| [`docs/add-your-own-books.md`](docs/add-your-own-books.md) | `ayl-add`: book keys, chapters, what is skipped, staged re-indexing |
 | [`docs/configuration.md`](docs/configuration.md) | Every environment variable, and the fully local, no-account setup |
-| [`docs/architecture.md`](docs/architecture.md) | The graph, hybrid retrieval, the catalogue path, quote provenance, project layout |
+| [`docs/add-your-own-books.md`](docs/add-your-own-books.md) | `ayl-add`: book keys, chapters, what is skipped, staged re-indexing |
 | [`docs/evaluation.md`](docs/evaluation.md) | The two harnesses, three golden sets, the measured runs and the ablation |
 | [`docs/privacy-and-threat-model.md`](docs/privacy-and-threat-model.md) | Data flow, threat model, the four injection layers and their limits |
-| [`docs/cost.md`](docs/cost.md) | What a question costs and why the cache counter stays at zero |
-| [`docs/known-limits.md`](docs/known-limits.md) | What this does not do, confirmed by the runs |
-| [`docs/adr/README.md`](docs/adr/README.md) | Sixteen decision records, each with the measurement that settled it |
-| [`docs/examples/README.md`](docs/examples/README.md) | Two end-to-end traces: a clean success and an instructive failure |
-| [`docs/eval-results/`](docs/eval-results/) | Every eval report, verbatim, under a provenance header |
-| [`docs/diagrams/README.md`](docs/diagrams/README.md) | The editable originals of the diagrams above |
-| [`docs/backlog.md`](docs/backlog.md) · [`docs/CHANGELOG.md`](docs/CHANGELOG.md) | Known gaps and release history |
+
+Everything else is under [`docs/`](docs/): the architecture and its decision records, what a
+question costs, the known limits, two end-to-end example traces, every eval report verbatim, the
+diagram sources, the backlog and the changelog.
 
 ## Status and licence
 
