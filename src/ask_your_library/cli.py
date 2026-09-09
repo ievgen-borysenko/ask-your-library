@@ -21,7 +21,7 @@ from .config import QUESTION_DEADLINE_S, SUPPORTED_LANGS
 from .graph import build_graph
 from .i18n import set_lang, status_word, t
 from .preflight import check_environment
-from .runner import run_question
+from .runner import history_entry, run_question
 from .sanitize import LINE_BREAK_RE, strip_control_chars
 
 EXIT_WORDS = {"exit", "quit", "q", "вихід"}
@@ -32,7 +32,8 @@ SESSION = {"questions": 0, "cost_usd": 0.0}
 # Per-question memory of the CLI: the passages of this run by hit_id (from the act
 # events), so --verbose can print each evidence item on the text it was checked
 # against. The CLI answers one question at a time; _run resets it.
-RUN = {"passages": {}, "verbose": False}
+RUN = {"passages": {}, "verbose": False,
+       "catalog": None}     # this question's catalogue result, if it took that path: the history keeps its shape only
 
 
 def terminal_safe(text: str) -> str:
@@ -60,8 +61,17 @@ def say(line: str, error: bool = False) -> None:
 def print_event(node_name: str, update: dict) -> None:
     """One line per graph event (language: ASK_LANG)."""
     if node_name == "plan":
-        say(t("ev_plan", mode=update["mode"],
-              queries=[update["current_query"]] + update["queries"]))
+        if update["mode"] == "catalog":
+            say(t("ev_plan_catalog", op=update["catalog_request"]["op"]))
+        else:
+            say(t("ev_plan", mode=update["mode"],
+                  queries=[update["current_query"]] + update["queries"]))
+        if update.get("catalog_fallback"):
+            say(t("ev_catalog_fallback_" + update["catalog_fallback"]))
+        if update.get("book_filter"):
+            say(t("ev_book_filter", book=update["book_filter"]))
+        if update.get("book_unresolved"):
+            say(t("ev_book_unresolved", q=update["book_unresolved"]))
         if update.get("clarify_unresolved"):
             say(t("ev_clarify_unresolved"))
         if update.get("plan_fallback"):
@@ -92,6 +102,11 @@ def print_event(node_name: str, update: dict) -> None:
             say(t("ev_reflect_enough"))
     elif node_name == "clarify":
         say(t("ev_clarify", a=update["clarification"]))
+    elif node_name == "catalog":
+        listing = update["catalog"]
+        RUN["catalog"] = listing
+        say(t("ev_catalog", op=listing["op"], n=listing["count"], total=listing["total"]))
+        say(t("ev_answer_header", a=update["answer"]))
     elif node_name == "synthesize":
         say(t("ev_answer_header", a=update["answer"]))
     elif node_name == "validate":
@@ -144,6 +159,7 @@ def _run(graph, question: str, history: list[str], deadline_s: float | None = No
     """One question with human-readable failure instead of a traceback
     (ASK_DEBUG=1 re-raises)."""
     RUN["passages"] = {}
+    RUN["catalog"] = None
     try:
         return run_question(graph, question, history, SCRATCH_DIR,
                             on_event=print_event, on_clarify=ask_in_terminal,
@@ -248,8 +264,9 @@ def main(argv: list[str] | None = None) -> None:
         answer = _run(graph, question, history, deadline_s=args.deadline)
         if not answer:
             continue
-        # Conversation memory: the question plus a truncated answer.
-        history.append(f"Q: {question}\nA: {answer[:500]}")
+        # Conversation memory: the question plus a truncated answer; a catalogue
+        # answer only as its shape, never the list of titles.
+        history.append(history_entry(question, answer, RUN["catalog"]))
 
     say(t("cli_bye"))
 

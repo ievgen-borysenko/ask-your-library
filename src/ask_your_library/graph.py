@@ -4,6 +4,7 @@
                                      --(clarify)--------> clarify -> plan (ask the user)
                                      --(enough / limit / CRAG gate)-> synthesize -> validate -> END
     plan --(clarify answered, no steps left)--> synthesize
+    plan --(catalogue question, ADR-016)--> catalog -> validate -> END   (code, no search)
 
 clarify uses interrupt(), so the graph is compiled with a checkpointer:
 without one LangGraph cannot suspend a run and resume it later.
@@ -13,7 +14,7 @@ import os
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
-from .nodes import (act, clarify, observe, plan, reflect, route_after_plan,
+from .nodes import (act, catalog, clarify, observe, plan, reflect, route_after_plan,
                     route_after_reflect, synthesize, validate)
 from .state import AgentState
 
@@ -36,12 +37,14 @@ def build_graph():
     graph.add_node("observe", observe)
     graph.add_node("reflect", reflect)
     graph.add_node("clarify", clarify)
+    graph.add_node("catalog", catalog)
     graph.add_node("synthesize", synthesize)
     graph.add_node("validate", validate)
 
     graph.set_entry_point("plan")
     graph.add_conditional_edges("plan", route_after_plan,
-                                {"act": "act", "synthesize": "synthesize"})
+                                {"act": "act", "synthesize": "synthesize", "catalog": "catalog"})
+    graph.add_edge("catalog", "validate")
     graph.add_edge("act", "observe")
     graph.add_edge("observe", "reflect")
     graph.add_conditional_edges("reflect", route_after_reflect,

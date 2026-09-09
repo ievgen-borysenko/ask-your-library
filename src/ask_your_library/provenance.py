@@ -141,6 +141,14 @@ def validate(state: AgentState) -> dict:
     character's lie quoted verbatim from the right chapter is confirmed."""
     empty = {"checked": 0, "confirmed": 0, "unattributed": 0, "broken": 0,
              "unused": 0, "broken_items": [], "items": []}
+    if state.get("catalog"):
+        # The catalogue path (ADR-016): the answer is a list computed by code
+        # from the index tables, with no quotes to check; the report says so,
+        # and carries the numbers so an interface can show them instead of "0/0".
+        listing = state["catalog"]
+        return {"verification": t("verif_catalog", n=listing["count"], total=listing["total"]),
+                "provenance": {**empty, "catalog": {"op": listing["op"], "count": listing["count"],
+                                                    "total": listing["total"]}}}
     if not state["evidence"]:
         return {"verification": t("verif_no_evidence"), "provenance": empty}
 

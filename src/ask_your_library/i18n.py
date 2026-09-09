@@ -98,6 +98,52 @@ _T = {
         "ua": "дедлайн питання ({s} с): відповідаю з того, що вже знайдено",
         "en": "question deadline ({s} s) reached: answering from what was found",
     },
+    "stop_catalog": {
+        "ua": "каталог: відповідь з таблиць індексу, без пошуку",
+        "en": "catalog: answered from the index tables, no search",
+    },
+    "verif_catalog": {
+        "ua": "каталог: {n} з {total} книжок перелічено кодом з таблиць індексу (вичерпно; цитат немає)",
+        "en": "catalog: {n} of {total} books listed by code from the index tables (exhaustive; no quotes to check)",
+    },
+    "catalog_count": {
+        "ua": "У бібліотеці {n} книжок (за таблицями індексу).",
+        "en": "Your library holds {n} books (by the index tables).",
+    },
+    "catalog_list": {
+        "ua": "Книжок у бібліотеці: {n} (за таблицями індексу):\n{items}",
+        "en": "{n} books in your library (by the index tables):\n{items}",
+    },
+    "catalog_has_yes": {
+        "ua": "Так, є в бібліотеці:\n{items}",
+        "en": "Yes, in your library:\n{items}",
+    },
+    "catalog_has_no": {
+        "ua": "Книжки з назвою «{q}» в бібліотеці немає.",
+        "en": "No book titled \"{q}\" is in your library.",
+    },
+    "catalog_closest_titles": {"ua": " Найближчі назви: {items}.", "en": " Closest titles: {items}."},
+    "catalog_by_author": {
+        "ua": "Книжок автора {author} в бібліотеці: {n}:\n{items}",
+        "en": "{n} book(s) by {author} in your library:\n{items}",
+    },
+    "catalog_by_author_none": {
+        "ua": "Книжок автора «{q}» в бібліотеці немає.",
+        "en": "No books by \"{q}\" in your library.",
+    },
+    "catalog_closest_authors": {"ua": " Найближчі автори: {items}.", "en": " Closest authors: {items}."},
+    "history_catalog": {
+        "ua": "(відповідь з каталогу: {op}, {n} з {total} книжок; запит: {q}, знайдено: {found}; "
+              "перелік назв в історію розмови не зберігається)",
+        "en": "(catalogue answer: {op}, {n} of {total} books; asked about: {q}, found: {found}; "
+              "the list of titles is not kept in the conversation)",
+    },
+    "history_yes": {"ua": "так", "en": "yes"},
+    "history_no": {"ua": "ні", "en": "no"},
+    "book_not_in_catalog": {
+        "ua": "(Книжки з назвою «{q}» в каталозі бібліотеки не знайдено; шукав по всій бібліотеці.)",
+        "en": "(No book titled \"{q}\" is in the library catalogue; the whole library was searched instead.)",
+    },
     "clarify_candidates_list": {
         "ua": "Кандидати з бібліотеки (можна відповісти номером або назвою):\n{items}",
         "en": "Candidates in the library (answer with a number or a title):\n{items}",
@@ -214,6 +260,20 @@ _T = {
                          "en": "[plan] the planner gave no usable plan (JSON or queries): searching the raw question"},
     "ev_plan": {"ua": "[plan] mode={mode}, запити: {queries}",
                 "en": "[plan] mode={mode}, queries: {queries}"},
+    "ev_plan_catalog": {"ua": "[plan] mode=catalog, операція: {op}",
+                        "en": "[plan] mode=catalog, operation: {op}"},
+    "ev_catalog_fallback_invalid_op": {"ua": "[plan] планер назвав операцію каталогу, якої нема: шукаю в текстах",
+                                       "en": "[plan] the planner named a catalogue operation that does not exist: searching the texts instead"},
+    "ev_catalog_fallback_after_clarify": {"ua": "[plan] запит до каталогу після уточнення не виконується: продовжую пошук у вибраній книжці",
+                                          "en": "[plan] a catalogue request after a clarify reply is not honoured: the search goes on in the chosen book"},
+    "ev_catalog_fallback_mixed_intent": {"ua": "[plan] питання і про наявність, і про зміст: сам каталог на нього не відповість, шукаю в текстах",
+                                         "en": "[plan] the question asks about content as well as holdings: the catalogue alone cannot answer it, searching the texts"},
+    "ev_book_filter": {"ua": "[plan] питання називає книжку {book}: пошук лише в ній",
+                       "en": "[plan] the question names {book}: retrieval limited to it"},
+    "ev_book_unresolved": {"ua": "[plan] книжки з назвою «{q}» в каталозі немає: шукаю по всій бібліотеці",
+                           "en": "[plan] no book titled \"{q}\" in the catalogue: searching the whole library"},
+    "ev_catalog": {"ua": "[catalog] {op}: {n} з {total} книжок, з таблиць індексу",
+                   "en": "[catalog] {op}: {n} of {total} books, from the index tables"},
     "ev_act": {"ua": "[act #{n}] знайдено {hits} хітів",
                "en": "[act #{n}] found {hits} hits"},
     "ev_observe": {"ua": "[observe] доказів разом: {n}{streak}",
@@ -267,11 +327,29 @@ _T = {
     # ---- web ui: chat header, agent-step trace, and metrics footer
     "ui_welcome": {
         "ua": "Ask Your Library — питай про свою бібліотеку. Кроки агента "
-              "(plan / act / observe / reflect) розгортаються над відповіддю.",
+              "(plan / act / observe / reflect, або catalog, коли питання про склад "
+              "бібліотеки) розгортаються над відповіддю.",
         "en": "Ask Your Library — ask about your library. Agent steps "
-              "(plan / act / observe / reflect) expand above the answer.",
+              "(plan / act / observe / reflect, or catalog for a question about what "
+              "the library holds) expand above the answer.",
     },
     "ui_mode": {"ua": "режим: {mode}", "en": "mode: {mode}"},
+    "ui_plan_catalog": {"ua": "режим: catalog, операція: {op}", "en": "mode: catalog, operation: {op}"},
+    "ui_catalog_fallback_invalid_op": {"ua": "планер назвав операцію каталогу, якої нема: шукаю в текстах",
+                                       "en": "the planner named a catalogue operation that does not exist: searching the texts instead"},
+    "ui_catalog_fallback_after_clarify": {"ua": "запит до каталогу після уточнення не виконується: продовжую пошук у вибраній книжці",
+                                          "en": "a catalogue request after a clarify reply is not honoured: the search goes on in the chosen book"},
+    "ui_catalog_fallback_mixed_intent": {"ua": "питання і про наявність, і про зміст: сам каталог на нього не відповість, шукаю в текстах",
+                                         "en": "the question asks about content as well as holdings: the catalogue alone cannot answer it, searching the texts"},
+    "ui_book_filter": {"ua": "питання називає книжку {book}: пошук лише в ній",
+                       "en": "the question names {book}: retrieval limited to it"},
+    "ui_book_unresolved": {"ua": "книжки з назвою «{q}» в каталозі немає: шукаю по всій бібліотеці",
+                           "en": "no book titled \"{q}\" in the catalogue: searching the whole library"},
+    "ui_catalog_step": {"ua": "{op}: {n} з {total} книжок, з таблиць індексу",
+                        "en": "{op}: {n} of {total} books, from the index tables"},
+    "ui_badge_catalog_title": {"ua": "Відповідь з каталогу", "en": "Catalogue answer"},
+    "ui_badge_catalog": {"ua": "вичерпно: {n} з {total} книжок перелічено кодом з таблиць індексу; цитат немає",
+                         "en": "exhaustive: {n} of {total} books listed by code from the index tables; no quotes to trace"},
     "ui_plan_fallback": {"ua": "планер не дав придатного плану (JSON або запити): шукаю за текстом питання",
                          "en": "the planner gave no usable plan (JSON or queries): searching the raw question"},
     "ui_queries": {"ua": "пошукові запити:", "en": "search queries:"},
