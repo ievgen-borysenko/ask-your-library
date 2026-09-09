@@ -16,6 +16,33 @@ permissions:
 jobs:
   secrets:
     runs-on: ubuntu-latest
+    # The two complete option strings gitleaks is given, held once here:
+    # `RANGE_OPTS` goes in front of an explicit commit range, `HISTORY_OPTS`
+    # stands alone for the whole history. The self-test and the real scan below
+    # both read these variables and neither composes a string of its own, so
+    # the test can only pass for the options the real scan is given.
+    #
+    # gitleaks hands `git log -p` to its parser, and `git log -p` prints no
+    # diff at all for a merge commit unless it is asked for one. A secret that
+    # only a merge introduces — a conflict resolution that writes a key into
+    # the file it is reconciling, or any other content the merge adds that
+    # neither side holds — is then in no commit's patch but the merge's, and
+    # the scan walked past it while `git rev-list --count` still reported
+    # commits: a green check over a range that was never read whole.
+    # `--diff-merges=first-parent` diffs every merge against its first parent.
+    # It changes nothing about the walk — side branches are still visited, so a
+    # secret a later commit removed before the merge is still found.
+    #
+    # The defaults are repeated because `--log-opts` replaces gitleaks' own
+    # rather than extending them: without it gitleaks runs `git log -p -U0
+    # --full-history --all --diff-filter=tuxdb`, with it `git log -p -U0
+    # <log-opts>`. The whole-history scan needs `--log-opts` now, so
+    # `HISTORY_OPTS` carries those three itself and keeps scanning every commit
+    # reachable from any ref, not only the commits reachable from HEAD, which
+    # is all a `git log` without `--all` walks.
+    env:
+      HISTORY_OPTS: "--full-history --all --diff-filter=tuxdb --diff-merges=first-parent"
+      RANGE_OPTS: "--diff-merges=first-parent"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -38,6 +65,65 @@ jobs:
           tar -xzf gitleaks.tgz gitleaks
           sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
           gitleaks version
+      - name: Prove the options catch a secret only a merge holds
+        # A throwaway repository under the runner's temp directory, never the
+        # workspace, so nothing here can reach the scan below: a base commit,
+        # two branches that rewrite the same line, and a merge whose conflict
+        # resolution writes a key no side branch ever held. The key is built
+        # here and exists only for this job, out of sixteen distinct characters
+        # of the alphabet: the rule that has to catch it holds an entropy floor
+        # of 3.0, and distinct characters put the draw at 4.0 by construction
+        # instead of leaving one draw in five thousand under the floor and the
+        # job red for no reason. The first scan has to come back clean — that
+        # is what makes the fixture a fixture — and the two after it, given the
+        # very strings the real scan below is given, have to find it. A test
+        # that spelled the options out again would only prove its own spelling.
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d "${RUNNER_TEMP}/gitleaks-selftest.XXXXXX")
+          cd "$work"
+          git init -q -b main .
+          git config user.name selftest
+          git config user.email selftest@example.invalid
+          printf 'credential = base\n' > app.conf
+          git add app.conf && git commit -qm base
+          git checkout -qb feature
+          printf 'credential = feature\n' > app.conf && git commit -qam feature
+          git checkout -q main
+          printf 'credential = main\n' > app.conf && git commit -qam main
+          git checkout -q feature
+          git merge --no-ff -m merge main >/dev/null 2>&1 || true
+          key="AKIA$(od -An -tu1 -N16 /dev/urandom |
+            awk -v a=ABCDEFGHIJKLMNOPQRSTUVWXYZ234567 '
+              { for (i = 1; i <= NF; i++) b[++n] = $i }
+              END {
+                for (i = 1; i <= 32; i++) c[i] = substr(a, i, 1)
+                m = 32
+                for (i = 1; i <= 16; i++) {
+                  j = b[i] % m + 1
+                  printf "%s", c[j]
+                  c[j] = c[m]
+                  m--
+                }
+              }')"
+          printf 'credential = main\naws_access_key_id = %s\n' "$key" > app.conf
+          git add app.conf && git commit -qm merge
+          range="$(git merge-base main HEAD)..HEAD"
+          if ! gitleaks git . --no-banner --redact --exit-code 1 --log-opts="$range"; then
+            echo "::error::self-test fixture is wrong: a plain range scan already sees its key"
+            exit 1
+          fi
+          if gitleaks git . --no-banner --redact --exit-code 1 \
+               --log-opts="${RANGE_OPTS} ${range}"; then
+            echo "::error::the range scan misses a secret only a merge commit holds"
+            exit 1
+          fi
+          if gitleaks git . --no-banner --redact --exit-code 1 \
+               --log-opts="${HISTORY_OPTS}"; then
+            echo "::error::the whole-history scan misses a secret only a merge commit holds"
+            exit 1
+          fi
+          echo "self-test passed: both option strings read merge commits' own diffs"
       - name: Scan the complete range for this event
         env:
           EVENT: ${{ github.event_name }}
@@ -45,8 +131,9 @@ jobs:
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.sha }}
         # A pull request: every commit between its merge base with the target
-        # branch and its head, merged branches included. A push: the pushed
-        # range. The all-zero "before" is not a branch being pushed for the
+        # branch and its head, merged branches and every merge commit's own
+        # first-parent diff included. A push: the pushed range, read the same
+        # way. The all-zero "before" is not a branch being pushed for the
         # first time — the push trigger above covers main and nothing else, so
         # it means the first push of main itself, when the repository is
         # created; that falls through to the whole history, like the weekly
@@ -61,6 +148,12 @@ jobs:
         # argument of a command that succeeds), so an unresolvable range
         # printed nothing, gitleaks logged "Invalid revision range", scanned 0
         # commits and exited 0: a green check for a scan that never ran.
+        #
+        # What the count measures is the scope, not gitleaks' work: gitleaks
+        # never sees a commit whose whole diff `--diff-filter=tuxdb` drops — an
+        # empty commit, one that only deletes — so the number of commits it
+        # reports reading can be the smaller of the two. Both are in the log:
+        # the scope on the `scanning` line, the read count from gitleaks.
         run: |
           set -euo pipefail
           case "$EVENT" in
@@ -78,12 +171,14 @@ jobs:
               echo "::error::${range} resolved to 0 commits: nothing was scanned"
               exit 1
             fi
-            echo "scanning ${range}: ${count} commit(s)"
-            gitleaks git . --no-banner --redact --exit-code 1 --log-opts="$range"
+            echo "scanning ${range}: ${count} commit(s) in scope"
+            gitleaks git . --no-banner --redact --exit-code 1 \
+              --log-opts="${RANGE_OPTS} ${range}"
           else
-            count=$(git rev-list --count HEAD)
-            echo "scanning the whole history reachable from HEAD: ${count} commit(s)"
-            gitleaks git . --no-banner --redact --exit-code 1
+            count=$(git rev-list --count --all)
+            echo "scanning every commit reachable from any ref: ${count} commit(s) in scope"
+            gitleaks git . --no-banner --redact --exit-code 1 \
+              --log-opts="${HISTORY_OPTS}"
           fi
 
   dependencies:
