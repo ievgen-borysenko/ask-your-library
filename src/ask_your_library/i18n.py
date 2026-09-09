@@ -86,9 +86,13 @@ _T = {
         "ua": "повторний clarify не дозволено — фінішуємо з наявним",
         "en": "repeated clarify not allowed — finishing with what we have",
     },
+    # No placeholder on purpose: the decision that lands here is off-schema
+    # model output, and the stop reason is shown in the terminal and in the
+    # web UI's footer. A fixed phrase says as much as the reader needs; the
+    # value itself goes to the debug log, where `reflect` writes it.
     "stop_other": {
-        "ua": "reflect: {what}",
-        "en": "reflect: {what}",
+        "ua": "reflect: рішення поза схемою",
+        "en": "reflect: decision outside the schema",
     },
     "stop_deadline": {
         "ua": "дедлайн питання ({s} с): відповідаю з того, що вже знайдено",

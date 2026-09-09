@@ -5,8 +5,53 @@ the observe prompt, where the model could obey the data instead of the system.
 Two layers: (1) this module redacts instruction-like lines in code before the
 model sees the text; (2) the observe prompt states that search results are
 data, never instructions. A canary test in eval/ exercises both layers.
+
+`strip_control_chars` is the same idea one level down: characters a book's text
+has no reason to carry and that mean something to a terminal or to the reader's
+eye rather than to the model.
 """
 import re
+
+# C0 controls except the whitespace ones, DEL, then the invisible formatting
+# characters: zero-width space/joiners and the LTR/RTL marks, the bidirectional
+# overrides, the isolates, and the byte-order mark.
+# Tab and every character LINE_BREAK_RE calls a line break are left in: they are
+# real text, and the two expressions compose (a strip, then a mapping to a space
+# or a <br>). Deleting a break here instead would silently join the words around
+# it, so an honest quote across a CR would read as broken.
+CONTROL_CHARS_RE = re.compile("[\x00-\x08\x0e-\x1f\x7f"
+                              "\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
+
+
+# Every character CommonMark (and a terminal) treats as the end of a line, not
+# only LF: CR alone, the vertical tab and form feed, NEL, and the Unicode line
+# and paragraph separators. CRLF is one break, not two, hence the alternative
+# in front of the class. Used where a line break has to become something else —
+# a space inside a block header (llm.data_block) or in a normalized quote
+# (provenance._normalize), a <br> inside an HTML block (ui.safe_html), a plain
+# LF on the way to a terminal, where a bare CR would overwrite the line just
+# printed (cli.terminal_safe, ingest.add_folder) — and never as a strip: a break
+# is real text.
+LINE_BREAK_RE = re.compile(r"\r\n|[\r\n\x0b\x0c\x85\u2028\u2029]")
+
+
+def strip_control_chars(text: str) -> str:
+    """Drop characters that are never part of a book's text.
+
+    An escape sequence in a title repaints or clears the terminal that prints
+    it; a bidi override reverses the reading order of the citation around it;
+    a zero-width space hides inside a book key and splits what looks like one
+    word. None of it survives a round through the index or the prompt, so the
+    strip happens where corpus text becomes metadata (the book key, front
+    matter fields, the section title of a row) and where it becomes prompt text
+    (`llm.data_block`); the CLI strips again at the boundary where it prints
+    (`cli.terminal_safe`), because an answer is model output, not indexed text.
+
+    Line breaks and tabs are NOT dropped: they are text, and where they have to
+    become something else the caller maps them (LINE_BREAK_RE) after the strip.
+    """
+    return CONTROL_CHARS_RE.sub("", text)
+
 
 INJECTION_PATTERNS = [
     r"ignore\s+(all\s+|any\s+)?(previous|above|prior|earlier)\s+instructions",
@@ -30,6 +75,9 @@ def sanitize_context(text: str) -> tuple[str, int]:
 
     The whole matching line is redacted: an instruction stripped of its context
     is harmless, and the surrounding book text stays usable as evidence.
+
+    Lines are split and rejoined, so a passage leaves with LF for every break
+    form it arrived with — a normalization, never a deletion.
     """
     clean_lines = []
     redacted_count = 0

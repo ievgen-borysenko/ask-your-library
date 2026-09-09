@@ -4,36 +4,21 @@ import asyncio
 import importlib
 import json
 import logging
-import os
-import subprocess
+import stat
 import sys
-import tempfile
 import tomllib
 from pathlib import Path
 
 import pytest
+from conftest import REPO, fresh_output as _out, run_fresh as _run
 
 pytest.importorskip("chainlit")
-REPO = Path(__file__).resolve().parents[1]
 
-# Everything ui.py or config reads at import time (same idea as test_local_llm):
-# a subprocess test must not inherit the developer's shell or their .env.
-UNSET = ("OPENROUTER_API_KEY", "OPENROUTER_ENV_FILE", "ORCHESTRATOR_MODEL", "OPENROUTER_BASE_URL",
-         "LLM_BACKEND", "EMBED_BACKEND", "OLLAMA_LLM_MODEL", "OLLAMA_URL", "OLLAMA_EMBED_MODEL",
-         "OPENROUTER_EMBED_MODEL", "LIBRARY_DB_PATH", "ASK_LANG", "AYL_STRICT_HIT_ID",
-         "AYL_ALLOW_START_WITHOUT_KEY", "AYL_ALLOW_DEFAULT_LOGIN", "AYL_CHAINLIT_DIR",
-         "CHAINLIT_AUTH_SECRET", "CHAINLIT_PASSWORD", "LANGCHAIN_TRACING_V2")
+from ask_your_library.sanitize import LINE_BREAK_RE      # noqa: E402  (after the skip)
 
-
-def _run(code: str, check=True, **env) -> subprocess.CompletedProcess:
-    """Run `code` in a fresh interpreter that can import `ui`, with every config
-    input unset and then `env` applied, in a fresh empty directory (load_dotenv
-    reads the cwd). check=True: an import-time SystemExit fails the test."""
-    base = {k: v for k, v in os.environ.items() if k not in UNSET}
-    base["PYTHONPATH"] = str(REPO)
-    with tempfile.TemporaryDirectory() as fresh:
-        return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
-                              check=check, env={**base, **env}, cwd=fresh)
+# A blank line ends the HTML block a message is; CommonMark ends a line on more
+# than LF, so every one of these opens the same hole in a badge or a footer.
+BLANK_LINES = ("\n\n", "\r\r", "\r\n\r\n", "\u2028\u2028", "\x85\x85")
 
 
 @pytest.fixture(autouse=True)
@@ -417,6 +402,14 @@ def test_every_evidence_item_opens_on_the_passage_it_was_checked_against(ui, mon
     assert "&lt;script&gt;" in block and "<script>" not in block and "![x]" not in block
     assert "\n" not in block and "<br><br>" in block          # no blank line can end the HTML block
     assert "## Plot" in block                                 # the heading text survives, as text
+    # The passage is a div, not a pre: Chainlit renders a <pre> with its
+    # code-snippet component ("Raw code" and a copy button) and the text inside
+    # it never reaches the DOM, so the passage the badge points at was invisible
+    # in the browser while sitting complete in chat.db.
+    assert "<pre" not in block
+    rendered_passage = block.split('<div style="white-space: pre-wrap;', 1)
+    assert len(rendered_passage) == 2
+    assert "Call me Ishmael." in rendered_passage[1].split("</div>", 1)[0]
     assert t("ui_passage_missing") in block                  # s9h9 was never in this run
     # views are per question and do not mix: a second view has no passages
     other = ui.RunView()
@@ -425,11 +418,118 @@ def test_every_evidence_item_opens_on_the_passage_it_was_checked_against(ui, mon
     assert t("ui_passage_missing") in sent[-1] and "Call me Ishmael" not in sent[-1]
 
 
+def test_the_evidence_card_names_its_source_without_the_corpus_formatting_it(ui, monkeypatch,
+                                                                             tmp_path):
+    """The card's summary is the citation: book, section, hit id. Both names are
+    index metadata, and the card only escapes HTML — a right-to-left override in
+    a section title reverses the rendering of the very line that says where a
+    quote came from, and an OSC sequence sits in chat.db for whoever reads it in
+    a terminal. `act` strips both off the hit, so nothing arrives here."""
+    from ask_your_library import nodes
+    osc = "\x1b]0;pwned\x07"
+    book, section = f"Moby Dick{osc} — Herman Melville", "Chapter ‮One"
+    monkeypatch.setattr(nodes, "read_chapter",
+                        lambda b, s, max_chars=12000: ("Call me Ishmael.", book, "found"))
+    acted = nodes.act({"current_query": f"__chapter__|{book}|{section}", "steps_taken": 0,
+                       "read_chapters": [], "scratchpad_path": str(tmp_path / "scratch.md")})
+    hit = acted["hits"][0]
+    items = [{"hit_id": hit["hit_id"], "book": hit["book"], "section": hit["section"],
+              "quote": "Call me Ishmael.", "status": "confirmed"}]
+    card = ui.evidence_passages(items, {hit["hit_id"]: acted["hits_log"][0]["text"]})
+    for char in ("\x1b", "\x07", "‮"):
+        assert char not in card
+    assert "Moby Dick]0;pwned — Herman Melville — Chapter One" in card
+
+
+def test_a_broken_quote_cannot_load_an_image_through_the_badge_tooltip(ui):
+    """The badge's title attribute carried the verification text escaped and
+    nothing more. That text is built around the quotes that failed, i.e. around
+    corpus text: a blank line in it ends the message's HTML block, everything
+    after it is chat markdown again, and an image reference there is fetched on
+    render, with no click and no visible element. Confirmed in a browser
+    before the fix. The whole badge must therefore hold no line break and no image.
+
+    Every form of break, not only LF: CommonMark ends a block on a bare CR and
+    on U+2028/U+0085 too, and only LF used to be normalized here."""
+    for blank in BLANK_LINES:
+        verification = ('WARNING: 1 of 1 quotes NOT found verbatim in any retrieved passage:\n'
+                        '  - Poisoned Book — Chapter 1: "a quote"'
+                        f'{blank}![p](http://x/y.png)')
+        for numbers in ({}, {"checked": 0}, {"checked": 1, "confirmed": 0, "unattributed": 0,
+                                             "broken": 1, "broken_items": []}):
+            badge = ui.verification_badge({"verification": verification, "provenance": numbers})
+            assert not LINE_BREAK_RE.search(badge), "a raw break ends the badge's HTML block"
+            assert "![" not in badge and "y.png" not in badge
+            assert "[image removed]" in badge
+
+
+def test_a_hostile_stop_reason_cannot_load_an_image_through_the_metrics_footer(ui, monkeypatch):
+    """The footer interpolates the stop reason, which reflect writes from the
+    model's decision, and the model reads poisoned passages. Same shape as the
+    badge tooltip: escaped is not enough, because a blank line ends the block."""
+    store = {}
+    session = type("S", (), {"get": staticmethod(lambda k: store.get(k)),
+                             "set": staticmethod(lambda k, v: store.__setitem__(k, v))})()
+    monkeypatch.setattr(ui.cl, "user_session", session)
+    sent = []
+
+    class Msg:
+        def __init__(self, content, **kw):
+            sent.append(content)
+
+        async def send(self):
+            return None
+    monkeypatch.setattr(ui.cl, "Message", Msg)
+    for blank in BLANK_LINES:
+        asyncio.run(ui.show_metrics({
+            "model": "m", "cost_usd": 0.01, "seconds": 1, "steps_taken": 1,
+            "stop_reason": f"halt{blank}![p](http://x/y.png)", "llm_calls": 1,
+            "input_tokens": 1, "output_tokens": 1, "cache_read_tokens": 0,
+            "by_role": {}, "hits_seen": 0, "evidence_distilled": 0, "redacted_lines": 0}))
+        assert not LINE_BREAK_RE.search(sent[-1])
+        assert "![" not in sent[-1] and "y.png" not in sent[-1]
+        assert "[image removed]" in sent[-1]
+
+
+def test_a_foreign_host_header_is_refused(ui):
+    """A page open in the reader's browser can reach a loopback server: the
+    port is guessable, and a name that resolves to 127.0.0.1 (DNS rebinding)
+    makes it same-origin for the browser. Without a Host check that page can
+    POST the quick start's placeholder login and then read every thread. The
+    check is registered on Chainlit's own app at import time (after the
+    middleware stack is built it would be too late), and a second import must
+    not stack copies of it."""
+    from chainlit.server import app
+    from starlette.middleware.trustedhost import TrustedHostMiddleware
+
+    registered = [m for m in app.user_middleware if m.cls is TrustedHostMiddleware]
+    assert len(registered) == 1
+    assert registered[0].kwargs["allowed_hosts"] == ["localhost", "127.0.0.1"] == ui.ALLOWED_HOSTS
+    assert app.middleware_stack is None, "the stack is already built: add_middleware came too late"
+
+
+def test_the_chat_db_is_readable_only_by_its_owner(ui, tmp_path):
+    """It holds every question, answer and title of every session. SQLite
+    creates it with the process umask (0644 on a default account), unlike the
+    auth secret next to it, which has always been 0600."""
+    db = tmp_path / "chainlit" / "chat.db"
+    assert stat.S_IMODE(db.stat().st_mode) == 0o600
+    # journal siblings hold the same text and are narrowed on the next start
+    sibling = tmp_path / "chainlit" / "chat.db-wal"
+    sibling.write_bytes(b"")
+    sibling.chmod(0o644)
+    ui.own_read_write_only(db)
+    assert stat.S_IMODE(sibling.stat().st_mode) == 0o600
+
+
 def test_badge_broken_quotes_are_neutralized_and_single_line(ui):
-    badge = ui.verification_badge({"verification": "x", "provenance": {
-        "checked": 1, "confirmed": 0, "unattributed": 0, "broken": 1, "unused": 0,
-        "broken_items": [{"hit_id": "s1h1", "book": "B", "section": "s", "quote": "line one\n\n![x](http://evil/x.png)"}]}})
-    assert "line one<br><br>[image removed]" in badge and "![x]" not in badge
+    for blank in BLANK_LINES:
+        badge = ui.verification_badge({"verification": "x", "provenance": {
+            "checked": 1, "confirmed": 0, "unattributed": 0, "broken": 1, "unused": 0,
+            "broken_items": [{"hit_id": "s1h1", "book": "B", "section": "s",
+                              "quote": f"line one{blank}![x](http://evil/x.png)"}]}})
+        # CRLF is one break, not two, so every form above gives the same two <br>
+        assert "line one<br><br>[image removed]" in badge and "![x]" not in badge
 
 
 # --- chat persistence: the thread insert that carries the title -----------------
@@ -494,3 +594,103 @@ def test_config_keeps_auto_tag_thread_off():
         "auto_tag_thread = true loses every chat title on SQLite; see "
         "test_sqlite_still_rejects_a_tag_list_so_auto_tag_thread_stays_off")
 
+
+def test_config_pins_allow_origins_to_the_serving_port_only():
+    """`allow_origins` is the CORS list: which OTHER origins a page may read this
+    server's responses from. A port is not part of a site, so the second pair
+    (`:8010`) let a page served there read the thread endpoints with the login
+    cookie; nothing but this test stops the pair coming back."""
+    project = tomllib.loads(CHAINLIT_CONFIG.read_text(encoding="utf-8"))["project"]
+    assert project["allow_origins"] == ["http://localhost:8000", "http://127.0.0.1:8000"]
+
+
+# --- the login cookie, in the process shape `chainlit run` really produces ------
+
+def test_the_login_cookie_is_really_strict_under_chainlit_run(tmp_path):
+    """CHAINLIT_COOKIE_SAMESITE cannot deliver this. `chainlit run ui.py` starts
+    at the console script, which imports chainlit.cli; that reaches
+    chainlit.auth.cookie (through ensure_jwt_secret) and the module reads the
+    variable ONCE, there, before ui.py is loaded at all — and a .env entry is
+    later still, because load_dotenv runs inside the package import. So ui.py
+    sets the two module globals the cookie writer reads at request time.
+
+    The child imports in the console script's order, and the assertion is on the
+    header a browser would actually receive, not only on the globals."""
+    code = ("import chainlit.cli, ui\n"
+            "import chainlit.auth.cookie as cookie\n"
+            "from fastapi import Request, Response\n"
+            "response = Response()\n"
+            "request = Request({'type': 'http', 'headers': [], 'method': 'GET', 'path': '/'})\n"
+            "cookie.set_auth_cookie(request, response, 'token')\n"
+            "print(cookie._cookie_samesite, cookie._cookie_secure)\n"
+            "print(response.headers['set-cookie'])\n")
+    globals_line, header = _out(code, CHAINLIT_AUTH_SECRET="test-secret",
+                                AYL_ALLOW_DEFAULT_LOGIN="1", AYL_ALLOW_START_WITHOUT_KEY="1",
+                                AYL_CHAINLIT_DIR=str(tmp_path / "chainlit")).splitlines()
+    # secure=False is what Chainlit itself computes for strict, and it has to
+    # stay False: a Secure cookie is dropped by the browser over plain http.
+    assert globals_line == "strict False"
+    assert "SameSite=strict" in header and "Secure" not in header and "HttpOnly" in header
+
+
+# --- on_chat_start: plain-markdown messages, and the db siblings ---------------
+
+def _chat_start(ui, monkeypatch, problems=(), notices=()) -> list[str]:
+    """on_chat_start against a stubbed session and message bus; returns what it
+    sent. check_environment is replaced, so no network and no index are needed."""
+    from ask_your_library.preflight import PreflightResult
+
+    store = {}
+    session = type("S", (), {"get": staticmethod(lambda k: store.get(k)),
+                             "set": staticmethod(lambda k, v: store.__setitem__(k, v))})()
+    monkeypatch.setattr(ui.cl, "user_session", session)
+    sent = []
+
+    class Msg:
+        def __init__(self, content, **kw):
+            sent.append(content)
+
+        async def send(self):
+            return None
+
+    def as_async(function):
+        async def call(*args, **kwargs):
+            return function(*args, **kwargs)
+        return call
+
+    monkeypatch.setattr(ui.cl, "Message", Msg)
+    monkeypatch.setattr(ui.cl, "make_async", as_async)
+    monkeypatch.setattr(ui, "check_environment", lambda: PreflightResult(problems, notices))
+    asyncio.run(ui.on_chat_start())
+    return sent
+
+
+def test_the_preflight_message_is_still_a_markdown_list(ui, monkeypatch):
+    """It is a plain-markdown message, not one of our HTML blocks: safe_html
+    turned each newline into a <br>, and "- item" lines rendered as one
+    paragraph of literal dashes. Escaping and image neutralization are the whole
+    job here — the line breaks ARE the list."""
+    sent = _chat_start(ui, monkeypatch,
+                       problems=["Ollama is not answering", "no index at ![p](http://x/y.png)"])
+    assert len(sent) == 1 and "<br>" not in sent[0]
+    assert sent[0].count("\n- ") == 2
+    assert "[image removed]" in sent[0] and "y.png" not in sent[0]
+
+
+def test_a_notice_keeps_its_list_too_and_the_welcome_still_follows(ui, monkeypatch):
+    sent = _chat_start(ui, monkeypatch, notices=["the cards table is missing"])
+    assert len(sent) == 2 and "<br>" not in sent[0]
+    assert sent[0].endswith("\n- the cards table is missing")
+
+
+def test_a_chat_start_narrows_the_journal_siblings_too(ui, monkeypatch, tmp_path):
+    """The import pass narrows what exists at import time, but -wal and -journal
+    hold the same questions and answers and are created with the process umask
+    when the data layer opens the db for a session, i.e. later. on_chat_start
+    runs the pass again — before the preflight, so the path that reports
+    problems and returns narrows them as well."""
+    sibling = tmp_path / "chainlit" / "chat.db-wal"
+    sibling.write_bytes(b"")
+    sibling.chmod(0o644)
+    _chat_start(ui, monkeypatch, problems=["Ollama is not answering"])
+    assert stat.S_IMODE(sibling.stat().st_mode) == 0o600

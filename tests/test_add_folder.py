@@ -398,11 +398,74 @@ def test_two_files_resolving_to_the_same_book_are_refused(tmp_path):
         add_folder.read_folder(folder)
 
 
-def test_hidden_files_are_skipped(tmp_path):
+def test_hidden_files_are_skipped_and_reported(tmp_path, caplog):
+    """Skipping them silently made the docstring and the README ("Skipped, and
+    reported on stderr: hidden files and directories") describe something the
+    code did not do: a book under a hidden directory simply never appeared.
+    One summary line, not one per file: a hidden directory can hold hundreds,
+    and they would bury the per-file warnings."""
     folder = tmp_path / "books"
     write(folder, "Real.txt", PARA)
-    write(folder / ".cache", "Hidden.txt", PARA)
-    assert [p.name for p in add_folder.book_files(folder)] == ["Real.txt"]
+    write(folder, ".Draft.md", PARA)
+    for name in ("Hidden.txt", "Second.txt", "Third.txt", "Fourth.txt"):
+        write(folder / ".cache", name, PARA)
+    with caplog.at_level("WARNING"):
+        found = add_folder.book_files(folder)
+    assert [p.name for p in found] == ["Real.txt"]
+    assert "5 hidden files skipped" in caplog.text
+    assert ".Draft.md" in caplog.text and "and 2 more" in caplog.text
+
+
+def test_a_hidden_directory_of_other_file_types_is_not_reported(tmp_path, caplog):
+    """The count names files that would otherwise have been indexed: a .git
+    full of objects is not a report of five hundred skipped books."""
+    folder = tmp_path / "books"
+    write(folder, "Real.txt", PARA)
+    write(folder / ".git", "HEAD", "ref: refs/heads/main\n")
+    with caplog.at_level("WARNING"):
+        assert [p.name for p in add_folder.book_files(folder)] == ["Real.txt"]
+    assert "hidden" not in caplog.text
+
+
+def test_a_book_key_carries_no_control_or_invisible_characters(tmp_path):
+    """The key is cited by the agent, printed by both interfaces and sent to
+    the model as a block attribute. A front matter title with an ANSI escape,
+    a zero-width space or a bidi override would otherwise be carried, verbatim,
+    everywhere the book is named."""
+    assert add_folder.book_key("Moby\x1b]0;pwned\x07 Dick\u200b", "H\u202eM") == \
+        "Moby]0;pwned Dick — HM"
+    folder = tmp_path / "books"
+    front = '---\ntitle: "Moby\x1b[2J Dick"\nauthor: "H\ufeffM"\n---\n\n'
+    write(folder, "Poisoned.md", front + PARA)
+    book = add_folder.read_folder(folder)[0]
+    assert book.book == "Moby[2J Dick — HM"
+    assert "\x1b" not in book.book and "\ufeff" not in book.book
+
+
+def test_a_section_title_carries_no_control_or_invisible_characters(tmp_path):
+    """The other half of a citation, and the half nothing above the row cleaned:
+    front matter goes through `parse_frontmatter` and the key through
+    `book_key`, but a chapter heading comes straight out of the file into the
+    section field, and from there into the scratchpad, the block header of the
+    prompt and the evidence card of the web UI, which escapes HTML and leaves a
+    bidi override alone. Every ingest path writes its rows through `rows_for`."""
+    folder = tmp_path / "books"
+    write(folder, "Poisoned - A Writer.md", f"## Chapter ‮One\x1b]0;pwned\x07\n\n{PARA}")
+    chunks = add_folder.chunks_for(add_folder.read_folder(folder)[0])
+    rows = add_folder.rows_for(chunks, [[0.0, 1.0, 0.5, 0.25]] * len(chunks))
+    assert [r["section"] for r in rows] == ["Chapter One]0;pwned"]
+    assert all("\x1b" not in r["section"] and "‮" not in r["section"] for r in rows)
+
+
+def test_the_log_filter_strips_a_mapping_style_call_too(caplog):
+    """The filter runs on the logger, so a warning added later is safe by
+    construction — but only the %s tuple was cleaned. logging keeps a lone
+    mapping argument as `record.args` itself, so `log.warning("%(book)s ...",
+    {"book": key})` walked past the tuple branch and put the escape on screen."""
+    with caplog.at_level("WARNING", logger=add_folder.log.name):
+        add_folder.log.warning("skipped %(book)s", {"book": "Moby\x1b]0;pwned\x07 Dick\u200b"})
+        add_folder.log.warning("skipped %s", "Moby\x1b[2J Dick")
+    assert caplog.messages == ["skipped Moby]0;pwned Dick", "skipped Moby[2J Dick"]
 
 
 def test_symlink_pointing_outside_the_folder_is_skipped(tmp_path, caplog):

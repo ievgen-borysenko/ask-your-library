@@ -5,8 +5,12 @@ controls themselves — a stage that would pass even with the defense removed
 proves nothing, so the negative controls here break the defense on purpose and
 require the stage to fail.
 """
+import contextlib
+import html
 import importlib.util
 import json
+import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -233,11 +237,38 @@ def test_ui_stage_runs_or_says_it_was_skipped():
 
 @pytest.mark.skipif(importlib.util.find_spec("chainlit") is None, reason="ui extra not installed")
 def test_ui_stage_fails_if_neutralization_is_removed(monkeypatch):
-    ui = canary.ui_module()
-    monkeypatch.setattr(ui, "neutralize_markdown", lambda text: text)
-    monkeypatch.setattr(canary, "ui_module", lambda: ui)
-    with pytest.raises(AssertionError):
-        canary.ui_stage({})
+    with canary.ui_module() as ui:
+        monkeypatch.setattr(ui, "neutralize_markdown", lambda text: text)
+        monkeypatch.setattr(canary, "ui_module", lambda: contextlib.nullcontext(ui))
+        with pytest.raises(AssertionError):
+            canary.ui_stage({})
+
+
+@pytest.mark.skipif(importlib.util.find_spec("chainlit") is None, reason="ui extra not installed")
+def test_ui_stage_fails_when_the_metrics_footer_stops_being_neutralized(monkeypatch):
+    """The other half of stage 5's new coverage: the footer and the badge are
+    HTML we build ourselves, so the stage has to fail when the summary goes
+    back to being escaped and nothing more."""
+    with canary.ui_module() as ui:
+        monkeypatch.setattr(ui, "safe_html", lambda text: html.escape(text, quote=False))
+        monkeypatch.setattr(canary, "ui_module", lambda: contextlib.nullcontext(ui))
+        with pytest.raises(AssertionError):
+            canary.ui_stage({})
+
+
+@pytest.mark.skipif(importlib.util.find_spec("chainlit") is None, reason="ui extra not installed")
+def test_the_ui_stage_leaves_the_process_as_it_found_it():
+    """The stage imports ui.py, which writes a chat db and reads three
+    variables. Run inside the test suite, it used to keep them for the rest of
+    the session and leave a temp directory behind on every call."""
+    watched = ("CHAINLIT_AUTH_SECRET", "AYL_ALLOW_DEFAULT_LOGIN", "AYL_CHAINLIT_DIR")
+    before = {name: os.environ.get(name) for name in watched}
+    with canary.ui_module() as ui:
+        chainlit_dir = ui.CHAINLIT_DIR
+        assert (chainlit_dir / "chat.db").exists()
+    assert {name: os.environ.get(name) for name in watched} == before
+    assert not chainlit_dir.exists(), "the canary left its temp directory behind"
+    assert "ui" not in sys.modules
 
 
 # ------------------------------------------------------------ the driver

@@ -29,6 +29,7 @@ import hashlib
 import logging
 import re
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -39,6 +40,7 @@ from ..config import DB_PATH, EMBED_BACKEND
 from ..embeddings import get_embedder
 from ..index_meta import check_index, read_index_meta, write_index_meta
 from ..library import TITLE_SEPARATOR
+from ..sanitize import LINE_BREAK_RE, strip_control_chars
 from .chapters import MergedHeading, split_book_sections
 from .chunking import Chunk, embedding_text, pack_sentences, parse_frontmatter, rows_for, \
     split_sentences
@@ -47,6 +49,48 @@ from .publish import COPY_BATCH_ROWS, NoRowsError, rebuild_table, recover_stagin
     table_batches, table_names
 
 log = logging.getLogger(__name__)
+
+
+def terminal_safe(text: str) -> str:
+    """One line of this CLI, ready for a terminal: the control and invisible
+    characters dropped, and every form of line break left as a plain LF — a
+    bare CR in a heading would otherwise put the cursor back at the start of
+    the line just written and let the rest overwrite it."""
+    return LINE_BREAK_RE.sub("\n", strip_control_chars(text))
+
+
+class _StripControlChars(logging.Filter):
+    """Every warning this module writes names something from the indexed
+    folder: a file name, a heading, a book key. The strip sits on the logger
+    instead of on each call site, so a warning added later is safe by
+    construction and cannot repaint the terminal it is read in."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple):
+            record.args = tuple(self._clean(a) for a in record.args)
+        elif isinstance(record.args, Mapping):
+            # log.warning("%(book)s ...", {"book": key}): logging keeps a lone
+            # mapping argument as the args itself, so the tuple branch never
+            # sees it and those names would reach the terminal unstripped.
+            record.args = {key: self._clean(value) for key, value in record.args.items()}
+        return True
+
+    @staticmethod
+    def _clean(value):
+        # Names arrive as str or as Path (always formatted with %s here);
+        # counts and exceptions are left alone so %d keeps working.
+        if isinstance(value, (str, Path)):
+            return terminal_safe(str(value))
+        return value
+
+
+log.addFilter(_StripControlChars())
+
+
+def say(line: str, error: bool = False) -> None:
+    """The CLI's own output, through the same strip as the warnings: book keys
+    and section titles come from the files being indexed."""
+    print(terminal_safe(line), file=sys.stderr if error else sys.stdout, flush=True)
 
 
 class IngestError(Exception):
@@ -80,8 +124,11 @@ class Book:
 # --- book key ---------------------------------------------------------------
 
 def book_key(title: str, author: str) -> str:
-    title = re.sub(r"\s+", " ", title).strip()
-    author = re.sub(r"\s+", " ", author).strip() or UNKNOWN_AUTHOR
+    """The key the agent cites and filters on, so it is also the string that
+    ends up in a terminal, in a prompt and in a chunk id: control and invisible
+    formatting characters are dropped before anything downstream sees them."""
+    title = re.sub(r"\s+", " ", strip_control_chars(title)).strip()
+    author = re.sub(r"\s+", " ", strip_control_chars(author)).strip() or UNKNOWN_AUTHOR
     return f"{title}{TITLE_SEPARATOR}{author}"
 
 
@@ -164,14 +211,22 @@ def book_files(folder: Path) -> list[Path]:
     out of the folder; anything that resolves outside the folder (a symlinked
     parent directory). `is_file()` follows symlinks, so without this a
     `books/notes.md -> ~/.ssh/id_rsa` would be read and its text handed to the
-    embedding backend. Copy the file in if you want it indexed."""
+    embedding backend. Copy the file in if you want it indexed.
+
+    Hidden paths are reported as one line, not one per file: a single hidden
+    directory can hold hundreds of them, and a warning per file would bury the
+    per-file warnings that need reading."""
     root = folder.resolve()
     found = []
+    hidden = []
     for path in folder.rglob("*"):
         relative = path.relative_to(folder)
-        if any(part.startswith(".") for part in relative.parts):
-            continue
         if path.suffix.lower() not in BOOK_SUFFIXES:
+            continue
+        if any(part.startswith(".") for part in relative.parts):
+            # Checked after the suffix, so the count names the files that would
+            # otherwise have been indexed, not everything under a .git.
+            hidden.append(relative)
             continue
         if path.is_symlink():
             log.warning("%s: symlink, skipped (copy the file in to index it)", relative)
@@ -187,6 +242,13 @@ def book_files(folder: Path) -> list[Path]:
             log.warning("%s: resolves outside %s, skipped", relative, folder)
             continue
         found.append(path)
+    if hidden:
+        hidden.sort()                               # same report for the same folder
+        names = ", ".join(str(h) for h in hidden[:3])
+        more = f", and {len(hidden) - 3} more" if len(hidden) > 3 else ""
+        log.warning("%d hidden file%s skipped (hidden, or under a hidden directory): %s%s "
+                    "(rename or move them out to index them)",
+                    len(hidden), "" if len(hidden) == 1 else "s", names, more)
     return sorted(found)
 
 
@@ -371,8 +433,8 @@ def add_books(books: list[Book], backend: str, db_path: Path) -> dict:
             counts["sections"] += len(book.sections)
             counts["chunks"] += len(chunks)
             counts["merged_headings"] += len(book.merged_headings)
-            print(f"  [{i}/{len(books)}] {book.book}: {len(book.sections)} sections, "
-                  f"{len(chunks)} chunks", flush=True)
+            say(f"  [{i}/{len(books)}] {book.book}: {len(book.sections)} sections, "
+                f"{len(chunks)} chunks")
             yield rows_for(chunks, vectors)
 
     try:
@@ -409,14 +471,14 @@ def dry_run(books: list[Book], backend: str, db_path: Path) -> int:
         sections += len(book.sections)
         chunks += len(book_chunks)
         merged += len(book.merged_headings)
-        print(f"  {book.book}  ({book.path.name})")
+        say(f"  {book.book}  ({book.path.name})")
         for title, _ in book.sections:
-            print(f"      - {title or '(untitled)'}")
-        print(f"      {len(book_chunks)} chunks")
-    print(f"\nwould index {len(books)} books, {sections} sections, {chunks} chunks "
-          f"into transcripts_{backend} at {db_path} (nothing written, nothing embedded)")
+            say(f"      - {title or '(untitled)'}")
+        say(f"      {len(book_chunks)} chunks")
+    say(f"\nwould index {len(books)} books, {sections} sections, {chunks} chunks "
+        f"into transcripts_{backend} at {db_path} (nothing written, nothing embedded)")
     if merged:
-        print(merged_headings_line(merged))
+        say(merged_headings_line(merged))
     return 0
 
 
@@ -439,17 +501,17 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.cards:
-        print("--cards is not implemented: book cards are LLM-distilled summaries, which "
-              "means paid model calls per book. The demo corpus ships its cards in "
-              "corpus/cards/ and indexes them with "
-              "`uv run scripts/ingest_demo_corpus.py --stage cards`; there is no generic "
-              "card generator yet. Run ayl-add without --cards for a full-text-only index.",
-              file=sys.stderr)
+        say("--cards is not implemented: book cards are LLM-distilled summaries, which "
+            "means paid model calls per book. The demo corpus ships its cards in "
+            "corpus/cards/ and indexes them with "
+            "`uv run scripts/ingest_demo_corpus.py --stage cards`; there is no generic "
+            "card generator yet. Run ayl-add without --cards for a full-text-only index.",
+            error=True)
         return 2
 
     folder = args.folder.expanduser()
     if not folder.is_dir():
-        print(f"not a folder: {folder}", file=sys.stderr)
+        say(f"not a folder: {folder}", error=True)
         return 2
     db_path = (args.db.expanduser() if args.db else DB_PATH)
 
@@ -457,22 +519,22 @@ def main(argv: list[str] | None = None) -> int:
         books = read_folder(folder)
         if args.dry_run:
             return dry_run(books, args.backend, db_path)
-        print(f"embedding {len(books)} books with {args.backend} into {db_path} ...")
+        say(f"embedding {len(books)} books with {args.backend} into {db_path} ...")
         counts = add_books(books, args.backend, db_path)
     except IngestError as error:              # one readable line, not a traceback
-        print(error, file=sys.stderr)
+        say(str(error), error=True)
         return 1
 
-    print(f"\nadded {counts['books']} books, {counts['sections']} sections, "
-          f"{counts['chunks']} chunks")
+    say(f"\nadded {counts['books']} books, {counts['sections']} sections, "
+        f"{counts['chunks']} chunks")
     if counts["merged_headings"]:
-        print(merged_headings_line(counts["merged_headings"]))
-    print(f"table {counts['table']} in {db_path}; embedding model {counts['model']} "
-          f"({counts['dims']} dims), FTS index rebuilt")
+        say(merged_headings_line(counts["merged_headings"]))
+    say(f"table {counts['table']} in {db_path}; embedding model {counts['model']} "
+        f"({counts['dims']} dims), FTS index rebuilt")
     if not counts["cards_table"]:
-        print(f"no cards_{args.backend} table here: the agent will search full text only "
-              f"(book cards need an LLM and are not generated by ayl-add)")
-    print(f"ask it something:  LIBRARY_DB_PATH={db_path} uv run ask-library \"...\"")
+        say(f"no cards_{args.backend} table here: the agent will search full text only "
+            f"(book cards need an LLM and are not generated by ayl-add)")
+    say(f"ask it something:  LIBRARY_DB_PATH={db_path} uv run ask-library \"...\"")
     return 0
 
 
