@@ -1,4 +1,6 @@
-"""Graph nodes: plan -> act -> observe -> reflect -> synthesize -> validate.
+"""Graph nodes: plan -> act -> observe -> reflect -> synthesize -> validate,
+plus `catalog`, plan's other exit: what the library HOLDS, answered from the
+index tables by code, with no search step and no second model call (ADR-016).
 
 Each node is a plain function of the state that returns only the fields it
 updates (LangGraph merges them into the state). The concerns the nodes lean on
@@ -12,20 +14,31 @@ live next door, one module each:
 
 Budgets (MAX_STEPS, MAX_EMPTY_STREAK, the per-hit windows) come from config.
 """
+import logging
+
 from langgraph.types import interrupt
 
 from . import llm
-from .catalog import content_clue, parse_catalog_request, render_catalog, resolve_title, run_catalog
+from .catalog import (mixed_intent, parse_catalog_request, render_catalog, resolve_title,
+                      run_catalog)
 from .clarify import _chosen_book, _clarify_candidates, _evidence_after_clarify
 from .config import CHAPTER_HIT_CHARS, MAX_CLARIFY_CANDIDATES, MAX_EMPTY_STREAK, MAX_STEPS, SEARCH_HIT_CHARS
 from .coverage import coverage_probe
 from .i18n import t
-from .library import TITLE_SEPARATOR, chapter_is_cut, list_books, read_chapter, search_both, title_of
+from .library import (TITLE_SEPARATOR, BookEntry, chapter_is_cut, list_books, read_chapter,
+                      search_both, title_of)
 from .llm import data_block
 from .prompts import OBSERVE_RULES, PLAN_RULES, REFLECT_RULES, SYNTHESIZE_RULES
 from .provenance import _valid_evidence, validate  # noqa: F401  (validate is wired by graph.py)
 from .sanitize import sanitize_context
 from .state import AgentState, is_loop_marker
+
+log = logging.getLogger(__name__)
+
+# The three reasons a "catalog" decision takes the research loop instead; the
+# interfaces have a line per reason ("ev_catalog_fallback_<reason>",
+# "ui_catalog_fallback_<reason>") and the eval report prints the value.
+CATALOG_FALLBACKS = ("invalid_op", "after_clarify", "mixed_intent")
 
 # Per-hit text budget, shared by act (hits_log) and observe (prompt): the
 # quote-provenance check compares quotes against the passage as observe saw it,
@@ -55,6 +68,22 @@ def _after_clarify(state: AgentState) -> bool:
 
 def _deadline_reason() -> str:
     return t("stop_deadline", s=int(llm.deadline_seconds()))
+
+
+def _catalogue() -> tuple[list[BookEntry], bool]:
+    """The book list plan needs (the gate's scope and the retrieval filter), and
+    whether it could be read at all. Before ADR-016 plan never touched LanceDB,
+    and run_question has no `except` of its own: an index this node cannot read
+    must not end a question the research loop could still answer. On a failure
+    the question is planned as if no book had been named: no filter, and no
+    "not in the catalogue" note, which would be a claim about a list nobody
+    read."""
+    try:
+        return list_books(), True
+    except Exception as error:
+        log.warning("the catalogue could not be read (%s: %s): planning without a book filter",
+                    type(error).__name__, error)
+        return [], False
 
 
 def plan(state: AgentState) -> dict:
@@ -100,7 +129,13 @@ def plan(state: AgentState) -> dict:
     common = {"evidence": evidence, "clarify_unresolved": unresolved, "clarify_chosen": chosen,
               "steps_taken": state.get("steps_taken", 0), "empty_streak": 0}
     catalog_request = parse_catalog_request(decision) if mode == "catalog" else None
-    mixed = bool(catalog_request) and content_clue(state["question"]) != ""
+    named_book = llm.str_field(decision, "book")
+    # One catalogue read per plan, and only when a name has to be resolved
+    # against it: the gate's scope below and the retrieval filter both use this
+    # list, and routing an operation without a title needs no lookup at all.
+    asked_title = catalog_request["title"] if catalog_request else ""
+    entries, catalog_read = _catalogue() if named_book or asked_title else ([], True)
+    mixed = bool(catalog_request) and mixed_intent(state["question"], asked_title, entries)
     if catalog_request and not mixed and not _after_clarify(state):
         # The catalogue path (ADR-016): the planner named an operation of ours
         # and code runs it; no query, no search step. Never after a clarify:
@@ -109,15 +144,17 @@ def plan(state: AgentState) -> dict:
                 "current_query": "", **common}
     # "catalog" without a usable operation, after a clarify reply, or on a
     # question that also asks about content (a content word the gate in
-    # catalog.py knows), is the research loop with the planner's queries or the
-    # raw question, and the event says which. The gate is a vocabulary check,
-    # not an understanding: a title hidden inside a question is beyond it, so
-    # that routing stays the planner's reading, measured by the eval set's
-    # controls rather than enforced here.
+    # catalog.py knows, outside the title of a book the library holds), is the
+    # research loop with the planner's queries or the raw question, and the
+    # event says which. The gate is a vocabulary check, not an understanding: a
+    # title hidden inside a question is beyond it, so that routing stays the
+    # planner's reading, measured by the eval set's controls rather than
+    # enforced here.
     catalog_fallback = ""
     if mode == "catalog":
-        catalog_fallback = ("after_clarify" if catalog_request and _after_clarify(state)
-                            else "mixed_intent" if mixed else "invalid_op")
+        invalid_op, after_clarify, mixed_intent_reason = CATALOG_FALLBACKS
+        catalog_fallback = (after_clarify if catalog_request and _after_clarify(state)
+                            else mixed_intent_reason if mixed else invalid_op)
         mode = "answer"
 
     # Valid JSON is not necessarily our schema; degrade instead of raising —
@@ -148,13 +185,16 @@ def plan(state: AgentState) -> dict:
     # matches ("Holmes"): no filter, the loop's own clarify may sort it out.
     # Strict resolution: a fragment of a title ("Time" for The Time Machine)
     # sets no filter either — a silent wrong filter would hide a whole library.
+    # An empty strict result is NOT "no such book", though: the loose resolver
+    # decides that. Otherwise an answer about The Time Machine would open by
+    # saying that a book on the shelf is not in the catalogue.
     book_filter = book_unresolved = ""
-    named = llm.str_field(decision, "book") or (catalog_request["title"] if catalog_fallback == "mixed_intent" else "")
+    named = named_book or (asked_title if catalog_fallback == "mixed_intent" else "")
     if named and mode == "answer" and not chosen:
-        matches, _ = resolve_title(named, list_books(), strict=True)
+        matches, _ = resolve_title(named, entries, strict=True)
         if len(matches) == 1:
             book_filter = matches[0].key
-        elif not matches:
+        elif not matches and catalog_read and not resolve_title(named, entries)[0]:
             book_unresolved = named
 
     update = {
@@ -180,7 +220,13 @@ def catalog(state: AgentState) -> dict:
     code over library.list_books(); the number in the answer is len() of the
     list under it. No model call and no search step, so steps_taken stays
     where it is (0 on a fresh run) and the stop reason names the path;
-    validate reports a catalogue answer instead of a quote check."""
+    validate reports a catalogue answer instead of a quote check.
+
+    An index this node cannot read fails the run with the message list_books
+    raises. There is nothing to degrade to here: the whole answer is the list,
+    and the research loop could not have answered the question either. Plan's
+    own read of the same list is guarded (`_catalogue`), because there the list
+    is only a filter."""
     result = run_catalog(state["catalog_request"], list_books())
     return {"answer": render_catalog(result), "catalog": result.as_state(),
             "queries": [], "current_query": "", "stop_reason": t("stop_catalog")}

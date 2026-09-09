@@ -562,7 +562,12 @@ async def on_chat_resume(thread) -> None:
                     except ValueError:
                         meta = {}
                 catalog_shape = meta.get("catalog") if isinstance(meta, dict) else None
-                history.append(history_entry(last_question, step_output, catalog_shape))
+                # The answer was escaped for rendering (html.escape at write
+                # time); escaping is the browser's business, not the model's.
+                # Without this the resumed conversation memory carries "&amp;"
+                # and "&lt;" into the next planner and synthesize prompt.
+                history.append(history_entry(last_question, html.unescape(step_output),
+                                             catalog_shape))
                 last_question = ""
     cl.user_session.set("history", history)
     cl.user_session.set("session_cost", 0.0)

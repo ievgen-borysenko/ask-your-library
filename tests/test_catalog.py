@@ -1,17 +1,20 @@
 """The catalogue path (ADR-016) without a model: list_books over a real LanceDB
-in tmp (canaries excluded by their source column, a text-only book flagged),
-the planner's catalog object validated by code, title and author resolution,
+in tmp (canaries excluded by their source column, a text-only book flagged, a
+partial index refused), the planner's catalog object validated by code, title
+and author resolution in both directions, the gate's vocabulary and its scope,
 the rendered answers in both languages, and the planner-side guards (a
-catalogue request after a clarify, an operation that is not ours) that keep a
-question in the research loop. The graph-level runs are in test_graph_e2e.py."""
+catalogue request after a clarify, an operation that is not ours, an index that
+cannot be read) that keep a question in the research loop. The graph-level runs
+are in test_graph_e2e.py."""
 import contextvars
 
 import lancedb
 import pytest
 
 from ask_your_library import i18n, library, llm, nodes, provenance
-from ask_your_library.catalog import (CatalogResult, content_clue, parse_catalog_request, render_catalog,
-                                      resolve_author, resolve_title, run_catalog)
+from ask_your_library.catalog import (CatalogResult, content_clue, mixed_intent,
+                                      parse_catalog_request, render_catalog, resolve_author,
+                                      resolve_title, run_catalog)
 from ask_your_library.i18n import t
 from ask_your_library.library import TITLE_SEPARATOR, BookEntry, list_books
 
@@ -28,6 +31,13 @@ HOLMES_B = key("The Return of Sherlock Holmes", "Arthur Conan Doyle")
 SCARLET = key("A Study in Scarlet", "Arthur Conan Doyle")
 CANARY = key("The Whispering Archive", "Vera Holloway")
 OWN = key("My Notes", "Unknown")
+DRACULA = key("Dracula", "Bram Stoker")
+FRANKENSTEIN = key("Frankenstein", "Mary Shelley")
+MEDITATIONS = key("Meditations", "Marcus Aurelius")
+EMMA = key("Emma", "Jane Austen")
+TIME = key("The Time Machine", "H. G. Wells")
+WILD = key("Where the Wild Things Are", "Maurice Sendak")
+STEEL = key("Як гартувалася сталь", "Микола Островський")
 
 
 def entries(*keys):
@@ -124,6 +134,10 @@ class RecordingTable:
     def count_rows(self):
         return self._table.count_rows()
 
+    @property
+    def schema(self):
+        return self._table.schema
+
 
 class RecordingDB:
     """The real database; every table opened is wrapped so the query the
@@ -161,17 +175,53 @@ def test_the_catalogue_reads_every_row_through_a_two_column_projection(index, mo
         assert record["limit"] >= (8 if name == library.TABLES["cards"] else 28), name
 
 
-def test_a_missing_corpus_is_skipped_and_the_other_one_is_listed(index, caplog):
-    index(cards=[row(IVANHOE, "x")], transcripts=[])
+def test_a_missing_cards_table_is_skipped_and_the_full_text_is_listed(index, caplog):
+    """`ayl-add` builds an index without cards; that is a supported shape, and
+    the books are the full text's."""
+    index(cards=[], transcripts=[row(IVANHOE, "pg:82")])
     library._reported_missing.clear()
     with caplog.at_level("WARNING"):
         assert [b.key for b in list_books()] == [IVANHOE]
     assert "no table" in caplog.text
 
 
-def test_an_index_with_neither_corpus_lists_nothing(index):
-    index(cards=[], transcripts=[])
-    assert list_books() == []
+@pytest.mark.parametrize("cards", [[], [row(MOBY, "frontmatter")]])
+def test_a_catalogue_over_half_an_index_refuses_instead_of_listing_what_is_left(index, cards):
+    """The listing is presented as exhaustive ("N of N books"), so a missing
+    full-text table is an error that names the table, never the cards' books
+    passed off as the whole library."""
+    index(cards=cards, transcripts=[])
+    with pytest.raises(RuntimeError, match=library.TABLES["transcripts"]):
+        list_books()
+
+
+class DroppedTableDB:
+    """The database as it looks in the window `ingest/publish.py` opens when it
+    drops and rebuilds a table: `table_names` still lists it, opening it fails."""
+
+    def __init__(self, db):
+        self._db = db
+
+    def table_names(self):
+        return self._db.table_names()
+
+    def open_table(self, name):
+        raise ValueError(f"Table '{name}' was not found")
+
+
+def test_a_table_that_disappears_between_the_check_and_the_read_is_an_error(index, monkeypatch):
+    index(cards=[], transcripts=[row(MOBY)])
+    real = library.lancedb.connect
+    monkeypatch.setattr(library.lancedb, "connect", lambda path: DroppedTableDB(real(path)))
+    with pytest.raises(RuntimeError, match=library.TABLES["transcripts"]):
+        list_books()
+
+
+def test_a_table_without_a_source_column_simply_has_no_canaries(index):
+    """An index built before the canary marker (or by another tool) has no
+    `source` field; asking for it would fail the whole listing."""
+    index(cards=[], transcripts=[{"book": MOBY}, {"book": GULLIVER}])
+    assert [b.key for b in list_books()] == [GULLIVER, MOBY]
 
 
 # ---------------------------------------------------------------- the operation, validated by code
@@ -218,12 +268,88 @@ def test_a_title_resolves_exactly_with_a_typo_or_as_several(name, expected):
     assert sorted(m.key for m in matches) == sorted(expected) and suggestions == []
 
 
-def test_a_title_that_is_not_there_resolves_to_nothing_with_at_most_three_suggestions():
-    matches, suggestions = resolve_title("War and Peace", ALL)
-    assert matches == [] and len(suggestions) <= 3
+def test_a_title_that_is_not_there_resolves_to_nothing_and_names_the_closest():
+    matches, suggestions = resolve_title("War and Peace", ALL)      # nothing near it at all
+    assert matches == [] and suggestions == []
+    matches, suggestions = resolve_title("Sherlock Holmes Stories", ALL)
+    assert matches == [] and len(suggestions) == 2
+    assert sorted(suggestions) == sorted(["The Adventures of Sherlock Holmes",
+                                          "The Return of Sherlock Holmes"])
     matches, suggestions = resolve_title("It", ALL)          # too short to be "contained" in every title
     assert matches == [] and suggestions == []
     assert resolve_title("   ", ALL) == ([], [])
+
+
+CONTAINS_A_HELD_TITLE = [
+    ("Dracula's Guest", DRACULA), ("Frankenstein in Baghdad", FRANKENSTEIN),
+    ("Meditations on First Philosophy", MEDITATIONS), ("Emma Bovary", EMMA),
+    ("Moby Dick and Other Whales", MOBY),
+]
+
+
+@pytest.mark.parametrize("name, held", CONTAINS_A_HELD_TITLE)
+def test_a_title_that_merely_contains_a_held_one_is_the_closest_name_not_a_match(name, held):
+    """Containment reads one way only. "Dracula's Guest" holds "Dracula" and is
+    a different book: confirming it as one the library owns was a silent wrong
+    answer. As a retrieval filter (strict) it hid the rest of the library, and
+    as "do I have X" it said yes about a book nobody has. Both refuse; the book
+    that IS there is named as the closest title."""
+    shelf = ALL + entries(DRACULA, FRANKENSTEIN, MEDITATIONS, EMMA)
+    assert resolve_title(name, shelf, strict=True)[0] == []
+    result = run_catalog({"op": "has", "title": name, "author": ""}, shelf)
+    assert result.resolved is False and result.books == []
+    assert library.title_of(held) in result.suggestions
+    assert render_catalog(result).startswith(t("catalog_has_no", q=name))
+
+
+def test_the_other_direction_and_the_typo_path_are_untouched():
+    """A name INSIDE a title still resolves loosely, and a misspelling still
+    resolves either way: only the reverse containment changed."""
+    shelf = ALL + entries(TIME)
+    assert [m.title for m in resolve_title("Time Machine", shelf)[0]] == ["The Time Machine"]
+    assert [m.key for m in resolve_title("Ivanho", shelf)[0]] == [IVANHOE]
+    assert [m.key for m in resolve_title("Ivanho", shelf, strict=True)[0]] == [IVANHOE]
+
+
+def test_a_typo_resolves_but_a_near_miss_is_only_the_closest_title():
+    """CLOSE_MATCH_CUTOFF: "Ivanho" is Ivanhoe; "Ivenho" (0.77) is not, and a
+    looser cutoff would confirm the wrong book instead of naming it as close."""
+    assert [m.key for m in resolve_title("Ivanho", ALL)[0]] == [IVANHOE]
+    matches, suggestions = resolve_title("Ivenho", ALL)
+    assert matches == [] and suggestions == ["Ivanhoe"]
+
+
+def test_containment_is_by_whole_words_not_by_substring():
+    """"Scarle" sits inside "A Study in Scarlet" as characters but not as a
+    word, and half a word is not a title anyone asked for."""
+    matches, suggestions = resolve_title("Scarle", ALL)
+    assert matches == [] and suggestions == ["A Study in Scarlet"]
+    assert [m.key for m in resolve_title("Scarlet", ALL)[0]] == [SCARLET]     # the whole word does
+    found = run_catalog({"op": "has", "title": "Scarlet", "author": ""}, ALL)
+    assert [m.key for m in found.books] == [SCARLET]
+
+
+def test_a_word_too_short_to_be_a_title_never_resolves_by_containment():
+    """MIN_CONTAINED_CHARS: "It" is a word in a title, not the title asked for.
+    With its author it is a key, and that resolves."""
+    shakespeare = key("As You Like It", "William Shakespeare")
+    stephen_king = key("It", "Stephen King")
+    assert resolve_title("It", ALL + entries(shakespeare)) == ([], [])
+    assert resolve_title("The", ALL) == ([], [])              # a word in half the titles
+    shelf = ALL + entries(shakespeare, stephen_king)
+    assert [m.key for m in resolve_title("It — Stephen King", shelf)[0]] == [stephen_king]
+
+
+def test_strict_containment_takes_a_one_word_name_that_is_most_of_the_title():
+    """STRICT_CONTAINED_SHARE: "Frankenstein" is 12 of the 19 characters of
+    "Frankenstein Papers" and limits retrieval to it, by the share rule alone:
+    0.77 is below the close-match cutoff. "Emma" is a third of "Emma's Diary"
+    and limits nothing, though the loose path still contains it."""
+    papers, diary = key("Frankenstein Papers", "Unknown"), key("Emma's Diary", "Unknown")
+    shelf = entries(papers, diary)
+    assert [m.key for m in resolve_title("Frankenstein", shelf, strict=True)[0]] == [papers]
+    assert resolve_title("Emma", shelf, strict=True)[0] == []
+    assert [m.key for m in resolve_title("Emma", shelf)[0]] == [diary]
 
 
 def test_strict_resolution_refuses_a_fragment_of_a_longer_title():
@@ -259,6 +385,10 @@ def test_a_title_that_contains_the_separator_still_resolves_as_a_whole():
     shelf = ALL + entries(perec)
     assert [m.key for m in resolve_title("Life — A User's Manual", shelf)[0]] == [perec]
     assert [m.key for m in resolve_title("Life — A User's Manual — Georges Perec", shelf)[0]] == [perec]
+    # Strict refuses the bare "Life" as a fragment of a longer title, so here the
+    # whole-key pass is the only thing that resolves this name at all.
+    strict = resolve_title("Life — A User's Manual", shelf, strict=True)[0]
+    assert [m.key for m in strict] == [perec]
 
 
 def test_an_author_resolves_by_full_name_surname_or_typo():
@@ -271,6 +401,16 @@ def test_an_author_resolves_by_full_name_surname_or_typo():
 
 
 # ---------------------------------------------------------------- the rendered answers
+
+def test_has_lists_every_book_that_shares_the_asked_title():
+    """Two authors, one title, no author given: "do I have X" answers with both,
+    as the resolver returns both."""
+    one, two = key("Shared Title", "Author One"), key("Shared Title", "Author Two")
+    shelf = ALL + entries(one, two)
+    both = run_catalog({"op": "has", "title": "Shared Title", "author": ""}, shelf)
+    assert both.resolved and [b.key for b in both.books] == [one, two]
+    assert render_catalog(both) == t("catalog_has_yes", items=f"- {one}\n- {two}")
+
 
 def test_has_and_by_author_answers_name_what_was_found_or_what_was_closest():
     yes = run_catalog({"op": "has", "title": "Ivanho", "author": ""}, ALL)
@@ -296,6 +436,11 @@ def test_the_answers_follow_the_session_language():
     "How many books do I have in my library?", "What are the names of all the books in my library?",
     "Do I have Ivanhoe?", "Is War and Peace in my library?", "What do I have by Jules Verne?",
     "Скільки книжок у моїй бібліотеці?", "Які книжки в мене є?", "Чи є в мене Айвенго?",
+    # The author is a catalogue attribute: the listing answers both halves, and
+    # "who" used to send the whole question to the research loop instead.
+    "How many books do I have, and who wrote them?",
+    "Which books do I have, and who are their authors?",
+    "Скільки книжок у мене є і хто їх написав?",
 ])
 def test_a_pure_holdings_question_carries_no_content_clue(question):
     assert content_clue(question) == ""
@@ -305,7 +450,7 @@ def test_a_pure_holdings_question_carries_no_content_clue(question):
     ("Do I have Dracula, and why does Jonathan Harker stay at the castle?", "why"),
     ("What do I have about whaling?", "about"),
     ("Which of my books mention London?", "mention"),
-    ("Is Moby Dick in my library, and who narrates it?", "who"),
+    ("Is Moby Dick in my library, and what happens to the Pequod?", "what happens"),
     ("How does Ivanhoe end?", "how"),
     ("Чи є в мене Дракула, і чому Гаркер лишається в замку?", "чому"),
     ("Що в мене є про китів?", "про"),
@@ -318,6 +463,28 @@ def test_a_question_that_also_asks_about_content_is_flagged(question, clue):
 def test_a_title_inside_a_question_is_beyond_the_gate():
     # Known limit, recorded in the ADR: the gate knows words, not titles.
     assert content_clue("What are the names of the three musketeers?") == ""
+
+
+def test_a_content_word_inside_a_held_title_is_not_the_readers_word():
+    """The gate reads the question's vocabulary, so a title that carries one of
+    its words ("Where the Wild Things Are", "Як гартувалася сталь") used to end
+    as "I don't know" about a book on the shelf. A title the catalogue resolves
+    strictly to one book is removed from the question before the gate; a title
+    the library does not hold is not the library's, and the question stands."""
+    shelf = ALL + entries(WILD, STEEL)
+    sendak, steel = "Where the Wild Things Are", "Як гартувалася сталь"
+    english, ukrainian = f"Do I have {sendak}?", f"Чи є в мене «{steel}»?"
+    assert mixed_intent(english, sendak, shelf) is False
+    assert mixed_intent(ukrainian, steel, shelf) is False
+    assert mixed_intent(english, sendak, ALL) is True
+    assert mixed_intent(ukrainian, steel, ALL) is True
+    # The removal takes the title out, not the question: a real content half stays.
+    assert mixed_intent(f"Do I have {sendak}, and why does Max sail away?", sendak, shelf) is True
+    # A fragment of a title resolves strictly to nothing and removes nothing.
+    assert mixed_intent(english, "Wild", shelf) is True
+    # count / list carry no title: the whole question, as before.
+    assert mixed_intent("What do I have about whaling?", "", ALL) is True
+    assert mixed_intent("How many books do I have?", "", ALL) is False
 
 
 # ---------------------------------------------------------------- the planner-side guards (nodes.plan, no graph)
@@ -378,6 +545,62 @@ def test_a_named_book_is_resolved_by_code_into_a_retrieval_filter(monkeypatch):
     several = plan_with("Sherlock Holmes")
     assert several["book_filter"] == "" and several["book_unresolved"] == ""            # several: no filter, no note
     assert plan_with("")["book_filter"] == "" and plan_with(None)["book_unresolved"] == ""
+
+
+def test_a_fragment_of_a_held_title_sets_no_filter_and_claims_nothing(monkeypatch):
+    """Strict resolution refuses "Time" as a fragment of The Time Machine, but
+    the book IS in the library, so the answer must not open with "no book
+    titled Time is in the library catalogue". The loose resolver decides that."""
+    monkeypatch.setattr(nodes, "list_books", lambda: ALL + entries(TIME))
+    monkeypatch.setattr(llm, "ask_json", lambda system, user, role: {
+        "mode": "answer", "queries": ["q"], "book": "Time"})
+    result = nodes.plan(fresh_state(question="Why does the Time Traveller go forward?"))
+    assert result["book_filter"] == "" and result["book_unresolved"] == ""
+
+
+def test_an_index_plan_cannot_read_leaves_the_question_to_the_loop(monkeypatch, caplog):
+    """plan is on the critical path of every question that names a book, and
+    run_question has no `except`: a catalogue read that fails must cost the
+    filter, not the answer, and must claim nothing about a list nobody read."""
+    def unreadable():
+        raise RuntimeError("the catalogue cannot list a library without the full-text table")
+    monkeypatch.setattr(nodes, "list_books", unreadable)
+    monkeypatch.setattr(llm, "ask_json", lambda system, user, role: {
+        "mode": "answer", "queries": ["Ishmael sails"], "book": "War and Peace"})
+    with caplog.at_level("WARNING"):
+        result = nodes.plan(fresh_state(question="Why does Ishmael go to sea?"))
+    assert result["mode"] == "answer" and result["current_query"] == "Ishmael sails"
+    assert result["book_filter"] == "" and result["book_unresolved"] == ""
+    assert "catalogue could not be read" in caplog.text
+
+
+def test_plan_over_half_an_index_plans_a_search_instead_of_failing(index, monkeypatch):
+    """The same, through the real reader: a cards-only index refuses to be
+    listed (it is not the whole library), and the question goes on."""
+    index(cards=[row(MOBY, "frontmatter")], transcripts=[])
+    monkeypatch.setattr(llm, "ask_json", lambda system, user, role: {
+        "mode": "answer", "queries": ["Ishmael sails"], "book": "Moby Dick"})
+    result = nodes.plan(fresh_state(question="Who narrates Moby Dick?"))
+    assert result["current_query"] == "Ishmael sails"
+    assert result["book_filter"] == "" and result["book_unresolved"] == ""
+
+
+def test_a_catalogue_request_after_a_clarify_reports_that_reason_when_mixed_too(monkeypatch):
+    """Both guards are live at once: the reply matched none of the candidates
+    AND the question carries a content word. The reason reported is the clarify
+    one, because the reply settled a book of the research loop whatever the
+    vocabulary says, and the request's title sets no filter."""
+    monkeypatch.setattr(llm, "ask_json", lambda system, user, role: {
+        "mode": "catalog", "catalog": {"op": "has", "title": "Moby Dick"}, "queries": []})
+    monkeypatch.setattr(nodes, "list_books", lambda: ALL)
+    llm.reset_usage()        # a resumed plan checks the deadline clock: this question's
+    state = fresh_state(question="Do I have Moby Dick, and why does Ishmael go to sea?",
+                        clarification="the green one", clarify_asked=True,
+                        clarify_candidates=[MOBY, GULLIVER])
+    result = nodes.plan(state)
+    assert result["catalog_fallback"] == "after_clarify" and result["clarify_unresolved"] is True
+    assert result["book_filter"] == "" and result["book_unresolved"] == ""
+    assert result["clarify_chosen"] == "" and "plan_fallback" not in result
 
 
 def test_a_mixed_question_the_planner_labelled_catalogue_takes_the_research_loop_with_the_filter(monkeypatch):

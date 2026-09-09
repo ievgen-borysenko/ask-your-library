@@ -246,13 +246,23 @@ def score(item: dict, r: dict) -> dict:
         # The catalogue path is scored on its structured result, not on wording:
         # the set of books the code listed must EQUAL the expected set (strict,
         # by title: one book too many fails), the count carried in the state
-        # must be the length of that list, and "has"/"by_author" must resolve
-        # as expected. A catalogue question that took the research loop has no
-        # result here and fails.
+        # must be the length of that list, the catalogue must have held
+        # something at all, and "has"/"by_author" must resolve as expected. A
+        # catalogue question that took the research loop has no result here and
+        # fails.
         listing = r.get("catalog") or {}
         listed = {fold(title_of(k)) for k in listing.get("books") or []}
         wanted = {fold(b) for b in expected}
-        ok = bool(listing) and listed == wanted and listing.get("count") == len(listing.get("books") or [])
+        # total > 0: an item that expects nothing to be found ("is War and Peace
+        # in my library?") passes over an EMPTY index otherwise: the honest
+        # "no" of a library with no books is not the answer being measured.
+        ok = (bool(listing) and listed == wanted
+              and listing.get("count") == len(listing.get("books") or [])
+              and listing.get("total", 0) > 0)
+        if "expected_op" in item:
+            # Which operation code ran, not only what it returned: "has" and
+            # "count" can both come back with an empty list on an empty question.
+            ok = ok and listing.get("op") == item["expected_op"]
         if "expected_count" in item:
             ok = ok and listing.get("count") == item["expected_count"]
         if "expected_resolved" in item:
@@ -266,8 +276,13 @@ def score(item: dict, r: dict) -> dict:
     elif behavior == "research":
         # Routing only: a question that reads like a listing but needs the books'
         # content must take the research loop (at least one search, no catalogue
-        # result); which books it names is not scored.
-        ok = not r.get("catalog") and r.get("steps_taken", 0) >= 1
+        # result); which books it names is not scored. The planner has to route
+        # it there itself: a run where the planner produced nothing usable
+        # (plan_fallback) or where code had to rescue a misroute
+        # (catalog_fallback) searched for a different reason, and counting it as
+        # a pass would measure the guards instead of the routing.
+        ok = (not r.get("catalog") and r.get("steps_taken", 0) >= 1
+              and not r.get("plan_fallback") and not r.get("catalog_fallback"))
     elif behavior == "clarify":
         ok = r["clarify_asked"]
     elif behavior == "clarify_or_answer":

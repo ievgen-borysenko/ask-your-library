@@ -1,4 +1,5 @@
-"""Library access: hybrid search over the LanceDB tables and chapter drill-down.
+"""Library access: hybrid search over the LanceDB tables, chapter drill-down,
+and the catalogue reader (`list_books`) the ADR-016 path answers from.
 
 Search is hybrid — vector (embedding) + full-text BM25 (LanceDB FTS index) —
 fused with Reciprocal Rank Fusion. RRF is implemented here rather than via
@@ -224,6 +225,14 @@ class BookEntry:
     has_text: bool
 
 
+def _catalog_columns(table) -> list[str]:
+    """The catalogue's projection. `source` marks the demo's canary fixtures;
+    a table built without that column (an older index, or one an `ayl-add`
+    predating it wrote) has no canaries to exclude, and asking for the column
+    would fail the whole listing with "No field named source"."""
+    return ["book", "source"] if "source" in table.schema.names else ["book"]
+
+
 def list_books() -> list[BookEntry]:
     """Every book in the index, once, sorted by title: the distinct `book` keys
     of both corpora. The canaries the demo ingest plants for the injection
@@ -232,16 +241,32 @@ def list_books() -> list[BookEntry]:
     key with any other row is a book (a real book that shares a title with a
     fixture, or carries a stray `source: canary` in one card, stays listed).
     A row without a key is not a book. Read from the tables each time (an
-    `ayl-add` while a server runs is seen at once); only the two metadata
-    columns are loaded, and the embedding fingerprint is not checked because
-    no vector is involved."""
+    `ayl-add` while a server runs is seen at once); only the metadata columns
+    are loaded, and the embedding fingerprint is not checked because no vector
+    is involved.
+
+    The full-text table is REQUIRED here, as it is for the preflight: this
+    listing is presented as exhaustive ("N of N books, by the index tables"),
+    so half an index must fail loudly rather than answer. That covers the table
+    being absent and the table disappearing between `has_table` and the read
+    (the window `ingest/publish.py` opens when it drops and rebuilds one). A
+    missing cards table is a supported shape (`ayl-add` builds text only) and
+    is skipped, as in search."""
     db = lancedb.connect(DB_PATH)
     present: dict[str, dict[str, bool]] = {}
     for corpus in ("cards", "transcripts"):
         if not has_table(db, TABLES[corpus]):
+            if corpus == "transcripts":
+                raise RuntimeError(f"the catalogue cannot list a library without the full-text "
+                                   f"table {TABLES[corpus]!r} (index {DB_PATH})")
             continue
-        table = db.open_table(TABLES[corpus])
-        rows = table.search().select(["book", "source"]).limit(max(table.count_rows(), 1)).to_list()
+        try:
+            table = db.open_table(TABLES[corpus])
+            rows = table.search().select(_catalog_columns(table)).limit(
+                max(table.count_rows(), 1)).to_list()
+        except Exception as error:
+            raise RuntimeError(f"the catalogue could not read the table {TABLES[corpus]!r} "
+                               f"(index {DB_PATH}): {type(error).__name__}: {error}") from error
         for row in rows:
             key = row.get("book")
             if not key or row.get("source") == CANARY_SOURCE:
@@ -261,8 +286,8 @@ def rows_for_book(rows: list[dict], book: str) -> list[dict]:
     exact = [r for r in rows if r["book"] == book]
     if exact:
         return exact
-    # rsplit: the author is the last part, a title may itself contain the separator
-    return [r for r in rows if r["book"].rsplit(TITLE_SEPARATOR, 1)[0] == book]
+    # title_of: the author is the last part, a title may itself contain the separator
+    return [r for r in rows if title_of(r["book"]) == book]
 
 
 def join_chapter(rows: list[dict], max_chars: int) -> str:

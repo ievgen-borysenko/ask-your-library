@@ -23,6 +23,7 @@ from ask_your_library.runner import run_question
 
 MOBY = f"Moby Dick{TITLE_SEPARATOR}Herman Melville"
 GULLIVER = f"Gulliver's Travels{TITLE_SEPARATOR}Jonathan Swift"
+WILD = f"Where the Wild Things Are{TITLE_SEPARATOR}Maurice Sendak"  # catalogue only, no text
 
 CORPUS = {
     MOBY: {
@@ -52,12 +53,15 @@ class FakeLibrary:
     overrides the text of (book, corpus) hits; `chapter` overrides what a
     chapter read returns (text, resolution)."""
 
-    def __init__(self, books_for_query=None, texts=None, chapter=None):
+    def __init__(self, books_for_query=None, texts=None, chapter=None, also_holds=()):
         self.searches: list[tuple[str, str | None]] = []
         self.reads: list[tuple[str, str]] = []
         self.books_for_query = books_for_query or (lambda q: list(CORPUS))
         self.texts = texts or {}
         self.chapter = chapter
+        # Books the catalogue knows and CORPUS has no text for: the listing is
+        # index metadata, and a scenario may need a title the search never returns.
+        self.also_holds = list(also_holds)
 
     def search_both(self, query: str, k: int = 4, book: str | None = None) -> list[dict]:
         self.searches.append((query, book))
@@ -65,7 +69,8 @@ class FakeLibrary:
         return [hit(b, c, self.texts.get((b, c))) for b in books for c in ("cards", "transcripts") if b in CORPUS]
 
     def list_books(self) -> list[BookEntry]:
-        return sorted((BookEntry(k, title_of(k), author_of(k), True, True) for k in CORPUS),
+        return sorted((BookEntry(k, title_of(k), author_of(k), True, True)
+                       for k in list(CORPUS) + self.also_holds),
                       key=lambda e: e.title.casefold())
 
     def read_chapter(self, book: str, section: str, max_chars: int = 12000):
@@ -701,6 +706,52 @@ def test_a_mixed_question_forced_into_the_catalogue_by_the_planner_is_searched_w
     assert library.searches == [(question, MOBY)]
     assert "catalog" not in by_name(events, "validate")[0]["provenance"]
     assert answer == "Because he has little money [Moby Dick, Chapter 1]."
+
+
+def test_a_holdings_question_that_asks_who_wrote_them_is_answered_by_the_listing(run):
+    """The author is a catalogue attribute: the listing IS "Title — Author",
+    so "who" no longer sends a pure holdings question to the research loop,
+    where it would be answered from a sample of top-k hits."""
+    model = ScriptedModel(plan=[{"mode": "catalog", "queries": [], "catalog": {"op": "list"}}])
+    library = FakeLibrary()
+    answer, events, _ = run(model, library, "How many books do I have, and who wrote them?")
+    assert names(events) == ["plan", "catalog", "validate", "metrics"] and library.searches == []
+    assert "catalog_fallback" not in by_name(events, "plan")[0]
+    assert answer == t("catalog_list", n=2, items=f"- {GULLIVER}\n- {MOBY}")
+
+
+def test_a_title_that_carries_a_content_word_is_still_a_holdings_question(run):
+    """"Do I have Where the Wild Things Are?" tripped the gate on "where", a
+    word inside the title, and ended as "I don't know" about a book on the shelf.
+    The title of a book the catalogue resolves is taken out before the gate."""
+    question = "Do I have Where the Wild Things Are?"
+    model = ScriptedModel(plan=[{"mode": "catalog", "queries": [],
+                                 "catalog": {"op": "has", "title": "Where the Wild Things Are"}}])
+    library = FakeLibrary(also_holds=[WILD])
+    answer, events, _ = run(model, library, question)
+    assert names(events) == ["plan", "catalog", "validate", "metrics"] and library.searches == []
+    assert by_name(events, "catalog")[0]["catalog"]["resolved"] is True
+    assert answer == t("catalog_has_yes", items=f"- {WILD}")
+
+
+def test_the_same_question_shape_about_a_book_nobody_has_still_takes_the_research_loop(run):
+    """Only a title the catalogue resolves is removed: "How to Cook Everything"
+    is not in the library, so the question is read as it stands ("how"), and the
+    answer says the named book is not in the catalogue."""
+    question = "Do I have How to Cook Everything?"
+    model = ScriptedModel(
+        plan=[{"mode": "catalog", "queries": [],
+               "catalog": {"op": "has", "title": "How to Cook Everything"}}],
+        observe=[{"evidence": []}],
+        reflect=[{"decision": "enough"}],
+    )
+    library = FakeLibrary()
+    answer, events, _ = run(model, library, question)
+    plan = by_name(events, "plan")[0]
+    assert plan["mode"] == "answer" and plan["catalog_fallback"] == "mixed_intent"
+    assert plan["book_filter"] == "" and plan["book_unresolved"] == "How to Cook Everything"
+    assert library.searches == [(question, None)]
+    assert answer.startswith(t("book_not_in_catalog", q="How to Cook Everything"))
 
 
 def test_a_topic_question_forced_into_a_listing_is_searched_everywhere(run):

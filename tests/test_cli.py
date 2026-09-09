@@ -3,6 +3,7 @@ a run, so they must work in a fresh clone with no API key and no index."""
 import pytest
 
 from ask_your_library import cli
+from ask_your_library import nodes as cli_nodes
 
 
 @pytest.fixture(autouse=True)
@@ -138,6 +139,60 @@ def test_plan_event_says_when_the_planner_fell_back_to_the_raw_question(capsys):
     assert t("ev_plan_fallback") not in capsys.readouterr().out
     cli.print_event("plan", {"mode": "answer", "current_query": "q", "queries": [], "plan_fallback": True})
     assert t("ev_plan_fallback") in capsys.readouterr().out
+
+
+def test_the_plan_event_of_a_catalogue_question_names_the_operation(capsys):
+    from ask_your_library.i18n import t
+    cli.print_event("plan", {"mode": "catalog", "current_query": "", "queries": [],
+                             "catalog_request": {"op": "count", "title": "", "author": ""}})
+    out = capsys.readouterr().out
+    assert t("ev_plan_catalog", op="count") in out
+    assert t("ev_plan", mode="catalog", queries=[""]) not in out       # not the research-loop line
+    moby = "Moby Dick — Herman Melville"
+    cli.print_event("plan", {"mode": "answer", "current_query": "q", "queries": [],
+                             "catalog_fallback": "mixed_intent", "book_filter": moby})
+    out = capsys.readouterr().out
+    assert t("ev_catalog_fallback_mixed_intent") in out
+    assert t("ev_book_filter", book=moby) in out
+
+
+def test_the_catalog_event_prints_the_listing_and_keeps_only_its_shape(capsys, monkeypatch):
+    """The CLI's history entry after a catalogue answer: the operation and the
+    counts, never the titles (they went to the terminal, not to the next
+    planner call). Titles are index metadata, so control characters are
+    stripped from the answer as from any other passage the CLI prints."""
+    from ask_your_library.i18n import t
+    from ask_your_library.runner import history_entry
+    monkeypatch.setitem(cli.RUN, "catalog", None)
+    listing = {"op": "list", "count": 2, "total": 2, "query": "", "resolved": True,
+               "books": ["Moby Dick — Herman Melville", "My Private Notes — Unknown"]}
+    answer = ("2 books in your library:\n- Moby Dick — Herman Melville\n"
+              "- My Private\x1b[2J Notes — Unknown")
+    cli.print_event("catalog", {"catalog": listing, "answer": answer})
+    out = capsys.readouterr().out
+    assert t("ev_catalog", op="list", n=2, total=2) in out
+    assert "Moby Dick — Herman Melville" in out and "\x1b" not in out
+    assert cli.RUN["catalog"] == listing
+    entry = history_entry("what are my books called?", answer, cli.RUN["catalog"])
+    assert "Moby Dick" not in entry and "My Private" not in entry
+    assert entry == "Q: what are my books called?\nA: " + t(
+        "history_catalog", op="list", n=2, total=2, q="-", found=t("history_yes"))
+
+
+@pytest.mark.parametrize("reason", cli_nodes.CATALOG_FALLBACKS)
+@pytest.mark.parametrize("lang", ["en", "ua"])
+def test_every_catalogue_fallback_has_a_line_in_both_interfaces_and_languages(reason, lang):
+    """The interfaces build these keys by composition ("ev_catalog_fallback_" +
+    reason), and t() raises KeyError on an unknown one: a fourth reason must
+    not reach a user as a crash in one language only."""
+    from ask_your_library import i18n
+    from ask_your_library.i18n import t
+    before = i18n.get_lang()
+    try:
+        i18n.set_lang(lang)
+        assert t("ev_catalog_fallback_" + reason) and t("ui_catalog_fallback_" + reason)
+    finally:
+        i18n.set_lang(before)
 
 
 def test_verbose_prints_every_evidence_item_on_the_passage_it_was_checked_against(capsys, monkeypatch):

@@ -323,9 +323,11 @@ _T = {
     # ---- web ui: chat header, agent-step trace, and metrics footer
     "ui_welcome": {
         "ua": "Ask Your Library — питай про свою бібліотеку. Кроки агента "
-              "(plan / act / observe / reflect) розгортаються над відповіддю.",
+              "(plan / act / observe / reflect, або catalog, коли питання про склад "
+              "бібліотеки) розгортаються над відповіддю.",
         "en": "Ask Your Library — ask about your library. Agent steps "
-              "(plan / act / observe / reflect) expand above the answer.",
+              "(plan / act / observe / reflect, or catalog for a question about what "
+              "the library holds) expand above the answer.",
     },
     "ui_mode": {"ua": "режим: {mode}", "en": "mode: {mode}"},
     "ui_plan_catalog": {"ua": "режим: catalog, операція: {op}", "en": "mode: catalog, operation: {op}"},

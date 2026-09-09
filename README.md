@@ -78,12 +78,18 @@ question -> planner queries (2-4, English) -> LanceDB hybrid search (vectors + B
   column); code validates the operation, resolves a title or an author against that list
   (exact, contained as whole words, or a close match for a typo) and formats the answer, so
   nothing can be listed that is not in the index and a count is the length of the same list a
-  listing shows. The same resolver limits a content question that names one book to that book
-  (a name that fits several books, or only a fragment of a title, sets no filter). An operation
+  listing shows. Containment reads one way: a name inside a title is a match, a title inside a
+  longer name is not, in either mode: "Dracula's Guest" is a different book, answered with a no
+  and the closest title. The same resolver limits a content question that names one book to that
+  book (a name that fits several books, or only a fragment of a title, sets no filter and claims
+  nothing). The listing is exhaustive or it is an error: the full-text table is required here, as
+  it is for the preflight. An operation
   the planner invents falls back to the research loop, and so does a question that also asks
   about content ("Do I have Dracula, and why does Harker stay?"): a conservative gate on content
   vocabulary sends it to the research loop, with the named book as the filter when the request
-  carries a title that resolves to one book. The gate knows
+  carries a title that resolves to one book. The gate reads the reader's words, not the
+  library's (the title of a book the catalogue holds is taken out of the question before the
+  check, so "Do I have Where the Wild Things Are?" is a holdings question), but it knows
   words, not titles hidden in a question, so that routing stays the planner's reading, which
   the catalogue eval set measures with negative controls. The list never reaches the model: not
   in the answer, and not on a later turn (the conversation memory keeps only the operation and
@@ -423,8 +429,11 @@ check), refusal questions answering with an explicit refusal (an evidence-free a
 model knowledge fails), `expected_behavior: clarify` questions actually triggering a clarify
 interrupt, `expects_chapter_read` questions actually drilling into a chapter of an expected
 book, and `catalog` questions on their structured result (the set of books the code listed must
-equal the expected set, the count must be the length of that list; a research question answered
-by the catalogue path fails). Quote provenance totals come from `validate`. Scoring is heuristic, no LLM judge -
+equal the expected set, the count must be the length of that list, the operation must be the one
+the item names, and the catalogue must hold something at all; a research question answered
+by the catalogue path fails, and so does a research control the planner did not route itself,
+where a planner or catalogue fallback searched instead). Quote provenance totals come from
+`validate`. Scoring is heuristic, no LLM judge -
 **answer correctness is still a manual read**, which is why the harness writes every answer
 into a report with a per-question correctness checkbox.
 
@@ -672,7 +681,8 @@ From `docs/backlog.md`, confirmed by the runs of 2026-09-05, 06 and 07 (`v0.2.0-
   top-k retrieval cannot prove that no other book matches. The catalogue path (ADR-016) covers
   what the library holds (count, titles, a title or an author), not what the books say. A content
   question that names one book is limited to it only when the name resolves to exactly one
-  catalogue entry; a name that fits several ("Holmes") gets the whole library.
+  catalogue entry; a name that fits several ("Holmes"), a fragment of a title ("Time"), or a
+  longer name that merely contains one ("Dracula's Guest") gets the whole library.
 - **Detail questions may skip drill-down** and be answered from card summaries instead of
   reading the chapter.
 - **The time budget is coarse, and there is no hard deadline.** `QUESTION_DEADLINE_S` (300 s)

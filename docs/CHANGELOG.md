@@ -33,11 +33,42 @@
   the list), three content questions as negative controls (one scored on routing alone) and one
   hybrid item that pins the named-book filter; a research question answered by the catalogue
   path fails its item. Tests: `tests/test_catalog.py` (`list_books` on a real index
-  in tmp, the resolver, the answers in both languages, the planner-side guards) and seven
+  in tmp, the resolver, the answers in both languages, the planner-side guards) and ten
   end-to-end runs of the graph. An earlier run of the set routed the hybrid item to the
   catalogue ("has Dracula: yes", the content part unanswered): one sentence in the planner
   prompt and the gate above closed it; routing beyond the gate's vocabulary is measured, not
   enforced. The set's measured numbers are in the README's Evaluation section.
+  Name resolution reads containment in one direction only: a name inside a title matches
+  ("Time Machine" is The Time Machine), a title inside a longer name never does. "Dracula's
+  Guest" is a different book from "Dracula", and the answer now says so and names Dracula as
+  the closest title, where before it confirmed the book as held (and, as a retrieval filter,
+  quietly searched Dracula alone). An empty strict result is no longer read as "no such book"
+  either: a one-word fragment of a held title ("Time") sets no filter and says nothing, instead
+  of opening the answer with a note that a book on the shelf is not in the catalogue.
+  The gate's vocabulary drops "who" / "хто", because an author is a catalogue attribute and the
+  listing answers "how many books do I have, and who wrote them?" itself; and the title of a
+  book the catalogue resolves is removed from the question before the vocabulary check, so
+  "Do I have Where the Wild Things Are?" and "Чи є в мене «Як гартувалася сталь»?" are answered
+  from the catalogue instead of ending as "I don't know" about a book on the shelf; the same
+  question shape about a book nobody has still takes the research loop.
+  The catalogue reader refuses a partial index: the listing is presented as exhaustive, so the
+  full-text table is required (as it is for the preflight) and a table that disappears between
+  the check and the read is an error naming the table, not a short list; a table without the
+  `source` column is read as a library without canaries rather than failing. A catalogue read
+  that fails inside `plan` costs the retrieval filter only: the question is planned without one
+  and the whole library is searched, since before this path `plan` never touched the index and
+  a failure there would end a question the research loop could still answer.
+  The eval scorer pins more of the same result: the operation the code ran (`expected_op` on
+  k01-k06), a catalogue that holds something at all (an item expecting nothing found used to
+  pass over an empty index), and, for the research control, that the planner routed the question
+  itself, since a planner or catalogue fallback searched for another reason. The golden checksum in
+  the run fingerprint changes with those keys, so numbers measured before and after are not the
+  same run. The CI guard on the golden files now requires a `catalog` item's `expected_books` to
+  BE manifest titles (they are scored by set equality, where a substring can only fail) and its
+  `expected_count` to agree with them.
+  A resumed web chat rebuilds its conversation memory unescaped: the persisted answer carries
+  the HTML escaping it was rendered with, and `&amp;` belongs on the page, not in the next
+  planner and synthesize prompt.
 - **Chat titles in the sidebar.** `auto_tag_thread` is now off in `.chainlit/config.toml`. With it
   on, the first message of every chat asked the SQLAlchemy data layer to insert the thread with
   `tags=[chat profile]`; SQLite refuses a Python list, the data layer only logs the failure, and the

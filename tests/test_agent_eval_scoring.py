@@ -298,11 +298,63 @@ def test_catalog_items_are_scored_on_the_listed_set_not_on_wording():
     assert not harness.score(item, run("Moby Dick and Dracula"))["behavior_ok"]   # the research loop: no result
 
 
+def test_a_listing_of_the_right_size_with_the_wrong_books_fails():
+    """Set EQUALITY, not overlap and not a count: two books listed, one of them
+    the expected one, is a wrong answer of the right shape."""
+    item = {"type": "catalog", "expected_books": ["Moby Dick", "Dracula"], "expected_count": 2}
+    swapped = {**run(""), "catalog": {
+        "op": "list", "count": 2, "total": 2, "resolved": True,
+        "books": ["Moby Dick — Herman Melville", "Ivanhoe — Walter Scott"]}}
+    verdict = harness.score(item, swapped)
+    assert verdict["behavior_ok"] is False
+    assert verdict["titles_mentioned"] == 1 and verdict["titles_expected"] == 2
+
+
+def test_each_count_guard_stands_on_its_own():
+    """The two count rules are not the same rule: the state's count must be the
+    length of the list it carries, AND it must be what the item expects."""
+    books = ["Moby Dick — Herman Melville", "Dracula — Bram Stoker"]
+    listing = {"op": "list", "count": 3, "total": 3, "books": books, "resolved": True}
+    no_expectation = {"type": "catalog", "expected_books": ["Moby Dick", "Dracula"]}
+    assert not harness.score(no_expectation, {**run(""), "catalog": listing})["behavior_ok"]
+    honest = {**listing, "count": 2, "total": 2}
+    assert harness.score(no_expectation, {**run(""), "catalog": honest})["behavior_ok"]
+    assert not harness.score({**no_expectation, "expected_count": 3},
+                             {**run(""), "catalog": honest})["behavior_ok"]
+
+
 def test_a_has_question_must_resolve_as_the_golden_says():
     absent = {"type": "catalog", "expected_books": [], "expected_resolved": False}
     r = {**run(""), "catalog": {"op": "has", "count": 0, "total": 2, "books": [], "resolved": False}}
     assert harness.score(absent, r)["behavior_ok"]
     assert not harness.score({**absent, "expected_resolved": True}, r)["behavior_ok"]
+
+
+def test_an_item_that_expects_nothing_found_still_needs_a_catalogue_to_look_in():
+    """"Is War and Peace in my library?" passed over an EMPTY index: nothing
+    expected, nothing listed, resolved false. A library of no books answers no
+    to every question, which is not the behaviour this item measures."""
+    item = {"type": "catalog", "expected_books": [], "expected_resolved": False,
+            "expected_op": "has"}
+    empty = {**run(""), "catalog": {"op": "has", "count": 0, "total": 0, "books": [],
+                                    "resolved": False}}
+    assert not harness.score(item, empty)["behavior_ok"]
+    stocked = {**run(""), "catalog": {**empty["catalog"], "total": 33}}
+    assert harness.score(item, stocked)["behavior_ok"]
+
+
+def test_the_operation_the_code_ran_is_scored_when_the_item_names_one():
+    """The same empty result comes back from "has" and from a count over an
+    empty shelf; expected_op says which operation the question is about."""
+    item = {"type": "catalog", "expected_books": [], "expected_resolved": False,
+            "expected_op": "has"}
+    wrong_op = {**run(""), "catalog": {"op": "count", "count": 0, "total": 33, "books": [],
+                                       "resolved": False}}
+    assert not harness.score(item, wrong_op)["behavior_ok"]
+    right_op = {**wrong_op, "catalog": {**wrong_op["catalog"], "op": "has"}}
+    assert harness.score(item, right_op)["behavior_ok"]
+    without_op = {k: v for k, v in item.items() if k != "expected_op"}
+    assert harness.score(without_op, wrong_op)["behavior_ok"]      # scored as before
 
 
 def test_a_content_question_answered_by_the_catalogue_fails_whatever_it_lists():
@@ -320,6 +372,17 @@ def test_a_research_control_is_scored_on_routing_alone():
     assert harness.score(item, routed)["behavior_ok"]
     assert not harness.score(item, {**routed, "catalog": {"op": "list", "count": 33, "total": 33, "books": []}})["behavior_ok"]
     assert not harness.score(item, {**routed, "steps_taken": 0})["behavior_ok"]
+
+
+def test_a_research_control_the_planner_did_not_route_itself_is_not_a_pass():
+    """The control measures the planner's reading. A run that searched because
+    the planner produced no usable JSON, or because code caught a catalogue
+    misroute, searched for another reason: it passed the guards, not the item."""
+    item = {"type": "answer", "expected_behavior": "research", "expected_books": []}
+    routed = {**run("whatever it names"), "steps_taken": 1}
+    assert not harness.score(item, {**routed, "plan_fallback": True})["behavior_ok"]
+    assert not harness.score(item, {**routed, "catalog_fallback": "mixed_intent"})["behavior_ok"]
+    assert not harness.score(item, {**routed, "catalog_fallback": "invalid_op"})["behavior_ok"]
 
 
 def test_the_hybrid_filter_must_be_the_expected_book():

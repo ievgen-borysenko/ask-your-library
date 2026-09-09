@@ -47,7 +47,7 @@ A separate, deterministic path for questions about what the library holds:
   settled a book of the research loop), and sends a question that also asks about content
   ("Do I have Dracula, and why does Harker stay?") to the research loop, with the named book as
   the filter when the request carries a title that resolves to one book: a conservative gate on
-  content vocabulary (why, how, who, about, mention, ...),
+  content vocabulary (why, how, about, mention, ...),
   because the planner labelled exactly that question "has" once. The event says which happened.
   The gate knows words, not titles: "the names of the three musketeers" is beyond it, so that
   routing stays the planner's reading, measured by the controls of the catalogue eval set.
@@ -72,6 +72,28 @@ every number and every list into code.
   that failed to ingest is invisible here (no ingest ledger exists yet — `docs/backlog.md`).
 - Exhaustive content questions ("which of my books mention London?") are not covered: they
   need the books' content and stay best-effort in the research loop, recorded as a known limit.
+- Containment resolves in ONE direction. A name inside a title is a match ("Time Machine" is
+  The Time Machine); a title inside a longer name is not, in either mode: "Dracula's Guest"
+  is a different book, and confirming it as one the library owns was the silent wrong answer
+  this refuses. It becomes the closest title instead, so "do I have X" answers no and names
+  what is there. The retrieval filter (strict) additionally refuses a one-word fragment of a
+  longer title, and an empty strict result is not "no such book": the loose resolver decides
+  that, or an answer about The Time Machine would open by saying it is not in the catalogue.
+- The gate's vocabulary does not carry "who" / "хто": an author is a catalogue attribute and
+  the listing ("Title — Author") answers "how many books do I have, and who wrote them?"
+  itself. And the gate reads the reader's words, not the library's: when the request carries a
+  title that resolves strictly to one held book, that title is removed from the question before
+  the vocabulary check, so "Do I have Where the Wild Things Are?" is a holdings question while
+  the same shape about a book nobody has ("How to Cook Everything") still goes to the research
+  loop. Everything else about the gate is unchanged, including its known limit.
+- A catalogue read that fails inside `plan` costs the retrieval filter, not the answer: the
+  question is planned as if no book had been named (no filter, and no "not in the catalogue"
+  note, which would be a claim about a list nobody read) and the whole library is searched.
+  The `catalog` node lets the same failure surface, because there the list IS the answer. The
+  reader itself refuses a partial index: a listing is presented as exhaustive, so the full-text
+  table is required, as it is for the preflight, and a table that disappears between the check
+  and the read (the window `ingest/publish.py` opens) is an error naming the table rather than
+  a short list. A missing cards table stays a supported shape.
 - The eval gains a set of its own, `eval/golden/en-demo-catalog.yaml`, scored on the structured
   result with strict set equality against the manifest, plus three negative controls (content
   questions that look like listings; one scored on routing alone) and one hybrid item that

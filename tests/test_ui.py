@@ -188,6 +188,20 @@ def test_a_resumed_chat_remembers_a_catalogue_answer_by_its_shape_only(ui, monke
     assert history[2] == "Q: who narrates Moby Dick?\nA: Ishmael [Moby Dick, Chapter 1]."
 
 
+def test_a_resumed_chat_puts_the_answer_back_into_the_memory_unescaped(ui, monkeypatch):
+    """The persisted answer was escaped for the browser at write time
+    (html.escape in render_event); the conversation memory is a prompt, not a
+    page. Without unescaping, the next planner and synthesize call read
+    "Sense &amp; Sensibility" and "&lt;note&gt;" as the previous turn."""
+    answer = "Ishmael &amp; Queequeg [&lt;Moby Dick&gt;, Chapter 1]."
+    thread = {"metadata": {"chat_profile": ui.PROFILE_EN}, "steps": [
+        {"type": "user_message", "output": "who narrates it?"},
+        {"type": "assistant_message", "output": answer, "metadata": "{}"},
+    ]}
+    history = _resumed_history(ui, monkeypatch, thread)
+    assert history == ["Q: who narrates it?\nA: Ishmael & Queequeg [<Moby Dick>, Chapter 1]."]
+
+
 def test_the_catalogue_shape_survives_the_data_layer_round_trip(ui, monkeypatch):
     """The real persistence: the message is written through the app's data
     layer into the app's schema and read back with get_thread, then the resume

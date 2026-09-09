@@ -32,13 +32,16 @@ STRICT_CONTAINED_SHARE = 0.6  # strict mode: a one-word name inside a longer tit
 # Dracula, and why does Harker stay?"); code then sends it to the research loop
 # as a mixed intent, with the named book as the retrieval filter. Conservative
 # on purpose: a false positive costs a search where a listing would have done,
-# never the reverse. A title hidden inside a question ("the names of the three
-# musketeers") is beyond this gate: that routing stays the planner's reading,
-# measured by the controls of the catalogue eval set.
+# never the reverse. "who" is NOT here: an author is a catalogue attribute, and
+# "how many books do I have, and who wrote them?" is answered by the listing
+# itself. A title hidden inside a question ("the names of the three musketeers")
+# is beyond this gate: that routing stays the planner's reading, measured by the
+# controls of the catalogue eval set.
 CONTENT_CLUES = re.compile(
-    r"(?<!\w)(?:why|how(?!\s+many)|who|whom|whose|where|when|what happens|explain|describe|"
+    r"(?<!\w)(?:why|how(?!\s+many)|whom|whose|where|when|what happens|explain|describe|"
     r"tell me about|summar\w*|plot|character\w*|about|mention\w*|discuss\w*|deals? with|"
-    r"чому|як(?!\s+багато)|хто|кого|де|коли|про що|про|поясни|розкажи|опиши|сюжет|згаду\w*|йдеться)(?!\w)",
+    r"чому|як(?!\s+багато)|кого|де|коли|про що|про|поясни|розкажи|опиши|сюжет|"
+    r"згаду\w*|йдеться)(?!\w)",
     re.I,
 )
 
@@ -50,6 +53,20 @@ def content_clue(question: str) -> str:
     Ukrainian words would never match."""
     found = CONTENT_CLUES.search(" ".join(question.casefold().split()))
     return found.group(0) if found else ""
+
+
+def mixed_intent(question: str, title: str, entries: list[BookEntry]) -> bool:
+    """Does a catalogue request also ask about content? The gate reads the
+    question's vocabulary, and a title of a book the library HOLDS is removed
+    from the question first: "Do I have Where the Wild Things Are?" and "Чи є в
+    мене «Як гартувалася сталь»?" are pure holdings questions whose titles
+    happen to carry a content word, and they used to end as "I don't know"
+    about a book on the shelf. Only a title that resolves strictly to exactly
+    one held book is removed: anything else is not the library's title, so the
+    question is read as it stands."""
+    if title and len(resolve_title(title, entries, strict=True)[0]) == 1:
+        question = re.sub(re.escape(title), " ", question, flags=re.I)
+    return content_clue(question) != ""
 
 
 def parse_catalog_request(decision: dict) -> dict | None:
@@ -95,15 +112,19 @@ def _resolve(name: str, entries: list[BookEntry], field_of, last_word_too: bool 
     """Entries whose `field_of(entry)` the reader means by `name`, and, when
     none, up to MAX_SUGGESTIONS closest values for the "not found" line.
     Exact (folded, a leading article ignored) first; then the name contained in
-    the field as whole words, or the field in the name (a title inside a
-    longer phrase), each at least MIN_CONTAINED_CHARS long; then close matches
-    (difflib, CLOSE_MATCH_CUTOFF) so a typo still resolves — for authors also
-    against the surname alone (`last_word_too`), because "Melvile" is a typo of
-    "Melville", not of "Herman Melville". Several matches are returned as
-    several: "Holmes" is every Holmes book. `strict` (the retrieval filter of
+    the field as whole words and at least MIN_CONTAINED_CHARS long; then close
+    matches (difflib, CLOSE_MATCH_CUTOFF) so a typo still resolves — for authors
+    also against the surname alone (`last_word_too`), because "Melvile" is a
+    typo of "Melville", not of "Herman Melville". Several matches are returned
+    as several: "Holmes" is every Holmes book. `strict` (the retrieval filter of
     the hybrid) accepts a name contained in a longer title only when it is
     several words or most of the title: "Time" is not The Time Machine.
-    `fuzzy=False` stops before the close-match step (exact or contained only)."""
+
+    The reverse containment, a FIELD inside the name, is never a match, in
+    either mode: "Dracula's Guest" holds "Dracula" and is another book, and
+    confirming it as one the library owns is the silent wrong answer this
+    refuses. It is reported as the closest name instead, so "do I have X" says
+    no and names what is there. `fuzzy=False` stops after the contained step."""
     wanted = fold(name)
     if not wanted:
         return [], []
@@ -111,13 +132,13 @@ def _resolve(name: str, entries: list[BookEntry], field_of, last_word_too: bool 
     exact = [e for e, v in values.items() if v == wanted or _without_article(v) == _without_article(wanted)]
     if exact:
         return exact, []
-    def contained_in(v: str) -> bool:
-        if len(wanted) >= MIN_CONTAINED_CHARS and _contains_words(v, wanted):
-            return (not strict or len(wanted.split()) >= 2
-                    or len(wanted) >= STRICT_CONTAINED_SHARE * len(v))
-        return len(v) >= MIN_CONTAINED_CHARS and _contains_words(wanted, v)
+    def contains_name(v: str) -> bool:
+        if len(wanted) < MIN_CONTAINED_CHARS or not _contains_words(v, wanted):
+            return False
+        return (not strict or len(wanted.split()) >= 2
+                or len(wanted) >= STRICT_CONTAINED_SHARE * len(v))
 
-    contained = [e for e, v in values.items() if contained_in(v)]
+    contained = [e for e, v in values.items() if contains_name(v)]
     if contained:
         return contained, []
     if not fuzzy:
@@ -128,6 +149,12 @@ def _resolve(name: str, entries: list[BookEntry], field_of, last_word_too: bool 
     matches = [e for e, vs in variants.items() if vs & close]
     if matches:
         return matches, []
+    # A held name inside the one asked about, after the typo step so that a
+    # near-identical spelling ("Sir Arthur Conan Doyle") still resolves.
+    inside = [field_of(e) for e, v in values.items()
+              if len(v) >= MIN_CONTAINED_CHARS and _contains_words(wanted, v)]
+    if inside:
+        return [], inside[:MAX_SUGGESTIONS]
     near = difflib.get_close_matches(wanted, list(values.values()), n=MAX_SUGGESTIONS,
                                      cutoff=SUGGESTION_CUTOFF)
     suggestions: list[str] = []

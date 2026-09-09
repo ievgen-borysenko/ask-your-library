@@ -2,10 +2,13 @@
 # catalogue path (ADR-016). Scored on the structured result, not on the answer's wording
 # (eval/run_agent_eval.py, type catalog): the set of books the code listed must EQUAL
 # expected_books (strict set equality, by title), the count carried in the state must be
-# len() of that list, and a "has" question must resolve (or not) as expected_resolved says.
+# len() of that list, the operation run must be expected_op, the catalogue must hold
+# something at all (an item that expects nothing found would otherwise pass over an empty
+# index), and a "has" question must resolve (or not) as expected_resolved says.
 # The research-type items are the negative controls: content questions that look like a
 # listing must NOT take the catalogue path (a catalogue result on any of them fails the item;
-# k09 is scored on routing alone), and k10 pins the hybrid (a named book becomes a retrieval
+# k09 is scored on routing alone, and the planner must route it there itself, so a planner or
+# catalogue fallback fails it), and k10 pins the hybrid (a named book becomes a retrieval
 # filter). Routing is the planner's reading; these items measure it, no code enforces it.
 # Titles are the demo manifest's (CI guard: tests/test_golden_books_in_manifest.py).
 # Run: GOLDEN_PATH=eval/golden/en-demo-catalog.yaml uv run python eval/run_agent_eval.py
@@ -47,6 +50,7 @@ questions:
 - id: k01-count
   question: How many books do I have in my library?
   type: catalog
+  expected_op: count
   expected_count: 33
   expected_books: *all_titles
   notes: The number must be len() of the list the code produced, and that list must be the
@@ -54,6 +58,7 @@ questions:
 - id: k02-list
   question: What are the names of all the books in my library?
   type: catalog
+  expected_op: list
   expected_count: 33
   expected_books: *all_titles
   notes: Strict set equality against the manifest; a sample of 14 with a heading that says 17
@@ -61,12 +66,14 @@ questions:
 - id: k03-has-yes
   question: Do I have Ivanhoe?
   type: catalog
+  expected_op: has
   expected_resolved: true
   expected_books:
   - Ivanhoe
 - id: k04-has-no
   question: Is War and Peace in my library?
   type: catalog
+  expected_op: has
   expected_resolved: false
   expected_books: []
   notes: Not in the demo corpus; the answer says so (closest titles may follow), nothing is
@@ -74,6 +81,7 @@ questions:
 - id: k05-by-author
   question: What do I have by Jules Verne?
   type: catalog
+  expected_op: by_author
   expected_resolved: true
   expected_books:
   - "Twenty Thousand Leagues Under the Sea"
@@ -82,6 +90,7 @@ questions:
 - id: k06-count-ua
   question: Скільки книжок у моїй бібліотеці?
   type: catalog
+  expected_op: count
   expected_count: 33
   expected_books: *all_titles
   notes: The same intent in Ukrainian; the planner recognises it, the code answers.
