@@ -11,8 +11,8 @@ open ones often refer to them.
 - Measured and documented: tag `v0.2.0-rc1` (07.09) with the core and extended reports, retrieval
   and canary outputs, the reader's verdicts on the eleven core answers, and the v0.1.0 baseline
   (`docs/eval-results/`, README "Evaluation").
-- Before this tree is called 0.2.0, one item is open: a short live check of the web UI on a clean
-  environment — the passage under an evidence item readable in the browser (not merely sent), a
+- Before the repository is made public, one item is open: a short live check of the web UI on a
+  clean environment — the passage under an evidence item readable in the browser (not merely sent), a
   clarify including the no-reply case, chat restore after a reload, and a first start by the
   README.
 - Done since: security CI (`.github/workflows/security.yml`: gitleaks over the complete range of
