@@ -40,7 +40,7 @@
   end-to-end runs of the graph. An earlier run of the set routed the hybrid item to the
   catalogue ("has Dracula: yes", the content part unanswered): one sentence in the planner
   prompt and the gate above closed it; routing beyond the gate's vocabulary is measured, not
-  enforced. The set's measured numbers are in the README's Evaluation section.
+  enforced. The set's measured numbers are in the README's Evaluation section: 10/10 on the branch's final commit `50b9347` with the scoring on keys and `expected_total`, and a core run on the same commit (11/11, 48/0/0 quotes, $0.0519 mean against $0.0488 on rc1) shows the research loop's numbers unchanged while three questions that name one book now run with the retrieval filter (`docs/eval-results/2026-09-09-catalogue-{set,branch-core}.md`).
   Name resolution reads containment in one direction only: a name inside a title matches
   ("Time Machine" is The Time Machine), a title inside a longer name never does. "Dracula's
   Guest" is a different book from "Dracula", and the answer now says so and names Dracula as

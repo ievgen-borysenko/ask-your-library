@@ -462,12 +462,13 @@ library holds (count, the full list, a title that is there, one that is not, an 
 in Ukrainian), scored on the structured result against the manifest's book keys and its size;
 three content questions
 that look like listings as negative controls (one scored on routing alone); and one hybrid item
-that pins the named-book retrieval filter. Measured on `b0d1321` (09.09, single run), before the
-items moved from titles to keys and gained `expected_total` — the golden checksum in the run
-fingerprint separates the two versions of the set: 10/10;
-the six catalogue items with 0 search steps and one model call each; the three controls through
-the research loop (1, 1 and 3 steps); the hybrid item with retrieval limited to Dracula; 17/17
-quotes confirmed; $0.16 for the set, of which the six catalogue items cost $0.014 together.
+that pins the named-book retrieval filter. Measured on `50b9347` (09.09, single run, the branch's
+final commit with the scoring on keys and `expected_total`; the earlier 10/10 run of the same day
+on `b0d1321` scored titles only and has a different golden checksum, so it is not the same
+measurement): 10/10; the six catalogue items with 0 search steps and one model call each; the three
+controls through the research loop (1, 2 and 3 steps); the hybrid item with retrieval limited to
+Dracula; 22/22 quotes confirmed on the four research items; $0.17 for the set, of which the six
+catalogue items cost $0.014 together (`docs/eval-results/2026-09-09-catalogue-set.md`).
 
 Two measured trees, both single runs, clean tree (`--require-clean`), strict hit-id mode, the same
 bge-m3 index: **v0.1.0**, 2026-09-05 on code `88881ee` (the last code commit before tag `v0.1.0`;
@@ -483,6 +484,16 @@ window and the gate were introduced and measured one at a time during developmen
 records those steps); the two columns below are the first measurement of both on one run: +39% per
 core question and +57% per extended question against v0.1.0 (from the committed totals, $0.5364/11
 against $0.4215/12 and $0.9008/21 against $0.5722/21).
+
+A third run of the core set, 2026-09-09 on `50b9347` (the catalogue branch's final commit, this
+repository), checks that the catalogue path (ADR-016) left the research loop's numbers where they
+were: 11/11 behaviour, 48 / 0 / 0 quotes confirmed / unattributed / broken, $0.0519 mean per
+question against $0.0488 on rc1 (73 model calls against 70). What changed is the path, not the
+verdicts: the three questions that name one book (c04, c05, c06) now run with retrieval limited to
+that book by the catalogue resolver, and the refusal question's answer carries the note that the
+named book is not in the catalogue. Single run, not reader-graded; the report is
+`docs/eval-results/2026-09-09-catalogue-branch-core.md`. The table below keeps the two tagged
+baselines.
 
 ### Where the measured code lives
 
