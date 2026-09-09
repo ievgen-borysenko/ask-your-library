@@ -1,8 +1,8 @@
 # ADR-016: The catalogue path — what the library holds is answered by code
 
 Status: accepted, 2026-09-08 (the pull request that adds this file). Earlier decisions
-(ADR-001 to ADR-015) are summarised in the README's Architecture section; this one is written
-out because it changes the planner's contract and adds a node to the graph.
+(ADR-001 to ADR-015) are summarised in the index beside this file ([`README.md`](README.md));
+this one is written out because it changes the planner's contract and adds a node to the graph.
 
 ## Context
 

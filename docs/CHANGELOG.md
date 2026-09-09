@@ -211,7 +211,7 @@
 
 ## 0.2.0-rc1 (2026-09-07) — release candidate
 
-- **Measured.** Tag `v0.2.0-rc1` = `33dba3f` (the merge of #74), single runs on 07.09 with
+- **Measured.** Tag `v0.2.0-rc1` = `33dba3f` (merged 07.09), single runs on 07.09 with
   `--require-clean`, strict hit-id, the same bge-m3 index as v0.1.0, Sonnet 4.6 via OpenRouter:
   core (11 questions) behaviour 11/11, quote provenance 47 / 0 / 0, $0.0488 mean per question, AI
   pre-check 10 correct / 0 incorrect / 1 incomplete (c06: the discovery scene not retrieved, the
@@ -472,7 +472,8 @@
   does not beat the model's own memory on answer content.
 - **Observe window 1,200 -> 2,500 characters per search hit** (ADR-012), after measuring
   1,200 / 2,500 / 4,000 on the core set: c03 names both Madame Coquenard and Madame de
-  Chevreuse from 2,500 up; behaviour and provenance unchanged; mean cost per core question
+  Chevreuse from 2,500 up; provenance clean at all three and behaviour 12/12 at 1,200 and 2,500
+  (11/12 at 4,000 through a scorer artefact, not a changed answer); mean cost per core question
   +9% at 2,500 (+32% at 4,000), +28% on the extended set. `SEARCH_HIT_CHARS` and
   `CHAPTER_HIT_CHARS` are environment knobs and part of the eval fingerprint.
 
