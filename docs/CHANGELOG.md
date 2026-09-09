@@ -10,11 +10,20 @@
   ask for, and their approximate sizes are printed first. Ollama is started for the session, with
   `brew services run` and not `start`: the run form registers no login item, so the script leaves
   nothing behind that comes back at every boot, and the one-liner that would make it permanent is
-  printed in the next steps instead. Only a loopback `OLLAMA_URL` is ever started here, and not
-  even that one while `OLLAMA_HOST` is exported to an address off this machine — that variable,
-  not the URL, is what a server started here would bind. `uv sync --locked --extra ui` installs
+  printed in the next steps instead; when `brew services` cannot start it the fallback is a
+  background `ollama serve`, which outlives the script, so that one prints its pid and the two
+  commands that stop it rather than the login-item line. Only a loopback `OLLAMA_URL` is ever
+  started here, and only while `OLLAMA_HOST` — that variable, not the URL, is what a server
+  started here would bind — is empty or one of the spellings of loopback, optionally with a
+  scheme and a port. That gate is closed by default: everything else is refused, a bare port
+  included, because `:11434` is a host/port pair whose empty host means every interface and `0`
+  is `0.0.0.0`. `uv sync --locked --extra ui` installs
   the environment. `.env` is written from `.env.example` only when it does not exist,
-  never overwritten, with `LLM_BACKEND=ollama` and `LLM_TIMEOUT_S=600` — the local defaults,
+  never overwritten, and written through a temporary file that is moved into place only once it
+  is complete — `> .env` created the file before the writer produced a byte, so a failure
+  halfway (an unreadable `.env.example` is enough) left an empty `.env` that the next run
+  refuses to touch and `config.py` resolves to the hosted defaults. It carries
+  `LLM_BACKEND=ollama` and `LLM_TIMEOUT_S=600` — the local defaults,
   because a value copied out of the example is an environment value and wins over the per-backend
   default `config.py` would otherwise apply, which would leave a local model on the hosted 120 s
   per-attempt budget. `QUESTION_DEADLINE_S=1200` goes in beside it: the per-question wall clock
@@ -29,17 +38,34 @@
   arguments and comparing, never by an English fragment, and only those are named back as
   expected; everything else fails the run with exit 1, an unreachable Ollama and a model that is
   not pulled included, as does a pre-existing `.env` whose `LLM_BACKEND` will not import at all.
-  The preflight's notices are printed under its problems. `--dry-run` prints the plan and touches
+  The preflight's notices are printed under its problems. A `.env` that is already there is what
+  the run is actually setting up, so it — not the flag — decides which answering model is pulled
+  and whether a key is expected, and the step that finds it says which mode it selects and, when
+  that is not the mode the banner named, that the banner's was not applied.
+  `--dry-run` prints the plan and touches
   nothing, `--hosted` writes the OpenRouter configuration and names the variable to set (a key is
   never taken as an argument), `--no-demo` points at `ayl-add` instead, `--yes` skips the
-  confirmation. macOS only, never `sudo`,
-  idempotent, and every download goes through `brew`, `uv` or `ollama`. A tool that fails is named
+  confirmation. macOS only, never `sudo`, idempotent. What reaches the network: the package
+  fetches through `brew`, `uv` and `ollama` and, when you say yes to the demo corpus, the
+  checksum-pinned public-domain texts `scripts/ingest_demo_corpus.py` downloads from
+  gutenberg.org. The two LibriVox audiobooks are not fetched — their transcripts are committed
+  under `corpus/prepared-audio/`, so archive.org is reached only by that script's
+  `--retranscribe`. A tool that fails is named
   with its status and ends the run at exit 1, one of the three documented codes, instead of
-  aborting through `set -e` with `brew`'s own.
+  aborting through `set -e` with `brew`'s own. Everything `run` does not wrap has the `ERR` trap
+  under it, and `set -E` is what carries that trap into functions, subshells and command
+  substitutions: without it a `sed` that failed inside one of them ended the script at its own
+  status with nothing of the script's own printed.
   `tests/test_install_script.py` runs the dry run against recorders on a scrubbed PATH: the plan
   has to name all twelve steps in order, and not one of `brew`, `ollama`, `uv`, `curl` may record
-  a call. Two of its tests are real runs that stop at a refusal — a `brew` that exits 17, and an
-  `OLLAMA_URL` that is not this machine. The file is exercised in CI by the `install-script` job
+  a call. The rest are real runs against the same recorders, so a "real" run still installs,
+  downloads and starts nothing: two stop at a refusal — a `brew` that exits 17, and an
+  `OLLAMA_URL` that is not this machine — and the others walk the whole script, over every
+  `OLLAMA_HOST` the gate must refuse and every one it must let through, an `.env.example` that
+  cannot be read (exit 1, and no `.env` left behind), and a `.env` that already selects the other
+  backend. Step 12's embedded Python is lifted out of the script by a regular expression and run
+  on its own, so what its exit codes classify is checked without macOS and without the eleven
+  steps in front of it. The file is exercised in CI by the `install-script` job
   on `macos-latest`; the Linux jobs, where it skips itself, now print skip reasons (`pytest -rs`)
   so a file that skipped cannot read as a file that passed.
 - **Security: two zero-click image channels in the web UI, and the rest of the hardening pass.**

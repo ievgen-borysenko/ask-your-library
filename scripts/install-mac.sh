@@ -3,9 +3,13 @@
 # Ask Your Library — macOS setup (Apple silicon and Intel).
 #
 # Takes a fresh clone to a working local install: prerequisites, models,
-# dependencies, .env, the demo corpus, and the project's own preflight. Every
-# download goes through brew, uv or ollama; nothing here runs sudo, and nothing
-# leaves this machine beyond those package fetches.
+# dependencies, .env, the demo corpus, and the project's own preflight. Nothing
+# here runs sudo. What reaches the network: package fetches through brew, uv and
+# ollama, and — when you say yes to the demo corpus — the checksum-pinned
+# public-domain texts scripts/ingest_demo_corpus.py downloads from gutenberg.org.
+# The two LibriVox audiobooks are not fetched: their transcripts are committed
+# under corpus/prepared-audio/, so archive.org is reached only by that script's
+# --retranscribe. Nothing else leaves this machine.
 #
 #   bash scripts/install-mac.sh                 # fully local: Ollama answers and embeds
 #   bash scripts/install-mac.sh --dry-run       # print the plan, change nothing
@@ -15,7 +19,10 @@
 #
 # Exit codes: 0 done, 1 a prerequisite is missing or a step failed (both are printed
 # with the fix), 2 bad usage.
-set -euo pipefail
+# -E, not just -e: without it the ERR trap below is not inherited by functions,
+# command substitutions or subshells, so every failure inside one of them ended
+# the script at the failing command's own status with nothing of ours printed.
+set -Eeuo pipefail
 
 STEPS=12
 step_no=0
@@ -96,7 +103,9 @@ run() {
 
 # The net under everything `run` does not cover — a cp, a sed, a substitution.
 # The ERR trap fires exactly where `set -e` would have exited, so it adds no new
-# failure, only the missing message and the documented status.
+# failure, only the missing message and the documented status. `set -E` above is
+# what carries it into functions and substitutions; `run`'s own `|| status=$?`
+# still keeps it off the commands `run` wraps, which report themselves once.
 on_error() {
     local status=$?
     fail "$BASH_COMMAND failed with status $status."
@@ -109,8 +118,12 @@ if [ "$dry_run" -eq 1 ]; then
     printf 'Dry run: the plan only. Nothing is installed, downloaded or written.\n'
 fi
 if [ "$hosted" -eq 1 ]; then
+    requested_backend="openrouter"
+    requested_mode="hosted"
     printf 'Configuration: hosted answering model (OpenRouter), local embeddings.\n'
 else
+    requested_backend="ollama"
+    requested_mode="fully local"
     printf 'Configuration: fully local — Ollama answers and embeds. No account, no key.\n'
 fi
 printf '\n'
@@ -229,6 +242,14 @@ if [ -z "$ollama_url" ] || [ -z "$embed_model" ] || [ -z "$llm_model" ]; then
     exit 1
 fi
 
+# Which backend this run will actually answer with — decided before step 8, and
+# by the .env already in the clone when there is one: step 10 never overwrites
+# one, so the flag alone would pull a model this run is never going to call and
+# expect a key this run is never going to need. Only when there is no .env does
+# --hosted (or its absence) decide.
+env_backend="$(dotenv_value LLM_BACKEND)"
+effective_backend="${env_backend:-$requested_backend}"
+
 # --- 7. Ollama --------------------------------------------------------------
 ollama_ready() { curl -fsS --max-time 3 "$ollama_url/api/tags" >/dev/null 2>&1; }
 
@@ -239,7 +260,9 @@ else
     note "missing"
     run brew install ollama
 fi
-ollama_started=0
+ollama_started=0        # this script brought a server up, either way
+ollama_service=0        # ... and it was brew services, which the last block names
+ollama_pid=""           # ... or a bare `ollama serve`, whose pid is how to stop it
 if [ "$dry_run" -eq 1 ]; then
     plan "start it for this session (brew services run ollama, else 'ollama serve')"
     plan "wait up to ${OLLAMA_WAIT_S}s for $ollama_url/api/tags to answer"
@@ -254,16 +277,28 @@ else
         localhost|localhost:*|127.0.0.1|127.0.0.1:*|"[::1]"|"[::1]:"*)
             # What the server binds is OLLAMA_HOST, not OLLAMA_URL: the URL only
             # says where to look for one. So an exported OLLAMA_HOST decides what
-            # the server started here listens on, and anything but a loopback
-            # address (or a bare port, which means loopback) would put a server
-            # this script started on the network. That is not ours to decide.
+            # the server started here listens on, and putting one on the network
+            # is not this script's call. The gate is therefore closed by default:
+            # through it go an empty value (Ollama's own loopback default) and the
+            # spellings of loopback, with an optional scheme and port — nothing
+            # else. A bare port is refused with the rest: ":11434" is a host/port
+            # pair whose empty host means every interface, and "0" is 0.0.0.0.
             ollama_bind="${OLLAMA_HOST-}"
             case "$ollama_bind" in
-                ""|localhost|localhost:*|127.0.0.1|127.0.0.1:*|"[::1]"|"[::1]:"*|:*) ;;
-                *[!0-9]*)
-                    fail "OLLAMA_HOST=$ollama_bind would bind the server started here beyond"
-                    fail "this machine. Run 'unset OLLAMA_HOST' and re-run, or start Ollama"
-                    fail "yourself with the binding you want."
+                http://*)  ollama_bind_host="${ollama_bind#http://}" ;;
+                https://*) ollama_bind_host="${ollama_bind#https://}" ;;
+                *)         ollama_bind_host="$ollama_bind" ;;
+            esac
+            # Unlike a URL host, a bind address may be a bare ::1 — and that form
+            # carries no port, ::1:11434 being an address in its own right; the
+            # bracketed form is the one that takes one.
+            case "$ollama_bind_host" in
+                ""|localhost|localhost:*|127.0.0.1|127.0.0.1:*|"::1"|"[::1]"|"[::1]:"*) ;;
+                *)
+                    fail "OLLAMA_HOST=$ollama_bind is not one of the loopback forms this script"
+                    fail "will start a server on, so it could listen beyond this machine. Run"
+                    fail "'unset OLLAMA_HOST' and re-run, or start Ollama yourself with the"
+                    fail "binding you want."
                     exit 1
                     ;;
             esac
@@ -272,11 +307,17 @@ else
             # the command for it is printed in the next steps.
             if brew services run ollama >/dev/null 2>&1; then
                 note "started for this session: brew services run ollama (no login item)"
+                ollama_service=1
             else
-                serve_log="${TMPDIR:-/tmp}/ask-your-library-ollama.log"
+                # mktemp, not a fixed name: TMPDIR can be world-writable, and a
+                # symlink planted at a name we would pick is a symlink nohup
+                # follows.
+                serve_log="$(mktemp "${TMPDIR:-/tmp}/ask-your-library-ollama.XXXXXX")"
                 note "brew services could not start it; running 'ollama serve' in the background"
                 note "server log: $serve_log"
                 nohup ollama serve >"$serve_log" 2>&1 &
+                ollama_pid=$!
+                note "pid $ollama_pid — it outlives this script; the last block stops it"
             fi
             ollama_started=1
             ;;
@@ -321,13 +362,16 @@ pull_model() {
 
 step "Models: pull what Ollama does not have yet (the sizes below are approximate)"
 note "$embed_model — embeddings, approximately 1.2 GB"
-if [ "$hosted" -eq 1 ]; then
-    note "no answering model is pulled: --hosted keeps it on OpenRouter"
-else
+if [ "$effective_backend" = "ollama" ]; then
     note "$llm_model — answers, a chat model: approximately 3-8 GB depending on the tag"
+else
+    note "no answering model is pulled: the answering model stays on OpenRouter"
+    if [ -n "$env_backend" ] && [ "$requested_backend" = "ollama" ]; then
+        note "that is the .env already in this clone deciding, not this run's flags"
+    fi
 fi
 pull_model "$embed_model"
-if [ "$hosted" -eq 0 ]; then
+if [ "$effective_backend" = "ollama" ]; then
     pull_model "$llm_model"
 fi
 
@@ -355,6 +399,29 @@ local_env() {
         -e 's/^# LANGCHAIN_TRACING_V2=false/LANGCHAIN_TRACING_V2=false/' .env.example
 }
 
+# Hosted mode keeps the example as it is. A function so it goes through the same
+# writer as the local one, and fails the same way.
+hosted_env() { cat .env.example; }
+
+# `local_env > .env` truncated .env into existence before the writer produced a
+# byte, so a sed that failed — an unreadable .env.example is enough — left an
+# empty file behind. And an empty .env is not an obvious ruin: step 10 refuses to
+# overwrite a .env that exists, and config.py resolves an empty one to the hosted
+# defaults, so the next run of a fully local install came up on OpenRouter and
+# said nothing. The output lands beside it instead, and only a complete,
+# non-empty file is moved into place.
+write_env() {
+    local tmp=".env.tmp.$$"
+    if "$@" >"$tmp" && [ -s "$tmp" ]; then
+        mv "$tmp" .env
+        return 0
+    fi
+    rm -f "$tmp"
+    fail "$* wrote no usable .env; the file was left untouched."
+    fail "fix that and re-run, or copy .env.example to .env yourself."
+    exit 1
+}
+
 # What the summary shows — never a key line: this is printed, and .env is where
 # a key lives.
 SUMMARY_KEYS='LIBRARY_DB_PATH|EMBED_BACKEND|OLLAMA_URL|OLLAMA_EMBED_MODEL'
@@ -369,13 +436,21 @@ env_summary() {
 step "Configuration: .env in the repository root"
 if [ -f .env ]; then
     note ".env exists and is never overwritten; nothing in it was changed"
-    note "it sets LLM_BACKEND=$(dotenv_value LLM_BACKEND)"
+    if [ -z "$env_backend" ]; then
+        note "it sets no LLM_BACKEND, so config.py's own default picks the backend"
+    elif [ "$env_backend" = "$requested_backend" ]; then
+        note "it sets LLM_BACKEND=$env_backend, which is the mode named at the top"
+    else
+        note "it sets LLM_BACKEND=$env_backend, so that is the mode this run set up"
+        note "the $requested_mode configuration named at the top was NOT applied: an"
+        note "existing .env decides. Edit it yourself (or move it aside and re-run)."
+    fi
 elif [ "$hosted" -eq 1 ]; then
     if [ "$dry_run" -eq 1 ]; then
         plan "copy .env.example to .env unchanged"
-        env_summary < .env.example
+        hosted_env | env_summary
     else
-        cp .env.example .env
+        write_env hosted_env
         note "written from .env.example"
         env_summary < .env
     fi
@@ -386,7 +461,7 @@ else
         plan "write .env from .env.example with these values"
         local_env | env_summary
     else
-        local_env > .env
+        write_env local_env
         note "written from .env.example"
         env_summary < .env
     fi
@@ -400,7 +475,11 @@ if [ -z "$db_path" ]; then
     fail "export LIBRARY_DB_PATH, then re-run."
     exit 1
 fi
-case "$db_path" in "~/"*) db_path="$HOME/${db_path#\~/}" ;; esac
+# Used exactly as the package uses it: config.py is Path(os.environ.get(...)) with
+# no expanduser, so a literal "~/index" is a directory called "~" for the app and
+# has to be one here too — expanding it here would have the two halves of one run
+# looking in different places. The ayl-add lines printed below are command lines,
+# where the shell expands the tilde long before the package sees the value.
 demo_ready=0
 for table in "$db_path"/transcripts_*.lance; do
     [ -e "$table" ] || continue
@@ -416,10 +495,12 @@ elif [ "$demo_ready" -eq 1 ]; then
     note "an index is already there; nothing is rebuilt"
     note "update it later with: uv run scripts/ingest_demo_corpus.py"
 else
-    note "about 30 minutes on the first run. It downloads public-domain texts"
-    note "(checksum-pinned in corpus/manifest.yaml) and uses the two audiobook"
-    note "transcripts already committed under corpus/prepared-audio/. Every stage is"
-    note "cached in data/, so it is safe to interrupt and re-run."
+    note "about 30 minutes on the first run. It downloads public-domain texts from"
+    note "gutenberg.org (checksum-pinned in corpus/manifest.yaml) — the only thing"
+    note "here that reaches anywhere but a package registry — and uses the two"
+    note "audiobook transcripts already committed under corpus/prepared-audio/, so"
+    note "archive.org is not contacted. Every stage is cached in data/, so it is"
+    note "safe to interrupt and re-run."
     build_demo=0
     if [ "$dry_run" -eq 1 ]; then
         plan "ask once for confirmation, then run: uv run scripts/ingest_demo_corpus.py"
@@ -504,7 +585,7 @@ preflight_expect=""
 if [ "$demo_ready" -eq 0 ]; then
     preflight_expect="no-index"
 fi
-if [ "$hosted" -eq 1 ]; then
+if [ "$effective_backend" != "ollama" ]; then
     preflight_expect="$preflight_expect no-key"
 fi
 if [ "$dry_run" -eq 1 ]; then
@@ -552,8 +633,14 @@ printf '      allows the placeholder password; set CHAINLIT_USERNAME and CHAINLI
 printf '      for a real one and drop it.\n'
 printf '  LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books\n'
 printf '      index your own .txt / .md books, then ask the same way against that path.\n'
-if [ "$ollama_started" -eq 1 ]; then
+if [ "$ollama_service" -eq 1 ]; then
     printf '  brew services start ollama\n'
     printf '      Ollama was started for this session only. This registers it as a login\n'
     printf '      item instead, so it is up after every restart.\n'
+elif [ "$ollama_started" -eq 1 ]; then
+    printf "  kill %s                      # or: pkill -f 'ollama serve'\n" "$ollama_pid"
+    printf "      brew services could not start Ollama, so it runs here as a background\n"
+    printf "      'ollama serve' that outlives this script. Either command stops it; the\n"
+    printf '      log is %s. To have it back at every login instead:\n' "$serve_log"
+    printf '      brew services start ollama\n'
 fi

@@ -6,10 +6,17 @@ step, in the order the script performs it. And the dry run itself does nothing:
 `brew`, `ollama`, `uv` and `curl` are replaced here by recorders, on a PATH that
 cannot reach the real ones, and every record has to come back empty.
 
-Two tests here are not dry runs: what the script does when a tool fails, and
-when the endpoint it is asked to reach is somebody else's machine, is only
-visible in a real run. They use the same recorders, and both stop the script at
-step 5 or step 7 — where a refusal belongs, and before anything is installed.
+Some tests here are not dry runs: what the script does when a tool fails, when
+the endpoint it is asked to reach is somebody else's machine, what it will and
+will not start a server on, and what it leaves behind when writing `.env` fails,
+is only visible in a real run. They use the same recorders — so a "real" run
+still installs, downloads and starts nothing — and each either stops at a
+refusal, before anything is installed, or walks the whole script with every
+tool stubbed out.
+
+Step 12 is a Python program embedded in the script, and its classification of
+this run's own leftovers is tested separately, on the snippet alone: it needs
+neither macOS nor the eleven steps in front of it.
 
 The steps that install, download or write are only reachable on macOS (the
 script refuses anywhere else), so those tests run on macOS and the refusal
@@ -17,15 +24,18 @@ itself is what CI on Linux checks — the `install-script` job in `ci.yml` is
 where they actually run. `--help` and a bad flag are parsed before the platform
 check, so they are tested everywhere.
 """
+import importlib.util
 import os
 import platform
+import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
-from conftest import REPO, fresh_output
+from conftest import REPO, SCRUBBED, fresh_output
 
 SCRIPT = REPO / "scripts" / "install-mac.sh"
 BASH = shutil.which("bash")
@@ -96,6 +106,26 @@ def dry_run(sandbox, *flags):
                             cwd=root, env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     return result.stdout
+
+
+def reaches_the_start_path(sandbox):
+    """Make the run take the branch that starts Ollama — where the OLLAMA_HOST
+    gate is — and then let it finish. `curl` answers only once something has
+    started a server, which here means once `brew` has been called: before that
+    /api/tags is unreachable and the script has to start one, after it the server
+    is up and the wait loop ends on its first check instead of after a minute."""
+    _, records, env = sandbox
+    curl = Path(env["PATH"].split(os.pathsep)[0]) / "curl"
+    curl.write_text(f'#!/bin/sh\necho "$@" >> "{records}/curl"\n'
+                    f'[ -e "{records}/brew" ] && exit 0\nexit 7\n')
+    curl.chmod(0o755)
+
+
+def real_run(sandbox, *flags, **environment):
+    """Not a dry run: the steps themselves, against the recorders."""
+    root, _, env = sandbox
+    return subprocess.run([BASH, "scripts/install-mac.sh", *flags], cwd=root,
+                          env={**env, **environment}, capture_output=True, text=True)
 
 
 def config_models():
@@ -219,6 +249,80 @@ def test_refuses_to_start_a_server_that_is_not_on_this_machine(sandbox):
 
 
 @mac_only
+@pytest.mark.parametrize("bind", ["0.0.0.0:11434", ":11434", "0", "11434", "999999",
+                                  "example.com:11434"])
+def test_a_non_loopback_ollama_host_is_refused(sandbox, bind):
+    """OLLAMA_HOST, not OLLAMA_URL, is what a server started here binds, so the
+    gate is on it and it is closed by default. A bare port is refused with the
+    rest: ':11434' is a host/port pair whose empty host is every interface, and
+    '0' is 0.0.0.0 — the two spellings that read most like loopback and are not."""
+    _, records, _ = sandbox
+    reaches_the_start_path(sandbox)
+    result = real_run(sandbox, "--no-demo", OLLAMA_HOST=bind)
+    assert result.returncode == 1, result.stdout
+    assert f"OLLAMA_HOST={bind}" in result.stderr
+    assert "unset OLLAMA_HOST" in result.stderr           # the fix is named
+    assert not (records / "brew").exists(), "the gate let a server be started"
+
+
+@mac_only
+@pytest.mark.parametrize("bind", ["", "localhost", "127.0.0.1:11434", "[::1]:11434",
+                                  "http://127.0.0.1:11434", "https://localhost"])
+def test_a_loopback_ollama_host_passes_the_gate(sandbox, bind):
+    """The forms that mean this machine — with or without a port, with or without
+    a scheme — are the ones a server may be started on, and 'http://127.0.0.1:11434'
+    is among them: it was refused before, which is the wrong half to fail closed."""
+    _, records, _ = sandbox
+    reaches_the_start_path(sandbox)
+    result = real_run(sandbox, "--no-demo", OLLAMA_HOST=bind)
+    assert result.returncode == 0, result.stderr
+    assert "OLLAMA_HOST" not in result.stderr
+    # Past the gate is `brew services run` — the session-only form, no login item.
+    assert "services run ollama" in (records / "brew").read_text()
+    assert "brew services start ollama" in result.stdout   # how to make it permanent
+
+
+@mac_only
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a chmod 000 file anyway")
+def test_a_failed_env_write_leaves_no_env_behind(sandbox):
+    """`local_env > .env` truncated the file into existence before sed produced a
+    byte, so a sed that failed left an empty .env — which the next run refuses to
+    overwrite and config.py resolves to the hosted defaults. The fully local run
+    became a hosted one, silently. Now the write lands beside it and only a
+    complete file is moved into place."""
+    root, _, _ = sandbox
+    reaches_the_start_path(sandbox)
+    (root / ".env.example").chmod(0o000)
+    try:
+        result = real_run(sandbox, "--no-demo")
+    finally:
+        (root / ".env.example").chmod(0o644)
+    assert result.returncode == 1, result.stdout
+    assert "no usable .env" in result.stderr
+    assert not (root / ".env").exists(), "a .env was left behind by a failed write"
+    assert [p.name for p in root.glob(".env.tmp.*")] == []
+
+
+@mac_only
+def test_an_existing_env_decides_the_mode_and_says_so(sandbox):
+    """A .env is never overwritten, so it — not the flag — is what the run is
+    setting up. Without --hosted the banner still says fully local, so the step
+    that finds the file has to say plainly that the mode was not applied, and
+    the answering model that mode would pull must not be pulled."""
+    root, records, _ = sandbox
+    embed_model, llm_model = config_models()
+    reaches_the_start_path(sandbox)
+    (root / ".env").write_text("LLM_BACKEND=openrouter\nOPENROUTER_API_KEY=k\n")
+    result = real_run(sandbox, "--no-demo")
+    assert result.returncode == 0, result.stderr
+    assert "it sets LLM_BACKEND=openrouter" in result.stdout
+    assert "was NOT applied" in result.stdout
+    pulled = (records / "ollama").read_text()
+    assert f"pull {embed_model}" in pulled          # embeddings are local either way
+    assert f"pull {llm_model}" not in pulled
+
+
+@mac_only
 def test_refuses_outside_the_repository_root(tmp_path):
     # Steps 1 and 2 only read; nothing is stubbed here because nothing runs.
     result = subprocess.run([BASH, str(SCRIPT), "--dry-run"], cwd=tmp_path,
@@ -234,6 +338,50 @@ def test_refuses_to_run_anywhere_but_macos(tmp_path):
     assert result.returncode == 1
     assert "macOS only" in result.stderr
     assert "README.md" in result.stderr
+
+
+# --- the preflight snippet, on its own ---------------------------------------
+# Step 12 is a Python program embedded in the script, and its exit codes are what
+# turn "something is wrong" into "this run's own leftovers". That classification
+# is the part worth testing, and it needs neither macOS nor the eleven steps in
+# front of it: the snippet is lifted out of the script by the same shape the
+# script writes it in, and run against the installed package.
+PREFLIGHT_RE = re.compile(r"^preflight_code='\n(.*?)\n'$", re.M | re.S)
+have_package = importlib.util.find_spec("ask_your_library") is not None
+
+
+def preflight_snippet():
+    match = PREFLIGHT_RE.search(SCRIPT.read_text(encoding="utf-8"))
+    assert match, "preflight_code='...' is no longer in the script in that shape"
+    return match.group(1)
+
+
+def run_preflight(expected, tmp_path):
+    """The snippet in a fresh interpreter that has an OpenRouter key and no
+    index: the key half of check_environment passes and no Ollama is contacted,
+    so the missing index is the only problem — the condition being classified."""
+    env = {k: v for k, v in os.environ.items() if k not in SCRUBBED}
+    env["PYTHONPATH"] = str(REPO)
+    env.update(LLM_BACKEND="openrouter", EMBED_BACKEND="openrouter",
+               OPENROUTER_API_KEY="not-a-real-key",
+               LIBRARY_DB_PATH=str(tmp_path / "nothing-here"))
+    return subprocess.run([sys.executable, "-c", preflight_snippet(), expected],
+                          cwd=tmp_path, env=env, capture_output=True, text=True)
+
+
+@pytest.mark.skipif(not have_package, reason="the package is not importable here")
+def test_the_preflight_snippet_classifies_a_missing_index(tmp_path):
+    result = run_preflight("no-index", tmp_path)
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert str(tmp_path / "nothing-here") in result.stdout      # and still reports it
+
+
+@pytest.mark.skipif(not have_package, reason="the package is not importable here")
+def test_the_preflight_snippet_fails_a_problem_this_run_did_not_leave(tmp_path):
+    """The same missing index, with nothing declared expected: an unclassified
+    problem is exit 1, which is what ends the run."""
+    result = run_preflight("", tmp_path)
+    assert result.returncode == 1, result.stdout + result.stderr
 
 
 def test_help_lists_every_flag(tmp_path):
