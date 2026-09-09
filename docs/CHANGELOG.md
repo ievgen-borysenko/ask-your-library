@@ -43,6 +43,34 @@
   this run's models onto whatever machine that variable named. And `--hosted` with an `OLLAMA_URL`
   off this machine says in its own line that every passage of the library would be embedded there,
   since that mode keeps `EMBED_BACKEND=ollama`.
+- **The installer reads `.env` the way the application reads it, and decides before it installs
+  anything.** The guard's parser was `sed -n "s/^NAME=//p"`, which understands one form and hands
+  back every other one as written: `LLM_BACKEND="ollama"` came out with its quotes, was not equal
+  to `ollama`, and so classified a fully local `.env` as hosted — the guard was then never applied
+  to the rest of the file, and `EMBED_BACKEND="openrouter"` went through, while python-dotenv read
+  those same two lines as a local answering model with the whole library embedded on OpenRouter.
+  The subset python-dotenv supports is now reproduced in the shell (blank lines and comments, an
+  `export` prefix, whitespace around the `=`, unquoted values with an inline `#` comment, single-
+  and double-quoted values with the escapes each of them decodes), and everything outside it — an
+  unmatched quote, a multi-line value, a `${VAR}` interpolation, a line with no `=` — stops the run
+  at exit 2 naming the line number, rather than being read one way here and another way there. It
+  is bash and not Python because it has to run before `uv` exists, which is the second half of
+  this: the whole resolution now sits directly after the repository-root check, ahead of `brew
+  install uv` and `uv python install`. A run that was going to be refused had already downloaded
+  and installed both. `--print-env-resolution` prints how the script read the file, and the tests
+  hold that output to `dotenv_values()` from the locked library, form by form.
+- **One resolver decides every setup step, and an embedder that is not on this machine is named
+  with its destination.** Which models step 8 pulls, whether step 12 expects a missing key, and
+  which expectation step 12 holds the loaded configuration to now all come from the same
+  resolution of what the application will load. So `--hosted` with an exported `LLM_BACKEND=ollama`
+  pulls the answering model that run is going to need, instead of finishing at "Done." with the
+  first question about to ask Ollama for a model nothing fetched — and step 12 checks the hosted
+  expectation as well as the local one. `--hosted` moves the answering model and nothing else, so a
+  run whose embeddings resolve off this machine says so whichever way it got there: a remote
+  `OLLAMA_URL` as before, and now `EMBED_BACKEND=openrouter`, which warned about nothing at all,
+  each naming the endpoint it resolves to. `OLLAMA_HOST` is parsed as an authority and its host
+  compared exactly, because `localhost:11434@ollama.example.com` begins with the loopback spelling
+  and *is* `ollama.example.com`: a match on a prefix sent this run's `ollama pull` there.
 - **`SECURITY.md` describes the branch rules that are actually in force.** The paragraph on
   required checks said the repository was private on the free plan until its first release and that
   a red check was honoured by hand. It is public, and the ruleset on `main` lists all seven checks

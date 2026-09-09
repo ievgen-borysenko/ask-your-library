@@ -19,7 +19,8 @@
 #
 # Exit codes: 0 done, 1 a prerequisite is missing or a step failed (both are printed
 # with the fix), 2 bad usage, or a configuration the application would not load —
-# an exported variable that contradicts the mode this run sets up.
+# an exported variable that contradicts the mode this run sets up, or a .env line
+# this script cannot read the way python-dotenv would.
 # -E, not just -e: without it the ERR trap below is not inherited by functions,
 # command substitutions or subshells, so every failure inside one of them ended
 # the script at the failing command's own status with nothing of ours printed.
@@ -45,7 +46,8 @@ first_line() { printf '%s\n' "${1%%$'\n'*}"; }
 
 usage() {
     cat <<'USAGE'
-Usage: bash scripts/install-mac.sh [--dry-run] [--yes] [--no-demo] [--hosted] [--help]
+Usage: bash scripts/install-mac.sh [--dry-run] [--yes] [--no-demo] [--hosted]
+                                   [--print-env-resolution] [--help]
 
 Sets up Ask Your Library on macOS: uv and Ollama through Homebrew, the two
 models, the locked dependencies, a .env, and (optionally) the demo corpus.
@@ -59,13 +61,19 @@ Run it from the repository root.
   --hosted        write the hosted configuration (OpenRouter answering model)
                   instead of the fully local one. The key is never taken on the
                   command line: the script names the variable to set
+  --print-env-resolution
+                  debug: print how this script reads the .env it would judge —
+                  one `env-resolution<TAB>NAME<TAB>value` record per name, with
+                  \\, newlines and tabs escaped — and exit. Installs nothing.
+                  It is how the tests hold this reading to python-dotenv's
   --help, -h      this text
 
 Exit codes: 0 done, 1 a prerequisite is missing or a step failed (both are
 printed with the fix), 2 bad usage (an unknown option, or not run from the
-repository root) or a shell whose exported settings contradict the mode: the
+repository root), a shell whose exported settings contradict the mode — the
 application reads .env without overriding what is already exported, so those
-values, not this script's, would decide where your data goes.
+values, not this script's, would decide where your data goes — or a .env line
+outside the subset this script can read exactly as python-dotenv does.
 USAGE
 }
 
@@ -73,6 +81,7 @@ dry_run=0
 assume_yes=0
 want_demo=1
 hosted=0
+print_resolution=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -80,6 +89,7 @@ while [ $# -gt 0 ]; do
         -y|--yes) assume_yes=1 ;;
         --no-demo) want_demo=0 ;;
         --hosted) hosted=1 ;;
+        --print-env-resolution) print_resolution=1 ;;
         -h|--help) usage; exit 0 ;;
         *) fail "unknown option: $1"; usage >&2; exit 2 ;;
     esac
@@ -153,124 +163,12 @@ if [ ! -f pyproject.toml ] || ! grep -q '^name = "ask-your-library"' pyproject.t
 fi
 note "$(pwd)"
 
-# --- 3. Homebrew ------------------------------------------------------------
-step "Homebrew: brew on PATH (it installs uv and Ollama)"
-if ! command -v brew >/dev/null 2>&1; then
-    # Both standard prefixes: /opt/homebrew on Apple silicon, /usr/local on Intel.
-    for brew_prefix in /opt/homebrew /usr/local; do
-        if [ -x "$brew_prefix/bin/brew" ]; then
-            note "$brew_prefix/bin/brew exists but is not on PATH; used for this run"
-            note "make that permanent: eval \"\$($brew_prefix/bin/brew shellenv)\""
-            PATH="$brew_prefix/bin:$PATH"
-            export PATH
-            break
-        fi
-    done
-fi
-if ! command -v brew >/dev/null 2>&1; then
-    brew_install_url='https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh'
-    fail "Homebrew is missing. Install it yourself with the official command:"
-    printf '  /bin/bash -c "$(curl -fsSL %s)"\n' "$brew_install_url" >&2
-    fail "(from https://brew.sh — this script never runs it for you), then re-run."
-    exit 1
-fi
-note "$(command -v brew)"
-
-# --- 4. Git -----------------------------------------------------------------
-step "Git: git on PATH (part of the Command Line Tools)"
-if ! command -v git >/dev/null 2>&1; then
-    fail "git is missing. Install the Command Line Tools, then re-run:"
-    fail "  xcode-select --install"
-    exit 1
-fi
-note "$(command -v git)"
-
-# --- 5. uv ------------------------------------------------------------------
-step "uv: uv on PATH (it provides Python and the locked dependencies)"
-if command -v uv >/dev/null 2>&1; then
-    note "$(command -v uv)"
-else
-    note "missing"
-    run brew install uv
-fi
-
-# --- 6. Python --------------------------------------------------------------
-step "Python: the version pyproject.toml requires, provided by uv"
-python_req="$(sed -n 's/^requires-python *= *">=\([0-9][0-9.]*\)".*/\1/p' pyproject.toml)"
-python_req="$(first_line "$python_req")"
-if [ -z "$python_req" ]; then
-    fail "could not read requires-python from pyproject.toml. Install an interpreter"
-    fail "yourself (uv python install <version>) and re-run."
-    exit 1
-fi
-note "requires-python >=$python_req"
-if [ "$dry_run" -eq 1 ]; then
-    plan "check 'uv python find >=$python_req'"
-    plan "run 'uv python install $python_req' when no interpreter answers that"
-elif uv python find ">=$python_req" >/dev/null 2>&1; then
-    note "an interpreter >=$python_req is already available to uv"
-else
-    run uv python install "$python_req"
-fi
-
 # The model names and the endpoint come from the code, so this script cannot
 # pull a model the app will never ask for. Exported value first, then .env, then
 # the default in config.py — the order config.py itself resolves them in.
 config_default() {
     first_line "$(sed -n "s/.*(\"$1\", *\"\\([^\"]*\\)\").*/\\1/p" src/ask_your_library/config.py)"
 }
-
-dotenv_value() {
-    [ -f .env ] || return 0
-    first_line "$(sed -n "s/^$1=//p" .env)"
-}
-
-setting() {
-    local name="$1" value
-    value="${!name-}"
-    [ -n "$value" ] || value="$(dotenv_value "$name")"
-    [ -n "$value" ] || value="$(config_default "$name")"
-    printf '%s\n' "$value"
-}
-
-ollama_url="$(setting OLLAMA_URL)"
-# config.py strips trailing slashes before it builds an endpoint out of this
-# value; without the same here a URL written with one asks for //api/tags.
-while [ "${ollama_url%/}" != "$ollama_url" ]; do ollama_url="${ollama_url%/}"; done
-embed_model="$(setting OLLAMA_EMBED_MODEL)"
-llm_model="$(setting OLLAMA_LLM_MODEL)"
-if [ -z "$ollama_url" ] || [ -z "$embed_model" ] || [ -z "$llm_model" ]; then
-    fail "could not read the Ollama defaults from src/ask_your_library/config.py."
-    fail "export OLLAMA_URL, OLLAMA_EMBED_MODEL and OLLAMA_LLM_MODEL, then re-run."
-    exit 1
-fi
-# config.py hands OLLAMA_URL to the client as it stands — LLM_BASE_URL is that
-# value with /v1 after it — so a value with no scheme is not an address the
-# application can call, and "localhost:11434" is the spelling that looks like
-# one. Refused here, by name, rather than as a mismatch eleven steps later.
-case "$ollama_url" in
-    *://*) ;;
-    *)
-        fail "OLLAMA_URL=$ollama_url has no scheme, and config.py uses the value as it"
-        fail "stands: the answering model would be asked for at $ollama_url/v1, which is"
-        fail "not an address. Write it in full (http://localhost:11434), or unset"
-        fail "OLLAMA_URL to use that default, and re-run."
-        exit 2
-        ;;
-esac
-
-# Which backend this run will actually answer with — decided before step 8, and
-# by the .env already in the clone when there is one: step 10 never overwrites
-# one, so the flag alone would pull a model this run is never going to call and
-# expect a key this run is never going to need. Only when there is no .env does
-# --hosted (or its absence) decide.
-env_backend="$(dotenv_value LLM_BACKEND)"
-effective_backend="${env_backend:-$requested_backend}"
-if [ "$effective_backend" = "ollama" ]; then
-    effective_mode="fully local"
-else
-    effective_mode="hosted"
-fi
 
 local_env() {
     # The lines local mode changes. LLM_TIMEOUT_S is one of them because
@@ -296,6 +194,13 @@ local_env() {
 hosted_env() { cat .env.example; }
 
 # --- the configuration the application will actually load -------------------
+# Everything from here to the end of this section reads files and decides; it
+# installs nothing. It sits BEFORE steps 3-6 on purpose: `brew install uv` and
+# `uv python install` download and write, and a run this section is going to
+# refuse had already done both by the time the refusal was printed. Nothing
+# below needs brew, uv, git or Ollama — only pyproject.toml, config.py and
+# .env / .env.example, all of which step 2 has just confirmed are here.
+#
 # config.py calls load_dotenv() without override, so a variable this shell
 # exports wins over every line step 10 writes. A shell already carrying another
 # project's hosted settings therefore produced a "fully local" install that
@@ -339,18 +244,289 @@ else
     [ -n "$planned_env" ] || planned_env_read=0
 fi
 
-planned_value() { first_line "$(printf '%s\n' "$planned_env" | sed -n "s/^$1=//p")"; }
+# --- reading that .env the way the application reads it ----------------------
+# python-dotenv is what config.py loads .env with, and it cannot be used here:
+# this section runs before uv exists, which is the whole point of it running
+# before uv exists. So the subset python-dotenv supports is reproduced in bash
+# — no interpreter to find, nothing to install — and every form outside that
+# subset stops the run instead of being guessed at. The parser it replaces was
+# `sed -n "s/^NAME=//p"`, which handed back LLM_BACKEND="ollama" WITH its
+# quotes: not equal to "ollama", so the run classified itself as hosted and
+# never applied the local guard at all, while python-dotenv read the same file
+# as a local backend with an OpenRouter embedder.
+#
+# Reproduced: blank lines and # comments; an optional `export ` prefix;
+# whitespace around the `=`; unquoted values, where whitespace followed by #
+# starts a comment; values in matching single or double quotes, quotes removed,
+# with the escapes python-dotenv decodes (\\ and \' inside single quotes;
+# those, \" and \a \b \f \n \r \t \v inside double ones).
+# Refused, by line number: an unmatched quote (which is also how a multi-line
+# value arrives), a ${VAR} interpolation (python-dotenv expands those by
+# default and this script will not), a line with no `=`, a name that is not a
+# plain identifier, and anything but a comment after a closing quote.
+dotenv_names=""
+dotenv_trimmed=""
+dotenv_scanned=""
+dotenv_rest=""
+
+dotenv_refuse() {
+    fail "$planned_env_source, line $1: $2."
+    fail "the application reads .env with python-dotenv, which would read that line"
+    fail "differently from this script — and the difference decides where your data"
+    fail "goes, so neither reading is safe to assume. Write the line as NAME=value"
+    fail "(quotes optional, matched and closed if used, no \${...}) and re-run."
+    exit 2
+}
+
+# Trimming through a global instead of a command substitution: this runs over
+# every line of the file, and a fork per line is a fork too many.
+dotenv_ltrim() {
+    dotenv_trimmed="$1"
+    while :; do
+        case "$dotenv_trimmed" in
+            " "*|$'\t'*) dotenv_trimmed="${dotenv_trimmed#?}" ;;
+            *) break ;;
+        esac
+    done
+}
+
+dotenv_rtrim() {
+    dotenv_trimmed="$1"
+    while :; do
+        case "$dotenv_trimmed" in
+            *" "|*$'\t') dotenv_trimmed="${dotenv_trimmed%?}" ;;
+            *) break ;;
+        esac
+    done
+}
+
+# Reads a quoted value out of "$1", which starts with the quote character, into
+# dotenv_scanned, and leaves what follows the closing quote in dotenv_rest.
+# Returns 1 when the quote is never closed — python-dotenv would then either
+# swallow the following lines (its value patterns are DOTALL) or drop the line
+# entirely, and neither is something to guess between.
+dotenv_scan_quoted() {
+    local text="$1" quote value="" index=1 char next
+    quote="${text:0:1}"
+    while [ "$index" -lt "${#text}" ]; do
+        char="${text:index:1}"
+        if [ "$char" = "\\" ]; then
+            # A backslash always consumes the character after it, so \" does not
+            # close a double-quoted value and \\ is not the start of an escape.
+            index=$((index + 1))
+            [ "$index" -lt "${#text}" ] || return 1
+            next="${text:index:1}"
+            if [ "$quote" = "'" ]; then
+                case "$next" in
+                    "\\"|"'") value="$value$next" ;;
+                    *) value="$value\\$next" ;;
+                esac
+            else
+                case "$next" in
+                    "\\"|"'"|'"') value="$value$next" ;;
+                    a) value="$value"$'\a' ;;
+                    b) value="$value"$'\b' ;;
+                    f) value="$value"$'\f' ;;
+                    n) value="$value"$'\n' ;;
+                    r) value="$value"$'\r' ;;
+                    t) value="$value"$'\t' ;;
+                    v) value="$value"$'\v' ;;
+                    *) value="$value\\$next" ;;
+                esac
+            fi
+        elif [ "$char" = "$quote" ]; then
+            dotenv_scanned="$value"
+            dotenv_rest="${text:$((index + 1))}"
+            return 0
+        else
+            value="$value$char"
+        fi
+        index=$((index + 1))
+    done
+    return 1
+}
+
+dotenv_parse() {
+    local line number=0 trimmed key value tail
+    dotenv_names=""
+    while IFS= read -r line || [ -n "$line" ]; do
+        number=$((number + 1))
+        line="${line%$'\r'}"            # a CRLF file: that \r is the line ending
+        case "$line" in
+            *$'\r'*) dotenv_refuse "$number" "a carriage return inside the line" ;;
+        esac
+        dotenv_ltrim "$line"
+        trimmed="$dotenv_trimmed"
+        [ -n "$trimmed" ] || continue                   # a blank line
+        case "$trimmed" in
+            "#"*) continue ;;                           # a comment line
+        esac
+        case "$trimmed" in
+            export" "*|export$'\t'*)
+                trimmed="${trimmed#export}"
+                dotenv_ltrim "$trimmed"
+                trimmed="$dotenv_trimmed"
+                ;;
+        esac
+        case "$trimmed" in
+            *"="*) ;;
+            *) dotenv_refuse "$number" \
+                   "no = on the line, so python-dotenv holds the name with no value at all" ;;
+        esac
+        dotenv_rtrim "${trimmed%%=*}"
+        key="$dotenv_trimmed"
+        dotenv_ltrim "${trimmed#*=}"
+        value="$dotenv_trimmed"
+        case "$key" in
+            ""|[0-9]*|*[!A-Za-z0-9_]*)
+                dotenv_refuse "$number" \
+                    "\"$key\" is not a plain NAME (letters, digits and _, not starting with a digit)" ;;
+        esac
+        case "$value" in
+            '"'*|"'"*)
+                if ! dotenv_scan_quoted "$value"; then
+                    dotenv_refuse "$number" "the ${value:0:1} quote is never closed on this line"
+                fi
+                dotenv_ltrim "$dotenv_rest"
+                tail="$dotenv_trimmed"
+                case "$tail" in
+                    ""|"#"*) ;;
+                    *) dotenv_refuse "$number" "text after the closing quote that is not a comment" ;;
+                esac
+                value="$dotenv_scanned"
+                ;;
+            *)
+                # python-dotenv: the rest of the line, then re.sub(r"\s+#.*", "")
+                # and rstrip() — so whitespace before a # starts a comment, and a
+                # # with no whitespace in front of it is part of the value.
+                case "$value" in
+                    *" #"*|*$'\t'"#"*)
+                        case "$value" in
+                            *" #"*) value="${value%%" #"*}" ;;
+                        esac
+                        case "$value" in
+                            *$'\t'"#"*) value="${value%%$'\t'"#"*}" ;;
+                        esac
+                        ;;
+                esac
+                dotenv_rtrim "$value"
+                value="$dotenv_trimmed"
+                ;;
+        esac
+        case "$value" in
+            *'${'*) dotenv_refuse "$number" \
+                        "a \${...} interpolation, which python-dotenv expands from the environment" ;;
+        esac
+        # No associative arrays: this has to run under the bash 3.2 macOS ships.
+        # $key is an identifier by the check above, and the right-hand side is a
+        # variable, so the assignment neither splits nor globs.
+        eval "dotenv_v_$key=\$value"
+        case " $dotenv_names " in
+            *" $key "*) ;;
+            *) dotenv_names="$dotenv_names $key" ;;
+        esac
+    done <<< "$1"
+}
+
+# The debug flag, and the way the tests prove this parser and python-dotenv
+# agree: one record per name, in the order the file defines them, with the
+# value escaped so a newline inside one (a \n in a double-quoted value) cannot
+# be mistaken for the end of the record.
+print_env_resolution() {
+    local name variable value out index char
+    for name in $dotenv_names; do
+        variable="dotenv_v_$name"
+        value="${!variable-}"
+        out=""
+        index=0
+        while [ "$index" -lt "${#value}" ]; do
+            char="${value:index:1}"
+            case "$char" in
+                "\\") out="$out\\\\" ;;
+                $'\n') out="${out}\\n" ;;
+                $'\r') out="${out}\\r" ;;
+                $'\t') out="${out}\\t" ;;
+                *) out="$out$char" ;;
+            esac
+            index=$((index + 1))
+        done
+        printf 'env-resolution\t%s\t%s\n' "$name" "$out"
+    done
+}
+
+if [ "$planned_env_read" -eq 1 ]; then
+    dotenv_parse "$planned_env"
+fi
+if [ "$print_resolution" -eq 1 ]; then
+    print_env_resolution
+    exit 0
+fi
+
+# The value that .env gives a name, as python-dotenv would give it.
+planned_value() {
+    local variable="dotenv_v_$1"
+    printf '%s\n' "${!variable-}"
+}
 
 # Whether that .env names the variable at all. python-dotenv fills every name it
 # holds a line for, a blank line included, so "set to nothing" and "not
 # mentioned" are two different states of the environment — and graph.py reads
 # exactly that difference.
 dotenv_defines() {
-    case $'\n'"$planned_env" in
-        *$'\n'"$1"=*) return 0 ;;
+    case " $dotenv_names " in
+        *" $1 "*) return 0 ;;
     esac
     return 1
 }
+
+setting() {
+    local name="$1" value
+    value="${!name-}"
+    [ -n "$value" ] || value="$(planned_value "$name")"
+    [ -n "$value" ] || value="$(config_default "$name")"
+    printf '%s\n' "$value"
+}
+
+ollama_url="$(setting OLLAMA_URL)"
+# config.py strips trailing slashes before it builds an endpoint out of this
+# value; without the same here a URL written with one asks for //api/tags.
+while [ "${ollama_url%/}" != "$ollama_url" ]; do ollama_url="${ollama_url%/}"; done
+embed_model="$(setting OLLAMA_EMBED_MODEL)"
+llm_model="$(setting OLLAMA_LLM_MODEL)"
+if [ -z "$ollama_url" ] || [ -z "$embed_model" ] || [ -z "$llm_model" ]; then
+    fail "could not read the Ollama defaults from src/ask_your_library/config.py."
+    fail "export OLLAMA_URL, OLLAMA_EMBED_MODEL and OLLAMA_LLM_MODEL, then re-run."
+    exit 1
+fi
+# config.py hands OLLAMA_URL to the client as it stands — LLM_BASE_URL is that
+# value with /v1 after it — so a value with no scheme is not an address the
+# application can call, and "localhost:11434" is the spelling that looks like
+# one. Refused here, by name, rather than as a mismatch eleven steps later.
+case "$ollama_url" in
+    *://*) ;;
+    *)
+        fail "OLLAMA_URL=$ollama_url has no scheme, and config.py uses the value as it"
+        fail "stands: the answering model would be asked for at $ollama_url/v1, which is"
+        fail "not an address. Write it in full (http://localhost:11434), or unset"
+        fail "OLLAMA_URL to use that default, and re-run."
+        exit 2
+        ;;
+esac
+
+# The mode this run SETS UP — which is what the guard below holds the loaded
+# configuration to. Decided by the .env already in the clone when there is one:
+# step 10 never overwrites one, so the flag alone would set up a mode the file
+# contradicts. Only when there is no .env does --hosted (or its absence) decide.
+env_backend=""
+if [ -f .env ]; then
+    env_backend="$(planned_value LLM_BACKEND)"
+fi
+setup_backend="${env_backend:-$requested_backend}"
+if [ "$setup_backend" = "ollama" ]; then
+    setup_mode="fully local"
+else
+    setup_mode="hosted"
+fi
 
 # Set as far as the loader is concerned: exported at any value, an empty one
 # included (python-dotenv skips a name that is already in the environment), or
@@ -417,24 +593,66 @@ shown_value() {
     esac
 }
 
-# The spellings of this machine a URL host may take. Quoted patterns are
-# literal, which the IPv6 form needs: bare [::1] is a bracket expression.
-# The authority is cut out before it is matched, and the userinfo with it: the
-# host of http://localhost:11434@ollama.example.com is ollama.example.com, which
-# is where the application would send everything, while the text in front of the
-# @ reads as loopback to anything that matches on a prefix. Case folded too,
-# because a host name is case-insensitive and LOCALHOST was being refused.
-url_is_loopback() {
-    local host="${1#*://}"
-    host="${host%%/*}"          # the authority only: no path,
-    host="${host%%\?*}"         # ... no query,
-    host="${host%%#*}"          # ... no fragment,
-    host="${host##*@}"          # ... and no userinfo in front of the real host.
-    host="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+# host[:port], compared against the spellings of this machine EXACTLY. A match
+# on a prefix read localhost:11434@ollama.example.com as loopback — everything
+# in front of the @ is userinfo, and ollama.example.com is the host the request
+# actually goes to — so an @ is refused outright here and the caller that has a
+# userinfo production (a URL) strips it before calling. Case folded, because a
+# host name is case-insensitive and LOCALHOST was being refused. The second
+# argument is the one difference between the two readings of "this machine": a
+# URL's IPv6 host must be bracketed (::1:11434 is an address in its own right),
+# a bind address may be bare.
+authority_is_loopback() {
+    local authority="$1" allow_bare_ipv6="${2-0}" host port
+    case "$authority" in
+        *@*) return 1 ;;                        # userinfo, not a host
+        */*|*"?"*|*"#"*) return 1 ;;            # a path, query or fragment: not an authority
+    esac
+    authority="$(printf '%s' "$authority" | tr '[:upper:]' '[:lower:]')"
+    if [ "$allow_bare_ipv6" = "1" ] && [ "$authority" = "::1" ]; then
+        return 0
+    fi
+    case "$authority" in
+        "["*"]")   host="$authority";                port="" ;;
+        "["*"]:"*) host="${authority%%]*}]";         port="${authority#*]:}" ;;
+        *:*)       host="${authority%%:*}";          port="${authority#*:}" ;;
+        *)         host="$authority";                port="" ;;
+    esac
     case "$host" in
-        localhost|localhost:*|127.0.0.1|127.0.0.1:*|"[::1]"|"[::1]:"*) return 0 ;;
+        localhost|127.0.0.1|"[::1]") ;;
         *) return 1 ;;
     esac
+    case "$port" in
+        "") return 0 ;;
+        *[!0-9]*) return 1 ;;                   # a port that is not a port: malformed
+        *) return 0 ;;
+    esac
+}
+
+# The endpoint config.py hands to the client, as a URL: the authority is cut out
+# of it, and the userinfo with it — http://reader@localhost:11434 IS this
+# machine, http://localhost:11434@ollama.example.com is not.
+url_is_loopback() {
+    local authority="${1#*://}"
+    authority="${authority%%/*}"                # the authority only: no path,
+    authority="${authority%%\?*}"               # ... no query,
+    authority="${authority%%#*}"                # ... no fragment,
+    authority="${authority##*@}"                # ... and no userinfo.
+    authority_is_loopback "$authority"
+}
+
+# OLLAMA_HOST is a host[:port] with an optional scheme, and it has no userinfo
+# production at all — so an @ in it is not a user name, it is the text that made
+# a prefix match call somebody else's machine loopback.
+ollama_host_is_loopback() {
+    local value="$1" authority
+    [ -n "$value" ] || return 0                 # Ollama's own default is loopback
+    case "$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')" in
+        http://*|https://*) authority="${value#*://}" ;;
+        *://*) return 1 ;;                      # some other scheme: not a form to serve on
+        *) authority="$value" ;;
+    esac
+    authority_is_loopback "$authority" 1
 }
 
 # Off in every spelling the SDK accepts; anything else is tracing on.
@@ -524,7 +742,7 @@ for name in $DATA_FLOW_VARS; do
     # stops the run on it, and a config.py default would read as a conflict of
     # its own making (its defaults are the hosted ones). An empty .env is a
     # different thing — it resolves to those defaults for real.
-    if [ "$planned_env_read" -eq 1 ] && [ "$effective_mode" = "fully local" ] \
+    if [ "$planned_env_read" -eq 1 ] && [ "$setup_mode" = "fully local" ] \
         && contradicts_local "$name" "$value"; then
         conflict_names="$conflict_names $name"
         conflict_lines="$conflict_lines  $name=$shown ($origin) — $(local_effect "$name")"$'\n'
@@ -576,10 +794,26 @@ if [ -n "$conflict_names" ]; then
     exit 2
 fi
 
+# Past the guard, so this is the configuration the run is going to carry out —
+# and it is the SAME resolver that decides every setup step from here on: which
+# models step 8 pulls, whether step 12 expects a missing key, and which
+# expectation step 12 holds the loaded configuration to. Reading the flag for
+# one of those and the environment for another is how --hosted with an exported
+# LLM_BACKEND=ollama pulled no answering model, expected a key it did not need,
+# and finished with the first question about to ask a local Ollama for a model
+# nothing had pulled.
+loaded_backend="$(effective_value LLM_BACKEND)"
+loaded_embed_backend="$(effective_value EMBED_BACKEND)"
+if [ "$loaded_backend" = "ollama" ]; then
+    loaded_mode="fully local"
+else
+    loaded_mode="hosted"
+fi
+
 if [ -n "$exported_lines" ]; then
     printf 'Exported in this shell, and read before .env — this is what decides the run:\n'
     printf '%s' "$exported_lines" | while IFS= read -r line; do note "$line"; done
-    if [ "$effective_mode" != "fully local" ]; then
+    if [ "$setup_mode" != "fully local" ]; then
         note "the hosted configuration is what this run sets up, so these are reported only"
     fi
 elif [ "$planned_env_read" -eq 1 ]; then
@@ -596,17 +830,93 @@ if tracing_resolves_on; then
     note "set LANGCHAIN_TRACING_V2=false (and LANGSMITH_TRACING_V2=false) to stop that"
 fi
 
-# --hosted moves the answering model off this machine and nothing else: the
-# example it writes keeps EMBED_BACKEND=ollama, so the Ollama endpoint is where
-# every passage of the library is embedded. An endpoint elsewhere makes that the
-# whole library leaving the machine, which is not what the flag asks for.
-if [ "$effective_mode" != "fully local" ] \
-    && [ "$(effective_value EMBED_BACKEND)" = "ollama" ] \
-    && ! url_is_loopback "$(effective_value OLLAMA_URL)"; then
-    note "warning: EMBED_BACKEND=ollama with OLLAMA_URL=$(effective_value OLLAMA_URL), which is"
-    note "not on this machine — every passage of your library would be sent there to be"
-    note "embedded. --hosted asks for a hosted answering model, not for that. Unset"
-    note "OLLAMA_URL, or set EMBED_BACKEND=openrouter if the remote endpoint is meant."
+# --hosted moves the ANSWERING model off this machine and nothing else, so
+# wherever the embeddings resolve to is where every passage of the library goes
+# — the whole library, not one question. Both halves of that are named here,
+# with the destination each resolves to: a remote Ollama endpoint (the .env this
+# flag writes keeps EMBED_BACKEND=ollama), and an embedding backend that is not
+# Ollama at all. The second one used to print nothing — not even for the
+# EMBED_BACKEND=openrouter this run reports two lines above as "reported only".
+if [ "$setup_mode" != "fully local" ]; then
+    if [ "$loaded_embed_backend" = "ollama" ]; then
+        if ! url_is_loopback "$(effective_value OLLAMA_URL)"; then
+            note "warning: EMBED_BACKEND=ollama with OLLAMA_URL=$(effective_value OLLAMA_URL), which is"
+            note "not on this machine — every passage of your library would be sent there to be"
+            note "embedded. --hosted asks for a hosted answering model, not for that. Unset"
+            note "OLLAMA_URL, or set EMBED_BACKEND=openrouter if the remote endpoint is meant."
+        fi
+    else
+        if [ "$loaded_embed_backend" = "openrouter" ]; then
+            embed_destination="$(effective_value OPENROUTER_BASE_URL)"
+        else
+            embed_destination="whatever endpoint the $loaded_embed_backend backend calls"
+        fi
+        note "warning: EMBED_BACKEND=$loaded_embed_backend ($(value_source EMBED_BACKEND)), which is"
+        note "not on this machine — every passage of your library would be sent to"
+        note "  $embed_destination"
+        note "to be embedded. --hosted asks for a hosted answering model, not for that. Set"
+        note "EMBED_BACKEND=ollama (the value .env.example ships) to keep the library here."
+    fi
+fi
+
+# --- 3. Homebrew ------------------------------------------------------------
+step "Homebrew: brew on PATH (it installs uv and Ollama)"
+if ! command -v brew >/dev/null 2>&1; then
+    # Both standard prefixes: /opt/homebrew on Apple silicon, /usr/local on Intel.
+    for brew_prefix in /opt/homebrew /usr/local; do
+        if [ -x "$brew_prefix/bin/brew" ]; then
+            note "$brew_prefix/bin/brew exists but is not on PATH; used for this run"
+            note "make that permanent: eval \"\$($brew_prefix/bin/brew shellenv)\""
+            PATH="$brew_prefix/bin:$PATH"
+            export PATH
+            break
+        fi
+    done
+fi
+if ! command -v brew >/dev/null 2>&1; then
+    brew_install_url='https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh'
+    fail "Homebrew is missing. Install it yourself with the official command:"
+    printf '  /bin/bash -c "$(curl -fsSL %s)"\n' "$brew_install_url" >&2
+    fail "(from https://brew.sh — this script never runs it for you), then re-run."
+    exit 1
+fi
+note "$(command -v brew)"
+
+# --- 4. Git -----------------------------------------------------------------
+step "Git: git on PATH (part of the Command Line Tools)"
+if ! command -v git >/dev/null 2>&1; then
+    fail "git is missing. Install the Command Line Tools, then re-run:"
+    fail "  xcode-select --install"
+    exit 1
+fi
+note "$(command -v git)"
+
+# --- 5. uv ------------------------------------------------------------------
+step "uv: uv on PATH (it provides Python and the locked dependencies)"
+if command -v uv >/dev/null 2>&1; then
+    note "$(command -v uv)"
+else
+    note "missing"
+    run brew install uv
+fi
+
+# --- 6. Python --------------------------------------------------------------
+step "Python: the version pyproject.toml requires, provided by uv"
+python_req="$(sed -n 's/^requires-python *= *">=\([0-9][0-9.]*\)".*/\1/p' pyproject.toml)"
+python_req="$(first_line "$python_req")"
+if [ -z "$python_req" ]; then
+    fail "could not read requires-python from pyproject.toml. Install an interpreter"
+    fail "yourself (uv python install <version>) and re-run."
+    exit 1
+fi
+note "requires-python >=$python_req"
+if [ "$dry_run" -eq 1 ]; then
+    plan "check 'uv python find >=$python_req'"
+    plan "run 'uv python install $python_req' when no interpreter answers that"
+elif uv python find ">=$python_req" >/dev/null 2>&1; then
+    note "an interpreter >=$python_req is already available to uv"
+else
+    run uv python install "$python_req"
 fi
 
 # --- 7. Ollama --------------------------------------------------------------
@@ -624,26 +934,20 @@ step "Ollama: the binary, and a server answering on $ollama_url/api/tags"
 # through it go an empty value (Ollama's own loopback default) and the spellings
 # of loopback, with an optional scheme and port — nothing else. A bare port is
 # refused with the rest: ":11434" is a host/port pair whose empty host means
-# every interface, and "0" is 0.0.0.0.
+# every interface, and "0" is 0.0.0.0. The host is compared exactly, not by
+# prefix: "localhost:11434@ollama.example.com" begins with the loopback spelling
+# and IS ollama.example.com, so `localhost:*` let this run's models be pulled
+# onto that machine. ollama_host_is_loopback refuses an @ outright — a bind
+# address has no userinfo — along with a port that is not digits and anything
+# carrying a path.
 ollama_bind="${OLLAMA_HOST-}"
-case "$ollama_bind" in
-    http://*)  ollama_bind_host="${ollama_bind#http://}" ;;
-    https://*) ollama_bind_host="${ollama_bind#https://}" ;;
-    *)         ollama_bind_host="$ollama_bind" ;;
-esac
-# Unlike a URL host, a bind address may be a bare ::1 — and that form carries no
-# port, ::1:11434 being an address in its own right; the bracketed form is the
-# one that takes one.
-case "$(printf '%s' "$ollama_bind_host" | tr '[:upper:]' '[:lower:]')" in
-    ""|localhost|localhost:*|127.0.0.1|127.0.0.1:*|"::1"|"[::1]"|"[::1]:"*) ;;
-    *)
-        fail "OLLAMA_HOST=$ollama_bind is not one of the loopback forms this script will"
-        fail "start a server on, or send an 'ollama pull' to, so it could listen — or"
-        fail "fetch — beyond this machine. Run 'unset OLLAMA_HOST' and re-run, or start"
-        fail "Ollama yourself with the binding you want."
-        exit 1
-        ;;
-esac
+if ! ollama_host_is_loopback "$ollama_bind"; then
+    fail "OLLAMA_HOST=$ollama_bind is not one of the loopback forms this script will"
+    fail "start a server on, or send an 'ollama pull' to, so it could listen — or"
+    fail "fetch — beyond this machine. Run 'unset OLLAMA_HOST' and re-run, or start"
+    fail "Ollama yourself with the binding you want."
+    exit 1
+fi
 if command -v ollama >/dev/null 2>&1; then
     note "$(command -v ollama)"
 else
@@ -716,9 +1020,19 @@ pull_model() {
     run ollama pull "$model"
 }
 
+# Which models this run needs is the configuration the APPLICATION will load,
+# not the flag it was started with: an exported LLM_BACKEND=ollama under
+# --hosted is a local answering model, and skipping its pull because the flag
+# said hosted left the first question asking Ollama for a model that was never
+# fetched. Both halves come from effective_value, the same resolver the guard
+# and step 12 use.
 step "Models: pull what Ollama does not have yet (the sizes below are approximate)"
-note "$embed_model — embeddings, approximately 1.2 GB"
-if [ "$effective_backend" = "ollama" ]; then
+if [ "$loaded_embed_backend" = "ollama" ]; then
+    note "$embed_model — embeddings, approximately 1.2 GB"
+else
+    note "no embedding model is pulled: EMBED_BACKEND=$loaded_embed_backend embeds elsewhere"
+fi
+if [ "$loaded_backend" = "ollama" ]; then
     note "$llm_model — answers, a chat model: approximately 3-8 GB depending on the tag"
 else
     note "no answering model is pulled: the answering model stays on OpenRouter"
@@ -726,8 +1040,10 @@ else
         note "that is the .env already in this clone deciding, not this run's flags"
     fi
 fi
-pull_model "$embed_model"
-if [ "$effective_backend" = "ollama" ]; then
+if [ "$loaded_embed_backend" = "ollama" ]; then
+    pull_model "$embed_model"
+fi
+if [ "$loaded_backend" = "ollama" ]; then
     pull_model "$llm_model"
 fi
 
@@ -870,8 +1186,10 @@ fi
 # It also prints the configuration the application resolves — the same import
 # the CLI performs, so the run ends with the values the app will use and not
 # with the ones step 10 wrote. Those differ whenever a variable is exported:
-# config.py loads .env without override. A second argument names the mode this
-# run set up, and a local mode the loader does not agree with ends the run.
+# config.py loads .env without override. A second argument names the mode the
+# effective resolver settled on, and BOTH of its values are checked: a local one
+# the loader does not agree with ends the run, and so does a hosted one whose
+# answering backend came back local — the run pulled no model for that.
 # Exit: 0 nothing to report, 3 only the missing index, 4 only the missing key,
 # 5 both, 6 the effective configuration is not the mode this run set up, 1
 # anything else — including a package that will not import, which is what a bad
@@ -949,6 +1267,17 @@ if mode == "local":
         print("       - the loaded configuration is not the fully local one: "
               + ", ".join(wrong))
         raise SystemExit(6)
+elif mode == "hosted":
+    # The same check the other way round, which was missing entirely: a hosted
+    # run pulled no answering model and expects a key, so a loaded LLM_BACKEND
+    # that is not the hosted one is the same mismatch — the first question would
+    # ask a local Ollama for a model nothing fetched. Only the answering backend
+    # is judged here: where the embeddings go is a warning with its destination
+    # named, not a refusal, because hosted embeddings are a supported shape.
+    if LLM_BACKEND != "openrouter":
+        print("       - the loaded configuration is not the hosted one: "
+              f"LLM_BACKEND={LLM_BACKEND}")
+        raise SystemExit(6)
 
 problems = set(result)
 if not problems:
@@ -968,19 +1297,24 @@ preflight_expect=""
 if [ "$demo_ready" -eq 0 ]; then
     preflight_expect="no-index"
 fi
-if [ "$effective_backend" != "ollama" ]; then
+# config.py's own rule: OPENROUTER_NEEDS_KEY is a hosted answering model OR
+# hosted embeddings, so a local backend with EMBED_BACKEND=openrouter needs the
+# key too and used to have the missing one reported as an unclassified problem.
+if [ "$loaded_backend" != "ollama" ] || [ "$loaded_embed_backend" = "openrouter" ]; then
     preflight_expect="$preflight_expect no-key"
 fi
-# The mode the loader is held to. A .env that already selected the other backend
-# is what this run set up, so the check follows the effective backend, not the flag.
+# The expectation the loader is held to, from the same resolver as the pulls
+# above: what the application will load, not what the flag asked for. Both
+# expectations are checked in the snippet — a hosted run that loads a local
+# backend is the mismatch that used to walk through to "Done."
 preflight_mode="hosted"
-if [ "$effective_backend" = "ollama" ]; then
+if [ "$loaded_backend" = "ollama" ]; then
     preflight_mode="local"
 fi
 if [ "$dry_run" -eq 1 ]; then
     plan "run ask_your_library.preflight.check_environment() and report its problems"
     plan "print the configuration ask_your_library.config resolves, and stop the run when"
-    plan "it is not the $effective_mode one this run set up"
+    plan "it is not the $loaded_mode one this run set up"
 else
     preflight_status=0
     uv run python -c "$preflight_code" "$preflight_expect" "$preflight_mode" || preflight_status=$?
@@ -1003,7 +1337,7 @@ else
             note "set the key in .env before the first question."
             ;;
         6)
-            fail "the configuration the application loads is not the $effective_mode one this"
+            fail "the configuration the application loads is not the $loaded_mode one this"
             fail "run set up — the values printed above are what config.py resolved. It reads"
             fail ".env without overriding what is already exported, so a .env rewrite is no"
             fail "fix: unset the variables named above (or use env -u) and re-run."
