@@ -1012,7 +1012,11 @@ def test_hosted_mode_names_the_endpoint_where_tracing_is_only_reported(sandbox, 
     assert result.returncode == 0, result.stderr
     printed = printed_lines(result.stdout)
     assert "tracing is on: prompts, retrieved passages and answers are uploaded to" in printed
-    assert "https://eu.api.smith.langchain.com" in printed
+    # `.count(...) == 1` and not `in`: the destination gets a line of its own, so
+    # the assertion is that exactly one printed line IS that URL. A bare URL
+    # literal on the left of an `in` reads as a substring test on a URL wherever
+    # it appears, which is the shape this file removed everywhere else.
+    assert printed.count("https://eu.api.smith.langchain.com") == 1
 
 
 # --- OLLAMA_HOST: the host, exactly ------------------------------------------
@@ -1085,7 +1089,7 @@ def test_hosted_mode_warns_when_the_embedder_is_openrouter(sandbox):
     assert ("warning: EMBED_BACKEND=openrouter (exported in this shell), which is"
             in printed)
     assert "not on this machine — every passage of your library would be sent to" in printed
-    assert "https://openrouter.ai/api/v1" in printed
+    assert printed.count("https://openrouter.ai/api/v1") == 1
 
 
 @mac_only
