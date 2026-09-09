@@ -33,15 +33,48 @@ import stat
 from pathlib import Path
 
 import chainlit as cl
+import chainlit.auth.cookie as chainlit_cookie
 from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
+from chainlit.server import app as chainlit_app
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from ask_your_library.graph import build_graph
 from ask_your_library.i18n import LANG, set_lang, status_word, t
 from ask_your_library.preflight import check_api_key, check_environment
 from ask_your_library.runner import history_entry, run_question
+from ask_your_library.sanitize import LINE_BREAK_RE
+
+# A single-user local app never needs the login cookie on a cross-site request;
+# strict keeps it off one, and Chainlit's own default is lax. CHAINLIT_COOKIE_SAMESITE
+# cannot deliver that here: chainlit.auth.cookie reads it once, at ITS import
+# time, and under `chainlit run ui.py` that has already happened before this
+# file is loaded at all — the console script imports chainlit.cli, which reaches
+# chainlit.auth.cookie through ensure_jwt_secret, and calls load_module(ui.py)
+# afterwards. A .env entry is later still (config.load_dotenv runs on the import
+# above). So the two module globals are set directly; they are read at request
+# time, where the cookie is written, not captured at import.
+# secure stays False, which is what Chainlit computes for strict: a Secure cookie
+# is dropped by the browser over plain http, i.e. over the loopback the UI serves.
+# These are private names, pinned to Chainlit 2.12.0 — hence the check, and
+# test_the_login_cookie_is_really_strict_under_chainlit_run.
+if not all(hasattr(chainlit_cookie, name)
+           for name in ("_cookie_samesite", "_cookie_secure")):
+    raise SystemExit("chainlit.auth.cookie no longer has _cookie_samesite/_cookie_secure: the "
+                     "login cookie policy is not being applied, check the Chainlit version")
+chainlit_cookie._cookie_samesite = "strict"
+chainlit_cookie._cookie_secure = False
 
 PROFILE_EN = "English"
 PROFILE_UA = "Українська"
+
+# A page in the reader's browser can send requests to a loopback server; it
+# cannot choose the Host header, and a name it controls that resolves to
+# 127.0.0.1 (DNS rebinding) arrives here as that name. Refusing every Host but
+# the two loopback ones costs nothing locally and closes the browser-side route
+# to /login and the thread endpoints. It is the Host check, not allow_origins:
+# CORS governs what a page may READ cross-origin, and a login POST does not
+# need to be read to have happened.
+ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 
 SCRATCH_DIR = Path(os.environ.get("ASK_SCRATCH_DIR", ".scratch"))
 # AYL_CHAINLIT_DIR exists so tests can import this module without touching the
@@ -53,6 +86,17 @@ CLARIFY_TIMEOUT_SECONDS = 300
 GREEN = "#16a34a"
 YELLOW = "#ca8a04"
 GRAY = "#6b7280"
+
+# Registered on Chainlit's own Starlette app, at import time: the middleware
+# stack is built when the server starts, and adding one afterwards is too late.
+# The guard is for a second import of this module in one process (the tests do
+# that): chainlit.server keeps the app, so the middleware must not stack up.
+if not any(m.cls is TrustedHostMiddleware for m in chainlit_app.user_middleware):
+    chainlit_app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+
+# Before anything is written into it: the repo's .chainlit/ exists (config.toml
+# is committed), but AYL_CHAINLIT_DIR points somewhere that usually does not.
+CHAINLIT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Login tokens need a stable secret, or every server restart logs everyone
 # out. Generated once and persisted to a file (gitignored).
@@ -172,11 +216,26 @@ CREATE TABLE IF NOT EXISTS feedbacks (
 );
 """
 
-CHAINLIT_DIR.mkdir(exist_ok=True)
+
+def own_read_write_only(path: Path) -> None:
+    """0600 for `path` and its SQLite siblings (-wal, -shm, -journal).
+
+    The chat db holds every question, answer and passage of every session, but
+    SQLite creates it with the process umask (0644 on a default account) while
+    the auth secret next to it is 0600. The mode is set after the schema is
+    written, and again on every start, so a db from an older version is
+    narrowed too — and once more in on_chat_start, because the siblings only
+    appear when the data layer opens the db, i.e. after the startup pass."""
+    for candidate in (path, *sorted(path.parent.glob(f"{path.name}-*"))):
+        if candidate.is_file():
+            candidate.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+
 with contextlib.closing(sqlite3.connect(CHAT_DB_PATH)) as _connection:
     # `closing`: a `with` on a sqlite3 connection commits but does not close it
     with _connection:
         _connection.executescript(CHAT_DB_SCHEMA)
+own_read_write_only(CHAT_DB_PATH)
 
 
 @cl.data_layer
@@ -216,9 +275,10 @@ def neutralize_markdown(text: str) -> str:
 async def show_step(step_name: str, step_output: str) -> None:
     # Step text mixes our labels with corpus/model-derived strings (book
     # titles, queries); with unsafe_allow_html enabled for our own badges,
-    # everything third-party must be neutralized (quote=False keeps markdown readable).
+    # everything third-party must be neutralized. A step is plain markdown, so
+    # safe_markdown, not safe_html: its line breaks are the list it prints.
     async with cl.Step(name=step_name, type="tool") as step:
-        step.output = neutralize_markdown(html.escape(step_output, quote=False))
+        step.output = safe_markdown(step_output)
 
 
 def verification_badge(update: dict) -> str:
@@ -227,7 +287,14 @@ def verification_badge(update: dict) -> str:
     numbers are absent."""
     verification = update.get("verification", "")
     numbers = update.get("provenance") or {}
-    tooltip = html.escape(verification, quote=True)
+    # The verification text is built around the quotes that failed, i.e. around
+    # corpus text. Escaping alone is not enough here: a blank line in it ends
+    # the message's HTML block, and what follows is rendered as chat markdown:
+    # an image reference there is fetched with no click. Images are neutralized
+    # and every line break becomes a space — every form of one, because
+    # CommonMark ends a block on a bare CR and on U+2028/U+0085 too, not only on
+    # LF. A <br> inside a title attribute would be shown literally.
+    tooltip = LINE_BREAK_RE.sub(" ", neutralize_markdown(html.escape(verification, quote=True)))
     title = t("ui_badge_title")
 
     if numbers.get("catalog"):
@@ -242,12 +309,12 @@ def verification_badge(update: dict) -> str:
         # Event without numbers (shouldn't happen with the current runner):
         # neutral badge, no locale-bound text sniffing.
         color = GRAY
-        headline = html.escape(verification).replace("\n", "<br>")
+        headline = safe_html(verification)
         details = ""
     elif numbers.get("checked", 0) == 0:
         # no evidence: the answer is itself an honest refusal, nothing to verify
         color = GRAY
-        headline = html.escape(verification)
+        headline = safe_html(verification)
         details = ""
     elif numbers.get("broken", 0) == 0 and numbers.get("unattributed", 0) == 0:
         color = GREEN
@@ -292,12 +359,23 @@ class RunView:
         self.catalog: dict | None = None
 
 
+def safe_markdown(text: str) -> str:
+    """Corpus- or model-derived text in a message we send as plain Markdown (the
+    answer, the steps, the clarify question, the preflight and error lines):
+    escaped and image-free, line breaks left as they are, so a "- item" list
+    still renders as a list. For text going INSIDE one of our own HTML blocks
+    use safe_html, which turns those breaks into <br>."""
+    return neutralize_markdown(html.escape(text, quote=False))
+
+
 def safe_html(text: str) -> str:
     """Corpus- or model-derived text inside our HTML: escaped, image-free, and
     without line breaks. The whole message is ONE CommonMark HTML block, and a
     blank line ends such a block: a card passage with paragraphs would spill
-    out of its <details> and render as chat markdown. <br> keeps the layout."""
-    return neutralize_markdown(html.escape(text, quote=False)).replace("\n", "<br>")
+    out of its <details> and render as chat markdown. <br> keeps the layout.
+    Every form of line break, not only LF: CommonMark ends a block on a bare CR
+    and on U+2028/U+0085 as well (LINE_BREAK_RE, shared with data_block)."""
+    return LINE_BREAK_RE.sub("<br>", safe_markdown(text))
 
 
 def evidence_passages(items: list[dict], passages: dict[str, str]) -> str:
@@ -312,7 +390,13 @@ def evidence_passages(items: list[dict], passages: dict[str, str]) -> str:
     for hit_id, group in by_hit.items():
         first = group[0]
         passage = passages.get(hit_id)
-        body = (f'<pre style="white-space: pre-wrap; font-size: 0.85em;">{safe_html(passage)}</pre>'
+        # A div, not a pre: Chainlit renders a <pre> with its code-snippet
+        # component ("Raw code" plus a copy button) and the text inside it is
+        # dropped, so the passage the badge points at was invisible in the
+        # browser. The style keeps the monospaced, wrapped look a pre gave it;
+        # safe_html already turns the line breaks into <br>.
+        body = (f'<div style="white-space: pre-wrap; font-family: monospace; '
+                f'font-size: 0.85em;">{safe_html(passage)}</div>'
                 if passage is not None else f"<i>{t('ui_passage_missing')}</i>")
         verdicts = " · ".join(f"{safe_html(status_word(s))} {sum(1 for i in group if i.get('status') == s)}"
                               for s in ("confirmed", "unattributed", "broken")
@@ -348,7 +432,7 @@ async def show_metrics(metrics: dict) -> None:
 
     role_rows = ""
     for role, usage in (metrics.get("by_role") or {}).items():
-        role_rows += (f"<tr><td>{html.escape(role)}</td><td>{usage['calls']}</td>"
+        role_rows += (f"<tr><td>{safe_html(role)}</td><td>{usage['calls']}</td>"
                       f"<td>{usage['input_tokens']}</td><td>{usage['output_tokens']}</td>"
                       f"<td>${usage['cost_usd']:.4f}</td></tr>")
 
@@ -361,8 +445,12 @@ async def show_metrics(metrics: dict) -> None:
         f"<div>{t('ui_m_injection', n=metrics.get('redacted_lines', 0))}</div>"
         "</details>")
 
+    # safe_html, not html.escape: the summary interpolates the stop reason, which
+    # reflect writes from the model's decision. The escape kept the HTML inert
+    # but left a blank line able to end this HTML block, and a markdown image
+    # after it would be fetched on render.
     await cl.Message(content=(f'<div style="color:{GRAY}; font-size:0.85em;">'
-                              f'{html.escape(summary)}{details}</div>')).send()
+                              f'{safe_html(summary)}{details}</div>')).send()
 
 
 def render_event(node_name: str, update: dict, view: RunView | None = None) -> None:
@@ -443,7 +531,7 @@ def render_event(node_name: str, update: dict, view: RunView | None = None) -> N
     elif node_name == "synthesize":
         # The answer is model output over corpus text: poisoned corpus HTML
         # must render as text, not DOM (unsafe_allow_html is on for badges).
-        cl.run_sync(cl.Message(content=neutralize_markdown(html.escape(update["answer"], quote=False))).send())
+        cl.run_sync(cl.Message(content=safe_markdown(update["answer"])).send())
 
     elif node_name == "validate":
         cl.run_sync(cl.Message(content=verification_badge(update)).send())
@@ -462,7 +550,7 @@ def ask_user_in_chat(question_to_user: str) -> str:
     """on_clarify for the web UI; called from a worker thread, hence
     cl.run_sync (see render_event)."""
     reply = cl.run_sync(
-        cl.AskUserMessage(content=neutralize_markdown(html.escape(question_to_user, quote=False)),
+        cl.AskUserMessage(content=safe_markdown(question_to_user),
                           timeout=CLARIFY_TIMEOUT_SECONDS).send())
     if reply is None:
         # on timeout, the agent proceeds without the clarification
@@ -503,20 +591,26 @@ async def on_chat_start() -> None:
     set_lang(lang)  # before the welcome message, so t() speaks the profile language
     cl.user_session.set("history", [])
     cl.user_session.set("session_cost", 0.0)
+    # Again here, not only at import: the -wal and -journal siblings hold the
+    # same questions and answers as the db, and SQLite creates them with the
+    # process umask when the data layer opens a session — i.e. after the import
+    # narrowed what existed then. Before the preflight, so the path that reports
+    # problems and returns narrows them too.
+    own_read_write_only(CHAT_DB_PATH)
     # Environment problems as a readable message instead of a traceback on the
     # first question (which would also bill an LLM call before failing).
     problems = await cl.make_async(check_environment)()
     cl.user_session.set("ready", not problems)
     if problems:
         text = t("pf_header") + "\n" + "\n".join(f"- {p}" for p in problems)
-        await cl.Message(content=html.escape(text, quote=False)).send()
+        await cl.Message(content=safe_markdown(text)).send()
         return
     # Non-fatal notices (a degraded index, e.g. no cards table): the session
     # works, but the user is told in the chat, not only in the server log.
     notices = getattr(problems, "notices", [])
     if notices:
         text = t("pf_notice_header") + "\n" + "\n".join(f"- {n}" for n in notices)
-        await cl.Message(content=html.escape(text, quote=False)).send()
+        await cl.Message(content=safe_markdown(text)).send()
     await cl.Message(content=t("ui_welcome")).send()
 
 
@@ -584,7 +678,7 @@ async def on_message(message: cl.Message) -> None:
         problems = await cl.make_async(check_environment)()
         if problems:
             text = t("pf_header") + "\n" + "\n".join(f"- {p}" for p in problems)
-            await cl.Message(content=html.escape(text, quote=False)).send()
+            await cl.Message(content=safe_markdown(text)).send()
             return
         cl.user_session.set("ready", True)
     history = cl.user_session.get("history")
@@ -597,7 +691,11 @@ async def on_message(message: cl.Message) -> None:
         # Class + short message only: a raw exception can leak paths and
         # provider details into the chat.
         short = f"{type(error).__name__}: {str(error)[:200]}"
-        await cl.Message(content=html.escape(t("ui_error", e=short), quote=False)).send()
+        # Same treatment as every other message: an exception message can carry
+        # corpus text (a book title in a lookup error). Plain markdown, not an
+        # HTML block, so the escape and the image neutralization are the whole
+        # job and the line breaks stay line breaks.
+        await cl.Message(content=safe_markdown(t("ui_error", e=short))).send()
         return
 
     # Conversation memory: the question plus a truncated answer; a catalogue

@@ -168,7 +168,9 @@ injection is planted in the evidence field each node really puts in its prompt (
 `reflect`, `quote` for `synthesize`), each fake model asserts it actually received the marker
 before echoing it, and an echo must be reported `FAILED`, a benign output `BLOCKED`, so a pass
 cannot be an artefact of a blind check; and the **UI render path** - an answer and a clarify
-question carrying a markdown image, a reference image and raw HTML come out inert.
+question carrying a markdown image, a reference image and raw HTML come out inert, and so do the
+two fragments the UI builds as HTML itself: the provenance badge on a broken quote and the
+metrics footer on a stop reason, each carrying a blank line and an image reference.
 The UI stage needs the `ui` extra; without it the stage reports `SKIPPED`, the run ends
 `CANARY MECHANICS INCOMPLETE` and exits 3 unless `--allow-skipped` is passed - an incomplete run
 is never reported as a pass.
@@ -284,8 +286,9 @@ on stderr: hidden files and directories; **symlinks** — in or out of the folde
 under a symlinked directory; files that are not UTF-8 text; and files with nothing but a front
 matter block or a title line. A link is not followed, so nothing outside the folder is ever read
 or embedded; copy the file in if you want it indexed. One bad file never aborts the run — the
-others are still indexed, and every skip is named on stderr. Only a folder in which *nothing* is
-indexable is an error, and then the existing index is left untouched.
+others are still indexed, and every skip is named on stderr (hidden ones as a single line with
+the count and the first few names, so one hidden directory cannot bury the rest). Only a folder
+in which *nothing* is indexable is an error, and then the existing index is left untouched.
 
 Re-running the command re-indexes: a book's rows are replaced, never appended, so `ayl-add` on
 the same folder twice leaves the index unchanged, and adding a folder to an existing index leaves
@@ -678,6 +681,18 @@ Designed for **localhost, single user**. Not designed for internet exposure:
 - Chainlit auth is a single username/password pair: no multi-user isolation and no per-book
   entitlement check (the `canary-authz` book is a placeholder for a future entitlements PoC, not
   an enforcement mechanism).
+- **Loopback is not private to your machine.** Any page open in your browser can send requests
+  to `127.0.0.1` (it only has to guess the port), and a name it controls that resolves to
+  `127.0.0.1` (DNS rebinding) makes those requests same-origin for the browser, carrying that
+  name in the `Host` header. That is why the quick start's placeholder login is unsafe even with
+  no port forwarding at all: such a page could post it and then read every thread. `ui.py`
+  registers Starlette's `TrustedHostMiddleware`, so the server answers only to the Host headers
+  `localhost` and `127.0.0.1` and returns 400 to anything else, which closes the rebinding route;
+  the login cookie is `SameSite=strict`, which `ui.py` sets on Chainlit's cookie module itself
+  (`CHAINLIT_COOKIE_SAMESITE` is read before `ui.py` is loaded under `chainlit run`, so neither
+  the environment nor `.env` decides it). Set `CHAINLIT_PASSWORD` anyway. `allow_origins` in
+  `.chainlit/config.toml` is a CORS list, i.e. what a cross-origin page may *read*, and never a
+  substitute for either.
 - The injection layers cover instructions embedded in the *corpus*. They do not protect against
   a hostile *user*, do not cover paraphrased or non-EN/UA injections, and do not make the
   XML-like data blocks a boundary.
@@ -742,7 +757,11 @@ From `docs/backlog.md`, confirmed by the runs of 2026-09-05, 06 and 07 (`v0.2.0-
   clarification reply is not covered by it; live model resistance is measured for `observe`
   only, on one injection.
 - **Markdown in the answer is rendered.** Image references are removed before rendering so the
-  browser fetches nothing on its own; links stay and need a click.
+  browser fetches nothing on its own; links stay and need a click. This now holds for every
+  message the web UI sends, the HTML fragments included (the provenance badge with its tooltip,
+  the evidence list, the metrics footer): each of them used to be escaped only, and an escape
+  does not stop a blank line from ending the message's HTML block and handing what follows back
+  to the markdown renderer.
 - **Heuristic behavioural scoring**, no LLM judge: refusals detected by phrase markers,
   titles by substring match. `get_chapter` caps at 1000 chunks / 12k chars and reconciles
   section naming (`Chapter 59` vs `59`) heuristically.

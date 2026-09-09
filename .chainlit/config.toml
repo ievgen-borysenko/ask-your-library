@@ -20,9 +20,16 @@ persist_user_env = false
 mask_user_env = false
 
 # Authorized origins
-# Local app: only same-host origins may talk to the websocket. Extend this
-# list if you ever serve the UI from another host.
-allow_origins = ["http://localhost:8000", "http://localhost:8010", "http://127.0.0.1:8000", "http://127.0.0.1:8010"]
+# This list governs the HTTP CORS middleware only: which OTHER origins a page may
+# read this server's responses from. It is not a websocket check (Chainlit builds
+# socket.io with cors_allowed_origins=[], which engineio reads as "CORS handling
+# disabled"), and it is not what keeps a foreign page out: the websocket relies on
+# the auth cookie, and the Host check lives in ui.py (TrustedHostMiddleware).
+# A page served by this server is same-origin and needs no entry here, whatever
+# port it was started on, so the default port alone is enough. Ports are not part
+# of an origin's site: listing another port on localhost let a page there read the
+# thread endpoints with the (SameSite=Lax) login cookie.
+allow_origins = ["http://localhost:8000", "http://127.0.0.1:8000"]
 
 [features]
 # Process and display HTML in messages. This can be a security risk (see https://stackoverflow.com/questions/19603097/why-is-it-dangerous-to-render-user-generated-html-or-javascript)

@@ -52,6 +52,7 @@ from ask_your_library.ingest.chapters import (DEFAULT_CHAPTER_RE, MIN_CHAPTER_CH
                                               split_chapters, with_parts)
 from ask_your_library.ingest.publish import (rebuild_table, recover_staging, table_names,
                                              upsert_book_rows)
+from ask_your_library.sanitize import strip_control_chars
 
 REPO = Path(__file__).resolve().parents[1]
 MANIFEST = REPO / "corpus" / "manifest.yaml"
@@ -220,6 +221,15 @@ def chapter_mp3s(ia_item: str) -> list[tuple[int, str]]:
     return sorted(by_number.items())
 
 
+def local_chapter_name(number: int, suffix: str) -> str:
+    """What a downloaded chapter is called on this machine: the chapter number,
+    never the name archive.org returned. That name is metadata from a site we
+    do not control, and joining it onto a directory lets it decide where the
+    download lands ("../", an absolute path). The remote name stays in the URL,
+    which is the only place it is needed."""
+    return f"ch{number:02d}{suffix}"
+
+
 def transcribe(mp3: Path, out_txt: Path) -> None:
     work = out_txt.parent
     subprocess.run(
@@ -251,11 +261,12 @@ def prepare_audio(entries: list[dict], retranscribe: bool = False) -> None:
         item_dir.mkdir(parents=True, exist_ok=True)
         chapters = []
         for number, name in chapter_mp3s(entry["ia_item"]):
-            mp3 = item_dir / name
-            txt = item_dir / f"ch{number:02d}.txt"
+            mp3 = item_dir / local_chapter_name(number, ".mp3")
+            txt = item_dir / local_chapter_name(number, ".txt")
             if not txt.exists():
                 if not mp3.exists():
-                    print(f"  downloading {name} ...")
+                    # The remote name is printed, never joined onto a path.
+                    print(f"  downloading {strip_control_chars(name)} ...")
                     url = f"https://archive.org/download/{entry['ia_item']}/{name}"
                     with requests.get(url, timeout=600, stream=True) as r:
                         r.raise_for_status()

@@ -30,7 +30,7 @@ from .library import (TITLE_SEPARATOR, BookEntry, chapter_is_cut, list_books, re
 from .llm import data_block
 from .prompts import OBSERVE_RULES, PLAN_RULES, REFLECT_RULES, SYNTHESIZE_RULES
 from .provenance import _valid_evidence, validate  # noqa: F401  (validate is wired by graph.py)
-from .sanitize import sanitize_context
+from .sanitize import sanitize_context, strip_control_chars
 from .state import AgentState, is_loop_marker
 
 log = logging.getLogger(__name__)
@@ -336,12 +336,27 @@ def act(state: AgentState) -> dict:
         empty_read_note = ""
         read_chapters = state.get("read_chapters", [])
 
-    # Injection defense: sanitize hit text before the model ever sees it
+    # Injection defense: sanitize hit text before the model ever sees it.
+    # The control/invisible strip happens HERE, on the passage itself and before
+    # it is cut: hits_log, the scratchpad and the observe prompt then hold one
+    # string, so a quote the model copied verbatim out of the prompt is checked
+    # against the text it was copied from. data_block strips again downstream and
+    # the strip is idempotent, so nothing is lost by doing it early — and a
+    # zero-width space can no longer hide an instruction line from the patterns
+    # below ("ig<zwsp>nore all previous instructions" is one word again).
+    # The book key and the section title travel with the passage and are shown
+    # next to it everywhere — the scratchpad line, the block header of the
+    # prompt, the citation on the evidence card — so they are stripped here as
+    # well, whichever branch above produced the hit (a chapter read included).
+    # An index built before this release still holds raw section titles; a new
+    # one is clean at the row (`ingest.chunking.rows_for`).
     usage = llm._usage()
     usage.hits_seen += len(hits)
     for h in hits:
-        clean_text, redacted = sanitize_context(h["text"])
+        clean_text, redacted = sanitize_context(strip_control_chars(h["text"]))
         h["text"] = clean_text
+        h["book"] = strip_control_chars(h["book"])
+        h["section"] = strip_control_chars(h["section"])
         if redacted:
             h["redacted_lines"] = redacted
             usage.redacted_lines += redacted
@@ -358,8 +373,12 @@ def act(state: AgentState) -> dict:
     # AgentState, so checkpoints and events stay linear in the number of steps.
     new_log = [{"hit_id": h["hit_id"], "step": step, "book": h["book"], "section": h["section"],
                 "corpus": h["corpus"], "text": h["text"][:limit]} for h in hits]
+    # The step header and the note are the model's own words (the query it
+    # wrote, the chapter it asked for), so they are stripped like the hits:
+    # `cat` on this file must not repaint the terminal reading it either.
     with open(state["scratchpad_path"], "a", encoding="utf-8") as f:
-        f.write(f"\n## step {step}: {state['current_query']}\n{empty_read_note}")
+        f.write(f"\n## step {step}: {strip_control_chars(state['current_query'])}\n"
+                f"{strip_control_chars(empty_read_note)}")
         for h in hits:
             # score = RRF, distance only exists on hits from the vector list.
             f.write(f"<<<hit>>> {h['hit_id']} | {h['book']} | {h['section']} | {h['corpus']} | "
@@ -437,17 +456,32 @@ def reflect(state: AgentState) -> dict:
         # No usable decision: finish with the evidence collected so far
         return {"current_query": "", "stop_reason": t("stop_json")}
 
-    probe = coverage_probe(state, decision.get("decision"))
+    # One read of the decision, against the schema: an off-schema value is None
+    # here, so it can never travel on as free text. It used to reach the stop
+    # reason verbatim, and from there the CLI and the metrics footer of the web
+    # UI: a passage that steers the model's decision field could write into
+    # both. What the model wanted is a note for the trace, not for the reader.
+    what = llm.str_field(decision, "decision",
+                         choices=("enough", "clarify", "read_chapter", "search"))
+    if what is None and "decision" in decision:
+        # Discarded, but not silently: the reader only ever sees the fixed stop
+        # phrase, so a model that answers off-schema every time would be
+        # invisible without this. The server log is the one place the value may
+        # appear — stripped and cut short, like any other corpus-shaped text.
+        log.debug("reflect: decision outside the schema: %.80s",
+                  strip_control_chars(str(decision["decision"])))
+
+    probe = coverage_probe(state, what)
     if probe:
         remaining = [q for q in state["queries"] if q != probe]
         return {"current_query": probe, "queries": remaining, "coverage_probed": True}
 
-    if decision.get("decision") == "read_chapter" and not (
+    if what == "read_chapter" and not (
             isinstance(decision.get("book"), str) and isinstance(decision.get("section"), str)):
         # Schema-less read_chapter: nothing to read, treat as enough.
-        decision = {"decision": "enough"}
+        what = "enough"
 
-    if decision.get("decision") == "read_chapter" and state["steps_taken"] < MAX_STEPS:
+    if what == "read_chapter" and state["steps_taken"] < MAX_STEPS:
         wanted = f"{decision['book']}|{decision['section']}"
 
         if not any(same_chapter(wanted, entry) for entry in state.get("read_chapters", [])):
@@ -458,7 +492,7 @@ def reflect(state: AgentState) -> dict:
 
     # One clarify per run, gated by the flag: an empty reply (web timeout)
     # must not re-open the clarify loop.
-    if decision.get("decision") == "clarify" and not state.get("clarify_asked"):
+    if what == "clarify" and not state.get("clarify_asked"):
         # The candidates are what the user picks from: books in the evidence,
         # topped up from the last hits when the evidence names fewer than two.
         candidates = _clarify_candidates(state)[:MAX_CLARIFY_CANDIDATES]
@@ -471,8 +505,7 @@ def reflect(state: AgentState) -> dict:
         return {"current_query": "__clarify__", "queries": [question],
                 "clarify_candidates": candidates}
 
-    if decision.get("decision") != "search" or state["steps_taken"] >= MAX_STEPS:
-        what = decision.get("decision")
+    if what != "search" or state["steps_taken"] >= MAX_STEPS:
         if state["steps_taken"] >= MAX_STEPS and what in ("search", "read_chapter"):
             reason = t("stop_limit", n=MAX_STEPS)
         elif what == "enough":
@@ -480,7 +513,7 @@ def reflect(state: AgentState) -> dict:
         elif what == "clarify":
             reason = t("stop_clarify_repeat")
         else:
-            reason = t("stop_other", what=what)
+            reason = t("stop_other")
         return {"current_query": "", "stop_reason": reason}
 
     next_query = llm.str_field(decision, "next_query") or ""

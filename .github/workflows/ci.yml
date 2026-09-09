@@ -23,6 +23,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          # The uv the lockfile is maintained with. The action SHA pins the
+          # action; without this it still installs whatever uv is newest, so
+          # the resolver CI runs is not the one the developer runs.
+          version: "0.12.10"
       - name: Install (locked)
         run: uv sync --locked --group dev
       - name: Unit tests + golden-set guard
@@ -42,10 +47,20 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.10"
       - name: Install (locked, with the ui extra)
         run: uv sync --locked --group dev --extra ui
+      - name: The ui extra is really installed
+        # Every ui-gated test skips itself when chainlit is missing, and a run
+        # of nothing but skips is green. This job exists to run them, so a
+        # missing extra has to fail here rather than pass quietly below.
+        run: uv run python -c "import chainlit"
       - name: UI rendering contracts
-        run: uv run pytest -q tests/test_ui.py -rs
+        # The canary's own tests are here too: their ui-gated half is skipped
+        # everywhere else, so this is the only place it runs. -rs prints what
+        # was skipped, so an all-skipped green run is visible in the log.
+        run: uv run pytest -q tests/test_ui.py tests/test_injection_canary.py -rs
       - name: Injection canary, mechanics only (no LLM call, no API key)
         # The canary's UI stage imports ui.py, which refuses to start a server
         # without a key; here it is a module under test, not a server.
