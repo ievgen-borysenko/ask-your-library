@@ -47,7 +47,10 @@ def test_a_copied_env_example_cannot_send_the_local_mode_to_openrouter(tmp_path)
     code = ("from ask_your_library import config; import json; "
             "print(json.dumps([config.ORCHESTRATOR_MODEL, config.LLM_BASE_URL, config.PRICE_IN_PER_MTOK]))")
     model, base, price = json.loads(_out(code, cwd=str(tmp_path), LLM_BACKEND="ollama", OLLAMA_LLM_MODEL="qwen2.5:3b"))
-    assert model == "qwen2.5:3b" and base.startswith("http://localhost:11434") and price == 0.0
+    # The endpoint whole, for the reason the test above gives: a prefix test
+    # against a URL is the shape of an allow-list check and is not one —
+    # http://localhost:11434.evil.example would pass it.
+    assert model == "qwen2.5:3b" and base == "http://localhost:11434/v1" and price == 0.0
     # blank values in a .env mean the default, never a crash
     (tmp_path / ".env").write_text("PRICE_IN_PER_MTOK=\nPRICE_OUT_PER_MTOK= \nORCHESTRATOR_MODEL=\n")
     model, base, price = json.loads(_out(code, cwd=str(tmp_path)))

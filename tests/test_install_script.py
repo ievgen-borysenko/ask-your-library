@@ -133,6 +133,29 @@ def real_run(sandbox, *flags, **environment):
                           env={**env, **environment}, capture_output=True, text=True)
 
 
+def error_lines(text):
+    """The script's own stderr, one whole line per entry, without the `error: `
+    prefix. Assertions compare a whole line against it rather than searching the
+    stream for a fragment: a substring test against a line that carries a URL
+    reads as an allow-list check on that URL and is not one."""
+    return [line[len("error: "):].strip() for line in text.splitlines()
+            if line.startswith("error: ")]
+
+
+def printed_lines(text):
+    """The same for stdout, where the script indents its own lines by seven
+    spaces and step 12 does too."""
+    return [line.strip() for line in text.splitlines()]
+
+
+def env_example_with_local_backend(root):
+    """The .env a reader writes by hand: the example, with the one line the
+    local mode needs. Its two tracing lines stay commented out, which is how
+    .env.example ships them and the state that lets a key decide alone."""
+    text = (root / ".env.example").read_text(encoding="utf-8")
+    return re.sub(r"^LLM_BACKEND=.*$", "LLM_BACKEND=ollama", text, flags=re.M)
+
+
 def config_models():
     """The two model names as the package resolves them with nothing exported —
     i.e. the defaults in config.py, which are what the script must pull."""
@@ -405,6 +428,164 @@ def test_the_dry_run_refuses_the_same_shell_and_says_it_wrote_nothing(sandbox):
 
 
 @mac_only
+def test_a_tracing_key_alone_stops_the_fully_local_install(sandbox):
+    """The key is the switch. graph.py sets LANGCHAIN_TRACING_V2=true whenever
+    LANGCHAIN_API_KEY is present and that name is not set AT ALL, so a .env whose
+    two tracing lines are still commented out — the shape .env.example ships —
+    plus a key inherited from another project traced the whole run while every
+    flag this script reads still said off, and step 12 printed "tracing: off".
+    The value itself is never printed: it is a credential, and only its presence
+    decides anything."""
+    root, records, _ = sandbox
+    (root / ".env").write_text(env_example_with_local_backend(root))
+    result = real_run(sandbox, "--no-demo", LANGCHAIN_API_KEY="lsv2-not-a-real-key")
+    assert result.returncode == 2, result.stdout
+    assert ("LANGCHAIN_API_KEY=<set> (exported in this shell) — a key with no "
+            "LANGCHAIN_TRACING_V2 set turns tracing on by itself: prompts and answers "
+            "would be uploaded to https://api.smith.langchain.com (the LangSmith default)"
+            ) in error_lines(result.stderr)
+    assert "lsv2-not-a-real-key" not in result.stderr + result.stdout
+    assert "unset LANGCHAIN_API_KEY" in error_lines(result.stderr)
+    # And the other way out, which is the line the local .env already carries.
+    assert any("LANGCHAIN_TRACING_V2=false" in line for line in error_lines(result.stderr))
+    assert not (records / "ollama").exists(), "a model was pulled before the refusal"
+
+
+@mac_only
+def test_a_tracing_flag_that_is_set_keeps_the_key_from_deciding(sandbox):
+    """The rule graph.py applies is about the NAME being set, not about its
+    value: LANGCHAIN_TRACING_V2=false is what stops the key, and that is the line
+    the local .env writes. A run with the same key and that line goes through."""
+    root, _, _ = sandbox
+    result = real_run(sandbox, "--no-demo", LANGCHAIN_API_KEY="lsv2-not-a-real-key")
+    assert result.returncode == 0, result.stderr
+    assert "LANGCHAIN_TRACING_V2=false" in (root / ".env").read_text()
+    assert "LANGCHAIN_API_KEY=<set> (exported in this shell)" in printed_lines(result.stdout)
+    assert "lsv2-not-a-real-key" not in result.stdout + result.stderr
+
+
+@mac_only
+def test_a_userinfo_host_is_not_this_machine(sandbox):
+    """The host of http://localhost:11434@ollama.example.com is
+    ollama.example.com; everything in front of the @ is userinfo, and it is
+    exactly the text a match on a prefix reads as loopback. The application
+    resolves the host, so this resolves the host."""
+    root, records, _ = sandbox
+    result = real_run(sandbox, "--no-demo",
+                      OLLAMA_URL="http://localhost:11434@ollama.example.com")
+    assert result.returncode == 2, result.stdout
+    assert ("OLLAMA_URL=http://localhost:11434@ollama.example.com (exported in this shell)"
+            " — that endpoint is not on this machine") in error_lines(result.stderr)
+    assert not (root / ".env").exists()
+    assert not (records / "ollama").exists()
+
+
+@mac_only
+def test_an_uppercase_loopback_host_is_this_machine(sandbox):
+    """A host name is case-insensitive. LOCALHOST was refused as if it named
+    somebody else's machine, which is the wrong half of the gate to fail."""
+    root, _, _ = sandbox
+    result = real_run(sandbox, "--no-demo", OLLAMA_URL="http://LOCALHOST:11434")
+    assert result.returncode == 0, result.stderr
+    assert "LLM_BACKEND=ollama" in (root / ".env").read_text()
+
+
+@mac_only
+def test_an_ollama_url_without_a_scheme_is_refused_by_name(sandbox):
+    """config.py uses the value as it stands, so "localhost:11434" becomes the
+    base URL "localhost:11434/v1" — not an address anything can call. It reads
+    like the loopback spelling it is not, so it is named here instead of
+    arriving eleven steps later as a configuration mismatch."""
+    root, records, _ = sandbox
+    result = real_run(sandbox, "--no-demo", OLLAMA_URL="localhost:11434")
+    assert result.returncode == 2, result.stdout
+    assert ("OLLAMA_URL=localhost:11434 has no scheme, and config.py uses the value as it"
+            in error_lines(result.stderr))
+    assert not (root / ".env").exists()
+    assert not (records / "ollama").exists()
+
+
+@mac_only
+def test_an_exported_blank_is_not_an_absent_variable(sandbox):
+    """python-dotenv skips a name that is already in the environment, an empty
+    value included, so an exported LLM_BACKEND= hides the ollama line this script
+    writes — and config.py._env reads that blank as the hosted default. The guard
+    read the blank as "nothing exported here" and let the run through."""
+    root, records, _ = sandbox
+    result = real_run(sandbox, "--no-demo", LLM_BACKEND="")
+    assert result.returncode == 2, result.stdout
+    assert ("LLM_BACKEND=openrouter (exported empty in this shell, which config.py reads as "
+            "the default) — the answering model would run on OpenRouter, not on Ollama"
+            ) in error_lines(result.stderr)
+    assert "unset LLM_BACKEND" in error_lines(result.stderr)
+    assert not (root / ".env").exists()
+    assert not (records / "ollama").exists()
+
+
+@mac_only
+def test_an_empty_env_is_a_resolution_and_is_judged_as_one(sandbox):
+    """An empty .env is not an unreadable .env.example. Step 10 never overwrites
+    a file that exists, and config.py resolves every name in an empty one to its
+    own default — which is the hosted backend. The guard skipped the judgement
+    whenever the text was empty, so this run said fully local and answered on
+    OpenRouter."""
+    root, records, _ = sandbox
+    (root / ".env").write_text("")
+    result = real_run(sandbox, "--no-demo")
+    assert result.returncode == 2, result.stdout
+    assert ("LLM_BACKEND=openrouter (the default in config.py) — the answering model would "
+            "run on OpenRouter, not on Ollama") in error_lines(result.stderr)
+    assert not (records / "ollama").exists()
+
+
+@mac_only
+def test_a_conflict_that_came_from_the_env_says_where_it_came_from(sandbox):
+    """Nothing is exported here: the .env itself selects the local backend and a
+    hosted embedder. The refusal explained that an exported variable wins over
+    the file, which described neither the source nor the fix."""
+    root, _, _ = sandbox
+    (root / ".env").write_text("LLM_BACKEND=ollama\nEMBED_BACKEND=openrouter\n")
+    result = real_run(sandbox, "--no-demo")
+    assert result.returncode == 2, result.stdout
+    lines = error_lines(result.stderr)
+    assert ("EMBED_BACKEND=openrouter (the .env already in this clone) — every passage would "
+            "be embedded by OpenRouter") in lines
+    assert "nothing in this shell exports these — each line above names where its" in lines
+    assert not any("wins over every line this script writes" in line for line in lines)
+
+
+@mac_only
+def test_hosted_mode_warns_when_the_embedder_endpoint_is_off_this_machine(sandbox):
+    """--hosted moves the answering model and nothing else: the .env it writes
+    keeps EMBED_BACKEND=ollama, so OLLAMA_URL is where every passage of the
+    library is embedded. Off this machine, that is the whole library leaving it
+    — a consequence the flag never asked for, and its own line."""
+    result = real_run(sandbox, "--no-demo", "--hosted",
+                      OLLAMA_URL="http://ollama.example.com")
+    assert result.returncode == 0, result.stderr
+    printed = printed_lines(result.stdout)
+    assert ("warning: EMBED_BACKEND=ollama with OLLAMA_URL=http://ollama.example.com, which is"
+            in printed)
+    assert ("not on this machine — every passage of your library would be sent there to be"
+            in printed)
+
+
+@mac_only
+def test_a_non_loopback_ollama_host_is_refused_even_when_a_server_answers(sandbox):
+    """OLLAMA_HOST is read twice by ollama: a server started here binds it, and
+    the CLI reads it as the address of the server it talks to — so it is also
+    where step 8's `ollama pull` goes. The gate sat inside the branch that starts
+    a server, so with one already answering the run pulled its models onto
+    whatever machine the variable named."""
+    _, records, _ = sandbox
+    result = real_run(sandbox, "--no-demo", OLLAMA_HOST="ollama.example.com:11434")
+    assert result.returncode == 1, result.stdout
+    assert ("OLLAMA_HOST=ollama.example.com:11434 is not one of the loopback forms this "
+            "script will") in error_lines(result.stderr)
+    assert not (records / "ollama").exists(), "a model was pulled onto another machine"
+
+
+@mac_only
 def test_refuses_outside_the_repository_root(tmp_path):
     # Steps 1 and 2 only read; nothing is stubbed here because nothing runs.
     result = subprocess.run([BASH, str(SCRIPT), "--dry-run"], cwd=tmp_path,
@@ -477,7 +658,11 @@ def test_the_preflight_snippet_reports_the_configuration_the_loader_resolves(tmp
     result = run_preflight("no-index", tmp_path, mode="local", LANGSMITH_TRACING_V2="true")
     assert result.returncode == 6, result.stdout + result.stderr
     assert "LLM_BACKEND=openrouter, EMBED_BACKEND=openrouter" in result.stdout
-    assert "https://openrouter.ai" in result.stdout          # the endpoint it would call
+    # The endpoint line whole, not a search for the host inside the output: a
+    # substring test against a URL is the shape of an allow-list check and is
+    # not one, and here the pair of endpoints is the whole point of the line.
+    assert ("LLM_BASE_URL=https://openrouter.ai/api/v1, OLLAMA_URL=http://localhost:11434"
+            in printed_lines(result.stdout))
     assert "tracing: LANGSMITH_TRACING_V2" in result.stdout
     assert "not the fully local one" in result.stdout
     for named in ("LLM_BACKEND=openrouter", "EMBED_BACKEND=openrouter", "LANGSMITH_TRACING_V2"):
@@ -492,8 +677,32 @@ def test_the_preflight_snippet_prints_the_configuration_it_agrees_with(tmp_path)
     result = run_preflight("no-index", tmp_path, mode="hosted")
     assert result.returncode == 3, result.stdout + result.stderr
     assert "LLM_BACKEND=openrouter, EMBED_BACKEND=openrouter" in result.stdout
-    assert "OLLAMA_URL=http://localhost:11434" in result.stdout
-    assert "tracing: off" in result.stdout
+    assert ("LLM_BASE_URL=https://openrouter.ai/api/v1, OLLAMA_URL=http://localhost:11434"
+            in printed_lines(result.stdout))
+    assert "tracing: off" in printed_lines(result.stdout)
+
+
+@pytest.mark.skipif(not have_package, reason="the package is not importable here")
+def test_the_preflight_snippet_runs_the_tracing_switch_the_application_runs(tmp_path):
+    """The five flags are not the whole rule. build_graph calls
+    enable_tracing_if_key_present(), which turns a LANGCHAIN_API_KEY with no
+    LANGCHAIN_TRACING_V2 set into LANGCHAIN_TRACING_V2=true — so reading the
+    environment without running it reported "off" for a run that traces. The
+    snippet runs the same function, and then names the destination; and with the
+    name set to false, the key decides nothing."""
+    result = run_preflight("no-index", tmp_path, mode="local",
+                           LANGCHAIN_API_KEY="lsv2-not-a-real-key")
+    assert result.returncode == 6, result.stdout + result.stderr
+    assert ("tracing: LANGCHAIN_TRACING_V2 -> https://api.smith.langchain.com "
+            "(the LangSmith default)") in printed_lines(result.stdout)
+    assert "LANGCHAIN_TRACING_V2" in result.stdout.split("not the fully local one")[1]
+    assert "lsv2-not-a-real-key" not in result.stdout + result.stderr
+
+    result = run_preflight("no-index", tmp_path, mode="hosted",
+                           LANGCHAIN_API_KEY="lsv2-not-a-real-key",
+                           LANGCHAIN_TRACING_V2="false")
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "tracing: off" in printed_lines(result.stdout)
 
 
 def test_help_lists_every_flag(tmp_path):

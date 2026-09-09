@@ -16,19 +16,48 @@
   nothing. Step 12 then prints the configuration `ask_your_library.config` resolves and ends the
   run when that is not the mode which was set up — a rewritten `.env` is no fix for a variable the
   shell exports, and only the loader can say which of the two won.
+- **A LangSmith key is a tracing switch, and the guard reads it as one.** `graph.py` sets
+  `LANGCHAIN_TRACING_V2=true` whenever `LANGCHAIN_API_KEY` is present and that name is not set at
+  all, so a key inherited from another project traced a "fully local" run while all five flags the
+  script reads still said off — and step 12, which read the environment without running that
+  function, printed `tracing: off` for a run that traces. The key is now judged in the local mode
+  by the rule `graph.py` itself applies, with the two ways out named (drop the key, or set
+  `LANGCHAIN_TRACING_V2=false`, which is the line the local `.env` already writes); the two tracing
+  endpoints are reported as the destinations they are; and step 12 calls
+  `enable_tracing_if_key_present()` — the application's own function, not a second copy of its rule
+  — before it reports, then names where the traces would go. A key is never printed: only whether
+  it is set.
+- **The rest of that guard reads the environment the way `config.py` does.** A URL host is taken
+  from the authority with the userinfo removed and the case folded, so
+  `http://localhost:11434@ollama.example.com` is the remote host it resolves to and `LOCALHOST` is
+  the local one it is; an `OLLAMA_URL` with no scheme is refused by name, because `config.py` uses
+  the value as it stands and `localhost:11434/v1` is not an address. Exportedness, not emptiness,
+  decides whether a variable is exported: python-dotenv skips a name already in the environment
+  even when it is empty, and `config.py._env` reads that blank as its default, so an exported
+  `LLM_BACKEND=` resolved to OpenRouter while the guard saw "nothing exported". An empty `.env` is
+  judged rather than skipped — it is a real resolution to `config.py`'s own, hosted defaults, not
+  the unreadable `.env.example` the skip was written for. A refusal that came from the `.env` no
+  longer explains that an exported variable wins over it. `OLLAMA_HOST` is checked before step 8
+  rather than only inside the branch that starts a server: the `ollama` CLI reads it as the address
+  of the server it talks to, so with a server already answering, `ollama pull` was free to fetch
+  this run's models onto whatever machine that variable named. And `--hosted` with an `OLLAMA_URL`
+  off this machine says in its own line that every passage of the library would be embedded there,
+  since that mode keeps `EMBED_BACKEND=ollama`.
 - **`SECURITY.md` describes the branch rules that are actually in force.** The paragraph on
   required checks said the repository was private on the free plan until its first release and that
   a red check was honoured by hand. It is public, and the ruleset on `main` lists all seven checks
-  as required, wants the branch up to date before it merges, and refuses force-pushes and deletion
-  with no bypass.
+  as required, requires code scanning results from CodeQL (no security alert of high severity or
+  above, no other alert at error level), wants the branch up to date before it merges, and refuses
+  force-pushes and deletion with no bypass. CodeQL runs from GitHub's default setup, so its two
+  analyses are not among the seven: what the ruleset requires is the result of the scan.
 - **Assertions that read as URL allow-list checks, and a character class that reads wider than it
-  is.** Three assertions checked a host name as a substring or a prefix of a URL (`example.org`
-  after neutralization, twice; the default endpoint once); they now compare whole URLs, parsed
-  with `urlsplit` where the text around them varies. `CONTROL_CHARS_RE` is written one block per
-  line with the invisible formatting characters spelled out singly instead of as spans, because a
-  span between two `\u` escapes reads to a checker as the range between their ASCII characters.
-  The set is unchanged, and `test_sanitize.py` now pins it over the whole of Unicode: 43 code
-  points.
+  is.** Four assertions checked a host name as a substring or a prefix of a URL (`example.org`
+  after neutralization, twice; the hosted endpoint; the local one); they now compare whole URLs,
+  parsed with `urlsplit` where the text around them varies, or whole printed lines where the
+  assertion is about a line of output. `CONTROL_CHARS_RE` is written one block per line with the
+  invisible formatting characters spelled out singly instead of as spans, because a span between
+  two `\u` escapes reads to a checker as the range between their ASCII characters. The set is
+  unchanged, and `test_sanitize.py` now pins it over the whole of Unicode: 43 code points.
 
 ## 0.2.0 (2026-09-09)
 

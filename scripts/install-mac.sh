@@ -244,6 +244,20 @@ if [ -z "$ollama_url" ] || [ -z "$embed_model" ] || [ -z "$llm_model" ]; then
     fail "export OLLAMA_URL, OLLAMA_EMBED_MODEL and OLLAMA_LLM_MODEL, then re-run."
     exit 1
 fi
+# config.py hands OLLAMA_URL to the client as it stands — LLM_BASE_URL is that
+# value with /v1 after it — so a value with no scheme is not an address the
+# application can call, and "localhost:11434" is the spelling that looks like
+# one. Refused here, by name, rather than as a mismatch eleven steps later.
+case "$ollama_url" in
+    *://*) ;;
+    *)
+        fail "OLLAMA_URL=$ollama_url has no scheme, and config.py uses the value as it"
+        fail "stands: the answering model would be asked for at $ollama_url/v1, which is"
+        fail "not an address. Write it in full (http://localhost:11434), or unset"
+        fail "OLLAMA_URL to use that default, and re-run."
+        exit 2
+        ;;
+esac
 
 # Which backend this run will actually answer with — decided before step 8, and
 # by the .env already in the clone when there is one: step 10 never overwrites
@@ -289,54 +303,134 @@ hosted_env() { cat .env.example; }
 # every line printed here still said local. The variables below are the ones
 # that decide where data goes: which backend answers, which one embeds, the
 # endpoint each one calls, and whether prompts and answers are uploaded as
-# traces — both prefixes, and the v1 names langchain_core still reads.
+# traces — both prefixes, and the v1 names langchain_core still reads — and the
+# LangSmith key, which needs no flag of its own: graph.py turns a key with no
+# LANGCHAIN_TRACING_V2 set into LANGCHAIN_TRACING_V2=true before the first node
+# runs, so a key alone is a tracing switch that none of the five flags shows.
 BACKEND_VARS="LLM_BACKEND EMBED_BACKEND"
-ENDPOINT_VARS="OLLAMA_URL OLLAMA_HOST OPENROUTER_BASE_URL"
+ENDPOINT_VARS="OLLAMA_URL OLLAMA_HOST OPENROUTER_BASE_URL LANGCHAIN_ENDPOINT LANGSMITH_ENDPOINT"
 TRACING_VARS="LANGSMITH_TRACING_V2 LANGCHAIN_TRACING_V2 LANGSMITH_TRACING LANGCHAIN_TRACING LANGCHAIN_HANDLER"
-DATA_FLOW_VARS="$BACKEND_VARS $ENDPOINT_VARS $TRACING_VARS"
+# LANGCHAIN_API_KEY is the one that is judged. LANGSMITH_API_KEY is reported
+# beside it because a reader who has one usually has the other, but nothing in
+# this project reads it: graph.py names LANGCHAIN_API_KEY, config.py names
+# neither, and no SDK starts tracing on a key with every flag off. Neither
+# value is ever printed — see shown_value.
+KEY_VARS="LANGCHAIN_API_KEY LANGSMITH_API_KEY"
+DATA_FLOW_VARS="$BACKEND_VARS $ENDPOINT_VARS $TRACING_VARS $KEY_VARS"
 
 # The .env the application will read: the one already in the clone, or the one
 # step 10 is about to write, resolved once so the guard judges the same text the
-# writer produces. An unreadable .env.example leaves this empty — that is step
-# 10's failure to report, with its own message, so the guard judges nothing.
+# writer produces. An unreadable .env.example is the one case where there is
+# nothing to judge — that is step 10's failure to report, with its own message.
+# An EMPTY .env is not that case: it is a real resolution in which every value
+# is config.py's own default, and those defaults are the hosted ones, so a fully
+# local run has to be held to them exactly as it is held to any other text.
+planned_env_read=1
 if [ -f .env ]; then
     planned_env="$(cat .env 2>/dev/null || true)"
     planned_env_source="the .env already in this clone"
 elif [ "$hosted" -eq 1 ]; then
     planned_env="$(hosted_env 2>/dev/null || true)"
     planned_env_source="the .env this run writes"
+    [ -n "$planned_env" ] || planned_env_read=0
 else
     planned_env="$(local_env 2>/dev/null || true)"
     planned_env_source="the .env this run writes"
+    [ -n "$planned_env" ] || planned_env_read=0
 fi
 
 planned_value() { first_line "$(printf '%s\n' "$planned_env" | sed -n "s/^$1=//p")"; }
 
+# Whether that .env names the variable at all. python-dotenv fills every name it
+# holds a line for, a blank line included, so "set to nothing" and "not
+# mentioned" are two different states of the environment — and graph.py reads
+# exactly that difference.
+dotenv_defines() {
+    case $'\n'"$planned_env" in
+        *$'\n'"$1"=*) return 0 ;;
+    esac
+    return 1
+}
+
+# Set as far as the loader is concerned: exported at any value, an empty one
+# included (python-dotenv skips a name that is already in the environment), or
+# written in the .env it reads.
+env_defines() {
+    [ -n "${!1+set}" ] || dotenv_defines "$1"
+}
+
+# config.py resolves a blank in two ways, and the difference decides the run.
+# _env(NAME, default) reads a blank as "the default was meant"; a plain
+# os.environ.get(NAME, default) keeps the blank. So an exported LLM_BACKEND=
+# resolves to the hosted default and never reaches the ollama line in .env —
+# that line is not read at all, the name being in the environment already.
+blank_is_default() {
+    case "$1" in
+        LLM_BACKEND|OPENROUTER_BASE_URL) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 # config.py's own order: an exported variable first, then .env, then the default.
+# Exportedness, not emptiness, is what decides the first of the three.
 effective_value() {
-    local value="${!1-}"
-    [ -n "$value" ] || value="$(planned_value "$1")"
-    [ -n "$value" ] || value="$(config_default "$1")"
+    local value=""
+    if [ -n "${!1+set}" ]; then
+        value="${!1}"
+    elif dotenv_defines "$1"; then
+        value="$(planned_value "$1")"
+    else
+        config_default "$1"
+        return 0
+    fi
+    if [ -z "$value" ] && blank_is_default "$1"; then
+        config_default "$1"
+        return 0
+    fi
     printf '%s\n' "$value"
 }
 
 # Where that value comes from. The exported environment is the only source this
 # script cannot rewrite, and the only one whose remedy is `unset`.
 value_source() {
-    if [ -n "${!1-}" ]; then
-        printf 'exported in this shell\n'
-    elif [ -n "$(planned_value "$1")" ]; then
+    if [ -n "${!1+set}" ]; then
+        if [ -z "${!1}" ] && blank_is_default "$1"; then
+            printf 'exported empty in this shell, which config.py reads as the default\n'
+        else
+            printf 'exported in this shell\n'
+        fi
+    elif dotenv_defines "$1"; then
         printf '%s\n' "$planned_env_source"
     else
         printf 'the default in config.py\n'
     fi
 }
 
+# A key is a credential: whether it is set is what decides here, and its value is
+# never printed. Everything else is shown as it stands.
+shown_value() {
+    case "$1" in
+        *_API_KEY)
+            if [ -n "$2" ]; then printf '<set>\n'; else printf '\n'; fi
+            ;;
+        *) printf '%s\n' "$2" ;;
+    esac
+}
+
 # The spellings of this machine a URL host may take. Quoted patterns are
 # literal, which the IPv6 form needs: bare [::1] is a bracket expression.
+# The authority is cut out before it is matched, and the userinfo with it: the
+# host of http://localhost:11434@ollama.example.com is ollama.example.com, which
+# is where the application would send everything, while the text in front of the
+# @ reads as loopback to anything that matches on a prefix. Case folded too,
+# because a host name is case-insensitive and LOCALHOST was being refused.
 url_is_loopback() {
-    local host="${1#*//}"
-    host="${host%%/*}"
+    local host="${1#*://}"
+    host="${host%%/*}"          # the authority only: no path,
+    host="${host%%\?*}"         # ... no query,
+    host="${host%%#*}"          # ... no fragment,
+    host="${host##*@}"          # ... and no userinfo in front of the real host.
+    host="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
     case "$host" in
         localhost|localhost:*|127.0.0.1|127.0.0.1:*|"[::1]"|"[::1]:"*) return 0 ;;
         *) return 1 ;;
@@ -351,16 +445,51 @@ tracing_is_off() {
     esac
 }
 
+# graph.py's own rule, in the shell. enable_tracing_if_key_present() sets
+# LANGCHAIN_TRACING_V2=true whenever LANGCHAIN_API_KEY is not empty and that
+# name is not set AT ALL — an empty value counts as set, which is why the .env
+# this script writes carries the line rather than leaving it commented out. So a
+# key inherited from another project, with no flag anywhere, turns tracing on
+# while every flag this script reads still says off.
+key_enables_tracing() {
+    [ -n "$(effective_value LANGCHAIN_API_KEY)" ] || return 1
+    if env_defines LANGCHAIN_TRACING_V2; then return 1; fi
+    return 0
+}
+
+# Tracing as the application resolves it: any of the five flags at a value that
+# is not one of the spellings of off, or the key rule above.
+tracing_resolves_on() {
+    local flag
+    for flag in $TRACING_VARS; do
+        if ! tracing_is_off "$(effective_value "$flag")"; then return 0; fi
+    done
+    key_enables_tracing
+}
+
+# Where the traces would go. Both names are the same setting under the two
+# prefixes; LangSmith has a default endpoint that no variable names.
+trace_endpoint() {
+    local endpoint
+    endpoint="$(effective_value LANGSMITH_ENDPOINT)"
+    [ -n "$endpoint" ] || endpoint="$(effective_value LANGCHAIN_ENDPOINT)"
+    [ -n "$endpoint" ] || endpoint="https://api.smith.langchain.com (the LangSmith default)"
+    printf '%s\n' "$endpoint"
+}
+
 # What contradicts "fully local". OLLAMA_HOST is reported but not judged here:
-# it decides what a server started by this script binds, not where the
-# application sends anything, and step 7 refuses every non-loopback value of it
-# with its own message. OPENROUTER_BASE_URL is reported for a similar reason:
-# with both backends on Ollama nothing reads it, and a backend that does read it
-# is refused on the backend variable itself.
+# it decides what a server started by this script binds and which server its
+# `ollama pull` talks to, not where the application sends anything, and step 7
+# refuses every non-loopback value of it with its own message. OPENROUTER_BASE_URL
+# is reported for a similar reason: with both backends on Ollama nothing reads
+# it, and a backend that does read it is refused on the backend variable itself.
+# The two tracing endpoints are destinations, not switches: they are reported,
+# and what is refused is tracing resolving on at all.
 contradicts_local() {
     case "$1" in
         LLM_BACKEND|EMBED_BACKEND) [ "$2" != "ollama" ] ;;
         OLLAMA_URL) ! url_is_loopback "$2" ;;
+        LANGCHAIN_API_KEY) key_enables_tracing ;;
         LANGSMITH_TRACING_V2|LANGCHAIN_TRACING_V2|LANGSMITH_TRACING|LANGCHAIN_TRACING|LANGCHAIN_HANDLER)
             ! tracing_is_off "$2" ;;
         *) false ;;
@@ -374,6 +503,9 @@ local_effect() {
         LLM_BACKEND) printf 'the answering model would run on OpenRouter, not on Ollama\n' ;;
         EMBED_BACKEND) printf 'every passage would be embedded by OpenRouter\n' ;;
         OLLAMA_URL) printf 'that endpoint is not on this machine\n' ;;
+        LANGCHAIN_API_KEY)
+            printf 'a key with no LANGCHAIN_TRACING_V2 set turns tracing on by itself: '
+            printf 'prompts and answers would be uploaded to %s\n' "$(trace_endpoint)" ;;
         *) printf 'prompts and answers would be uploaded as traces\n' ;;
     esac
 }
@@ -383,17 +515,19 @@ conflict_lines=""
 exported_lines=""
 for name in $DATA_FLOW_VARS; do
     value="$(effective_value "$name")"
+    shown="$(shown_value "$name" "$value")"
     origin="$(value_source "$name")"
-    if [ -n "${!name-}" ]; then
-        exported_lines="$exported_lines$name=$value ($origin)"$'\n'
+    if [ -n "${!name+set}" ]; then
+        exported_lines="$exported_lines$name=$shown ($origin)"$'\n'
     fi
     # Nothing to judge when the file that decides could not be read: step 10
     # stops the run on it, and a config.py default would read as a conflict of
-    # its own making (its defaults are the hosted ones).
-    if [ -n "$planned_env" ] && [ "$effective_mode" = "fully local" ] \
+    # its own making (its defaults are the hosted ones). An empty .env is a
+    # different thing — it resolves to those defaults for real.
+    if [ "$planned_env_read" -eq 1 ] && [ "$effective_mode" = "fully local" ] \
         && contradicts_local "$name" "$value"; then
         conflict_names="$conflict_names $name"
-        conflict_lines="$conflict_lines  $name=$value ($origin) — $(local_effect "$name")"$'\n'
+        conflict_lines="$conflict_lines  $name=$shown ($origin) — $(local_effect "$name")"$'\n'
     fi
 done
 
@@ -401,18 +535,18 @@ if [ -n "$conflict_names" ]; then
     fail "this run sets up the fully local configuration, but that is not what the"
     fail "application would load. These values decide where your data goes:"
     printf '%s' "$conflict_lines" | while IFS= read -r line; do fail "$line"; done
-    fail "config.py reads .env without overriding what is already exported, so an"
-    fail "exported variable wins over every line this script writes."
     exported_conflicts=""
     dotenv_conflicts=""
     for name in $conflict_names; do
-        if [ -n "${!name-}" ]; then
+        if [ -n "${!name+set}" ]; then
             exported_conflicts="$exported_conflicts $name"
         else
             dotenv_conflicts="$dotenv_conflicts $name"
         fi
     done
     if [ -n "$exported_conflicts" ]; then
+        fail "config.py reads .env without overriding what is already exported, so an"
+        fail "exported variable wins over every line this script writes."
         fail "remove them from this shell:"
         fail " unset$exported_conflicts"
         unset_flags=""
@@ -420,9 +554,21 @@ if [ -n "$conflict_names" ]; then
         fail "or start the script without them:"
         fail " env$unset_flags bash scripts/install-mac.sh"
     fi
+    # Said only of the names that are actually in it: the sentence above is
+    # about an exported variable, and printing it over a conflict this shell
+    # never exported described the wrong file.
     if [ -n "$dotenv_conflicts" ]; then
-        fail "and edit .env (or move it aside and re-run) for:$dotenv_conflicts"
+        fail "nothing in this shell exports these — each line above names where its"
+        fail "value came from. Edit .env (or move it aside and re-run) for:$dotenv_conflicts"
     fi
+    case " $conflict_names " in
+        *" LANGCHAIN_API_KEY "*)
+            fail "the key needs no flag of its own: build_graph sets LANGCHAIN_TRACING_V2=true"
+            fail "whenever a key is present and that name is not set at all. Either drop the"
+            fail "key, or set LANGCHAIN_TRACING_V2=false — the .env this script writes for the"
+            fail "local mode carries that line, so a run with no .env yet is already covered."
+            ;;
+    esac
     fail "to answer on OpenRouter on purpose, run: bash scripts/install-mac.sh --hosted"
     if [ "$dry_run" -eq 1 ]; then
         fail "(dry run: nothing was installed, downloaded or written; a real run stops here too)"
@@ -436,14 +582,68 @@ if [ -n "$exported_lines" ]; then
     if [ "$effective_mode" != "fully local" ]; then
         note "the hosted configuration is what this run sets up, so these are reported only"
     fi
-elif [ -n "$planned_env" ]; then
+elif [ "$planned_env_read" -eq 1 ]; then
     printf 'Nothing exported in this shell decides where data goes; .env does.\n'
+fi
+
+# Only ever reached in the hosted mode: in the local one tracing resolving on is
+# a refusal, above. Named with its destination, because a mode that sends the
+# question to a provider still does not say anything about a second copy of the
+# prompts and the retrieved passages going somewhere else.
+if tracing_resolves_on; then
+    note "tracing is on: prompts, retrieved passages and answers are uploaded to"
+    note "  $(trace_endpoint)"
+    note "set LANGCHAIN_TRACING_V2=false (and LANGSMITH_TRACING_V2=false) to stop that"
+fi
+
+# --hosted moves the answering model off this machine and nothing else: the
+# example it writes keeps EMBED_BACKEND=ollama, so the Ollama endpoint is where
+# every passage of the library is embedded. An endpoint elsewhere makes that the
+# whole library leaving the machine, which is not what the flag asks for.
+if [ "$effective_mode" != "fully local" ] \
+    && [ "$(effective_value EMBED_BACKEND)" = "ollama" ] \
+    && ! url_is_loopback "$(effective_value OLLAMA_URL)"; then
+    note "warning: EMBED_BACKEND=ollama with OLLAMA_URL=$(effective_value OLLAMA_URL), which is"
+    note "not on this machine — every passage of your library would be sent there to be"
+    note "embedded. --hosted asks for a hosted answering model, not for that. Unset"
+    note "OLLAMA_URL, or set EMBED_BACKEND=openrouter if the remote endpoint is meant."
 fi
 
 # --- 7. Ollama --------------------------------------------------------------
 ollama_ready() { curl -fsS --max-time 3 "$ollama_url/api/tags" >/dev/null 2>&1; }
 
 step "Ollama: the binary, and a server answering on $ollama_url/api/tags"
+# OLLAMA_HOST is read twice by ollama and not at all by config.py — the
+# application's endpoint is OLLAMA_URL. A server started here BINDS it, and the
+# CLI reads it as the address of the server it talks to, so it is also where the
+# `ollama list` and `ollama pull` of step 8 go. Both readings are refused beyond
+# loopback: one would put a server on the network, the other would pull this
+# run's models onto somebody else's machine. That second one used to walk
+# straight through, because the gate sat inside the branch that starts a server
+# and a server already answering skips it. The gate is closed by default:
+# through it go an empty value (Ollama's own loopback default) and the spellings
+# of loopback, with an optional scheme and port — nothing else. A bare port is
+# refused with the rest: ":11434" is a host/port pair whose empty host means
+# every interface, and "0" is 0.0.0.0.
+ollama_bind="${OLLAMA_HOST-}"
+case "$ollama_bind" in
+    http://*)  ollama_bind_host="${ollama_bind#http://}" ;;
+    https://*) ollama_bind_host="${ollama_bind#https://}" ;;
+    *)         ollama_bind_host="$ollama_bind" ;;
+esac
+# Unlike a URL host, a bind address may be a bare ::1 — and that form carries no
+# port, ::1:11434 being an address in its own right; the bracketed form is the
+# one that takes one.
+case "$(printf '%s' "$ollama_bind_host" | tr '[:upper:]' '[:lower:]')" in
+    ""|localhost|localhost:*|127.0.0.1|127.0.0.1:*|"::1"|"[::1]"|"[::1]:"*) ;;
+    *)
+        fail "OLLAMA_HOST=$ollama_bind is not one of the loopback forms this script will"
+        fail "start a server on, or send an 'ollama pull' to, so it could listen — or"
+        fail "fetch — beyond this machine. Run 'unset OLLAMA_HOST' and re-run, or start"
+        fail "Ollama yourself with the binding you want."
+        exit 1
+        ;;
+esac
 if command -v ollama >/dev/null 2>&1; then
     note "$(command -v ollama)"
 else
@@ -466,33 +666,6 @@ else
         fail "start Ollama there (or unset OLLAMA_URL to use the default) and re-run."
         exit 1
     fi
-    # What the server binds is OLLAMA_HOST, not OLLAMA_URL: the URL only says
-    # where to look for one. So an exported OLLAMA_HOST decides what the server
-    # started here listens on, and putting one on the network is not this
-    # script's call. The gate is therefore closed by default: through it go an
-    # empty value (Ollama's own loopback default) and the spellings of loopback,
-    # with an optional scheme and port — nothing else. A bare port is refused
-    # with the rest: ":11434" is a host/port pair whose empty host means every
-    # interface, and "0" is 0.0.0.0.
-    ollama_bind="${OLLAMA_HOST-}"
-    case "$ollama_bind" in
-        http://*)  ollama_bind_host="${ollama_bind#http://}" ;;
-        https://*) ollama_bind_host="${ollama_bind#https://}" ;;
-        *)         ollama_bind_host="$ollama_bind" ;;
-    esac
-    # Unlike a URL host, a bind address may be a bare ::1 — and that form
-    # carries no port, ::1:11434 being an address in its own right; the
-    # bracketed form is the one that takes one.
-    case "$ollama_bind_host" in
-        ""|localhost|localhost:*|127.0.0.1|127.0.0.1:*|"::1"|"[::1]"|"[::1]:"*) ;;
-        *)
-            fail "OLLAMA_HOST=$ollama_bind is not one of the loopback forms this script"
-            fail "will start a server on, so it could listen beyond this machine. Run"
-            fail "'unset OLLAMA_HOST' and re-run, or start Ollama yourself with the"
-            fail "binding you want."
-            exit 1
-            ;;
-    esac
     # `run`, not `start`: `start` writes a LaunchAgent and brings Ollama up at
     # every login. Making it permanent is the reader's call, and the command for
     # it is printed in the next steps.
@@ -711,9 +884,17 @@ from urllib.parse import urlsplit
 try:
     from ask_your_library.config import (DB_PATH, EMBED_BACKEND, LLM_BACKEND, LLM_BASE_URL,
                                          OLLAMA_URL, TABLES)
+    from ask_your_library.graph import enable_tracing_if_key_present
     from ask_your_library.i18n import t
     from ask_your_library.preflight import check_environment
 
+    # Tracing is not decided by the flags alone. build_graph calls this before
+    # the first node, and it turns a LANGCHAIN_API_KEY with no
+    # LANGCHAIN_TRACING_V2 set into LANGCHAIN_TRACING_V2=true. Reading the
+    # environment without running it reported "off" for a run that traces, so
+    # the same function the application uses is run here first, rather than a
+    # second copy of its rule that could drift from it.
+    enable_tracing_if_key_present()
     result = check_environment()
 except Exception as error:
     print(f"       - the preflight could not run: {type(error).__name__}: {error}")
@@ -730,7 +911,16 @@ tracing_on = [name for name in TRACING
               if os.environ.get(name, "").strip().lower() not in OFF]
 print(f"       LLM_BACKEND={LLM_BACKEND}, EMBED_BACKEND={EMBED_BACKEND}")
 print(f"       LLM_BASE_URL={LLM_BASE_URL}, OLLAMA_URL={OLLAMA_URL}")
-print("       tracing: " + (", ".join(tracing_on) if tracing_on else "off"))
+if tracing_on:
+    # A flag says that traces leave; the endpoint says where to. Neither name is
+    # required, so the destination of a run that sets neither is the default the
+    # LangSmith client falls back to.
+    endpoint = (os.environ.get("LANGSMITH_ENDPOINT", "").strip()
+                or os.environ.get("LANGCHAIN_ENDPOINT", "").strip()
+                or "https://api.smith.langchain.com (the LangSmith default)")
+    print("       tracing: " + ", ".join(tracing_on) + " -> " + endpoint)
+else:
+    print("       tracing: off")
 
 # The only required table is the transcripts one, so the missing-tables message
 # preflight would build has exactly that name in it.
