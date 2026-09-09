@@ -66,6 +66,9 @@ question -> planner queries (2-4, English) -> LanceDB hybrid search (vectors + B
          -> validate re-checks every collected evidence quote against the passage it was copied from
 ```
 
+The decisions behind this shape, and the alternative each one replaced, are recorded as ADRs
+in [`docs/adr/README.md`](docs/adr/README.md), each with the measurement that settled it.
+
 - **Hybrid retrieval.** Each corpus is searched twice (vector top-20 and BM25 top-20 from the
   LanceDB FTS index) and the lists are fused with Reciprocal Rank Fusion implemented in
   `library.py`, not via LanceDB's built-in rerankers. Manual RRF keeps the fusion transparent
@@ -233,6 +236,7 @@ uv run ask-library                       # interactive chat with conversation me
 uv run ask-library --verbose "..."        # plus every evidence item with the passage it was checked against
 
 # web UI (Chainlit, same core as the CLI), bound to loopback; throwaway local demo, admin / change-me:
+# the login form's first field is labelled "Email address"; type the username there
 AYL_ALLOW_DEFAULT_LOGIN=1 uv run --extra ui chainlit run ui.py -w --host 127.0.0.1
 # with a real password (the UI refuses to start on the placeholder one):
 CHAINLIT_USERNAME=... CHAINLIT_PASSWORD=... uv run --extra ui chainlit run ui.py -w --host 127.0.0.1
@@ -573,7 +577,7 @@ aggregation does not hold up.
 ### Where the quality comes from
 
 **`eval/run_ablation.py` - the same twelve core questions under five conditions** (ADR-014; the
-architecture decision records are kept outside this repo), one run
+architecture decision records are in [`docs/adr/README.md`](docs/adr/README.md)), one run
 each on 2026-09-05, code `ab4e458` (`88881ee` plus the ablation harness - `eval/run_ablation.py`,
 `tests/test_ablation.py` and their two entries in the private export allowlist - which
 changes nothing the agent runs), clean tree, same index and same model as the table above. It
@@ -780,6 +784,16 @@ From `docs/backlog.md`, confirmed by the runs of 2026-09-05, 06 and 07 (`v0.2.0-
 - **Heuristic behavioural scoring**, no LLM judge: refusals detected by phrase markers,
   titles by substring match. `get_chapter` caps at 1000 chunks / 12k chars and reconciles
   section naming (`Chapter 59` vs `59`) heuristically.
+- **A book is its `Title — Author` key, and the catalogue is a history of ingests, not a listing
+  of your folder.** The key is derived from the file — front matter, a standalone title line, or
+  the file name — and everything downstream is keyed on it: the citation, the chapter filter, the
+  catalogue. Correct `author:` in a file's front matter and run `ayl-add` again, and the catalogue
+  holds a second book: the corrected key is indexed, and the rows under the old one stay until
+  someone removes them by hand. A file removed from the folder keeps its rows too, and a book card
+  whose heading differs from its transcript's key by one character lists as two books. The count
+  is the length of what the index holds, which is the history of what was ingested, not the
+  current state of the folder. A `books` table with a stable id, and an ingest ledger beside it,
+  are the planned fix (`docs/backlog.md`).
 
 ## Cost
 
@@ -794,6 +808,13 @@ pre-authorizes the model maximum on every call. Prices come from `PRICE_IN_PER_M
 `PRICE_OUT_PER_MTOK`. The CLI prints a per-node breakdown after each question (calls, tokens,
 USD per role), plus the stop reason, retrieval selectivity and redaction counts.
 
+The metrics also carry a cache-read counter, and it stays at zero by construction: the client
+never marks a prompt prefix for caching (no `cache_control` is sent), and even if it did, the
+system prompts are below the provider's minimum cacheable prefix and the large user message —
+question, results, evidence — changes at every step, so no prompt caching happens and there is
+nothing to discount. "Cache reads not discounted" in the eval reports' cost line is a statement
+about the configured rates, not a discount those runs missed.
+
 ## Project layout
 
 ```
@@ -807,7 +828,8 @@ corpus/                manifest.yaml (checksums), book cards, canaries, audio tr
                        toc/ (committed chapter titles; the card-grounding test uses them)
 eval/                  retrieval eval, agent eval, injection canary, golden sets, report summarizer
 tests/                 unit tests and the golden-set / manifest CI guard
-docs/                  backlog.md (known gaps, v0.2), CHANGELOG.md, adr-016-catalog-path.md, eval-results/, examples/
+docs/                  backlog.md (known gaps, v0.2), CHANGELOG.md, adr/ (decision records),
+                       eval-results/, examples/
 .github/workflows/     CI: unit tests on every push, UI contracts with the chainlit extra
 ui.py                  Chainlit web chat
 ```

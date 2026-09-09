@@ -75,8 +75,8 @@ OPENROUTER_ENV_FILE = Path(_env_file).expanduser() if _env_file else None
 
 # Hard cap on output tokens per call. Every node returns short JSON or a
 # short answer; without a cap the provider pre-authorizes its model maximum
-# (65k tokens for Sonnet), which is an unbounded cost ceiling and fails with
-# 402 on a low balance.
+# (65k tokens for the default model), which is an unbounded cost ceiling and
+# fails with 402 on a low balance.
 MAX_OUTPUT_TOKENS = int(os.environ.get("MAX_OUTPUT_TOKENS", "2048"))
 
 # What observe sees of each retrieved passage (ADR-012). SEARCH_HIT_CHARS caps a
