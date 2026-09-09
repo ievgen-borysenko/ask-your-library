@@ -12,6 +12,8 @@ live next door, one module each:
 
 Budgets (MAX_STEPS, MAX_EMPTY_STREAK, the per-hit windows) come from config.
 """
+import logging
+
 from langgraph.types import interrupt
 
 from . import llm
@@ -25,6 +27,8 @@ from .prompts import OBSERVE_RULES, PLAN_RULES, REFLECT_RULES, SYNTHESIZE_RULES
 from .provenance import _valid_evidence, validate  # noqa: F401  (validate is wired by graph.py)
 from .sanitize import sanitize_context, strip_control_chars
 from .state import AgentState, is_loop_marker
+
+log = logging.getLogger(__name__)
 
 # Per-hit text budget, shared by act (hits_log) and observe (prompt): the
 # quote-provenance check compares quotes against the passage as observe saw it,
@@ -233,11 +237,19 @@ def act(state: AgentState) -> dict:
     # the strip is idempotent, so nothing is lost by doing it early — and a
     # zero-width space can no longer hide an instruction line from the patterns
     # below ("ig<zwsp>nore all previous instructions" is one word again).
+    # The book key and the section title travel with the passage and are shown
+    # next to it everywhere — the scratchpad line, the block header of the
+    # prompt, the citation on the evidence card — so they are stripped here as
+    # well, whichever branch above produced the hit (a chapter read included).
+    # An index built before this release still holds raw section titles; a new
+    # one is clean at the row (`ingest.chunking.rows_for`).
     usage = llm._usage()
     usage.hits_seen += len(hits)
     for h in hits:
         clean_text, redacted = sanitize_context(strip_control_chars(h["text"]))
         h["text"] = clean_text
+        h["book"] = strip_control_chars(h["book"])
+        h["section"] = strip_control_chars(h["section"])
         if redacted:
             h["redacted_lines"] = redacted
             usage.redacted_lines += redacted
@@ -254,8 +266,12 @@ def act(state: AgentState) -> dict:
     # AgentState, so checkpoints and events stay linear in the number of steps.
     new_log = [{"hit_id": h["hit_id"], "step": step, "book": h["book"], "section": h["section"],
                 "corpus": h["corpus"], "text": h["text"][:limit]} for h in hits]
+    # The step header and the note are the model's own words (the query it
+    # wrote, the chapter it asked for), so they are stripped like the hits:
+    # `cat` on this file must not repaint the terminal reading it either.
     with open(state["scratchpad_path"], "a", encoding="utf-8") as f:
-        f.write(f"\n## step {step}: {state['current_query']}\n{empty_read_note}")
+        f.write(f"\n## step {step}: {strip_control_chars(state['current_query'])}\n"
+                f"{strip_control_chars(empty_read_note)}")
         for h in hits:
             # score = RRF, distance only exists on hits from the vector list.
             f.write(f"<<<hit>>> {h['hit_id']} | {h['book']} | {h['section']} | {h['corpus']} | "
@@ -340,6 +356,13 @@ def reflect(state: AgentState) -> dict:
     # both. What the model wanted is a note for the trace, not for the reader.
     what = llm.str_field(decision, "decision",
                          choices=("enough", "clarify", "read_chapter", "search"))
+    if what is None and "decision" in decision:
+        # Discarded, but not silently: the reader only ever sees the fixed stop
+        # phrase, so a model that answers off-schema every time would be
+        # invisible without this. The server log is the one place the value may
+        # appear — stripped and cut short, like any other corpus-shaped text.
+        log.debug("reflect: decision outside the schema: %.80s",
+                  strip_control_chars(str(decision["decision"])))
 
     probe = coverage_probe(state, what)
     if probe:

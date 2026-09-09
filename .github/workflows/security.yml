@@ -46,10 +46,14 @@ jobs:
           AFTER: ${{ github.sha }}
         # A pull request: every commit between its merge base with the target
         # branch and its head, merged branches included. A push: the pushed
-        # range; a first push of a branch has no "before" and falls through to
-        # the whole history, like the weekly schedule. A range git cannot
-        # resolve fails the step, which is the right outcome for a scan that
-        # could not be done.
+        # range. The all-zero "before" is not a branch being pushed for the
+        # first time — the push trigger above covers main and nothing else, so
+        # it means the first push of main itself, when the repository is
+        # created; that falls through to the whole history, like the weekly
+        # schedule. Two pushes fail the step instead, both of them on purpose,
+        # because neither can be scanned: a force-push that moves main backwards
+        # (the range resolves and holds no commit) and one whose "before" the
+        # repository no longer has (the range does not resolve at all).
         #
         # The count is its own assignment, and the step fails when a resolvable
         # range turns out to be empty. Inside `echo "... $(git rev-list ...)"`

@@ -59,8 +59,13 @@ DEFAULTS = {
 
 # Tracing is switched off outright, not defaulted: an inherited flag is exactly
 # the shape that traced whole test runs to LangSmith. Both prefixes, because the
-# SDK reads both (see test_tracing_recipe.py, which manages these itself).
-TRACING_OFF = {"LANGCHAIN_TRACING_V2": "false", "LANGSMITH_TRACING_V2": "false"}
+# SDK reads both (see test_tracing_recipe.py, which manages these itself), and
+# the older names too: langchain_core still reads LANGCHAIN_TRACING and
+# LANGCHAIN_HANDLER, and RAISES when either is set while v2 is off, so a shell
+# carrying the v1 flag failed the end-to-end tests instead of being ignored.
+TRACING_OFF = {"LANGCHAIN_TRACING_V2": "false", "LANGSMITH_TRACING_V2": "false",
+               "LANGCHAIN_TRACING": "false", "LANGSMITH_TRACING": "false",
+               "LANGCHAIN_HANDLER": ""}
 
 # Credentials and the opt-in key file: pinned BLANK, so no test can reach a
 # provider or a tracing endpoint even by accident, whatever the shell holds.

@@ -43,13 +43,22 @@ def embedding_text(chunk: Chunk) -> str:
 
 
 def rows_for(chunks: list[Chunk], vectors: list[list[float]]) -> list[dict]:
+    """Chunks plus their vectors as index rows — the one place every ingest
+    path (cards, transcripts, `ayl-add`) writes through.
+
+    The book key and the section title are the metadata that gets printed,
+    cited and sent to the model, and a section title is corpus text like any
+    other: it is a heading the file itself supplied, and nothing above strips
+    it (front matter is cleaned by `parse_frontmatter`, the key by `book_key`,
+    but a `# Chapter One` carrying an escape sequence reaches the row intact).
+    So the strip happens on the row, for every path at once."""
     # strict: an embedder returning fewer vectors must fail here, not silently
     # drop the tail chunks
     if len(chunks) != len(vectors):
         raise ValueError(f"{len(chunks)} chunks but {len(vectors)} vectors")
     return [{
-        "chunk_id": c.chunk_id, "note": c.note, "book": c.book,
-        "source": c.source, "section": c.section, "text": c.text,
+        "chunk_id": c.chunk_id, "note": c.note, "book": strip_control_chars(c.book),
+        "source": c.source, "section": strip_control_chars(c.section), "text": c.text,
         "vector": v,
     } for c, v in zip(chunks, vectors)]
 

@@ -40,7 +40,7 @@ from ..config import DB_PATH, EMBED_BACKEND
 from ..embeddings import get_embedder
 from ..index_meta import check_index, read_index_meta, write_index_meta
 from ..library import TITLE_SEPARATOR
-from ..sanitize import strip_control_chars
+from ..sanitize import LINE_BREAK_RE, strip_control_chars
 from .chapters import MergedHeading, split_book_sections
 from .chunking import Chunk, embedding_text, pack_sentences, parse_frontmatter, rows_for, \
     split_sentences
@@ -49,6 +49,14 @@ from .publish import COPY_BATCH_ROWS, NoRowsError, rebuild_table, recover_stagin
     table_batches, table_names
 
 log = logging.getLogger(__name__)
+
+
+def terminal_safe(text: str) -> str:
+    """One line of this CLI, ready for a terminal: the control and invisible
+    characters dropped, and every form of line break left as a plain LF — a
+    bare CR in a heading would otherwise put the cursor back at the start of
+    the line just written and let the rest overwrite it."""
+    return LINE_BREAK_RE.sub("\n", strip_control_chars(text))
 
 
 class _StripControlChars(logging.Filter):
@@ -72,7 +80,7 @@ class _StripControlChars(logging.Filter):
         # Names arrive as str or as Path (always formatted with %s here);
         # counts and exceptions are left alone so %d keeps working.
         if isinstance(value, (str, Path)):
-            return strip_control_chars(str(value))
+            return terminal_safe(str(value))
         return value
 
 
@@ -82,7 +90,7 @@ log.addFilter(_StripControlChars())
 def say(line: str, error: bool = False) -> None:
     """The CLI's own output, through the same strip as the warnings: book keys
     and section titles come from the files being indexed."""
-    print(strip_control_chars(line), file=sys.stderr if error else sys.stdout, flush=True)
+    print(terminal_safe(line), file=sys.stderr if error else sys.stdout, flush=True)
 
 
 class IngestError(Exception):

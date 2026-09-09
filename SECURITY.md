@@ -31,13 +31,17 @@ or enabling features the shipped configuration keeps off (MCP, file uploads, sha
 and once a week. gitleaks (a release binary verified against a pinned SHA-256, not the action
 wrapper) scans an explicit range: on a pull request every commit between its merge base with the
 target branch and its head, merged branches included; on a push to `main` the pushed range; on the
-weekly run, and on the first push of a branch (which has no "before" commit), the whole history
-reachable from `HEAD`. The range is resolved before the scan, in its own assignment, and a range
-git cannot resolve now fails the step. Inside the `echo` that reported the commit count it did
-not, because a command substitution in an argument of a succeeding command discards its exit
-status: gitleaks then logged "Invalid revision range", scanned nothing and exited 0. A range that
-resolves but holds no commit fails the step too, for the same reason: a scan of zero commits is
-not a pass.
+weekly run, and on the one push that has no "before" commit, the whole history reachable from
+`HEAD`. That push is the first one of `main` itself, at the creation of the repository: `main` is
+the only branch the workflow reacts to, so no other branch ever arrives here without a "before".
+The range is resolved before the scan, in its own assignment, and a range git cannot resolve now
+fails the step. Inside the `echo` that reported the commit count it did not, because a command
+substitution in an argument of a succeeding command discards its exit status: gitleaks then
+logged "Invalid revision range", scanned nothing and exited 0. A range that resolves but holds no
+commit fails the step too, for the same reason: a scan of zero commits is not a pass. Both
+failures describe a force-push of `main`, and both are meant: one that moves the branch backwards
+leaves a range of no commits, one whose "before" the repository no longer holds leaves a range
+git cannot resolve, and neither of them is a scan.
 OSV-Scanner runs over `uv.lock`, the resolved dependency set CI installs from. A secret, or an
 advisory without a recorded exception, fails the job — and so does a scanner that cannot run, which
 is why neither job is marked `continue-on-error`. A failed job blocks the merge once the

@@ -16,7 +16,7 @@ from .config import SEARCH_HIT_CHARS
 from .i18n import t
 from .library import title_of
 from . import llm
-from .sanitize import strip_control_chars
+from .sanitize import LINE_BREAK_RE, strip_control_chars
 from .state import AgentState
 
 MAX_QUOTE_CHARS = SEARCH_HIT_CHARS   # a quote cannot exceed the hit it was copied from
@@ -86,10 +86,11 @@ def _normalize(text: str) -> str:
     # word a zero-width space hides inside, so a quote the model copied
     # verbatim from the prompt ("the word") would not match the haystack the
     # check runs against ("the wo rd") and would read as broken. Dropping them
-    # first also keeps them off the placeholders below. Tab and newline are
-    # real separators and survive the strip, so they become spaces here.
+    # first also keeps them off the placeholders below. Tabs and line breaks are
+    # real separators and survive the strip, so they become spaces here — every
+    # form of break, not only LF: a passage split by a bare CR is two words.
     text = strip_control_chars(unicodedata.normalize("NFKC", text).lower())
-    text = re.sub(r"[\t\n]", " ", text)
+    text = LINE_BREAK_RE.sub(" ", text).replace("\t", " ")
     text = re.sub(r"(?<=\d)[.,](?=\d)", "\x00", text)
     text = re.sub(r"(?<=\d)[-–−](?=\d)", "\x01", text)
     text = re.sub(r"(?:(?<=\W)|^)[-–−](?=\d)", "\x02", text)   # sign after any non-word char: "(-5)"

@@ -938,7 +938,10 @@ def test_an_honest_quote_survives_the_invisible_character_strip(monkeypatch, tmp
     acted = nodes.act({"current_query": f"__chapter__|{book}|Chapter 1", "steps_taken": 0,
                        "read_chapters": [], "scratchpad_path": str(scratchpad)})
     hit, logged = acted["hits"][0], acted["hits_log"][0]
-    clean = "Call me Ishmael. Some years ago — never mind how long."
+    # The vertical tab is a line break, not a character to delete: it survives
+    # the strip as the break it is (the sanitizer rejoins its lines with LF)
+    # and becomes a space where the quote is normalized.
+    clean = "Call me Ishmael.\n Some years ago — never mind how long."
     assert hit["text"] == logged["text"] == clean          # one string: the log and the prompt
     assert clean in data_block("result", hit["text"], hit_id=hit["hit_id"])
 

@@ -442,6 +442,21 @@ def test_a_book_key_carries_no_control_or_invisible_characters(tmp_path):
     assert "\x1b" not in book.book and "\ufeff" not in book.book
 
 
+def test_a_section_title_carries_no_control_or_invisible_characters(tmp_path):
+    """The other half of a citation, and the half nothing above the row cleaned:
+    front matter goes through `parse_frontmatter` and the key through
+    `book_key`, but a chapter heading comes straight out of the file into the
+    section field, and from there into the scratchpad, the block header of the
+    prompt and the evidence card of the web UI, which escapes HTML and leaves a
+    bidi override alone. Every ingest path writes its rows through `rows_for`."""
+    folder = tmp_path / "books"
+    write(folder, "Poisoned - A Writer.md", f"## Chapter ‮One\x1b]0;pwned\x07\n\n{PARA}")
+    chunks = add_folder.chunks_for(add_folder.read_folder(folder)[0])
+    rows = add_folder.rows_for(chunks, [[0.0, 1.0, 0.5, 0.25]] * len(chunks))
+    assert [r["section"] for r in rows] == ["Chapter One]0;pwned"]
+    assert all("\x1b" not in r["section"] and "‮" not in r["section"] for r in rows)
+
+
 def test_the_log_filter_strips_a_mapping_style_call_too(caplog):
     """The filter runs on the logger, so a warning added later is safe by
     construction — but only the %s tuple was cleaned. logging keeps a lone

@@ -264,6 +264,29 @@ def test_every_evidence_item_opens_on_the_passage_it_was_checked_against(ui, mon
     assert t("ui_passage_missing") in sent[-1] and "Call me Ishmael" not in sent[-1]
 
 
+def test_the_evidence_card_names_its_source_without_the_corpus_formatting_it(ui, monkeypatch,
+                                                                             tmp_path):
+    """The card's summary is the citation: book, section, hit id. Both names are
+    index metadata, and the card only escapes HTML — a right-to-left override in
+    a section title reverses the rendering of the very line that says where a
+    quote came from, and an OSC sequence sits in chat.db for whoever reads it in
+    a terminal. `act` strips both off the hit, so nothing arrives here."""
+    from ask_your_library import nodes
+    osc = "\x1b]0;pwned\x07"
+    book, section = f"Moby Dick{osc} — Herman Melville", "Chapter ‮One"
+    monkeypatch.setattr(nodes, "read_chapter",
+                        lambda b, s, max_chars=12000: ("Call me Ishmael.", book, "found"))
+    acted = nodes.act({"current_query": f"__chapter__|{book}|{section}", "steps_taken": 0,
+                       "read_chapters": [], "scratchpad_path": str(tmp_path / "scratch.md")})
+    hit = acted["hits"][0]
+    items = [{"hit_id": hit["hit_id"], "book": hit["book"], "section": hit["section"],
+              "quote": "Call me Ishmael.", "status": "confirmed"}]
+    card = ui.evidence_passages(items, {hit["hit_id"]: acted["hits_log"][0]["text"]})
+    for char in ("\x1b", "\x07", "‮"):
+        assert char not in card
+    assert "Moby Dick]0;pwned — Herman Melville — Chapter One" in card
+
+
 def test_a_broken_quote_cannot_load_an_image_through_the_badge_tooltip(ui):
     """The badge's title attribute carried the verification text escaped and
     nothing more. That text is built around the quotes that failed, i.e. around

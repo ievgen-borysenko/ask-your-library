@@ -11,7 +11,9 @@
   the badge's tooltip and headline (built from the quotes that failed provenance, i.e. from
   corpus text) and the metrics footer, whose stop reason came from `reflect`; `reflect` now reads
   the model's `decision` against its schema, so an off-schema value degrades to a fixed phrase
-  instead of travelling into the terminal and the footer as free text. Every form of line break
+  instead of travelling into the terminal and the footer as free text (the value itself goes to
+  the debug log, cut to eighty characters, so a model that keeps answering off-schema is still
+  diagnosable). Every form of line break
   counts, not only LF: CommonMark ends a block on a bare CR and on U+2028/U+0085 as well, and one
   regular expression (`sanitize.LINE_BREAK_RE`) now serves the badge, the footer and the block
   headers of the prompt. The preflight, notice and error messages go through the same escaping and
@@ -27,8 +29,17 @@
   site, so listing another port let a page there read the thread endpoints), its comment now
   says what the list actually governs, and a test pins the pair that is left. Terminal escape
   sequences carried by a poisoned book are stripped where corpus text becomes index metadata
-  (`book_key`, front matter) and prompt text (`data_block`), and every line both CLIs print goes
-  through one strip, so a crafted title can no longer repaint the reader's terminal. The demo
+  (`book_key`, front matter, and the section title of a row — a heading the file itself supplied,
+  which nothing above the row had cleaned), where it becomes prompt text (`data_block`), and where
+  it travels beside a passage: the book and section of a hit reach the scratchpad, the block header
+  of the prompt and the evidence card of the web UI, which escapes HTML and would leave a bidi
+  override free to reverse the citation naming the source. Every line both CLIs print goes
+  through one strip, so a crafted title can no longer repaint the reader's terminal. A line break
+  is text, and is no longer part of that strip: deleting CR, the vertical tab and the form feed
+  joined the words on either side, which reported an honest quote spanning a line break as broken
+  and put `MobyDick` in a block header. They are mapped now instead — to a space in a header and
+  in a normalized quote, to a plain LF on the way to a terminal, where a bare CR would otherwise
+  put the cursor back over the line just printed. The demo
   corpus's audio download names its local file after the chapter number instead of after the name
   archive.org returned. `.chainlit/chat.db`
   and the run scratchpads are created (or narrowed) to 0600 like the auth secret, and the db's
@@ -65,7 +76,10 @@
   absent, so dropping a key left the repository's own `.env` free to put it straight back, while
   every reader treats a blank value as no key at all. `ASK_LANG=ua` in a shell used to fail eight
   tests, and a LangSmith key made the end-to-end tests upload trace batches while staying green
-  (the client swallows the connection error). An autouse fixture resets the per-run state (token
+  (the client swallows the connection error). Tracing is pinned off under its old names too
+  (`LANGCHAIN_TRACING`, `LANGCHAIN_HANDLER`): `langchain_core` still reads them and raises when one
+  is set while v2 is off, so a shell carrying the v1 flag failed all eighteen end-to-end tests.
+  An autouse fixture resets the per-run state (token
   counters, language, the `library` caches), the subprocess tests share one fresh-interpreter
   helper instead of keeping a scrub list each, and the canary's UI stage restores the environment
   it writes and removes its temp directory.

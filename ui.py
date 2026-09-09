@@ -417,7 +417,7 @@ async def show_metrics(metrics: dict) -> None:
 
     role_rows = ""
     for role, usage in (metrics.get("by_role") or {}).items():
-        role_rows += (f"<tr><td>{html.escape(role)}</td><td>{usage['calls']}</td>"
+        role_rows += (f"<tr><td>{safe_html(role)}</td><td>{usage['calls']}</td>"
                       f"<td>{usage['input_tokens']}</td><td>{usage['output_tokens']}</td>"
                       f"<td>${usage['cost_usd']:.4f}</td></tr>")
 

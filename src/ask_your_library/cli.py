@@ -22,7 +22,7 @@ from .graph import build_graph
 from .i18n import set_lang, status_word, t
 from .preflight import check_environment
 from .runner import run_question
-from .sanitize import strip_control_chars
+from .sanitize import LINE_BREAK_RE, strip_control_chars
 
 EXIT_WORDS = {"exit", "quit", "q", "вихід"}
 SCRATCH_DIR = Path(os.environ.get("ASK_SCRATCH_DIR", ".scratch"))
@@ -37,12 +37,17 @@ RUN = {"passages": {}, "verbose": False}
 
 def terminal_safe(text: str) -> str:
     """Text printed by the CLI must not repaint or clear the terminal:
-    sanitize_context redacts instruction lines, not escape sequences."""
-    return strip_control_chars(text)
+    sanitize_context redacts instruction lines, not escape sequences.
+
+    A line break is text and stays, but it leaves as a plain LF, whatever form
+    it arrived in: a bare CR would put the cursor back at the start of the line
+    just printed and let the next characters overwrite it."""
+    return LINE_BREAK_RE.sub("\n", strip_control_chars(text))
 
 
 def say(line: str, error: bool = False) -> None:
-    """Every line a run reports goes out through here.
+    """Every line the CLI prints goes out through here, the banner and the
+    echoed question included.
 
     Book titles, section names, queries, the answer, the provenance line and
     the failure messages all carry corpus text or model output shaped by it,
@@ -221,7 +226,7 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.question:
         question = " ".join(args.question)
-        print(t("cli_question", q=question) + "\n")
+        say(t("cli_question", q=question) + "\n")
         # Single-question mode is what scripts and evals call: a failed run has
         # to be visible in the exit code, not only in the message _run printed.
         # (The interactive loop keeps going instead — a bad question there is
@@ -230,7 +235,7 @@ def main(argv: list[str] | None = None) -> None:
             raise SystemExit(1)
         return
 
-    print(t("cli_banner"))
+    say(t("cli_banner"))
     history: list[str] = []
     while True:
         try:
@@ -246,7 +251,7 @@ def main(argv: list[str] | None = None) -> None:
         # Conversation memory: the question plus a truncated answer.
         history.append(f"Q: {question}\nA: {answer[:500]}")
 
-    print(t("cli_bye"))
+    say(t("cli_bye"))
 
 
 if __name__ == "__main__":
