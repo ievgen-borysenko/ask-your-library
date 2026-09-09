@@ -39,9 +39,12 @@ status: gitleaks then logged "Invalid revision range", scanned nothing and exite
 resolves but holds no commit fails the step too, for the same reason: a scan of zero commits is
 not a pass.
 OSV-Scanner runs over `uv.lock`, the resolved dependency set CI installs from. A secret, or an
-advisory without a recorded exception, fails the job and blocks the merge — and so does a scanner
-that cannot run, which is why neither job is marked `continue-on-error`. An exception is an
-`[[IgnoredVulns]]` entry in `osv-scanner.toml` naming the advisory, the mitigation that keeps it
+advisory without a recorded exception, fails the job — and so does a scanner that cannot run, which
+is why neither job is marked `continue-on-error`. A failed job blocks the merge once the
+repository's branch protection lists it as a required check; GitHub offers that setting on public
+repositories and on paid plans, and this repository is private on the free plan until its first
+release, so until then a red check is honoured by hand and nothing merges over it. An exception is
+an `[[IgnoredVulns]]` entry in `osv-scanner.toml` naming the advisory, the mitigation that keeps it
 out of this repository, an owner and a review date after which the scanner reports it again.
 Both workflows pin every third-party action to a commit SHA
 with its version in a comment; the pin covers the action's code, not the container image the
@@ -53,10 +56,14 @@ with the same read-only token as any other.
 
 ## Known dependency advisories
 
-None open. Chainlit 2.11.1 carried two advisories about its MCP transports (command injection over
-stdio, SSRF over HTTP/SSE); this repository never enabled MCP, and the upgrade to Chainlit 2.12.0
-closed both. MCP stays disabled (`[features.mcp] enabled = false` in `.chainlit/config.toml`, which
-is what makes every transport unreachable; user-connected servers are off as well); enabling MCP
-is a deliberate change that starts with re-reading this file. The OSV-Scanner job in
-`.github/workflows/security.yml` reports any new advisory, and `osv-scanner.toml` holds no
-exception at the moment.
+Open: none, as of the evening of 08.09, when the lockfile moved httpx2 to 2.12.0. The weekly OSV
+job, not this paragraph, is the current state, because an unchanged lockfile can go red when the
+advisory database moves: three advisories against httpx2 2.10.0 were published on 08.09 at about
+20:45 UTC, between two green runs, and the bump that closed them was committed the same evening. No
+advisory carries an exception: `osv-scanner.toml` holds no `[[IgnoredVulns]]` entry. Chainlit
+2.11.1 carried two advisories about its MCP transports (command injection over stdio, SSRF over
+HTTP/SSE); this repository never enabled MCP, and the upgrade to Chainlit 2.12.0 closed both. MCP
+stays disabled (`[features.mcp] enabled = false` in `.chainlit/config.toml`, which is what makes
+every transport unreachable; user-connected servers are off as well); enabling MCP is a deliberate
+change that starts with re-reading this file. The OSV-Scanner job in
+`.github/workflows/security.yml` reports any new advisory.
