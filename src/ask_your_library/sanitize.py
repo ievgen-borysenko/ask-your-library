@@ -19,6 +19,15 @@ CONTROL_CHARS_RE = re.compile("[\x00-\x08\x0b-\x1f\x7f"
                               "\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
 
 
+# Every character CommonMark (and a terminal) treats as the end of a line, not
+# only LF: CR alone, the vertical tab and form feed, NEL, and the Unicode line
+# and paragraph separators. CRLF is one break, not two, hence the alternative
+# in front of the class. Used where a line break has to become something else —
+# a space inside a block header (llm.data_block), a <br> inside an HTML block
+# (ui.safe_html) — and never as a strip: a break is real text.
+LINE_BREAK_RE = re.compile(r"\r\n|[\r\n\x0b\x0c\x85\u2028\u2029]")
+
+
 def strip_control_chars(text: str) -> str:
     """Drop characters that are never part of a book's text.
 

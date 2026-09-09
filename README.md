@@ -616,7 +616,9 @@ Designed for **localhost, single user**. Not designed for internet exposure:
   no port forwarding at all: such a page could post it and then read every thread. `ui.py`
   registers Starlette's `TrustedHostMiddleware`, so the server answers only to the Host headers
   `localhost` and `127.0.0.1` and returns 400 to anything else, which closes the rebinding route;
-  the login cookie is `SameSite=strict`. Set `CHAINLIT_PASSWORD` anyway. `allow_origins` in
+  the login cookie is `SameSite=strict`, which `ui.py` sets on Chainlit's cookie module itself
+  (`CHAINLIT_COOKIE_SAMESITE` is read before `ui.py` is loaded under `chainlit run`, so neither
+  the environment nor `.env` decides it). Set `CHAINLIT_PASSWORD` anyway. `allow_origins` in
   `.chainlit/config.toml` is a CORS list, i.e. what a cross-origin page may *read*, and never a
   substitute for either.
 - The injection layers cover instructions embedded in the *corpus*. They do not protect against

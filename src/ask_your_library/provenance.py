@@ -16,6 +16,7 @@ from .config import SEARCH_HIT_CHARS
 from .i18n import t
 from .library import title_of
 from . import llm
+from .sanitize import strip_control_chars
 from .state import AgentState
 
 MAX_QUOTE_CHARS = SEARCH_HIT_CHARS   # a quote cannot exceed the hit it was copied from
@@ -79,9 +80,16 @@ def _normalize(text: str) -> str:
     digits and a sign directly before a digit, so "-5" is not "5" and "1-2"
     is not "1.2". A fabricated or paraphrased sentence still fails the
     word-by-word check regardless."""
-    # Control characters are never text: strip them first so they cannot
-    # collide with the placeholders below.
-    text = re.sub(r"[\x00-\x1f]", " ", unicodedata.normalize("NFKC", text).lower())
+    # Control and invisible formatting characters are never text: DROPPED, the
+    # same class and the same way as where the passage becomes prompt text
+    # (`act`, `llm.data_block`). Mapping them to a space instead would split a
+    # word a zero-width space hides inside, so a quote the model copied
+    # verbatim from the prompt ("the word") would not match the haystack the
+    # check runs against ("the wo rd") and would read as broken. Dropping them
+    # first also keeps them off the placeholders below. Tab and newline are
+    # real separators and survive the strip, so they become spaces here.
+    text = strip_control_chars(unicodedata.normalize("NFKC", text).lower())
+    text = re.sub(r"[\t\n]", " ", text)
     text = re.sub(r"(?<=\d)[.,](?=\d)", "\x00", text)
     text = re.sub(r"(?<=\d)[-–−](?=\d)", "\x01", text)
     text = re.sub(r"(?:(?<=\W)|^)[-–−](?=\d)", "\x02", text)   # sign after any non-word char: "(-5)"

@@ -11,20 +11,31 @@
   the badge's tooltip and headline (built from the quotes that failed provenance, i.e. from
   corpus text) and the metrics footer, whose stop reason came from `reflect`; `reflect` now reads
   the model's `decision` against its schema, so an off-schema value degrades to a fixed phrase
-  instead of travelling into the terminal and the footer as free text. The preflight, notice and
-  error messages go through the same neutralization as every other message.
+  instead of travelling into the terminal and the footer as free text. Every form of line break
+  counts, not only LF: CommonMark ends a block on a bare CR and on U+2028/U+0085 as well, and one
+  regular expression (`sanitize.LINE_BREAK_RE`) now serves the badge, the footer and the block
+  headers of the prompt. The preflight, notice and error messages go through the same escaping and
+  image neutralization, but as plain Markdown (`safe_markdown`), so their `- item` lists still
+  render as lists instead of one paragraph of literal dashes.
   Also in this pass: the web UI answers only to the `Host` headers `localhost` and `127.0.0.1`
   (Starlette's `TrustedHostMiddleware`), which closes the DNS-rebinding route a page in your
-  browser otherwise has to a loopback server, and its login cookie is `SameSite=strict`;
+  browser otherwise has to a loopback server, and its login cookie is `SameSite=strict` — set on
+  Chainlit's cookie module, because `chainlit run` imports `chainlit.cli` (and through it
+  `chainlit.auth.cookie`, which reads `CHAINLIT_COOKIE_SAMESITE` once) before it loads `ui.py`, so
+  neither an exported variable nor a `.env` entry could have delivered it;
   `allow_origins` in `.chainlit/config.toml` drops the second port pair (ports are not part of a
-  site, so listing another port let a page there read the thread endpoints) and its comment now
-  says what the list actually governs. Terminal escape sequences carried by a poisoned book are
-  stripped where corpus text becomes index metadata (`book_key`, front matter) and prompt text
-  (`data_block`), and every line both CLIs print goes through one strip, so a crafted title can
-  no longer repaint the reader's terminal. The demo corpus's audio download names its local file
-  after the chapter number instead of after the name archive.org returned. `.chainlit/chat.db`
-  and the run scratchpads are created (or narrowed) to 0600 like the auth secret. `ayl-add` now
-  reports the hidden files it skips, which the README and its own docstring already promised.
+  site, so listing another port let a page there read the thread endpoints), its comment now
+  says what the list actually governs, and a test pins the pair that is left. Terminal escape
+  sequences carried by a poisoned book are stripped where corpus text becomes index metadata
+  (`book_key`, front matter) and prompt text (`data_block`), and every line both CLIs print goes
+  through one strip, so a crafted title can no longer repaint the reader's terminal. The demo
+  corpus's audio download names its local file after the chapter number instead of after the name
+  archive.org returned. `.chainlit/chat.db`
+  and the run scratchpads are created (or narrowed) to 0600 like the auth secret, and the db's
+  `-wal`/`-journal` siblings are narrowed again when a chat starts, since they only appear once
+  the data layer opens a session. `ayl-add` now reports the hidden files it skips, which the
+  README and its own docstring already promised, and its logging filter strips a mapping-style
+  call (`"%(book)s"`, one dict) as well as the `%s` tuple it already covered.
   In CI: the gitleaks range is resolved in its own assignment and an empty or unresolvable range
   fails the step instead of scanning zero commits and passing (see SECURITY.md); `setup-uv` is
   pinned to the uv release the lockfile is maintained with; the `test-ui` job asserts the `ui`
@@ -37,15 +48,27 @@
   is a `<div>` with the same monospaced, wrapped styling now. The web UI check before a release
   has to confirm the passage under an evidence item is actually readable in the browser, not
   only that the message was sent.
+- **An honest quote out of a poisoned passage is confirmed again.** The strip of control and
+  invisible characters ran on the way into the prompt only, so `hits_log` still held the raw
+  passage: a zero-width space inside a word left the model quoting `the word` while the text the
+  provenance check ran against normalized to `the wo rd`, and the quote was reported broken. The
+  passage is stripped once now, in `act`, before it is cut — so the log, the scratchpad and the
+  prompt are one string — and `provenance._normalize` drops the same class instead of turning it
+  into a space, which keeps a quote checked against a `hits_log` written by an older version
+  consistent too. The same strip runs before the injection patterns, so a zero-width space can no
+  longer hide an instruction line from them.
 - **Tests no longer inherit the shell.** `tests/conftest.py` pins every knob `config.py` reads to
-  its documented default before the package is imported (`setdefault`, so the CI backend matrix
-  still works), points `LIBRARY_DB_PATH` at nothing, switches tracing off and removes the
-  provider and LangSmith keys. `ASK_LANG=ua` in a shell used to fail eight tests, and a LangSmith
-  key made the end-to-end tests upload trace batches while staying green (the client swallows the
-  connection error). An autouse fixture resets the per-run state (token counters, language, the
-  `library` caches), the two subprocess test files share one fresh-interpreter helper instead of
-  keeping a scrub list each, and the canary's UI stage restores the environment it writes and
-  removes its temp directory.
+  its documented default before the package is imported (`pin_environment()`, with `setdefault`,
+  so the CI backend matrix still works), points `LIBRARY_DB_PATH` at a per-process path under the
+  system temp dir that no library lives at, switches tracing off and pins the provider and
+  LangSmith keys BLANK. Blank, not removed: `config.load_dotenv()` fills in any name that is
+  absent, so dropping a key left the repository's own `.env` free to put it straight back, while
+  every reader treats a blank value as no key at all. `ASK_LANG=ua` in a shell used to fail eight
+  tests, and a LangSmith key made the end-to-end tests upload trace batches while staying green
+  (the client swallows the connection error). An autouse fixture resets the per-run state (token
+  counters, language, the `library` caches), the subprocess tests share one fresh-interpreter
+  helper instead of keeping a scrub list each, and the canary's UI stage restores the environment
+  it writes and removes its temp directory.
 - **Chat titles in the sidebar.** `auto_tag_thread` is now off in `.chainlit/config.toml`. With it
   on, the first message of every chat asked the SQLAlchemy data layer to insert the thread with
   `tags=[chat profile]`; SQLite refuses a Python list, the data layer only logs the failure, and the

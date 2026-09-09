@@ -23,7 +23,7 @@ from .library import TITLE_SEPARATOR, chapter_is_cut, read_chapter, search_both,
 from .llm import data_block
 from .prompts import OBSERVE_RULES, PLAN_RULES, REFLECT_RULES, SYNTHESIZE_RULES
 from .provenance import _valid_evidence, validate  # noqa: F401  (validate is wired by graph.py)
-from .sanitize import sanitize_context
+from .sanitize import sanitize_context, strip_control_chars
 from .state import AgentState, is_loop_marker
 
 # Per-hit text budget, shared by act (hits_log) and observe (prompt): the
@@ -225,11 +225,18 @@ def act(state: AgentState) -> dict:
         empty_read_note = ""
         read_chapters = state.get("read_chapters", [])
 
-    # Injection defense: sanitize hit text before the model ever sees it
+    # Injection defense: sanitize hit text before the model ever sees it.
+    # The control/invisible strip happens HERE, on the passage itself and before
+    # it is cut: hits_log, the scratchpad and the observe prompt then hold one
+    # string, so a quote the model copied verbatim out of the prompt is checked
+    # against the text it was copied from. data_block strips again downstream and
+    # the strip is idempotent, so nothing is lost by doing it early — and a
+    # zero-width space can no longer hide an instruction line from the patterns
+    # below ("ig<zwsp>nore all previous instructions" is one word again).
     usage = llm._usage()
     usage.hits_seen += len(hits)
     for h in hits:
-        clean_text, redacted = sanitize_context(h["text"])
+        clean_text, redacted = sanitize_context(strip_control_chars(h["text"]))
         h["text"] = clean_text
         if redacted:
             h["redacted_lines"] = redacted

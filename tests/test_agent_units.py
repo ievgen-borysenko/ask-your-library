@@ -918,6 +918,47 @@ def test_data_block_drops_control_and_invisible_characters(monkeypatch):
     assert data_block("result", "a\tb\nc", trusted=True) == "<result>\na\tb\nc\n</result>"
 
 
+def test_an_honest_quote_survives_the_invisible_character_strip(monkeypatch, tmp_path):
+    """The strip used to happen only on the way into the prompt, so hits_log kept
+    the raw passage: a quote the model copied verbatim out of what it SAW ("the
+    word") normalized to one token while the haystack still had two ("the wo rd"),
+    and an honest quote read as broken. act strips the passage itself now, before
+    the cut, so the log, the scratchpad and the prompt are one string — and
+    _normalize DROPS the same class instead of turning it into a space, so a
+    hits_log written by an older version reads the same way."""
+    from ask_your_library import nodes
+    from ask_your_library.llm import data_block
+
+    book = "Moby Dick — Herman Melville"
+    raw = "Call me Ish\u200bmael.\x0b Some years\ufeff ago\u202e — never mind how long."
+    monkeypatch.setattr(nodes, "read_chapter", lambda b, s, max_chars=12000: (raw, book, "found"))
+    llm.reset_usage()
+    scratchpad = tmp_path / "scratch.md"
+    scratchpad.write_text("")
+    acted = nodes.act({"current_query": f"__chapter__|{book}|Chapter 1", "steps_taken": 0,
+                       "read_chapters": [], "scratchpad_path": str(scratchpad)})
+    hit, logged = acted["hits"][0], acted["hits_log"][0]
+    clean = "Call me Ishmael. Some years ago — never mind how long."
+    assert hit["text"] == logged["text"] == clean          # one string: the log and the prompt
+    assert clean in data_block("result", hit["text"], hit_id=hit["hit_id"])
+
+    def status(hits_log, quote):
+        return nodes.validate({"answer": book, "hits_log": hits_log,
+                               "evidence": [{"hit_id": hit["hit_id"], "book": book,
+                                             "section": "Chapter 1", "quote": quote}]}
+                              )["provenance"]["items"][0]["status"]
+
+    copied_from_the_prompt = "Call me Ishmael. Some years ago"
+    assert status(acted["hits_log"], copied_from_the_prompt) == "confirmed"
+    # the raw spelling is no worse off: the same characters are dropped on both sides
+    raw_spelling = "Call me Ish\u200bmael.\x0b Some years\ufeff ago"
+    assert status(acted["hits_log"], raw_spelling) == "confirmed"
+    # ...and against a hits_log an older version wrote, which still holds the raw text
+    assert status([{**logged, "text": raw}], copied_from_the_prompt) == "confirmed"
+    # a fabricated sentence is still broken, invisible characters or not
+    assert status(acted["hits_log"], "Call me Bob.\u200b") == "broken"
+
+
 def test_reflect_ignores_a_non_string_or_reserved_next_query(monkeypatch):
     from ask_your_library import nodes
 

@@ -7,8 +7,9 @@ to run on loopback: every launch command in the README and in `ui.py` passes `--
 because Chainlit's own default binds to all interfaces and the UI does not override it; it asks for
 a password and is not designed to be exposed to a network or run for several users. Loopback is not
 by itself a boundary against the browser on the same machine, so `ui.py` also refuses every `Host`
-header other than `localhost` and `127.0.0.1` (Starlette's `TrustedHostMiddleware`) and asks for a
-`SameSite=strict` login cookie; see "Threat model" in the README. Prompts,
+header other than `localhost` and `127.0.0.1` (Starlette's `TrustedHostMiddleware`) and sets its
+login cookie to `SameSite=strict` on Chainlit's cookie module, `CHAINLIT_COOKIE_SAMESITE` being
+already read by the time `chainlit run` loads `ui.py`; see "Threat model" in the README. Prompts,
 retrieved passages and answers leave the machine only as calls to the providers you configure:
 the answering model (`LLM_BACKEND`), the embedding model (`EMBED_BACKEND`, local Ollama by
 default) and, if a LangSmith key and tracing flag are in the environment (either the `LANGCHAIN_`

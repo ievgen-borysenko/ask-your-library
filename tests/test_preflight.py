@@ -245,3 +245,26 @@ def test_a_hosted_llm_never_asks_for_a_pulled_chat_model(monkeypatch, tmp_path):
             return Tags({"models": [{"name": "bge-m3:latest"}]})
     monkeypatch.setattr(preflight, "requests", Embeddings())
     assert preflight.check_environment() == []
+
+
+def test_a_repo_env_file_cannot_hand_the_suite_a_provider_key(tmp_path):
+    """The suite must not be able to reach a provider, whatever is on the
+    machine — and `config.load_dotenv()` runs at the first package import and
+    fills in any name that is ABSENT, reading a .env from the working directory
+    and its parents. Dropping the keys therefore left the door open: a .env in
+    the repository root put them straight back. conftest pins them blank
+    instead, which holds the name and reads as "no key" everywhere.
+
+    Driven through the shared fresh-interpreter helper, with a planted .env as
+    the working directory: the pin only ever happens before the first import,
+    so nothing in this process can show whether it worked."""
+    from conftest import fresh_output
+
+    planted = 'OPENROUTER_API_KEY="sk-planted-not-a-real-key"\n'
+    (tmp_path / ".env").write_text(planted, encoding="utf-8")
+    code = ("from conftest import pin_environment\n"
+            "pin_environment()\n"
+            "import os\n"
+            "from ask_your_library import preflight\n"
+            "print(repr(os.environ['OPENROUTER_API_KEY']), preflight.check_api_key() is not None)")
+    assert fresh_output(code, cwd=str(tmp_path)) == "'' True"

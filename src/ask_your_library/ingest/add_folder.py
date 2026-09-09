@@ -29,6 +29,7 @@ import hashlib
 import logging
 import re
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -59,6 +60,11 @@ class _StripControlChars(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         if isinstance(record.args, tuple):
             record.args = tuple(self._clean(a) for a in record.args)
+        elif isinstance(record.args, Mapping):
+            # log.warning("%(book)s ...", {"book": key}): logging keeps a lone
+            # mapping argument as the args itself, so the tuple branch never
+            # sees it and those names would reach the terminal unstripped.
+            record.args = {key: self._clean(value) for key, value in record.args.items()}
         return True
 
     @staticmethod

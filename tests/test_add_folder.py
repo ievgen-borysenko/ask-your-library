@@ -442,6 +442,17 @@ def test_a_book_key_carries_no_control_or_invisible_characters(tmp_path):
     assert "\x1b" not in book.book and "\ufeff" not in book.book
 
 
+def test_the_log_filter_strips_a_mapping_style_call_too(caplog):
+    """The filter runs on the logger, so a warning added later is safe by
+    construction — but only the %s tuple was cleaned. logging keeps a lone
+    mapping argument as `record.args` itself, so `log.warning("%(book)s ...",
+    {"book": key})` walked past the tuple branch and put the escape on screen."""
+    with caplog.at_level("WARNING", logger=add_folder.log.name):
+        add_folder.log.warning("skipped %(book)s", {"book": "Moby\x1b]0;pwned\x07 Dick\u200b"})
+        add_folder.log.warning("skipped %s", "Moby\x1b[2J Dick")
+    assert caplog.messages == ["skipped Moby]0;pwned Dick", "skipped Moby[2J Dick"]
+
+
 def test_symlink_pointing_outside_the_folder_is_skipped(tmp_path, caplog):
     # is_file() follows symlinks: without the check, this file's text would be
     # read and sent to the embedding backend.
