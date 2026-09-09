@@ -326,17 +326,25 @@ def reflect(state: AgentState) -> dict:
         # No usable decision: finish with the evidence collected so far
         return {"current_query": "", "stop_reason": t("stop_json")}
 
-    probe = coverage_probe(state, decision.get("decision"))
+    # One read of the decision, against the schema: an off-schema value is None
+    # here, so it can never travel on as free text. It used to reach the stop
+    # reason verbatim, and from there the CLI and the metrics footer of the web
+    # UI: a passage that steers the model's decision field could write into
+    # both. What the model wanted is a note for the trace, not for the reader.
+    what = llm.str_field(decision, "decision",
+                         choices=("enough", "clarify", "read_chapter", "search"))
+
+    probe = coverage_probe(state, what)
     if probe:
         remaining = [q for q in state["queries"] if q != probe]
         return {"current_query": probe, "queries": remaining, "coverage_probed": True}
 
-    if decision.get("decision") == "read_chapter" and not (
+    if what == "read_chapter" and not (
             isinstance(decision.get("book"), str) and isinstance(decision.get("section"), str)):
         # Schema-less read_chapter: nothing to read, treat as enough.
-        decision = {"decision": "enough"}
+        what = "enough"
 
-    if decision.get("decision") == "read_chapter" and state["steps_taken"] < MAX_STEPS:
+    if what == "read_chapter" and state["steps_taken"] < MAX_STEPS:
         wanted = f"{decision['book']}|{decision['section']}"
 
         if not any(same_chapter(wanted, entry) for entry in state.get("read_chapters", [])):
@@ -347,7 +355,7 @@ def reflect(state: AgentState) -> dict:
 
     # One clarify per run, gated by the flag: an empty reply (web timeout)
     # must not re-open the clarify loop.
-    if decision.get("decision") == "clarify" and not state.get("clarify_asked"):
+    if what == "clarify" and not state.get("clarify_asked"):
         # The candidates are what the user picks from: books in the evidence,
         # topped up from the last hits when the evidence names fewer than two.
         candidates = _clarify_candidates(state)[:MAX_CLARIFY_CANDIDATES]
@@ -360,8 +368,7 @@ def reflect(state: AgentState) -> dict:
         return {"current_query": "__clarify__", "queries": [question],
                 "clarify_candidates": candidates}
 
-    if decision.get("decision") != "search" or state["steps_taken"] >= MAX_STEPS:
-        what = decision.get("decision")
+    if what != "search" or state["steps_taken"] >= MAX_STEPS:
         if state["steps_taken"] >= MAX_STEPS and what in ("search", "read_chapter"):
             reason = t("stop_limit", n=MAX_STEPS)
         elif what == "enough":
@@ -369,7 +376,7 @@ def reflect(state: AgentState) -> dict:
         elif what == "clarify":
             reason = t("stop_clarify_repeat")
         else:
-            reason = t("stop_other", what=what)
+            reason = t("stop_other")
         return {"current_query": "", "stop_reason": reason}
 
     next_query = llm.str_field(decision, "next_query") or ""

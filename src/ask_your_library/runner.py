@@ -34,6 +34,8 @@ Event contract (node_name -> keys present in update):
              node. Always describes ONE question; session totals are the
              interface's job.
 """
+import os
+import stat
 import time
 import uuid
 from pathlib import Path
@@ -76,7 +78,13 @@ def run_question(graph, question: str, history: list[str], scratch_dir: Path,
     # Timestamp for humans browsing the dir, uuid so concurrent runs never share
     # a file (validate would otherwise confirm quotes against another run's text).
     scratchpad = scratch_dir / f"run-{int(time.time())}-{uuid.uuid4().hex[:8]}.md"
-    scratchpad.touch()
+    # 0600 from the first byte rather than touch() + chmod: the file holds the
+    # retrieved passages as the model saw them, and the umask would otherwise
+    # make it world-readable for the length of the run. O_EXCL turns the
+    # (already unlikely) name collision into an error instead of an append to
+    # another run's evidence.
+    os.close(os.open(scratchpad, os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                     stat.S_IRUSR | stat.S_IWUSR))
 
     reset_usage(deadline_s)     # metrics and the deadline clock are per question
     started = time.monotonic()

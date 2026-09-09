@@ -25,6 +25,21 @@ class FakeGraph:
         return type("S", (), {"values": self.state})()
 
 
+def test_the_scratchpad_is_readable_only_by_its_owner(tmp_path):
+    """It holds the retrieved passages as the model saw them. touch() created
+    it with the process umask (0644 on a default account), so every local
+    account could read a run's evidence while the run was still going."""
+    import stat
+
+    from ask_your_library import runner
+
+    runner.run_question(FakeGraph(), "q", [], Path(tmp_path), lambda n, u: None,
+                        lambda question: "the first one")
+    written = list(Path(tmp_path).glob("run-*.md"))
+    assert len(written) == 1
+    assert stat.S_IMODE(written[0].stat().st_mode) == 0o600
+
+
 def test_partial_metrics_at_the_interrupt_and_final_metrics_once(tmp_path):
     from ask_your_library import runner
 

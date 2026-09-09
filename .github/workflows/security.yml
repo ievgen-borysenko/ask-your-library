@@ -46,9 +46,17 @@ jobs:
           AFTER: ${{ github.sha }}
         # A pull request: every commit between its merge base with the target
         # branch and its head, merged branches included. A push: the pushed
-        # range. Anything else (the weekly schedule, a first push): the whole
-        # history reachable from HEAD. A range git cannot resolve fails the
-        # step, which is the right outcome for a scan that could not be done.
+        # range; a first push of a branch has no "before" and falls through to
+        # the whole history, like the weekly schedule. A range git cannot
+        # resolve fails the step, which is the right outcome for a scan that
+        # could not be done.
+        #
+        # The count is its own assignment, and the step fails when a resolvable
+        # range turns out to be empty. Inside `echo "... $(git rev-list ...)"`
+        # the failure was discarded (set -e ignores a substitution in an
+        # argument of a command that succeeds), so an unresolvable range
+        # printed nothing, gitleaks logged "Invalid revision range", scanned 0
+        # commits and exited 0: a green check for a scan that never ran.
         run: |
           set -euo pipefail
           case "$EVENT" in
@@ -61,10 +69,16 @@ jobs:
               range="" ;;
           esac
           if [ -n "$range" ]; then
-            echo "scanning ${range}: $(git rev-list --count "$range") commit(s)"
+            count=$(git rev-list --count "$range")
+            if [ "$count" -eq 0 ]; then
+              echo "::error::${range} resolved to 0 commits: nothing was scanned"
+              exit 1
+            fi
+            echo "scanning ${range}: ${count} commit(s)"
             gitleaks git . --no-banner --redact --exit-code 1 --log-opts="$range"
           else
-            echo "scanning the whole history reachable from HEAD: $(git rev-list --count HEAD) commit(s)"
+            count=$(git rev-list --count HEAD)
+            echo "scanning the whole history reachable from HEAD: ${count} commit(s)"
             gitleaks git . --no-banner --redact --exit-code 1
           fi
 

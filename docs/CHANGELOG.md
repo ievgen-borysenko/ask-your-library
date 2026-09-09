@@ -2,6 +2,50 @@
 
 ## Unreleased
 
+- **Security: two zero-click image channels in the web UI, and the rest of the hardening pass.**
+  The chat renders our own HTML (the provenance badge, the evidence list, the metrics footer),
+  and a whole message is one HTML block that a blank line ends: everything after that line is
+  chat markdown again, so a markdown image there is fetched by the browser on render, with no
+  click and nothing visible. Escaping does not stop it. Both places that only escaped are fixed,
+  at both ends:
+  the badge's tooltip and headline (built from the quotes that failed provenance, i.e. from
+  corpus text) and the metrics footer, whose stop reason came from `reflect`; `reflect` now reads
+  the model's `decision` against its schema, so an off-schema value degrades to a fixed phrase
+  instead of travelling into the terminal and the footer as free text. The preflight, notice and
+  error messages go through the same neutralization as every other message.
+  Also in this pass: the web UI answers only to the `Host` headers `localhost` and `127.0.0.1`
+  (Starlette's `TrustedHostMiddleware`), which closes the DNS-rebinding route a page in your
+  browser otherwise has to a loopback server, and its login cookie is `SameSite=strict`;
+  `allow_origins` in `.chainlit/config.toml` drops the second port pair (ports are not part of a
+  site, so listing another port let a page there read the thread endpoints) and its comment now
+  says what the list actually governs. Terminal escape sequences carried by a poisoned book are
+  stripped where corpus text becomes index metadata (`book_key`, front matter) and prompt text
+  (`data_block`), and every line both CLIs print goes through one strip, so a crafted title can
+  no longer repaint the reader's terminal. The demo corpus's audio download names its local file
+  after the chapter number instead of after the name archive.org returned. `.chainlit/chat.db`
+  and the run scratchpads are created (or narrowed) to 0600 like the auth secret. `ayl-add` now
+  reports the hidden files it skips, which the README and its own docstring already promised.
+  In CI: the gitleaks range is resolved in its own assignment and an empty or unresolvable range
+  fails the step instead of scanning zero commits and passing (see SECURITY.md); `setup-uv` is
+  pinned to the uv release the lockfile is maintained with; the `test-ui` job asserts the `ui`
+  extra is importable and runs the canary's own tests, whose ui-gated half ran nowhere before.
+  The injection canary's UI stage now renders the badge tooltip and the metrics footer with a
+  hostile broken quote and stop reason, so a regression of either channel fails the canary.
+- **Evidence passages are visible again in the web UI.** Each passage was wrapped in a `<pre>`,
+  which Chainlit 2.12 renders with its code-snippet component: the block showed "Raw code" and a
+  copy button, and the text inside it never reached the DOM, while `chat.db` held it in full. It
+  is a `<div>` with the same monospaced, wrapped styling now. The web UI check before a release
+  has to confirm the passage under an evidence item is actually readable in the browser, not
+  only that the message was sent.
+- **Tests no longer inherit the shell.** `tests/conftest.py` pins every knob `config.py` reads to
+  its documented default before the package is imported (`setdefault`, so the CI backend matrix
+  still works), points `LIBRARY_DB_PATH` at nothing, switches tracing off and removes the
+  provider and LangSmith keys. `ASK_LANG=ua` in a shell used to fail eight tests, and a LangSmith
+  key made the end-to-end tests upload trace batches while staying green (the client swallows the
+  connection error). An autouse fixture resets the per-run state (token counters, language, the
+  `library` caches), the two subprocess test files share one fresh-interpreter helper instead of
+  keeping a scrub list each, and the canary's UI stage restores the environment it writes and
+  removes its temp directory.
 - **Chat titles in the sidebar.** `auto_tag_thread` is now off in `.chainlit/config.toml`. With it
   on, the first message of every chat asked the SQLAlchemy data layer to insert the thread with
   `tags=[chat profile]`; SQLite refuses a Python list, the data layer only logs the failure, and the

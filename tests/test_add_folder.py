@@ -398,11 +398,48 @@ def test_two_files_resolving_to_the_same_book_are_refused(tmp_path):
         add_folder.read_folder(folder)
 
 
-def test_hidden_files_are_skipped(tmp_path):
+def test_hidden_files_are_skipped_and_reported(tmp_path, caplog):
+    """Skipping them silently made the docstring and the README ("Skipped, and
+    reported on stderr: hidden files and directories") describe something the
+    code did not do: a book under a hidden directory simply never appeared.
+    One summary line, not one per file: a hidden directory can hold hundreds,
+    and they would bury the per-file warnings."""
     folder = tmp_path / "books"
     write(folder, "Real.txt", PARA)
-    write(folder / ".cache", "Hidden.txt", PARA)
-    assert [p.name for p in add_folder.book_files(folder)] == ["Real.txt"]
+    write(folder, ".Draft.md", PARA)
+    for name in ("Hidden.txt", "Second.txt", "Third.txt", "Fourth.txt"):
+        write(folder / ".cache", name, PARA)
+    with caplog.at_level("WARNING"):
+        found = add_folder.book_files(folder)
+    assert [p.name for p in found] == ["Real.txt"]
+    assert "5 hidden files skipped" in caplog.text
+    assert ".Draft.md" in caplog.text and "and 2 more" in caplog.text
+
+
+def test_a_hidden_directory_of_other_file_types_is_not_reported(tmp_path, caplog):
+    """The count names files that would otherwise have been indexed: a .git
+    full of objects is not a report of five hundred skipped books."""
+    folder = tmp_path / "books"
+    write(folder, "Real.txt", PARA)
+    write(folder / ".git", "HEAD", "ref: refs/heads/main\n")
+    with caplog.at_level("WARNING"):
+        assert [p.name for p in add_folder.book_files(folder)] == ["Real.txt"]
+    assert "hidden" not in caplog.text
+
+
+def test_a_book_key_carries_no_control_or_invisible_characters(tmp_path):
+    """The key is cited by the agent, printed by both interfaces and sent to
+    the model as a block attribute. A front matter title with an ANSI escape,
+    a zero-width space or a bidi override would otherwise be carried, verbatim,
+    everywhere the book is named."""
+    assert add_folder.book_key("Moby\x1b]0;pwned\x07 Dick\u200b", "H\u202eM") == \
+        "Moby]0;pwned Dick — HM"
+    folder = tmp_path / "books"
+    front = '---\ntitle: "Moby\x1b[2J Dick"\nauthor: "H\ufeffM"\n---\n\n'
+    write(folder, "Poisoned.md", front + PARA)
+    book = add_folder.read_folder(folder)[0]
+    assert book.book == "Moby[2J Dick — HM"
+    assert "\x1b" not in book.book and "\ufeff" not in book.book
 
 
 def test_symlink_pointing_outside_the_folder_is_skipped(tmp_path, caplog):

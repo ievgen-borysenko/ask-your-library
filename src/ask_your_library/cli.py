@@ -13,7 +13,6 @@ only when a run is actually about to start.
 """
 import argparse
 import os
-import re
 import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -23,6 +22,7 @@ from .graph import build_graph
 from .i18n import set_lang, status_word, t
 from .preflight import check_environment
 from .runner import run_question
+from .sanitize import strip_control_chars
 
 EXIT_WORDS = {"exit", "quit", "q", "вихід"}
 SCRATCH_DIR = Path(os.environ.get("ASK_SCRATCH_DIR", ".scratch"))
@@ -35,93 +35,103 @@ SESSION = {"questions": 0, "cost_usd": 0.0}
 RUN = {"passages": {}, "verbose": False}
 
 
-CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")   # keep \t and \n; drop ANSI/OSC and the rest
-
-
 def terminal_safe(text: str) -> str:
-    """Corpus text printed by --verbose must not repaint or clear the terminal:
+    """Text printed by the CLI must not repaint or clear the terminal:
     sanitize_context redacts instruction lines, not escape sequences."""
-    return CONTROL_CHARS_RE.sub("", text)
+    return strip_control_chars(text)
+
+
+def say(line: str, error: bool = False) -> None:
+    """Every line a run reports goes out through here.
+
+    Book titles, section names, queries, the answer, the provenance line and
+    the failure messages all carry corpus text or model output shaped by it,
+    and the labels around them are ours, so one strip on the finished line
+    covers the lot, and there is no second place a poisoned title could reach
+    the terminal from."""
+    print(terminal_safe(line), file=sys.stderr if error else sys.stdout)
 
 
 def print_event(node_name: str, update: dict) -> None:
     """One line per graph event (language: ASK_LANG)."""
     if node_name == "plan":
-        print(t("ev_plan", mode=update["mode"],
-                queries=[update["current_query"]] + update["queries"]))
+        say(t("ev_plan", mode=update["mode"],
+              queries=[update["current_query"]] + update["queries"]))
         if update.get("clarify_unresolved"):
-            print(t("ev_clarify_unresolved"))
+            say(t("ev_clarify_unresolved"))
         if update.get("plan_fallback"):
-            print(t("ev_plan_fallback"))
+            say(t("ev_plan_fallback"))
     elif node_name == "act":
-        print(t("ev_act", n=update["steps_taken"], hits=len(update["hits"])))
+        say(t("ev_act", n=update["steps_taken"], hits=len(update["hits"])))
         for h in update.get("hits_log", []):
             RUN["passages"][h["hit_id"]] = h["text"]
     elif node_name == "observe":
         streak = update["empty_streak"]
         note = t("ev_streak", n=streak) if streak else ""
-        print(t("ev_observe", n=len(update["evidence"]), streak=note))
+        say(t("ev_observe", n=len(update["evidence"]), streak=note))
     elif node_name == "reflect":
         nxt = update.get("current_query")
         if nxt == "__clarify__":
-            print(t("ev_reflect_clarify"))
+            say(t("ev_reflect_clarify"))
         elif nxt and nxt.startswith("__chapter__|"):
             _, book, section = nxt.split("|", 2)
-            print(t("ev_reflect_chapter", book=book, section=section))
+            say(t("ev_reflect_chapter", book=book, section=section))
         elif nxt and nxt.startswith("__book__|"):
             _, book, _ = nxt.split("|", 2)
-            print(t("ev_reflect_probe", book=book))
+            say(t("ev_reflect_probe", book=book))
         elif nxt:
-            print(t("ev_reflect_search", q=nxt))
+            say(t("ev_reflect_search", q=nxt))
         elif update.get("stop_reason"):
-            print(t("ev_reflect_stopped", r=update["stop_reason"]))
+            say(t("ev_reflect_stopped", r=update["stop_reason"]))
         else:
-            print(t("ev_reflect_enough"))
+            say(t("ev_reflect_enough"))
     elif node_name == "clarify":
-        print(t("ev_clarify", a=update["clarification"]))
+        say(t("ev_clarify", a=update["clarification"]))
     elif node_name == "synthesize":
-        print(t("ev_answer_header", a=update["answer"]))
+        say(t("ev_answer_header", a=update["answer"]))
     elif node_name == "validate":
-        print(t("ev_provenance", v=update["verification"]))
+        say(t("ev_provenance", v=update["verification"]))
         items = (update.get("provenance") or {}).get("items") or []
         if RUN["verbose"] and items:
-            print(t("ev_evidence_header", n=len(items)))
+            say(t("ev_evidence_header", n=len(items)))
             shown: set[str] = set()
             for item in items:
-                print(t("ev_evidence_item", status=status_word(item["status"]), book=terminal_safe(item["book"]),
-                        section=terminal_safe(item["section"]), hit_id=item["hit_id"], quote=terminal_safe(item["quote"])))
+                say(t("ev_evidence_item", status=status_word(item["status"]), book=item["book"],
+                      section=item["section"], hit_id=item["hit_id"], quote=item["quote"]))
                 if item["hit_id"] in shown:
                     continue                      # the passage is printed once, under its first quote
                 shown.add(item["hit_id"])
                 passage = RUN["passages"].get(item["hit_id"])
                 if passage is None:
-                    print(t("ev_passage_missing"))
+                    say(t("ev_passage_missing"))
                 else:
-                    print("    " + terminal_safe(passage).replace("\n", "\n    "))
+                    say("    " + passage.replace("\n", "\n    "))
     elif node_name == "metrics" and update.get("partial"):
         # paused at a clarify: what the run has cost so far, not a session total
-        print(t("m_partial", cost=update["cost_usd"], calls=update["llm_calls"], sec=update["seconds"]))
+        say(t("m_partial", cost=update["cost_usd"], calls=update["llm_calls"],
+              sec=update["seconds"]))
     elif node_name == "metrics":
         SESSION["questions"] += 1
         SESSION["cost_usd"] += update["cost_usd"]
-        print(t("m_line1", model=update["model"], calls=update["llm_calls"],
-                tin=update["input_tokens"], tout=update["output_tokens"],
-                cost=update["cost_usd"], sec=update["seconds"],
-                steps=update["steps_taken"]))
-        print(t("m_stop", r=update["stop_reason"] or t("m_stop_default")))
+        say(t("m_line1", model=update["model"], calls=update["llm_calls"],
+              tin=update["input_tokens"], tout=update["output_tokens"],
+              cost=update["cost_usd"], sec=update["seconds"],
+              steps=update["steps_taken"]))
+        say(t("m_stop", r=update["stop_reason"] or t("m_stop_default")))
         roles = ", ".join(f"{role} ${u['cost_usd']:.4f} ({u['calls']}x)"
                           for role, u in update["by_role"].items())
-        print(t("m_roles", roles=roles))
-        print(t("m_retrieval", hits=update["hits_seen"],
-                ev=update["evidence_distilled"], red=update["redacted_lines"]))
+        say(t("m_roles", roles=roles))
+        say(t("m_retrieval", hits=update["hits_seen"],
+              ev=update["evidence_distilled"], red=update["redacted_lines"]))
         if update["cache_read_tokens"]:
-            print(t("m_cache", n=update["cache_read_tokens"]))
+            say(t("m_cache", n=update["cache_read_tokens"]))
         if SESSION["questions"] > 1:
-            print(t("m_session", q=SESSION["questions"], cost=SESSION["cost_usd"]))
+            say(t("m_session", q=SESSION["questions"], cost=SESSION["cost_usd"]))
 
 
 def ask_in_terminal(question_to_user: str) -> str:
-    print(f"\n[?] {question_to_user}")
+    # The clarify question is written by the model around book titles it read.
+    say(f"\n[?] {question_to_user}")
     return input(t("cli_your_answer")).strip()
 
 
@@ -136,7 +146,8 @@ def _run(graph, question: str, history: list[str], deadline_s: float | None = No
     except Exception as error:
         if os.environ.get("ASK_DEBUG"):
             raise
-        print(t("cli_run_error", e=f"{type(error).__name__}: {error}"), file=sys.stderr)
+        # The message can carry index text (a book named in a lookup failure).
+        say(t("cli_run_error", e=f"{type(error).__name__}: {error}"), error=True)
         return ""
 
 
@@ -195,16 +206,16 @@ def main(argv: list[str] | None = None) -> None:
 
     problems = check_environment()
     if problems:
-        print(t("pf_header"), file=sys.stderr)
+        say(t("pf_header"), error=True)
         for problem in problems:
-            print(f"  - {problem}", file=sys.stderr)
+            say(f"  - {problem}", error=True)
         raise SystemExit(1)
     # Non-fatal: the agent runs, but the user is told how the index is degraded.
     notices = getattr(problems, "notices", [])
     if notices:
-        print(t("pf_notice_header"), file=sys.stderr)
+        say(t("pf_notice_header"), error=True)
         for notice in notices:
-            print(f"  - {notice}", file=sys.stderr)
+            say(f"  - {notice}", error=True)
 
     graph = build_graph()
 

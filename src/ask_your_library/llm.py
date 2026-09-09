@@ -19,6 +19,7 @@ from langchain_openai import ChatOpenAI
 from .config import (LLM_BASE_URL, LLM_MAX_RETRIES, LLM_NEEDS_KEY, LLM_TIMEOUT_S, MAX_OUTPUT_TOKENS,
                      ORCHESTRATOR_MODEL, PRICE_IN_PER_MTOK, PRICE_OUT_PER_MTOK, QUESTION_DEADLINE_S)
 from .embeddings import openrouter_api_key
+from .sanitize import strip_control_chars
 
 # Per-run accumulators live in a ContextVar: one shared graph serves concurrent
 # web sessions from worker threads, and module globals would mix their numbers.
@@ -114,15 +115,21 @@ def data_block(tag: str, text: str, trusted: bool = False, **attrs: str) -> str:
     untrusted body could close or forge a block; a space after it keeps it
     inert (quote checks are unaffected: _normalize turns "<" into a space).
     `trusted=True` is for bodies we built ourselves out of already-neutralized
-    blocks, so nesting does not neutralize our own delimiters."""
+    blocks, so nesting does not neutralize our own delimiters.
+
+    Control and invisible formatting characters are dropped from the whole
+    block, trusted bodies included: they are never part of a book, they travel
+    from the prompt into the answer and from there into a terminal, and the
+    strip is idempotent, so a nested block loses nothing by passing again."""
     def attr(v) -> str:
         # Attribute values come from index metadata (book, section): a crafted
         # title must not carry a delimiter or a line break (any kind: LF, CR,
         # CRLF, the Unicode line and paragraph separators) into the block header.
         value = str(v).replace('"', "'").replace("<", "‹").replace(">", "›")
-        return LINE_BREAK_RE.sub(" ", value)
+        return LINE_BREAK_RE.sub(" ", strip_control_chars(value))
 
     attr_text = "".join(f' {k}="{attr(v)}"' for k, v in attrs.items())
+    text = strip_control_chars(text)
     body = text if trusted else text.replace("<", "< ")
     return f"<{tag}{attr_text}>\n{body}\n</{tag}>"
 

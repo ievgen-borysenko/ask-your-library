@@ -163,6 +163,33 @@ def test_verbose_prints_every_evidence_item_on_the_passage_it_was_checked_agains
     assert t("ev_evidence_header", n=3) not in capsys.readouterr().out
 
 
+def test_no_line_of_a_run_carries_an_escape_sequence(capsys, monkeypatch):
+    """Book keys, queries, the answer, the provenance line and the clarify
+    question all come from the corpus or from a model that read it. The verbose
+    evidence list was sanitized; the rest of the report was not, so one crafted
+    title could retitle or repaint the terminal of whoever ran the question."""
+    osc = "\x1b]0;pwned\x07"
+    monkeypatch.setitem(cli.RUN, "verbose", False)
+    cli.print_event("plan", {"mode": "answer", "current_query": f"whales {osc}", "queries": []})
+    cli.print_event("act", {"steps_taken": 1, "hits": [{}], "hits_log": []})
+    cli.print_event("reflect", {"current_query": f"__chapter__|Moby Dick{osc}|Chapter 1"})
+    cli.print_event("reflect", {"current_query": "", "stop_reason": f"reflect: {osc}"})
+    cli.print_event("clarify", {"clarification": f"the first one {osc}"})
+    cli.print_event("synthesize", {"answer": f"An answer [Moby Dick{osc}, Chapter 1]."})
+    cli.print_event("validate", {"verification": f"OK: 1 quote {osc}",
+                                 "provenance": {"items": []}})
+    cli.print_event("metrics", {"model": f"m{osc}", "llm_calls": 1, "input_tokens": 1,
+                                "output_tokens": 1, "cost_usd": 0.01, "seconds": 1,
+                                "steps_taken": 1, "stop_reason": f"enough {osc}", "by_role": {},
+                                "hits_seen": 1, "evidence_distilled": 1, "redacted_lines": 0,
+                                "cache_read_tokens": 0})
+    monkeypatch.setattr("builtins.input", lambda prompt="": "the first one")
+    cli.ask_in_terminal(f"Which book? {osc}")
+    out = capsys.readouterr().out
+    assert "\x1b" not in out and "\x07" not in out
+    assert "pwned" in out and "An answer [Moby Dick" in out    # shown as text, only inert
+
+
 def test_each_question_starts_with_no_passages(monkeypatch):
     """The interactive loop asks question after question: passages of question
     N-1 must not be shown under the quotes of question N."""

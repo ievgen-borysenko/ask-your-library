@@ -3,36 +3,15 @@ Skipped when the ui extra is not installed (a plain `uv sync` clone)."""
 import asyncio
 import importlib
 import logging
-import os
-import subprocess
+import stat
 import sys
-import tempfile
 import tomllib
 from pathlib import Path
 
 import pytest
+from conftest import REPO, run_fresh as _run
 
 pytest.importorskip("chainlit")
-REPO = Path(__file__).resolve().parents[1]
-
-# Everything ui.py or config reads at import time (same idea as test_local_llm):
-# a subprocess test must not inherit the developer's shell or their .env.
-UNSET = ("OPENROUTER_API_KEY", "OPENROUTER_ENV_FILE", "ORCHESTRATOR_MODEL", "OPENROUTER_BASE_URL",
-         "LLM_BACKEND", "EMBED_BACKEND", "OLLAMA_LLM_MODEL", "OLLAMA_URL", "OLLAMA_EMBED_MODEL",
-         "OPENROUTER_EMBED_MODEL", "LIBRARY_DB_PATH", "ASK_LANG", "AYL_STRICT_HIT_ID",
-         "AYL_ALLOW_START_WITHOUT_KEY", "AYL_ALLOW_DEFAULT_LOGIN", "AYL_CHAINLIT_DIR",
-         "CHAINLIT_AUTH_SECRET", "CHAINLIT_PASSWORD", "LANGCHAIN_TRACING_V2")
-
-
-def _run(code: str, check=True, **env) -> subprocess.CompletedProcess:
-    """Run `code` in a fresh interpreter that can import `ui`, with every config
-    input unset and then `env` applied, in a fresh empty directory (load_dotenv
-    reads the cwd). check=True: an import-time SystemExit fails the test."""
-    base = {k: v for k, v in os.environ.items() if k not in UNSET}
-    base["PYTHONPATH"] = str(REPO)
-    with tempfile.TemporaryDirectory() as fresh:
-        return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
-                              check=check, env={**base, **env}, cwd=fresh)
 
 
 @pytest.fixture(autouse=True)
@@ -263,12 +242,95 @@ def test_every_evidence_item_opens_on_the_passage_it_was_checked_against(ui, mon
     assert "&lt;script&gt;" in block and "<script>" not in block and "![x]" not in block
     assert "\n" not in block and "<br><br>" in block          # no blank line can end the HTML block
     assert "## Plot" in block                                 # the heading text survives, as text
+    # The passage is a div, not a pre: Chainlit renders a <pre> with its
+    # code-snippet component ("Raw code" and a copy button) and the text inside
+    # it never reaches the DOM, so the passage the badge points at was invisible
+    # in the browser while sitting complete in chat.db.
+    assert "<pre" not in block
+    rendered_passage = block.split('<div style="white-space: pre-wrap;', 1)
+    assert len(rendered_passage) == 2
+    assert "Call me Ishmael." in rendered_passage[1].split("</div>", 1)[0]
     assert t("ui_passage_missing") in block                  # s9h9 was never in this run
     # views are per question and do not mix: a second view has no passages
     other = ui.RunView()
     ui.render_event("validate", {"verification": "OK", "provenance": {"items": [
         {"hit_id": "s1h1", "book": "b", "section": "s", "quote": "q", "status": "confirmed"}]}}, view=other)
     assert t("ui_passage_missing") in sent[-1] and "Call me Ishmael" not in sent[-1]
+
+
+def test_a_broken_quote_cannot_load_an_image_through_the_badge_tooltip(ui):
+    """The badge's title attribute carried the verification text escaped and
+    nothing more. That text is built around the quotes that failed, i.e. around
+    corpus text: a blank line in it ends the message's HTML block, everything
+    after it is chat markdown again, and an image reference there is fetched on
+    render, with no click and no visible element. Confirmed in a browser
+    before the fix. The whole badge must therefore hold no line break and no image."""
+    verification = ('WARNING: 1 of 1 quotes NOT found verbatim in any retrieved passage:\n'
+                    '  - Poisoned Book — Chapter 1: "a quote"\n\n'
+                    '![p](http://x/y.png)')
+    for numbers in ({}, {"checked": 0}, {"checked": 1, "confirmed": 0, "unattributed": 0,
+                                         "broken": 1, "broken_items": []}):
+        badge = ui.verification_badge({"verification": verification, "provenance": numbers})
+        assert "\n" not in badge, "a raw line break ends the HTML block the message is"
+        assert "![" not in badge and "y.png" not in badge
+        assert "[image removed]" in badge
+
+
+def test_a_hostile_stop_reason_cannot_load_an_image_through_the_metrics_footer(ui, monkeypatch):
+    """The footer interpolates the stop reason, which reflect writes from the
+    model's decision, and the model reads poisoned passages. Same shape as the
+    badge tooltip: escaped is not enough, because a blank line ends the block."""
+    store = {}
+    session = type("S", (), {"get": staticmethod(lambda k: store.get(k)),
+                             "set": staticmethod(lambda k, v: store.__setitem__(k, v))})()
+    monkeypatch.setattr(ui.cl, "user_session", session)
+    sent = []
+
+    class Msg:
+        def __init__(self, content, **kw):
+            sent.append(content)
+
+        async def send(self):
+            return None
+    monkeypatch.setattr(ui.cl, "Message", Msg)
+    asyncio.run(ui.show_metrics({"model": "m", "cost_usd": 0.01, "seconds": 1, "steps_taken": 1,
+                                 "stop_reason": "halt\n\n![p](http://x/y.png)", "llm_calls": 1,
+                                 "input_tokens": 1, "output_tokens": 1, "cache_read_tokens": 0,
+                                 "by_role": {}, "hits_seen": 0, "evidence_distilled": 0,
+                                 "redacted_lines": 0}))
+    assert "\n" not in sent[-1] and "![" not in sent[-1] and "y.png" not in sent[-1]
+    assert "[image removed]" in sent[-1]
+
+
+def test_a_foreign_host_header_is_refused(ui):
+    """A page open in the reader's browser can reach a loopback server: the
+    port is guessable, and a name that resolves to 127.0.0.1 (DNS rebinding)
+    makes it same-origin for the browser. Without a Host check that page can
+    POST the quick start's placeholder login and then read every thread. The
+    check is registered on Chainlit's own app at import time (after the
+    middleware stack is built it would be too late), and a second import must
+    not stack copies of it."""
+    from chainlit.server import app
+    from starlette.middleware.trustedhost import TrustedHostMiddleware
+
+    registered = [m for m in app.user_middleware if m.cls is TrustedHostMiddleware]
+    assert len(registered) == 1
+    assert registered[0].kwargs["allowed_hosts"] == ["localhost", "127.0.0.1"] == ui.ALLOWED_HOSTS
+    assert app.middleware_stack is None, "the stack is already built: add_middleware came too late"
+
+
+def test_the_chat_db_is_readable_only_by_its_owner(ui, tmp_path):
+    """It holds every question, answer and title of every session. SQLite
+    creates it with the process umask (0644 on a default account), unlike the
+    auth secret next to it, which has always been 0600."""
+    db = tmp_path / "chainlit" / "chat.db"
+    assert stat.S_IMODE(db.stat().st_mode) == 0o600
+    # journal siblings hold the same text and are narrowed on the next start
+    sibling = tmp_path / "chainlit" / "chat.db-wal"
+    sibling.write_bytes(b"")
+    sibling.chmod(0o644)
+    ui.own_read_write_only(db)
+    assert stat.S_IMODE(sibling.stat().st_mode) == 0o600
 
 
 def test_badge_broken_quotes_are_neutralized_and_single_line(ui):

@@ -5,8 +5,34 @@ the observe prompt, where the model could obey the data instead of the system.
 Two layers: (1) this module redacts instruction-like lines in code before the
 model sees the text; (2) the observe prompt states that search results are
 data, never instructions. A canary test in eval/ exercises both layers.
+
+`strip_control_chars` is the same idea one level down: characters a book's text
+has no reason to carry and that mean something to a terminal or to the reader's
+eye rather than to the model.
 """
 import re
+
+# C0 controls except tab and newline, DEL, then the invisible formatting
+# characters: zero-width space/joiners and the LTR/RTL marks, the bidirectional
+# overrides, the isolates, and the byte-order mark.
+CONTROL_CHARS_RE = re.compile("[\x00-\x08\x0b-\x1f\x7f"
+                              "\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
+
+
+def strip_control_chars(text: str) -> str:
+    """Drop characters that are never part of a book's text.
+
+    An escape sequence in a title repaints or clears the terminal that prints
+    it; a bidi override reverses the reading order of the citation around it;
+    a zero-width space hides inside a book key and splits what looks like one
+    word. None of it survives a round through the index or the prompt, so the
+    strip happens where corpus text becomes metadata (the book key, front
+    matter fields) and where it becomes prompt text (`llm.data_block`); the
+    CLI strips again at the boundary where it prints (`cli.terminal_safe`),
+    because an answer is model output, not indexed text.
+    """
+    return CONTROL_CHARS_RE.sub("", text)
+
 
 INJECTION_PATTERNS = [
     r"ignore\s+(all\s+|any\s+)?(previous|above|prior|earlier)\s+instructions",

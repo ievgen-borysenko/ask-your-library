@@ -3,31 +3,8 @@ OpenAI-compatible endpoint, with no key, no cost and the local model named in
 the fingerprint. Checked in a subprocess so the running interpreter's config is
 not reloaded."""
 import json
-import os
-import subprocess
-import sys
 
-
-import tempfile
-
-UNSET = ("OPENROUTER_API_KEY", "OPENROUTER_ENV_FILE", "ORCHESTRATOR_MODEL", "OPENROUTER_BASE_URL",
-         "PRICE_IN_PER_MTOK", "PRICE_OUT_PER_MTOK", "LLM_BACKEND", "OLLAMA_LLM_MODEL", "OLLAMA_URL",
-         "EMBED_BACKEND", "OLLAMA_PRICE_IN_PER_MTOK", "OLLAMA_PRICE_OUT_PER_MTOK", "LIBRARY_DB_PATH",
-         "MAX_OUTPUT_TOKENS", "SEARCH_HIT_CHARS", "CHAPTER_HIT_CHARS", "OLLAMA_EMBED_MODEL", "OPENROUTER_EMBED_MODEL",
-         "ASK_LANG", "AYL_STRICT_HIT_ID", "AYL_ALLOW_START_WITHOUT_KEY", "AYL_CHAINLIT_DIR", "LANGCHAIN_TRACING_V2")
-
-
-def _run(code: str, cwd=None, check=True, **env) -> subprocess.CompletedProcess:
-    """Run `code` in a fresh interpreter with every config input unset, then
-    `env` applied, in a fresh empty directory (load_dotenv reads the cwd)."""
-    base = {k: v for k, v in os.environ.items() if k not in UNSET}
-    with tempfile.TemporaryDirectory() as fresh:
-        return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=check,
-                              env={**base, **env}, cwd=cwd or fresh)
-
-
-def _out(code: str, cwd=None, **env) -> str:
-    return _run(code, cwd=cwd, **env).stdout.strip()
+from conftest import fresh_output as _out, run_fresh as _run
 
 
 def test_ollama_backend_points_the_client_at_ollama_with_no_key_and_no_price():

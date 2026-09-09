@@ -21,6 +21,19 @@ TEXT = (
 )
 
 
+def test_a_downloaded_chapter_is_named_after_its_number_not_after_the_remote_file():
+    """The file name in an archive.org item's metadata is not ours, and it was
+    joined straight onto the download directory: "../" or an absolute path in
+    it would have decided where the mp3 landed. The number decides now; the
+    remote name is only used in the URL."""
+    item_dir = Path("/tmp/ayl-item")
+    hostile = [(1, "../../../etc/cron.d/evil.mp3"), (2, "/etc/passwd"), (12, "ch_12_64kb.mp3")]
+    names = [ingest.local_chapter_name(number, ".mp3") for number, _ in hostile]
+    assert names == ["ch01.mp3", "ch02.mp3", "ch12.mp3"]
+    assert all((item_dir / name).parent == item_dir for name in names)
+    assert ingest.local_chapter_name(3, ".txt") == "ch03.txt"
+
+
 def test_repeated_chapter_titles_get_their_part():
     chapters = ingest.split_chapters(TEXT, r"^CHAPTER [IVX]+\.$", r"^(OF [A-Z]+)\.$")
     assert [t for t, _ in chapters] == [

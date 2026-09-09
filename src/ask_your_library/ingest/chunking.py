@@ -11,6 +11,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..sanitize import strip_control_chars
+
 # Card sections longer than MAX are split on bullet boundaries, packing up to TARGET.
 MAX_CHUNK_CHARS = 2000
 TARGET_CHUNK_CHARS = 1400
@@ -56,7 +58,11 @@ def rows_for(chunks: list[Chunk], vectors: list[list[float]]) -> list[dict]:
 
 def parse_frontmatter(text: str) -> tuple[dict, str]:
     """A leading "---" YAML-ish block -> (fields, body). Shared with the folder
-    ingest, which reads `title:` / `author:` from the same block."""
+    ingest, which reads `title:` / `author:` from the same block.
+
+    Field values become index metadata (the book key, a card's source), which
+    is printed, cited and sent to the model, so control and invisible
+    formatting characters are dropped here rather than carried along."""
     if not text.startswith("---"):
         return {}, text
     end = text.find("\n---", 3)
@@ -66,7 +72,7 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
     for line in text[3:end].splitlines():
         m = re.match(r'^(\w+):\s*"?(.*?)"?\s*$', line.strip())
         if m:
-            meta[m.group(1)] = m.group(2)
+            meta[m.group(1)] = strip_control_chars(m.group(2))
     return meta, text[end + 4:]
 
 
