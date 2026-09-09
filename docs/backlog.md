@@ -81,7 +81,8 @@ open ones often refer to them.
   adds a second book instead of renaming the first: the corrected key is indexed and the rows
   under the old one stay until someone removes them by hand; a file removed from the folder keeps
   its rows; a card whose heading differs from its transcript's key by one character lists as two
-  books. And since `ayl-add` rewrites the table without recording requested / indexed / failed
+  books. And since `ayl-add` rebuilds the table (carrying over the rows it did not replace) without
+  recording requested / indexed / failed
   per file, "which of my files did not index" cannot be answered either (`list_books` shows what
   is there, never what is missing). The catalogue is exhaustive for what the index holds, which
   is the history of what was ingested, not the current state of the folder (README, Known

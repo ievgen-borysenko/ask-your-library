@@ -35,9 +35,8 @@ Status: accepted.
 
 `cards_<backend>` holds a distilled card per book (summary, plot, characters, themes, takeaways,
 generated once per book and grounded by a CI test on titles); `transcripts_<backend>` holds
-chapter-aware chunks of the text, target 4,000 characters with 400 of overlap, keyed
-`<book>/<section>/<n>` with part-aware section names. Both tables carry an `index_meta` fingerprint
-that is checked when they are opened. The alternative was one corpus of raw chunks, which answers
+chapter-aware chunks of the text, target 4,000 characters with 400 of overlap, keyed by note, section and chunk number, with part-aware section names. Both tables carry an `index_meta` fingerprint
+that is checked the first time a table is opened in a process. The alternative was one corpus of raw chunks, which answers
 "which book was it" badly: an identify question needs a whole-book summary, a detail question needs
 the text.
 
@@ -58,8 +57,9 @@ reranker was less code but ties the scoring to the library's API; a cross-encode
 out because nothing had measured ranking as the weak link.
 
 Fed the raw golden question, the retriever window holds the expected book in 9/9 core and 12/12
-extended single-book questions, with multi-book coverage 2/2 core and 3/5 extended; the numbers are
-unchanged at `v0.2.0-rc1` apart from the question the reader removed
+extended single-book questions, with multi-book coverage 2/2 core and 3/5 extended, on the
+twelve-question core; at `v0.2.0-rc1` the core row reads 8/8 because the reader removed one question
+and nothing else changed
 ([`2026-09-07-v0.2.0-rc1-retrieval-canary.md`][rc1-retrieval]). The known misses are in what the
 agent queries and in what it sees of a hit, not in the ranking, which is why no reranker was added.
 
@@ -117,7 +117,8 @@ The clarify interrupt is one of the two things the ablation credits the loop wit
 weakness is upstream: a candidate the retriever never returned cannot be offered. The eval's
 `--clarify-pick second` mode measures whether the choice is honoured, and on `v0.2.0-rc1` it
 reports `applied` on both clarify items, with the answer drawn from the chosen book
-([`2026-09-07-v0.2.0-rc1-core.md`][rc1-core]).
+([`2026-09-07-v0.2.0-rc1-core.md`][rc1-core] for c09, [`2026-09-07-v0.2.0-rc1-extended.md`][rc1-extended]
+for h22).
 
 ## ADR-007: Chapter drill-down with an honest read status
 
@@ -168,8 +169,8 @@ a release blocker.
 
 One behaviour in every interface, and UI features cost nothing in the agent. The weak spot was that
 the event contract lived in a docstring and drifted twice in one week; it is pinned by tests now —
-a fake graph for the events, and fifteen end-to-end scenarios of the compiled graph driven by a
-scripted model.
+a fake graph for the events, and end-to-end scenarios of the compiled graph driven by a scripted
+model.
 
 ## ADR-010: Evaluation as a first-class deliverable, correctness kept separate
 
@@ -184,8 +185,8 @@ rows and build time, the strict and pick modes), a release run must be made on a
 rejected in favour of three rows that cannot be confused: behavioural compliance, human-reviewed
 correctness, and quote provenance.
 
-Every number is therefore attributable to a run, and the published failure is the strongest
-artifact in the repository ([`docs/examples/c06-fogg-missing-day.md`][c06-trace]). The costs are
+Every number is therefore attributable to a run, and the published failure trace is the most instructive artifact in the
+repository ([`docs/examples/c06-fogg-missing-day.md`][c06-trace]). The costs are
 recorded as honestly: runs are single, the hosted model varies, and the scorer is heuristic — an
 LLM judge stays out until human verdicts exist. A catalogue set of ten questions joined the two in
 September (ADR-016).
@@ -213,8 +214,8 @@ Status: accepted (measured and merged on 2026-09-06).
 
 `SEARCH_HIT_CHARS` becomes a configuration knob and its default rises from 1,200 to 2,500
 characters. Measured on the core set at 1,200 / 2,500 / 4,000, one run each: behaviour 12/12 and
-provenance clean at 1,200 and 2,500, mean cost per question +9% at 2,500 and +32% at 4,000, where
-behaviour also lost a question to a scorer artefact. The alternative that stayed unbuilt was a
+provenance clean at 1,200 and 2,500, mean cost per question +9% at 2,500 and +32% at 4,000, where the
+behaviour row read 11/12 because of a scorer artefact, not a changed answer. The alternative that stayed unbuilt was a
 window centred on the matching span instead of the head of the chunk, which needs the hit offsets
 from both retrievers; at +9% for the simple constant it was not worth the machinery.
 
@@ -305,7 +306,7 @@ with the model; a regex router before the model is brittle across two languages 
 
 Catalogue questions now cost one model call and no search step, and the answer is exhaustive by
 construction for what the index holds. The catalogue set scores 10/10, its six catalogue items
-costing $0.014 together ([`2026-09-09-catalogue-set.md`][catalogue-set]), and a core run on the
+costing $0.0136 together ([`2026-09-09-catalogue-set.md`][catalogue-set]), and a core run on the
 same commit leaves the research loop where it was: 11/11 behaviour, 48/0/0 quotes, $0.0519 mean per
 question against $0.0488 on `v0.2.0-rc1` ([`2026-09-09-catalogue-branch-core.md`][catalogue-core]).
 Exhaustive content questions ("which of my books mention London?") are explicitly not covered by
