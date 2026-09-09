@@ -90,6 +90,10 @@
   A resumed web chat rebuilds its conversation memory unescaped: the persisted answer carries
   the HTML escaping it was rendered with, and `&amp;` belongs on the page, not in the next
   planner and synthesize prompt.
+- **httpx2 2.12.0.** The lockfile moves `httpx2` (and its `httpcore2`) from 2.10.0 to 2.12.0, the
+  release that closes the three advisories the dependency scan reported on 08.09 against an
+  unchanged lockfile (`GHSA-8xx6-hgc6-gc2m`, `GHSA-h4x7-gw46-3wm6`, `GHSA-pf96-p4fj-6566`; the
+  first is rated high). Nothing else in the lock changes; the suite passes on the new versions.
 - **Chat titles in the sidebar.** `auto_tag_thread` is now off in `.chainlit/config.toml`. With it
   on, the first message of every chat asked the SQLAlchemy data layer to insert the thread with
   `tags=[chat profile]`; SQLite refuses a Python list, the data layer only logs the failure, and the
