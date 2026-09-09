@@ -185,6 +185,21 @@ injection, not a suite.
 
 ## Quick start
 
+**On a Mac**, one script does all of the below:
+
+```bash
+git clone https://github.com/ievgen-borysenko/ask-your-library.git && cd ask-your-library
+bash scripts/install-mac.sh --dry-run    # the plan, printed; nothing is changed
+bash scripts/install-mac.sh              # mostly download time, + ~30 min for the demo corpus
+```
+
+[`scripts/install-mac.sh`](scripts/install-mac.sh) installs `uv` and Ollama through Homebrew
+(whose own install command it prints and never runs for you), pulls the two models, syncs the
+locked environment, writes a fully local `.env`, asks once before the demo corpus, and finishes
+on the preflight the CLI runs before every question. `--no-demo`, `--hosted`, `--yes` and
+`--help` are the rest of it. The manual steps below are the same thing by hand: the path on
+every other system, and on a Mac when you would rather run each step yourself.
+
 Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), [Ollama](https://ollama.com) for
 local embeddings, an OpenRouter API key for the answering model (or none at all: see
 [Fully local, no account](#fully-local-no-account)).

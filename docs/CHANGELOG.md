@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **A macOS install path.** `scripts/install-mac.sh` takes a fresh clone to a working local setup
+  in one command. Homebrew is checked, never installed: the official command is printed and the
+  script exits. `uv` and Ollama come from `brew`; the interpreter is whatever `requires-python` in
+  `pyproject.toml` asks for, through `uv python install`; the embedding and answering models are
+  pulled by the names read out of `config.py`, so the script cannot pull a model the app will not
+  ask for, and their approximate sizes are printed first. `uv sync --locked --extra ui` installs
+  the environment. `.env` is written from `.env.example` only when it does not exist, never
+  overwritten, with `LLM_BACKEND=ollama` and `LLM_TIMEOUT_S=600` — the local defaults, because a
+  value copied out of the example is an environment value and wins over the per-backend default
+  `config.py` would otherwise apply, which would leave a local model on the hosted 120 s
+  per-attempt budget. Then one confirmation before the ~30-minute demo build, and
+  `check_environment()` at the end: the preflight the CLI runs before every question, no model
+  call. `--dry-run` prints the plan and touches nothing, `--hosted` writes the OpenRouter
+  configuration and names the variable to set (a key is never taken as an argument), `--no-demo`
+  points at `ayl-add` instead, `--yes` skips the confirmation. macOS only, never `sudo`,
+  idempotent, and every download goes through `brew`, `uv` or `ollama`.
+  `tests/test_install_script.py` runs the dry run against recorders on a scrubbed PATH: the plan
+  has to name all twelve steps in order, and not one of `brew`, `ollama`, `uv`, `curl` may record
+  a call.
 - **Security: two zero-click image channels in the web UI, and the rest of the hardening pass.**
   The chat renders our own HTML (the provenance badge, the evidence list, the metrics footer),
   and a whole message is one HTML block that a blank line ends: everything after that line is
