@@ -31,9 +31,15 @@ or enabling features the shipped configuration keeps off (MCP, file uploads, sha
 and once a week. gitleaks (a release binary verified against a pinned SHA-256, not the action
 wrapper) scans an explicit range: on a pull request every commit between its merge base with the
 target branch and its head, merged branches included; on a push to `main` the pushed range; on the
-weekly run, and on the one push that has no "before" commit, the whole history reachable from
-`HEAD`. That push is the first one of `main` itself, at the creation of the repository: `main` is
-the only branch the workflow reacts to, so no other branch ever arrives here without a "before".
+weekly run, and on the one push that has no "before" commit, every commit reachable from any ref.
+That push is the first one of `main` itself, at the creation of the repository: `main` is the
+only branch the workflow reacts to, so no other branch ever arrives here without a "before". Each
+merge commit's own diff against its first parent is read as well, and it has to be asked for by
+name — `git log -p`, which is what gitleaks parses, prints nothing at all for a merge unless it
+is told to. A merge can introduce content no side branch holds, a conflict resolved by writing a
+key into the file being reconciled being the plain case, and such a key sat in no commit's patch
+but the merge's: the range still counted its commits, so the scan passed without ever reading
+them. At the time of this change, that was fourteen of the fifty commits the history then held.
 The range is resolved before the scan, in its own assignment, and a range git cannot resolve now
 fails the step. Inside the `echo` that reported the commit count it did not, because a command
 substitution in an argument of a succeeding command discards its exit status: gitleaks then
