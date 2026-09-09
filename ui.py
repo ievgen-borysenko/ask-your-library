@@ -27,6 +27,7 @@ import json
 import os
 import re
 import secrets
+import contextlib
 import sqlite3
 import stat
 from pathlib import Path
@@ -37,7 +38,7 @@ from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 from ask_your_library.graph import build_graph
 from ask_your_library.i18n import LANG, set_lang, status_word, t
 from ask_your_library.preflight import check_api_key, check_environment
-from ask_your_library.runner import run_question
+from ask_your_library.runner import history_entry, run_question
 
 PROFILE_EN = "English"
 PROFILE_UA = "Українська"
@@ -172,8 +173,10 @@ CREATE TABLE IF NOT EXISTS feedbacks (
 """
 
 CHAINLIT_DIR.mkdir(exist_ok=True)
-with sqlite3.connect(CHAT_DB_PATH) as _connection:
-    _connection.executescript(CHAT_DB_SCHEMA)
+with contextlib.closing(sqlite3.connect(CHAT_DB_PATH)) as _connection:
+    # `closing`: a `with` on a sqlite3 connection commits but does not close it
+    with _connection:
+        _connection.executescript(CHAT_DB_SCHEMA)
 
 
 @cl.data_layer
@@ -225,8 +228,17 @@ def verification_badge(update: dict) -> str:
     verification = update.get("verification", "")
     numbers = update.get("provenance") or {}
     tooltip = html.escape(verification, quote=True)
+    title = t("ui_badge_title")
 
-    if not numbers:
+    if numbers.get("catalog"):
+        # The catalogue path (ADR-016): a list computed by code from the index
+        # tables, nothing to trace; the badge says what it is instead of "0/0".
+        listing = numbers["catalog"]
+        color = GREEN
+        title = t("ui_badge_catalog_title")
+        headline = t("ui_badge_catalog", n=listing["count"], total=listing["total"])
+        details = ""
+    elif not numbers:
         # Event without numbers (shouldn't happen with the current runner):
         # neutral badge, no locale-bound text sniffing.
         color = GRAY
@@ -264,7 +276,7 @@ def verification_badge(update: dict) -> str:
 
     return (f'<div title="{tooltip}" style="border-left: 4px solid {color}; '
             f'background: {color}1a; padding: 8px 12px; border-radius: 4px;">'
-            f'<b>{t("ui_badge_title")}</b><br>{headline}{unused_note}{details}</div>')
+            f'<b>{title}</b><br>{headline}{unused_note}{details}</div>')
 
 
 class RunView:
@@ -275,6 +287,9 @@ class RunView:
 
     def __init__(self):
         self.passages: dict[str, str] = {}
+        # the catalogue result when the question took that path: the conversation
+        # memory keeps its shape, never the list of titles (runner.history_entry)
+        self.catalog: dict | None = None
 
 
 def safe_html(text: str) -> str:
@@ -356,10 +371,19 @@ def render_event(node_name: str, update: dict, view: RunView | None = None) -> N
     question's memory (on_message makes one per question)."""
     view = view if view is not None else RunView()
     if node_name == "plan":
-        queries = [update["current_query"]] + update["queries"]
-        lines = [t("ui_mode", mode=update["mode"]), t("ui_queries")]
-        for query in queries:
-            lines.append(f"- {query}")
+        if update["mode"] == "catalog":
+            lines = [t("ui_plan_catalog", op=update["catalog_request"]["op"])]
+        else:
+            queries = [update["current_query"]] + update["queries"]
+            lines = [t("ui_mode", mode=update["mode"]), t("ui_queries")]
+            for query in queries:
+                lines.append(f"- {query}")
+        if update.get("catalog_fallback"):
+            lines.append(t("ui_catalog_fallback_" + update["catalog_fallback"]))
+        if update.get("book_filter"):
+            lines.append(t("ui_book_filter", book=update["book_filter"]))
+        if update.get("book_unresolved"):
+            lines.append(t("ui_book_unresolved", q=update["book_unresolved"]))
         if update.get("clarify_unresolved"):
             lines.append(t("ui_clarify_unresolved"))
         if update.get("plan_fallback"):
@@ -403,6 +427,18 @@ def render_event(node_name: str, update: dict, view: RunView | None = None) -> N
     elif node_name == "clarify":
         cl.run_sync(show_step("clarify",
                               t("ui_user_clarified", a=update["clarification"])))
+
+    elif node_name == "catalog":
+        listing = update["catalog"]
+        view.catalog = listing
+        cl.run_sync(show_step("catalog", t("ui_catalog_step", op=listing["op"], n=listing["count"],
+                                           total=listing["total"])))
+        # Titles are index metadata, i.e. data: rendered as text like a model answer.
+        # The shape of the result travels with the persisted message, so a resumed
+        # chat rebuilds its memory without the list (on_chat_resume).
+        shape = {key: listing[key] for key in ("op", "count", "total", "query", "resolved")}
+        cl.run_sync(cl.Message(content=neutralize_markdown(html.escape(update["answer"], quote=False)),
+                               metadata={"catalog": shape}).send())
 
     elif node_name == "synthesize":
         # The answer is model output over corpus text: poisoned corpus HTML
@@ -517,7 +553,21 @@ async def on_chat_resume(thread) -> None:
             if step_output.startswith("<div") or step_output.startswith("Ask Your Library —"):
                 continue
             if last_question:
-                history.append(f"Q: {last_question}\nA: {step_output[:500]}")
+                # A catalogue answer is remembered by its shape only (never the
+                # titles): the shape rides on the persisted message's metadata.
+                meta = step.get("metadata") or {}
+                if isinstance(meta, str):
+                    try:
+                        meta = json.loads(meta)
+                    except ValueError:
+                        meta = {}
+                catalog_shape = meta.get("catalog") if isinstance(meta, dict) else None
+                # The answer was escaped for rendering (html.escape at write
+                # time); escaping is the browser's business, not the model's.
+                # Without this the resumed conversation memory carries "&amp;"
+                # and "&lt;" into the next planner and synthesize prompt.
+                history.append(history_entry(last_question, html.unescape(step_output),
+                                             catalog_shape))
                 last_question = ""
     cl.user_session.set("history", history)
     cl.user_session.set("session_cost", 0.0)
@@ -538,10 +588,11 @@ async def on_message(message: cl.Message) -> None:
             return
         cl.user_session.set("ready", True)
     history = cl.user_session.get("history")
+    view = RunView()
     try:
         answer = await cl.make_async(run_question)(
             GRAPH, message.content, history, SCRATCH_DIR,
-            on_event=functools.partial(render_event, view=RunView()), on_clarify=ask_user_in_chat)
+            on_event=functools.partial(render_event, view=view), on_clarify=ask_user_in_chat)
     except Exception as error:
         # Class + short message only: a raw exception can leak paths and
         # provider details into the chat.
@@ -549,5 +600,6 @@ async def on_message(message: cl.Message) -> None:
         await cl.Message(content=html.escape(t("ui_error", e=short), quote=False)).send()
         return
 
-    # Conversation memory: the question plus a truncated answer.
-    history.append(f"Q: {message.content}\nA: {answer[:500]}")
+    # Conversation memory: the question plus a truncated answer; a catalogue
+    # answer only as its shape, never the list of titles.
+    history.append(history_entry(message.content, answer, view.catalog))

@@ -2,6 +2,7 @@
 Skipped when the ui extra is not installed (a plain `uv sync` clone)."""
 import asyncio
 import importlib
+import json
 import logging
 import os
 import subprocess
@@ -80,6 +81,159 @@ def test_badge_is_green_only_when_nothing_is_broken_or_unattributed(ui):
     assert ui.YELLOW in badge(checked=3, confirmed=2, broken=0, unattributed=1)
     assert ui.YELLOW in badge(checked=3, confirmed=2, broken=1, unattributed=0, broken_items=[])
     assert ui.GRAY in badge(checked=0, confirmed=0, broken=0, unattributed=0)
+
+
+def test_a_catalogue_answer_is_one_step_and_the_titles_render_as_text(ui, monkeypatch):
+    shown, sent = [], []
+    monkeypatch.setattr(ui, "show_step", lambda name, text: shown.append((name, text)))
+
+    class Msg:
+        def __init__(self, content, metadata=None):
+            sent.append((content, metadata))
+
+        def send(self):
+            return None
+
+    monkeypatch.setattr(ui.cl, "Message", Msg)
+    ui.render_event("plan", {"mode": "catalog", "catalog_request": {"op": "list", "title": "", "author": ""},
+                             "current_query": "", "queries": []})
+    assert shown[-1][0] == "plan" and "operation: list" in shown[-1][1] and "search queries" not in shown[-1][1]
+    ui.render_event("catalog", {"answer": "2 books:\n- <b>Moby Dick</b> — Herman Melville",
+                                "catalog": {"op": "list", "count": 2, "total": 2, "books": ["x", "y"],
+                                            "query": "", "resolved": True, "suggestions": []},
+                                "stop_reason": "catalog"})
+    assert shown[-1] == ("catalog", "list: 2 of 2 books, from the index tables")
+    content, metadata = sent[-1]
+    assert "&lt;b&gt;Moby Dick&lt;/b&gt;" in content                   # a crafted title is text, not DOM
+    assert metadata == {"catalog": {"op": "list", "count": 2, "total": 2, "query": "", "resolved": True}}
+    assert "books" not in metadata["catalog"]                          # the shape rides along, never the list
+    ui.render_event("plan", {"mode": "answer", "current_query": "q", "queries": [],
+                             "book_filter": "Moby Dick — Herman Melville", "book_unresolved": ""})
+    assert "retrieval limited to it" in shown[-1][1]
+
+
+def test_plan_step_book_names_are_escaped_by_the_real_step_writer(ui, monkeypatch):
+    """show_step itself, not a pass-through: a crafted book name in the plan
+    step is text, not DOM."""
+    import asyncio
+    outputs = []
+
+    class Step:
+        def __init__(self, name, type=None):
+            self.name, self.output = name, ""
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            outputs.append((self.name, self.output))
+            return False
+
+    monkeypatch.setattr(ui.cl, "Step", Step)
+    monkeypatch.setattr(ui.cl, "run_sync", lambda coro: asyncio.run(coro))
+    ui.render_event("plan", {"mode": "answer", "current_query": "q", "queries": [],
+                             "book_filter": "<img src=x onerror=alert(1)> — Nobody", "book_unresolved": ""})
+    name, output = outputs[-1]
+    assert name == "plan" and "&lt;img src=x onerror=alert(1)&gt;" in output and "<img" not in output
+
+
+def test_the_badge_of_a_catalogue_answer_is_green_and_names_the_source(ui):
+    badge = ui.verification_badge({"verification": "v", "provenance": {
+        "checked": 0, "confirmed": 0, "broken": 0, "unattributed": 0,
+        "catalog": {"op": "count", "count": 33, "total": 33}}})
+    assert ui.GREEN in badge and "Catalogue answer" in badge and "33 of 33 books" in badge
+    assert "Quote provenance" not in badge
+
+
+class FakeSession:
+    """cl.user_session outside a Chainlit context: a dict with get/set."""
+
+    def __init__(self):
+        self.values = {}
+
+    def get(self, key, default=None):
+        return self.values.get(key, default)
+
+    def set(self, key, value):
+        self.values[key] = value
+
+
+def _resumed_history(ui, monkeypatch, thread):
+    import asyncio
+    session = FakeSession()
+    monkeypatch.setattr(ui.cl, "user_session", session)
+    asyncio.run(ui.on_chat_resume(thread))
+    return session.get("history")
+
+
+def test_a_resumed_chat_remembers_a_catalogue_answer_by_its_shape_only(ui, monkeypatch):
+    """on_chat_resume rebuilds the conversation memory from the persisted steps;
+    the catalogue message's metadata (a dict, or the JSON string SQLite hands
+    back) keeps the titles out of it, and an ordinary answer stays as text."""
+    shape = {"op": "list", "count": 2, "total": 2, "query": "", "resolved": True}
+    listing = "2 books in your library (by the index tables):\n- Private Book — Someone\n- Other — Else"
+    thread = {"metadata": {"chat_profile": ui.PROFILE_EN}, "steps": [
+        {"type": "user_message", "output": "what are my books called?"},
+        {"type": "assistant_message", "output": listing, "metadata": {"catalog": shape}},
+        {"type": "user_message", "output": "and by author?"},
+        {"type": "assistant_message", "output": listing, "metadata": json.dumps({"catalog": shape})},
+        {"type": "user_message", "output": "who narrates Moby Dick?"},
+        {"type": "assistant_message", "output": "Ishmael [Moby Dick, Chapter 1].", "metadata": "{}"},
+    ]}
+    history = _resumed_history(ui, monkeypatch, thread)
+    assert len(history) == 3
+    for entry in history[:2]:
+        assert "catalogue answer: list, 2 of 2 books" in entry
+        assert "Private Book" not in entry and "Other — Else" not in entry
+    assert history[2] == "Q: who narrates Moby Dick?\nA: Ishmael [Moby Dick, Chapter 1]."
+
+
+def test_a_resumed_chat_puts_the_answer_back_into_the_memory_unescaped(ui, monkeypatch):
+    """The persisted answer was escaped for the browser at write time
+    (html.escape in render_event); the conversation memory is a prompt, not a
+    page. Without unescaping, the next planner and synthesize call read
+    "Sense &amp; Sensibility" and "&lt;note&gt;" as the previous turn."""
+    answer = "Ishmael &amp; Queequeg [&lt;Moby Dick&gt;, Chapter 1]."
+    thread = {"metadata": {"chat_profile": ui.PROFILE_EN}, "steps": [
+        {"type": "user_message", "output": "who narrates it?"},
+        {"type": "assistant_message", "output": answer, "metadata": "{}"},
+    ]}
+    history = _resumed_history(ui, monkeypatch, thread)
+    assert history == ["Q: who narrates it?\nA: Ishmael & Queequeg [<Moby Dick>, Chapter 1]."]
+
+
+def test_the_catalogue_shape_survives_the_data_layer_round_trip(ui, monkeypatch):
+    """The real persistence: the message is written through the app's data
+    layer into the app's schema and read back with get_thread, then the resume
+    handler rebuilds the memory from what came back."""
+    import asyncio
+    layer = ui.data_layer()
+    shape = {"op": "has", "count": 1, "total": 33, "query": "Dracula", "resolved": True}
+
+    # create_step is wrapped by a decorator that queues writes until a live
+    # session's first user message; the write itself (the INSERT with the
+    # metadata serialized) is what this test exercises, through __wrapped__.
+    write_step = type(layer).create_step.__wrapped__
+
+    async def persist_and_read():
+        try:
+            await layer.update_thread(thread_id="t1", name="do I have Dracula?", metadata={"chat_profile": ui.PROFILE_EN})
+            base = {"threadId": "t1", "streaming": False}
+            await write_step(layer, {**base, "id": "s1", "name": "admin", "type": "user_message",
+                                     "output": "do I have Dracula?", "createdAt": "2026-09-08T20:00:00Z"})
+            await write_step(layer, {**base, "id": "s2", "name": "Ask Your Library", "type": "assistant_message",
+                                     "output": "Yes, in your library:\n- Dracula — Bram Stoker",
+                                     "metadata": {"catalog": shape}, "createdAt": "2026-09-08T20:00:01Z"})
+            return await layer.get_thread("t1")
+        finally:
+            await layer.close()
+
+    thread = asyncio.run(persist_and_read())
+    assert thread is not None and len(thread["steps"]) == 2
+    history = _resumed_history(ui, monkeypatch, thread)
+    assert history == ["Q: do I have Dracula?\nA: (catalogue answer: has, 1 of 33 books; asked about: Dracula, "
+                       "found: yes; the list of titles is not kept in the conversation)"]
+    assert "Bram Stoker" not in history[0]
 
 
 def test_ui_import_writes_only_into_its_configured_dir(ui, tmp_path):

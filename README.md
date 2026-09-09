@@ -23,6 +23,12 @@ with the mechanism explained, in
   chapter-aware full-text chunks. Answers cite `[book, chapter]`; a code-based guard verifies
   each evidence quote the agent collected against the exact passage it was copied from (the
   answer's own sentences are not checked claim by claim).
+- **Knows what it holds.** Questions about the library itself (how many books, which titles,
+  whether a title or an author is in it) are answered by code from the index tables,
+  exhaustively: the planner only names the operation, the list is read from the tables and the
+  number in the answer is the length of that list (ADR-016). A content question that names one
+  book is answered from that book. Content questions stay evidence-based and may be incomplete:
+  a search cannot prove that nothing else matches.
 - **Behaves like an agent, not a pipeline.** plan / act / observe / reflect loop with a step
   budget, a CRAG-style early stop after consecutive dry steps, chapter drill-down for detail
   questions, and a human-in-the-loop clarify interrupt when a half-remembered book matches
@@ -41,6 +47,8 @@ flowchart TD
     Q([question]) --> P[plan: mode + 2-4 English queries]
     P -->|steps left| A[act: hybrid search, or read a chapter<br/>hit ids s&lt;step&gt;h&lt;n&gt;, raw text to the scratchpad]
     P -->|step budget used up after a clarify| S
+    P -->|catalogue question: count, titles, a title or an author| K[catalog: the book list read from the index tables,<br/>count = length of that list; no search, no second model call]
+    K --> V
     A --> O[observe: distill verbatim quotes, each pinned to a hit id]
     O --> R{reflect}
     R -->|search: next query, steps left| A
@@ -64,6 +72,34 @@ question -> planner queries (2-4, English) -> LanceDB hybrid search (vectors + B
   and score-scale free: only a chunk's rank in each list matters, so cosine distance and BM25
   never have to be calibrated against each other. A broken FTS index degrades to vector-only
   with a warning rather than silently.
+- **Catalogue questions bypass retrieval (ADR-016).** `plan` recognises them in its one call and
+  names the operation (`count`, `list`, `has` a title, `by_author`); `library.list_books()` reads
+  the distinct book keys of both tables (the demo's canary fixtures excluded by their `source`
+  column); code validates the operation, resolves a title or an author against that list
+  (exact, contained as whole words, or a close match for a typo) and formats the answer, so
+  nothing can be listed that is not in the index and a count is the length of the same list a
+  listing shows. Containment reads one way: a name inside a title is a match, a title inside a
+  longer name is not, in either mode: "Dracula's Guest" and "Dracula II" are different books,
+  answered with a no and the closest title — for titles that is settled before the typo step,
+  which on its own is close enough to confirm one ("Dracula II" is 0.824 alike to "Dracula"),
+  while an author name that contains a held one still resolves ("Sir Arthur Conan Doyle" is the
+  man on the shelf). The same resolver limits a content question that names one book to that
+  book (a name that fits several books, or only a fragment of a title, sets no filter and claims
+  nothing). The listing is exhaustive or it is an error: the full-text table is required here, as
+  it is for the preflight. An operation
+  the planner invents falls back to the research loop, and so does a question that also asks
+  about content ("Do I have Dracula, and why does Harker stay?"): a conservative gate on content
+  vocabulary sends it to the research loop, with the named book as the filter when the request
+  carries a title that resolves to one book. "Who" is one of those words ("and who kills
+  Lucy?"), except where it asks who wrote them: there the author is a catalogue attribute and
+  the listing "Title — Author" answers that half itself. The gate reads the reader's words, not
+  the library's (one mention of the title of a book the catalogue holds is taken out of the
+  question before the check, so "Do I have Where the Wild Things Are?" is a holdings question
+  and a book called "Why" keeps the reader's own "why"), but it knows
+  words, not titles hidden in a question, so that routing stays the planner's reading, which
+  the catalogue eval set measures with negative controls. The list never reaches the model: not
+  in the answer, and not on a later turn (the conversation memory keeps only the operation and
+  counts).
 - **Only `observe` sees retrieved text, sanitized and cut to a fixed budget.** `act` writes the
   sanitized passages, cut to the same budget, to a per-run scratchpad (a human-readable log) and
   keeps each passage, as observe saw it, in state under a stable hit id; plan, reflect and synthesize work on the distilled evidence,
@@ -397,12 +433,19 @@ through the whole graph (clarify interrupts are auto-answered, so the run is non
 scored on: expected titles mentioned in the answer (accent-folded substring, not a citation
 check), refusal questions answering with an explicit refusal (an evidence-free answer told from
 model knowledge fails), `expected_behavior: clarify` questions actually triggering a clarify
-interrupt, and `expects_chapter_read` questions actually drilling into a chapter of an expected
-book. Quote provenance totals come from `validate`. Scoring is heuristic, no LLM judge -
+interrupt, `expects_chapter_read` questions actually drilling into a chapter of an expected
+book, and `catalog` questions on their structured result (the set of books the code listed must
+equal the expected set of index keys, "Title — Author", so the right title under a wrong author
+fails; the count must be the length of that list, the operation must be the one
+the item names, and the catalogue as a whole must hold the `expected_total` the item was written
+for, or a run of two or three items could certify a partial index; a research question answered
+by the catalogue path fails, and so does a research control the planner did not route itself,
+where a planner or catalogue fallback searched instead). Quote provenance totals come from
+`validate`. Scoring is heuristic, no LLM judge -
 **answer correctness is still a manual read**, which is why the harness writes every answer
 into a report with a per-question correctness checkbox.
 
-Two golden sets, reported separately. **Core** (`eval/golden/en-demo.yaml`, 11 questions, the
+Three golden sets, reported separately. **Core** (`eval/golden/en-demo.yaml`, 11 questions, the
 default `GOLDEN_PATH`): eight questions on books the golden author has read and a two-book
 comparison of two of them (Ivanhoe and Don Quixote), all nine reader-verified; h06, one of the two
 questions the example traces are built on, verified against the source text by an AI session only;
@@ -414,6 +457,18 @@ eleven-question set (see the note under the table).
 (`eval/golden/en-demo-extended.yaml`, 21 questions) is the former v3 draft with near-duplicates
 removed; its notes were checked against the source text by an AI session only, so its numbers are
 exploratory.
+**Catalogue** (`eval/golden/en-demo-catalog.yaml`, 10 questions): six questions about what the
+library holds (count, the full list, a title that is there, one that is not, an author, the count
+in Ukrainian), scored on the structured result against the manifest's book keys and its size;
+three content questions
+that look like listings as negative controls (one scored on routing alone); and one hybrid item
+that pins the named-book retrieval filter. Measured on `50b9347` (09.09, single run, the branch's
+final commit with the scoring on keys and `expected_total`; the earlier 10/10 run of the same day
+on `b0d1321` scored titles only and has a different golden checksum, so it is not the same
+measurement): 10/10; the six catalogue items with 0 search steps and one model call each; the three
+controls through the research loop (1, 2 and 3 steps); the hybrid item with retrieval limited to
+Dracula; 22/22 quotes confirmed on the four research items; $0.17 for the set, of which the six
+catalogue items cost $0.014 together (`docs/eval-results/2026-09-09-catalogue-set.md`).
 
 Two measured trees, both single runs, clean tree (`--require-clean`), strict hit-id mode, the same
 bge-m3 index: **v0.1.0**, 2026-09-05 on code `88881ee` (the last code commit before tag `v0.1.0`;
@@ -429,6 +484,16 @@ window and the gate were introduced and measured one at a time during developmen
 records those steps); the two columns below are the first measurement of both on one run: +39% per
 core question and +57% per extended question against v0.1.0 (from the committed totals, $0.5364/11
 against $0.4215/12 and $0.9008/21 against $0.5722/21).
+
+A third run of the core set, 2026-09-09 on `50b9347` (the catalogue branch's final commit, this
+repository), checks that the catalogue path (ADR-016) left the research loop's numbers where they
+were: 11/11 behaviour, 48 / 0 / 0 quotes confirmed / unattributed / broken, $0.0519 mean per
+question against $0.0488 on rc1 (73 model calls against 70). What changed is the path, not the
+verdicts: the three questions that name one book (c04, c05, c06) now run with retrieval limited to
+that book by the catalogue resolver, and the refusal question's answer carries the note that the
+named book is not in the catalogue. Single run, not reader-graded; the report is
+`docs/eval-results/2026-09-09-catalogue-branch-core.md`. The table below keeps the two tagged
+baselines.
 
 ### Where the measured code lives
 
@@ -583,6 +648,13 @@ Yellow boxes leave the machine (the LLM provider, optionally LangSmith); everyth
   OpenRouter by default, and on to the model vendor. Point `OPENROUTER_BASE_URL` elsewhere to
   change that, or set `LLM_BACKEND=ollama`: with local embeddings (the default) and tracing off,
   nothing leaves the machine at all.
+- A catalogue answer (the list of your books) is computed locally from the index tables and is
+  not sent to the provider; the conversation memory keeps only its shape (the operation and the
+  counts, and the name you asked about), so a later question does not carry the titles either.
+  Two different guarantees: the list never reaches the *model*; a *tracing exporter*, when you
+  enable one, receives the graph state, the catalogue list and the answer included, like every
+  other run's state. Keep tracing off (the recipe under Configuration) if the list must stay
+  on the machine.
 - Embeddings are computed **locally** by Ollama by default; nothing leaves the machine for
   retrieval. `EMBED_BACKEND=openrouter` sends chunk text to the embedding API too.
 - Every run writes a scratchpad with the **retrieved passages as the model saw them** (sanitized,
@@ -626,6 +698,13 @@ From `docs/backlog.md`, confirmed by the runs of 2026-09-05, 06 and 07 (`v0.2.0-
 - **Comparative and aggregation questions may miss a work.** The planner issues queries centred
   on one side of the comparison and the other book is never retrieved. Decomposition per implied
   work is v0.2.
+- **Exhaustive content questions are best-effort.** "Which of my books mention London?" reads
+  like a catalogue question but needs the books' content: it goes through the research loop, and
+  top-k retrieval cannot prove that no other book matches. The catalogue path (ADR-016) covers
+  what the library holds (count, titles, a title or an author), not what the books say. A content
+  question that names one book is limited to it only when the name resolves to exactly one
+  catalogue entry; a name that fits several ("Holmes"), a fragment of a title ("Time"), or a
+  longer name that merely contains one ("Dracula's Guest") gets the whole library.
 - **Detail questions may skip drill-down** and be answered from card summaries instead of
   reading the chapter.
 - **The time budget is coarse, and there is no hard deadline.** `QUESTION_DEADLINE_S` (300 s)
@@ -694,7 +773,7 @@ corpus/                manifest.yaml (checksums), book cards, canaries, audio tr
                        toc/ (committed chapter titles; the card-grounding test uses them)
 eval/                  retrieval eval, agent eval, injection canary, golden sets, report summarizer
 tests/                 unit tests and the golden-set / manifest CI guard
-docs/                  backlog.md (known gaps, v0.2), CHANGELOG.md, eval-results/, examples/
+docs/                  backlog.md (known gaps, v0.2), CHANGELOG.md, adr-016-catalog-path.md, eval-results/, examples/
 .github/workflows/     CI: unit tests on every push, UI contracts with the chainlit extra
 ui.py                  Chainlit web chat
 ```

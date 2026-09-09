@@ -22,7 +22,7 @@ from .config import QUESTION_DEADLINE_S, SUPPORTED_LANGS
 from .graph import build_graph
 from .i18n import set_lang, status_word, t
 from .preflight import check_environment
-from .runner import run_question
+from .runner import history_entry, run_question
 
 EXIT_WORDS = {"exit", "quit", "q", "вихід"}
 SCRATCH_DIR = Path(os.environ.get("ASK_SCRATCH_DIR", ".scratch"))
@@ -32,7 +32,8 @@ SESSION = {"questions": 0, "cost_usd": 0.0}
 # Per-question memory of the CLI: the passages of this run by hit_id (from the act
 # events), so --verbose can print each evidence item on the text it was checked
 # against. The CLI answers one question at a time; _run resets it.
-RUN = {"passages": {}, "verbose": False}
+RUN = {"passages": {}, "verbose": False,
+       "catalog": None}     # this question's catalogue result, if it took that path: the history keeps its shape only
 
 
 CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")   # keep \t and \n; drop ANSI/OSC and the rest
@@ -47,8 +48,17 @@ def terminal_safe(text: str) -> str:
 def print_event(node_name: str, update: dict) -> None:
     """One line per graph event (language: ASK_LANG)."""
     if node_name == "plan":
-        print(t("ev_plan", mode=update["mode"],
-                queries=[update["current_query"]] + update["queries"]))
+        if update["mode"] == "catalog":
+            print(t("ev_plan_catalog", op=update["catalog_request"]["op"]))
+        else:
+            print(t("ev_plan", mode=update["mode"],
+                    queries=[update["current_query"]] + update["queries"]))
+        if update.get("catalog_fallback"):
+            print(t("ev_catalog_fallback_" + update["catalog_fallback"]))
+        if update.get("book_filter"):
+            print(t("ev_book_filter", book=terminal_safe(update["book_filter"])))
+        if update.get("book_unresolved"):
+            print(t("ev_book_unresolved", q=terminal_safe(update["book_unresolved"])))
         if update.get("clarify_unresolved"):
             print(t("ev_clarify_unresolved"))
         if update.get("plan_fallback"):
@@ -79,6 +89,13 @@ def print_event(node_name: str, update: dict) -> None:
             print(t("ev_reflect_enough"))
     elif node_name == "clarify":
         print(t("ev_clarify", a=update["clarification"]))
+    elif node_name == "catalog":
+        listing = update["catalog"]
+        RUN["catalog"] = listing
+        print(t("ev_catalog", op=listing["op"], n=listing["count"], total=listing["total"]))
+        # Titles are index metadata (file names and frontmatter for ayl-add books):
+        # control characters are stripped as for every other passage the CLI prints.
+        print(t("ev_answer_header", a=terminal_safe(update["answer"])))
     elif node_name == "synthesize":
         print(t("ev_answer_header", a=update["answer"]))
     elif node_name == "validate":
@@ -129,6 +146,7 @@ def _run(graph, question: str, history: list[str], deadline_s: float | None = No
     """One question with human-readable failure instead of a traceback
     (ASK_DEBUG=1 re-raises)."""
     RUN["passages"] = {}
+    RUN["catalog"] = None
     try:
         return run_question(graph, question, history, SCRATCH_DIR,
                             on_event=print_event, on_clarify=ask_in_terminal,
@@ -232,8 +250,9 @@ def main(argv: list[str] | None = None) -> None:
         answer = _run(graph, question, history, deadline_s=args.deadline)
         if not answer:
             continue
-        # Conversation memory: the question plus a truncated answer.
-        history.append(f"Q: {question}\nA: {answer[:500]}")
+        # Conversation memory: the question plus a truncated answer; a catalogue
+        # answer only as its shape, never the list of titles.
+        history.append(history_entry(question, answer, RUN["catalog"]))
 
     print(t("cli_bye"))
 

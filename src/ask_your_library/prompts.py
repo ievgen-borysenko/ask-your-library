@@ -11,12 +11,27 @@ When <user_chose_book> is present, that exact book is the target: search it,
 not the alternatives the user just rejected.
 
 Decide:
-1. "mode": "identify" if the user half-remembers a book and we must first find WHICH book,
+1. "mode":
+   "catalog" if the question is about the library ITSELF, not about what its books say: how
+     many books it holds, which titles or authors, whether a given title or author is in it.
+     Then add "catalog": {"op": "count" | "list" | "has" | "by_author",
+     "title": "<the title asked about, as written, or omit>",
+     "author": "<the author asked about, as written, or omit>"} and "queries": [].
+     NOT catalog: anything that needs the books' content ("which of my books mention London",
+     "what are the names of the musketeers") — that is "answer". A question that asks whether
+     a book is in the library AND something about its content ("Do I have Dracula, and why
+     does Harker stay?") is "answer" with "book" (item 3), never "catalog": the catalogue
+     cannot answer the content part.
+   "identify" if the user half-remembers a book and we must first find WHICH book,
    "answer" if the target book/topic is clear and we must answer from content.
-2. "queries": 2-4 ENGLISH search queries for semantic search (the corpus is English).
-   Decompose the question: different aspects -> different queries.
+2. "queries" (identify and answer): 2-4 ENGLISH search queries for semantic search (the corpus
+   is English). Decompose the question: different aspects -> different queries.
+3. "book" (answer mode, optional): the ONE title the question names as the book to answer
+   from, exactly as the user wrote it ("Do I have Dracula, and why does Harker stay?" ->
+   "Dracula"). Omit when the question names no book, or several.
 
-Return ONLY JSON: {"mode": "...", "queries": ["...", "..."]}"""
+Return ONLY JSON: {"mode": "...", "queries": ["...", "..."], "catalog": {...} or omitted,
+"book": "..." or omitted}"""
 
 OBSERVE_RULES = """You distill search results for a research agent.
 The user message holds the question being researched, the search query used,

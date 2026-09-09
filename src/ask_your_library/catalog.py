@@ -1,0 +1,284 @@
+"""The catalogue path (ADR-016): questions about what the library HOLDS — how
+many books, which titles, whether a title or an author is in it — answered by
+code from the index tables, exhaustively, with no model reading the list.
+
+Sent through the research loop, such a question gets a sample: top-k search
+returns the neighbours of a phrase, `observe` keeps hits by the text of a
+chunk while the answer sits in its metadata, and the count is written by a
+model over a list it saw (the owner's first question to the web UI got 14
+titles under a heading that said 17, of 33). Here the planner only names the
+operation; the list is `library.list_books()`, the count is `len()` of the very
+list the answer shows, and a title or an author in the question is resolved
+against that list by code, so nothing can be "found" that is not in it.
+"""
+import difflib
+import re
+import unicodedata
+from dataclasses import dataclass, field
+
+from .i18n import t
+from .library import TITLE_SEPARATOR, BookEntry, list_books
+
+CATALOG_OPS = ("count", "list", "has", "by_author")
+CLOSE_MATCH_CUTOFF = 0.8      # a typo still resolves ("Ivanho" -> Ivanhoe)
+SUGGESTION_CUTOFF = 0.5       # what "closest titles" may name when nothing resolves
+MAX_SUGGESTIONS = 3
+MIN_CONTAINED_CHARS = 4       # "It" must not resolve by being contained in every title
+STRICT_CONTAINED_SHARE = 0.6  # strict mode: a one-word name inside a longer title must be most of it
+
+
+# Words a question about HOLDINGS does not carry: they ask about content. The
+# planner may still label such a question "catalog" (it did, once, for "Do I have
+# Dracula, and why does Harker stay?"); code then sends it to the research loop
+# as a mixed intent, with the named book as the retrieval filter. Conservative
+# on purpose: a false positive costs a search where a listing would have done,
+# never the reverse. "who" is a content word like the rest ("do I have Dracula,
+# and who kills Lucy?" asks about the book), with ONE exemption: the authorship
+# construction, where the author is a catalogue attribute and the listing
+# ("Title — Author") answers the question itself — "who wrote them", "who are
+# their authors", and in Ukrainian "хто (їх) написав", where the object stands
+# between the pronoun and the verb. A title hidden inside a question ("the names
+# of the three musketeers") is beyond this gate: that routing stays the
+# planner's reading, measured by the controls of the catalogue eval set.
+CONTENT_CLUES = re.compile(
+    r"(?<!\w)(?:why|how(?!\s+many)|"
+    r"who(?!\s+(?:wrote|authored|(?:is|are)\s+(?:the|their)\s+authors?))|whom|whose|"
+    r"where|when|what happens|explain|describe|"
+    r"tell me about|summar\w*|plot|character\w*|about|mention\w*|discuss\w*|deals? with|"
+    r"чому|як(?!\s+багато)|"
+    r"хто(?!\s+(?:\w+\s+)?(?:написав|написала|автор|авторка|автори))|"
+    r"кого|де|коли|про що|про|поясни|розкажи|опиши|сюжет|"
+    r"згаду\w*|йдеться)(?!\w)",
+    re.I,
+)
+
+
+def content_clue(question: str) -> str:
+    """The first content word of a question, or "" when it reads as a pure
+    holdings question (how many, which titles, do I have X, what do I have by Y).
+    Case-folded only: `fold` would strip the breve off "й" and the pattern's
+    Ukrainian words would never match."""
+    found = CONTENT_CLUES.search(" ".join(question.casefold().split()))
+    return found.group(0) if found else ""
+
+
+def mixed_intent(question: str, title: str, entries: list[BookEntry]) -> bool:
+    """Does a catalogue request also ask about content? The gate reads the
+    question's vocabulary, and a title of a book the library HOLDS is removed
+    from the question first: "Do I have Where the Wild Things Are?" and "Чи є в
+    мене «Як гартувалася сталь»?" are pure holdings questions whose titles
+    happen to carry a content word, and they used to end as "I don't know"
+    about a book on the shelf. Only a title that resolves strictly to exactly
+    one held book is removed: anything else is not the library's title, so the
+    question is read as it stands. Exactly ONE occurrence goes: the title is
+    mentioned once, and for a book called "Why" the rest of "Do I have Why, and
+    why does it end there?" is the reader's own content question."""
+    if title and len(resolve_title(title, entries, strict=True)[0]) == 1:
+        question = re.sub(re.escape(title), " ", question, count=1, flags=re.I)
+    return content_clue(question) != ""
+
+
+def parse_catalog_request(decision: dict) -> dict | None:
+    """The planner's "catalog" object, validated by CODE: {"op": one of
+    CATALOG_OPS, "title": str, "author": str}. None when it is absent, not an
+    object, names an operation that is not ours, or asks "has" without a title
+    or "by_author" without an author — the question then takes the research
+    loop, never the other way round."""
+    raw = decision.get("catalog")
+    if not isinstance(raw, dict):
+        return None
+    op = raw.get("op")
+    if not isinstance(op, str) or op not in CATALOG_OPS:
+        return None
+    title = raw.get("title") if isinstance(raw.get("title"), str) else ""
+    author = raw.get("author") if isinstance(raw.get("author"), str) else ""
+    title, author = title.strip(), author.strip()
+    if op == "has" and not title:
+        return None
+    if op == "by_author" and not author:
+        return None
+    return {"op": op, "title": title, "author": author}
+
+
+def fold(text: str) -> str:
+    """Case, accents, curly apostrophes and runs of whitespace folded away:
+    what two spellings of one title have in common."""
+    text = unicodedata.normalize("NFKD", text).casefold().replace("\u2019", "'")
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    return " ".join(text.split())
+
+
+def _without_article(text: str) -> str:
+    return re.sub(r"^(?:the|a|an) ", "", text)
+
+
+def _contains_words(haystack: str, needle: str) -> bool:
+    return bool(needle) and re.search(rf"(?<!\w){re.escape(needle)}(?!\w)", haystack) is not None
+
+
+def _resolve(name: str, entries: list[BookEntry], field_of, last_word_too: bool = False,
+             strict: bool = False, fuzzy: bool = True,
+             longer_name_is_another: bool = False) -> tuple[list[BookEntry], list[str]]:
+    """Entries whose `field_of(entry)` the reader means by `name`, and, when
+    none, up to MAX_SUGGESTIONS closest values for the "not found" line.
+    Exact (folded, a leading article ignored) first; then the name contained in
+    the field as whole words and at least MIN_CONTAINED_CHARS long; then close
+    matches (difflib, CLOSE_MATCH_CUTOFF) so a typo still resolves — for authors
+    also against the surname alone (`last_word_too`), because "Melvile" is a
+    typo of "Melville", not of "Herman Melville". Several matches are returned
+    as several: "Holmes" is every Holmes book. `strict` (the retrieval filter of
+    the hybrid) accepts a name contained in a longer title only when it is
+    several words or most of the title: "Time" is not The Time Machine.
+
+    The reverse containment, a FIELD inside the name, is never a match, in
+    either mode: "Dracula's Guest" holds "Dracula" and is another book, and
+    confirming it as one the library owns is the silent wrong answer this
+    refuses. It is reported as the closest name instead, so "do I have X" says
+    no and names what is there. WHEN it is decided differs by field, and
+    `longer_name_is_another` says which way round. TITLES decide it BEFORE the
+    close-match step (resolve_title sets the flag), because a longer title is
+    another work and the typo step would otherwise confirm it: "Dracula II" is
+    0.824 alike to a held "Dracula", above CLOSE_MATCH_CUTOFF. AUTHORS decide it
+    after, because a longer author name is usually the same person with an
+    honorific or a middle name ("Sir Arthur Conan Doyle", 0.9 alike to the held
+    "Arthur Conan Doyle"), and that must still resolve to the books held.
+    `fuzzy=False` stops after the contained step."""
+    wanted = fold(name)
+    if not wanted:
+        return [], []
+    values = {e: fold(field_of(e)) for e in entries}
+    exact = [e for e, v in values.items() if v == wanted or _without_article(v) == _without_article(wanted)]
+    if exact:
+        return exact, []
+    def contains_name(v: str) -> bool:
+        if len(wanted) < MIN_CONTAINED_CHARS or not _contains_words(v, wanted):
+            return False
+        return (not strict or len(wanted.split()) >= 2
+                or len(wanted) >= STRICT_CONTAINED_SHARE * len(v))
+
+    contained = [e for e, v in values.items() if contains_name(v)]
+    if contained:
+        return contained, []
+    if not fuzzy:
+        return [], []
+    # A held name inside the one asked about: the closest name, never a match.
+    inside = [field_of(e) for e, v in values.items()
+              if len(v) >= MIN_CONTAINED_CHARS and _contains_words(wanted, v)]
+    if inside and longer_name_is_another:
+        return [], inside[:MAX_SUGGESTIONS]     # titles: before the typo step
+    variants = {e: ({v, v.split()[-1]} if last_word_too and " " in v else {v}) for e, v in values.items()}
+    pool = sorted({variant for vs in variants.values() for variant in vs})
+    close = set(difflib.get_close_matches(wanted, pool, n=MAX_SUGGESTIONS, cutoff=CLOSE_MATCH_CUTOFF))
+    matches = [e for e, vs in variants.items() if vs & close]
+    if matches:
+        return matches, []
+    if inside:
+        return [], inside[:MAX_SUGGESTIONS]     # authors: after it, for the honorific
+    near = difflib.get_close_matches(wanted, list(values.values()), n=MAX_SUGGESTIONS,
+                                     cutoff=SUGGESTION_CUTOFF)
+    suggestions: list[str] = []
+    for v in near:
+        display = next(field_of(e) for e, folded in values.items() if folded == v)
+        if display not in suggestions:
+            suggestions.append(display)
+    return [], suggestions
+
+
+def _split_author(name: str) -> tuple[str, str] | None:
+    """("Title", "Author") when the name carries an explicit author — the index
+    key's separator or " by " — split on the LAST one, since a title may itself
+    contain a dash or a "by"; None otherwise."""
+    if TITLE_SEPARATOR in name:
+        title, _, author = name.rpartition(TITLE_SEPARATOR)
+        if title.strip() and author.strip():
+            return title.strip(), author.strip()
+    by = re.search(r"^(.+)\s+by\s+(\S.*)$", name, re.I)        # greedy: the last " by "
+    if by and by.group(1).strip():
+        return by.group(1).strip(), by.group(2).strip()
+    return None
+
+
+def resolve_title(name: str, entries: list[BookEntry],
+                  strict: bool = False) -> tuple[list[BookEntry], list[str]]:
+    """Books the reader means by a title. An explicit author ("Title — Author",
+    "Title by Author") is a constraint, not a hint: the title is resolved, then
+    the author must match as well (full name, surname or a typo); a wrong author
+    resolves to nothing, with the same-title books as the suggestions, so "has"
+    can never confirm another author's book. A title that itself contains the
+    separator is tried as a whole key (exact or contained, never fuzzy) before
+    giving up."""
+    split = _split_author(name)
+    if split:
+        title_part, author_part = split
+        by_title, suggestions = _resolve(title_part, entries, lambda e: e.title, strict=strict,
+                                         longer_name_is_another=True)
+        if by_title:
+            by_author, _ = _resolve(author_part, by_title, lambda e: e.author, last_word_too=True)
+            if by_author:
+                return by_author, []
+            whole, _ = _resolve(name, entries, lambda e: e.key, strict=strict, fuzzy=False)
+            return (whole, []) if whole else ([], [e.key for e in by_title][:MAX_SUGGESTIONS])
+        whole, _ = _resolve(name, entries, lambda e: e.key, strict=strict, fuzzy=False)
+        return (whole, []) if whole else ([], suggestions)
+    by_title, suggestions = _resolve(name, entries, lambda e: e.title, strict=strict,
+                                     longer_name_is_another=True)
+    return (by_title, []) if by_title else ([], suggestions)
+
+
+def resolve_author(name: str, entries: list[BookEntry]) -> tuple[list[BookEntry], list[str]]:
+    """Books by an author named in full, by surname, or with a typo. A held name
+    inside a longer one is decided AFTER the close match here, unlike a title:
+    "Sir Arthur Conan Doyle" is the man on the shelf, while "Dracula II" is
+    another book."""
+    return _resolve(name, entries, lambda e: e.author, last_word_too=True)
+
+
+@dataclass
+class CatalogResult:
+    op: str
+    books: list[BookEntry]          # the answer set; count = len(books), never a separate number
+    total: int                      # books in the catalogue (canaries excluded)
+    query: str = ""                 # the title or author asked about (has / by_author)
+    resolved: bool = True           # has / by_author: something matched
+    suggestions: list[str] = field(default_factory=list)   # closest names when nothing did
+
+    def as_state(self) -> dict:
+        """What the state, the events and the eval carry."""
+        return {"op": self.op, "count": len(self.books), "total": self.total,
+                "books": [b.key for b in self.books], "query": self.query,
+                "resolved": self.resolved, "suggestions": list(self.suggestions)}
+
+
+def run_catalog(request: dict, entries: list[BookEntry] | None = None) -> CatalogResult:
+    """One validated request against the catalogue (list_books unless given)."""
+    entries = list_books() if entries is None else entries
+    op = request["op"]
+    if op in ("count", "list"):
+        return CatalogResult(op, list(entries), len(entries))
+    if op == "has":
+        matches, suggestions = resolve_title(request["title"], entries)
+        return CatalogResult(op, matches, len(entries), request["title"], bool(matches), suggestions)
+    matches, suggestions = resolve_author(request["author"], entries)
+    return CatalogResult(op, matches, len(entries), request["author"], bool(matches), suggestions)
+
+
+def render_catalog(result: CatalogResult) -> str:
+    """The answer, from templates and the result only: the number in the text
+    is len() of the list under it. Titles are index metadata, i.e. data; the
+    interfaces neutralize markup in this text as they do for model answers."""
+    items = "\n".join(f"- {b.key}" for b in result.books)
+    n = len(result.books)
+    if result.op == "count":
+        return t("catalog_count", n=n)
+    if result.op == "list":
+        return t("catalog_list", n=n, items=items)
+    if result.op == "has":
+        if result.resolved:
+            return t("catalog_has_yes", items=items)
+        text = t("catalog_has_no", q=result.query)
+        return text + (t("catalog_closest_titles", items="; ".join(result.suggestions)) if result.suggestions else "")
+    if result.resolved:
+        authors = ", ".join(sorted({b.author for b in result.books if b.author}))
+        return t("catalog_by_author", n=n, author=authors or result.query, items=items)
+    text = t("catalog_by_author_none", q=result.query)
+    return text + (t("catalog_closest_authors", items="; ".join(result.suggestions)) if result.suggestions else "")

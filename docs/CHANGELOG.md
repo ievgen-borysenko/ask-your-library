@@ -2,6 +2,94 @@
 
 ## Unreleased
 
+- **Catalogue questions are answered by code (ADR-016).** "How many books do I have, and what
+  are they called?" went through the research loop and came back with a sample: fourteen titles
+  under a heading that said seventeen, of thirty-three, after four searches (the owner's first
+  question to the web UI on 08.09). The planner has a third mode, `catalog`, in which it only
+  names the operation (`count`, `list`, `has` a title, `by_author`); code reads the distinct book
+  keys of both index tables (`library.list_books`, the demo's canary fixtures excluded by their
+  `source` column), validates the operation, resolves a title or an author against that list
+  (exact, contained as whole words, or a close match for a typo) and formats the answer, so the
+  number in the answer is the length of the list under it and nothing can be listed that is not
+  in the index. One model call, no search step; the CLI and the web UI show one `catalog` step
+  and a "catalogue answer" badge instead of a quote count. A content question that names one
+  book is answered from that book: the planner repeats the name, code resolves it, and retrieval
+  is limited to the resolved key, as after a clarify; a name that matches nothing is searched
+  everywhere and the answer says so; an operation the planner invents, or a catalogue request
+  after a clarify reply, takes the research loop and the event says which; so does a question
+  that also asks about content ("Do I have Dracula, and why does Harker stay?"), through a
+  conservative gate on content vocabulary, with the named book as the retrieval filter (the
+  gate knows words, not titles hidden in a question: routing beyond that vocabulary stays the
+  planner's reading, measured by the set's negative controls). The list never reaches the model: the conversation memory keeps only the
+  shape of a catalogue answer (operation, counts, the name asked about), never the titles, in
+  the CLI, the web UI and a resumed chat (a tracing exporter, when enabled, still receives the
+  graph state, the list included; the privacy section says so). An explicit author in a name
+  ("Shared Title — Author Two", "Shared Title by Author Two") is a constraint: the other
+  author's book with the same title is never confirmed, and an author who wrote neither
+  resolves to nothing with both books as the closest. A book that also carries a
+  canary-sourced row stays listed: only a key whose every row is a canary is a fixture. New eval set
+  `eval/golden/en-demo-catalog.yaml`: type `catalog`, scored on the structured result with strict
+  set equality against the manifest KEYS, "Title — Author" (one book too many fails, so does the
+  right title under a wrong author, and the count must be the length of the list), against the
+  size of the catalogue the item was written for
+  (`expected_total`, which a targeted run of one or two items would otherwise never touch),
+  three content questions as negative controls (one scored on routing alone) and one
+  hybrid item that pins the named-book filter; a research question answered by the catalogue
+  path fails its item. Tests: `tests/test_catalog.py` (`list_books` on a real index
+  in tmp, the resolver, the answers in both languages, the planner-side guards) and ten
+  end-to-end runs of the graph. An earlier run of the set routed the hybrid item to the
+  catalogue ("has Dracula: yes", the content part unanswered): one sentence in the planner
+  prompt and the gate above closed it; routing beyond the gate's vocabulary is measured, not
+  enforced. The set's measured numbers are in the README's Evaluation section: 10/10 on the branch's final commit `50b9347` with the scoring on keys and `expected_total`, and a core run on the same commit (11/11, 48/0/0 quotes, $0.0519 mean against $0.0488 on rc1) shows the research loop's numbers unchanged while three questions that name one book now run with the retrieval filter (`docs/eval-results/2026-09-09-catalogue-{set,branch-core}.md`).
+  Name resolution reads containment in one direction only: a name inside a title matches
+  ("Time Machine" is The Time Machine), a title inside a longer name never does. "Dracula's
+  Guest" is a different book from "Dracula", and the answer now says so and names Dracula as
+  the closest title, where before it confirmed the book as held (and, as a retrieval filter,
+  quietly searched Dracula alone). For titles that is decided before the close match for a
+  typo, which is close enough to confirm another work by itself: "Dracula II" is 0.824 alike to
+  a held "Dracula", over the 0.8 cutoff, so both the loose and the strict resolver used to
+  answer it with Dracula. For authors the order is the other way round, so that "Sir Arthur
+  Conan Doyle" (0.9) still resolves to the man on the shelf — a longer title is another work, a
+  longer author name is usually the same person with an honorific or a middle name.
+  An empty strict result is no longer read as "no such book"
+  either: a one-word fragment of a held title ("Time") sets no filter and says nothing, instead
+  of opening the answer with a note that a book on the shelf is not in the catalogue.
+  The gate's vocabulary keeps "who" / "хто" as content words ("do I have Dracula, and who kills
+  Lucy?" asks about the book), exempting only the authorship construction — "who wrote them",
+  "who is the author", "who are their authors", "хто (їх) написав" — where an author is a
+  catalogue attribute and the listing answers that half itself. And the title of a
+  book the catalogue resolves is removed from the question before the vocabulary check, one
+  occurrence of it, so that a book called "Why" does not take the reader's own "why" with it:
+  "Do I have Where the Wild Things Are?" and "Чи є в мене «Як гартувалася сталь»?" are answered
+  from the catalogue instead of ending as "I don't know" about a book on the shelf; the same
+  question shape about a book nobody has still takes the research loop.
+  A clarify that fires on the last allowed step settles both book fields too. The plan that
+  answers it returns no search, and a state channel an update leaves out keeps the value it
+  had, so a run that started with a name the catalogue does not hold and ended with the reader
+  choosing a book that IS on the shelf still opened its answer with the "not in the library
+  catalogue" note about the earlier name.
+  The catalogue reader refuses a partial index: the listing is presented as exhaustive, so the
+  full-text table is required (as it is for the preflight) and a table that disappears between
+  the check and the read is an error naming the table, not a short list; a table without the
+  `source` column is read as a library without canaries rather than failing. A catalogue read
+  that fails inside `plan` costs the retrieval filter only: the question is planned without one
+  and the whole library is searched, since before this path `plan` never touched the index and
+  a failure there would end a question the research loop could still answer.
+  The eval scorer pins more of the same result: the operation the code ran (`expected_op` on
+  k01-k06), the size of the whole catalogue (`expected_total`, required on every `catalog` item
+  — an item expecting nothing found used to pass over an empty index, and a targeted run of
+  k03-k05 over any non-empty one), and, for the research control, that the planner routed the
+  question
+  itself, since a planner or catalogue fallback searched for another reason. The golden checksum in
+  the run fingerprint changes with those keys and with the switch to full book keys, so numbers
+  measured before and after are not the
+  same run. The CI guard on the golden files now requires a `catalog` item's `expected_books` to
+  BE manifest keys (they are scored by set equality, where a substring or a bare title can only
+  fail), its `expected_count` to agree with them, and its `expected_total` to be the number of
+  books in the manifest.
+  A resumed web chat rebuilds its conversation memory unescaped: the persisted answer carries
+  the HTML escaping it was rendered with, and `&amp;` belongs on the page, not in the next
+  planner and synthesize prompt.
 - **httpx2 2.12.0.** The lockfile moves `httpx2` (and its `httpcore2`) from 2.10.0 to 2.12.0, the
   release that closes the three advisories the dependency scan reported on 08.09 against an
   unchanged lockfile (`GHSA-8xx6-hgc6-gc2m`, `GHSA-h4x7-gw46-3wm6`, `GHSA-pf96-p4fj-6566`; the

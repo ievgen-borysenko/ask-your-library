@@ -1,4 +1,5 @@
-"""Library access: hybrid search over the LanceDB tables and chapter drill-down.
+"""Library access: hybrid search over the LanceDB tables, chapter drill-down,
+and the catalogue reader (`list_books`) the ADR-016 path answers from.
 
 Search is hybrid — vector (embedding) + full-text BM25 (LanceDB FTS index) —
 fused with Reciprocal Rank Fusion. RRF is implemented here rather than via
@@ -7,6 +8,7 @@ rank of a chunk in each list matters, never the raw distance / BM25 score, so
 the two scales need no calibration against each other.
 """
 import logging
+from dataclasses import dataclass
 
 import lancedb
 from lancedb.expr import col, lit
@@ -201,6 +203,81 @@ def title_of(book_key: str) -> str:
     return book_key.rsplit(TITLE_SEPARATOR, 1)[0].strip()
 
 
+def author_of(book_key: str) -> str:
+    """'Herman Melville' for 'Moby Dick — Herman Melville'; "" for a key without the separator."""
+    return book_key.rsplit(TITLE_SEPARATOR, 1)[1].strip() if TITLE_SEPARATOR in book_key else ""
+
+
+# --- the catalogue: what the index holds, as data --------------------------------
+
+CANARY_SOURCE = "canary"    # the demo ingest's marker on its test fixtures (corpus/manifest.yaml, `source: canary`)
+
+
+@dataclass(frozen=True)
+class BookEntry:
+    """One book as the index knows it: the key both tables cite, split for
+    display, and which corpora hold it (a book added with `ayl-add` has text
+    and no cards)."""
+    key: str
+    title: str
+    author: str
+    has_cards: bool
+    has_text: bool
+
+
+def _catalog_columns(table) -> list[str]:
+    """The catalogue's projection. `source` marks the demo's canary fixtures;
+    a table built without that column (an older index, or one an `ayl-add`
+    predating it wrote) has no canaries to exclude, and asking for the column
+    would fail the whole listing with "No field named source"."""
+    return ["book", "source"] if "source" in table.schema.names else ["book"]
+
+
+def list_books() -> list[BookEntry]:
+    """Every book in the index, once, sorted by title: the distinct `book` keys
+    of both corpora. The canaries the demo ingest plants for the injection
+    tests are excluded by their `source` column, never by name: a canary row
+    counts for nothing, so a key whose every row is a canary is a fixture and a
+    key with any other row is a book (a real book that shares a title with a
+    fixture, or carries a stray `source: canary` in one card, stays listed).
+    A row without a key is not a book. Read from the tables each time (an
+    `ayl-add` while a server runs is seen at once); only the metadata columns
+    are loaded, and the embedding fingerprint is not checked because no vector
+    is involved.
+
+    The full-text table is REQUIRED here, as it is for the preflight: this
+    listing is presented as exhaustive ("N of N books, by the index tables"),
+    so half an index must fail loudly rather than answer. That covers the table
+    being absent and the table disappearing between `has_table` and the read
+    (the window `ingest/publish.py` opens when it drops and rebuilds one). A
+    missing cards table is a supported shape (`ayl-add` builds text only) and
+    is skipped, as in search."""
+    db = lancedb.connect(DB_PATH)
+    present: dict[str, dict[str, bool]] = {}
+    for corpus in ("cards", "transcripts"):
+        if not has_table(db, TABLES[corpus]):
+            if corpus == "transcripts":
+                raise RuntimeError(f"the catalogue cannot list a library without the full-text "
+                                   f"table {TABLES[corpus]!r} (index {DB_PATH})")
+            continue
+        try:
+            table = db.open_table(TABLES[corpus])
+            rows = table.search().select(_catalog_columns(table)).limit(
+                max(table.count_rows(), 1)).to_list()
+        except Exception as error:
+            raise RuntimeError(f"the catalogue could not read the table {TABLES[corpus]!r} "
+                               f"(index {DB_PATH}): {type(error).__name__}: {error}") from error
+        for row in rows:
+            key = row.get("book")
+            if not key or row.get("source") == CANARY_SOURCE:
+                continue
+            present.setdefault(key, {"cards": False, "transcripts": False})[corpus] = True
+    entries = [BookEntry(key=key, title=title_of(key), author=author_of(key),
+                         has_cards=flags["cards"], has_text=flags["transcripts"])
+               for key, flags in present.items()]
+    return sorted(entries, key=lambda e: (e.title.casefold(), e.author.casefold()))
+
+
 def rows_for_book(rows: list[dict], book: str) -> list[dict]:
     """Rows whose book key equals `book`, or whose title part equals it when the
     caller passed a bare title ("Don Quixote" for "Don Quixote — Miguel de
@@ -209,8 +286,8 @@ def rows_for_book(rows: list[dict], book: str) -> list[dict]:
     exact = [r for r in rows if r["book"] == book]
     if exact:
         return exact
-    # rsplit: the author is the last part, a title may itself contain the separator
-    return [r for r in rows if r["book"].rsplit(TITLE_SEPARATOR, 1)[0] == book]
+    # title_of: the author is the last part, a title may itself contain the separator
+    return [r for r in rows if title_of(r["book"]) == book]
 
 
 def join_chapter(rows: list[dict], max_chars: int) -> str:
