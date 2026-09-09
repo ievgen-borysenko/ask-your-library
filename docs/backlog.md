@@ -11,13 +11,21 @@ open ones often refer to them.
 - Measured and documented: tag `v0.2.0-rc1` (07.09) with the core and extended reports, retrieval
   and canary outputs, the reader's verdicts on the eleven core answers, and the v0.1.0 baseline
   (`docs/eval-results/`, README "Evaluation").
-- Before this tree is called 0.2.0: a short live check of the web UI on a clean environment
-  (evidence block and quote against passage, clarify including no reply, chat restore after a
-  reload, first start by the README).
+- Before this tree is called 0.2.0, one item is open: a short live check of the web UI on a clean
+  environment — the passage under an evidence item readable in the browser (not merely sent), a
+  clarify including the no-reply case, chat restore after a reload, and a first start by the
+  README.
 - Done since: security CI (`.github/workflows/security.yml`: gitleaks over the complete range of
   each event, OSV-Scanner over `uv.lock`, weekly; Dependabot; every action pinned to a commit SHA)
   and Chainlit 2.12.0, the release that closes the two MCP advisories, with the config cleaned and
-  the UI re-checked (`SECURITY.md`, CHANGELOG).
+  the UI re-checked (`SECURITY.md`, CHANGELOG). The catalogue path (ADR-016): questions about what
+  the library holds are answered by code from the index tables — one model call, no search step,
+  the number in the answer the length of the list under it — with an eval set of its own. The
+  hardening pass: two zero-click image channels in the web UI closed at both ends, a `Host` check
+  and a `SameSite=strict` login cookie on the loopback UI, terminal escape sequences stripped
+  where corpus text becomes index metadata, prompt text or a printed line, evidence passages
+  readable again after 2.12 rendered them as code snippets, an honest quote out of a poisoned
+  passage confirmed again, and a `conftest.py` that stops the suite inheriting the shell.
 - At the visibility switch: branch protection on `main` (required checks `test`, `test-ui`,
   `secrets`, `dependencies`; no force-push, no deletion), private vulnerability reporting, push
   protection; then CodeQL and a workflow linter, which are free on a public repository.
@@ -55,9 +63,6 @@ open ones often refer to them.
   what the library holds, not what the books say. Next: honest marking in the synthesis ("found
   in these N books; no full scan was run") and, separately, a full scan per book as an explicit,
   priced decision.
-- **No ingest ledger.** `ayl-add` rewrites the table; nothing records requested / indexed /
-  failed per file, so "which of my files did not index" cannot be answered (`list_books` shows
-  what is there, never what is missing).
 - Trust boundary: synthesize consumes evidence before validate runs; a "verifying" state in the
   UI, or validation before synthesis.
 - Behavioural scoring is heuristic (substring titles, refusal phrase markers); refusal markers are
@@ -69,6 +74,19 @@ open ones often refer to them.
 
 ## Retrieval, ingest, eval harness, code quality
 
+- **Book identity is a derived string, and no ingest ledger records what went in.** A book is its
+  `Title — Author` key, derived from the file (front matter, a standalone title line, or the file
+  name), and every downstream reference — the citation, the chapter filter, the catalogue
+  listing — is that string. Correcting `author:` in a file and running `ayl-add` again therefore
+  adds a second book instead of renaming the first: the corrected key is indexed and the rows
+  under the old one stay until someone removes them by hand; a file removed from the folder keeps
+  its rows; a card whose heading differs from its transcript's key by one character lists as two
+  books. And since `ayl-add` rewrites the table without recording requested / indexed / failed
+  per file, "which of my files did not index" cannot be answered either (`list_books` shows what
+  is there, never what is missing). The catalogue is exhaustive for what the index holds, which
+  is the history of what was ingested, not the current state of the folder (README, Known
+  limits). Fix: a `books` table with a stable id that a re-ingest updates in place, and an ingest
+  ledger beside it.
 - `validate` accepts one-token quotes; require a minimum of 3-5 tokens in `_valid_evidence` (a
   reviewer disagrees: one name can be evidence; decide with a case).
 - Link answer claims to evidence ids (citations by id in the answer, checked by code); today the

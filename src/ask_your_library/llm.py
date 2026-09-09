@@ -139,8 +139,9 @@ def llm_invoke(system: str, user: str, role: str):
     usage.llm_calls += 1
     usage.input_tokens += tokens_in
     usage.output_tokens += tokens_out
-    # Anthropic cache: stays 0 until we send cache_control (needs a stable prompt
-    # prefix >=1024 tokens) — tracked already so we notice when it starts working
+    # The provider's prompt cache: stays 0 until cache_control is sent (needs a
+    # stable prompt prefix >=1024 tokens) — tracked already so we notice when it
+    # starts working
     usage.cache_read_tokens += (meta.get("input_token_details") or {}).get("cache_read", 0)
     role_usage = usage.by_role.setdefault(role, {"calls": 0, "input_tokens": 0, "output_tokens": 0})
     role_usage["calls"] += 1
