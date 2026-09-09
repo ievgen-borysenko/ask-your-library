@@ -7,20 +7,41 @@
   script exits. `uv` and Ollama come from `brew`; the interpreter is whatever `requires-python` in
   `pyproject.toml` asks for, through `uv python install`; the embedding and answering models are
   pulled by the names read out of `config.py`, so the script cannot pull a model the app will not
-  ask for, and their approximate sizes are printed first. `uv sync --locked --extra ui` installs
-  the environment. `.env` is written from `.env.example` only when it does not exist, never
-  overwritten, with `LLM_BACKEND=ollama` and `LLM_TIMEOUT_S=600` — the local defaults, because a
-  value copied out of the example is an environment value and wins over the per-backend default
-  `config.py` would otherwise apply, which would leave a local model on the hosted 120 s
-  per-attempt budget. Then one confirmation before the ~30-minute demo build, and
-  `check_environment()` at the end: the preflight the CLI runs before every question, no model
-  call. `--dry-run` prints the plan and touches nothing, `--hosted` writes the OpenRouter
-  configuration and names the variable to set (a key is never taken as an argument), `--no-demo`
-  points at `ayl-add` instead, `--yes` skips the confirmation. macOS only, never `sudo`,
-  idempotent, and every download goes through `brew`, `uv` or `ollama`.
+  ask for, and their approximate sizes are printed first. Ollama is started for the session, with
+  `brew services run` and not `start`: the run form registers no login item, so the script leaves
+  nothing behind that comes back at every boot, and the one-liner that would make it permanent is
+  printed in the next steps instead. Only a loopback `OLLAMA_URL` is ever started here, and not
+  even that one while `OLLAMA_HOST` is exported to an address off this machine — that variable,
+  not the URL, is what a server started here would bind. `uv sync --locked --extra ui` installs
+  the environment. `.env` is written from `.env.example` only when it does not exist,
+  never overwritten, with `LLM_BACKEND=ollama` and `LLM_TIMEOUT_S=600` — the local defaults,
+  because a value copied out of the example is an environment value and wins over the per-backend
+  default `config.py` would otherwise apply, which would leave a local model on the hosted 120 s
+  per-attempt budget. `QUESTION_DEADLINE_S=1200` goes in beside it: the per-question wall clock
+  has no per-backend default, and the 300 s in the example is a budget a cold local model can
+  spend in the plan node alone. `LANGSMITH_TRACING_V2=false` and `LANGCHAIN_TRACING_V2=false` are
+  uncommented in that mode too — the README's own recipe for keeping tracing off whatever the
+  shell exported, applied in the mode whose whole point is that nothing leaves the machine. Then
+  one confirmation before the ~30-minute demo build, and `check_environment()` at the end: the
+  preflight the CLI runs before every question, no model call. Its problems are classified before
+  they are reported. A problem this run knowingly left behind — no index yet, or no key yet under
+  `--hosted` — is recognised by rendering the same message through `i18n.t` with the same
+  arguments and comparing, never by an English fragment, and only those are named back as
+  expected; everything else fails the run with exit 1, an unreachable Ollama and a model that is
+  not pulled included, as does a pre-existing `.env` whose `LLM_BACKEND` will not import at all.
+  The preflight's notices are printed under its problems. `--dry-run` prints the plan and touches
+  nothing, `--hosted` writes the OpenRouter configuration and names the variable to set (a key is
+  never taken as an argument), `--no-demo` points at `ayl-add` instead, `--yes` skips the
+  confirmation. macOS only, never `sudo`,
+  idempotent, and every download goes through `brew`, `uv` or `ollama`. A tool that fails is named
+  with its status and ends the run at exit 1, one of the three documented codes, instead of
+  aborting through `set -e` with `brew`'s own.
   `tests/test_install_script.py` runs the dry run against recorders on a scrubbed PATH: the plan
   has to name all twelve steps in order, and not one of `brew`, `ollama`, `uv`, `curl` may record
-  a call.
+  a call. Two of its tests are real runs that stop at a refusal — a `brew` that exits 17, and an
+  `OLLAMA_URL` that is not this machine. The file is exercised in CI by the `install-script` job
+  on `macos-latest`; the Linux jobs, where it skips itself, now print skip reasons (`pytest -rs`)
+  so a file that skipped cannot read as a file that passed.
 - **Security: two zero-click image channels in the web UI, and the rest of the hardening pass.**
   The chat renders our own HTML (the provenance badge, the evidence list, the metrics footer),
   and a whole message is one HTML block that a blank line ends: everything after that line is

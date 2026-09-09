@@ -197,10 +197,11 @@ bash scripts/install-mac.sh              # mostly download time, + ~30 min for t
 ```
 
 [`scripts/install-mac.sh`](scripts/install-mac.sh) installs `uv` and Ollama through Homebrew
-(whose own install command it prints and never runs for you), pulls the two models, syncs the
-locked environment, writes a fully local `.env`, asks once before the demo corpus, and finishes
-on the preflight the CLI runs before every question. `--no-demo`, `--hosted`, `--yes` and
-`--help` are the rest of it. The manual steps below are the same thing by hand: the path on
+(whose own install command it prints and never runs for you), starts Ollama for this session
+only (`brew services run`, which registers no login item — the one-liner that makes it permanent
+is printed at the end), pulls the two models, syncs the locked environment, writes a fully local
+`.env`, asks once before the demo corpus, and finishes on the preflight the CLI runs before
+every question. `--no-demo`, `--hosted`, `--yes` and `--help` are the rest of it. The manual steps below are the same thing by hand: the path on
 every other system, and on a Mac when you would rather run each step yourself.
 
 Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), [Ollama](https://ollama.com) for

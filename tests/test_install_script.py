@@ -6,15 +6,22 @@ step, in the order the script performs it. And the dry run itself does nothing:
 `brew`, `ollama`, `uv` and `curl` are replaced here by recorders, on a PATH that
 cannot reach the real ones, and every record has to come back empty.
 
+Two tests here are not dry runs: what the script does when a tool fails, and
+when the endpoint it is asked to reach is somebody else's machine, is only
+visible in a real run. They use the same recorders, and both stop the script at
+step 5 or step 7 — where a refusal belongs, and before anything is installed.
+
 The steps that install, download or write are only reachable on macOS (the
 script refuses anywhere else), so those tests run on macOS and the refusal
-itself is what CI on Linux checks. `--help` and a bad flag are parsed before
-the platform check, so they are tested everywhere.
+itself is what CI on Linux checks — the `install-script` job in `ci.yml` is
+where they actually run. `--help` and a bad flag are parsed before the platform
+check, so they are tested everywhere.
 """
 import os
 import platform
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -138,6 +145,13 @@ def test_local_mode_configures_both_backends_on_ollama(sandbox):
     # config.py's own default for the local backend. A .env copied from the
     # example is an environment value and would otherwise pin the hosted 120 s.
     assert "LLM_TIMEOUT_S=600" in out
+    # The per-question wall clock has no per-backend default: 300 s is the whole
+    # budget for four steps, which a cold local model can spend in the first one.
+    assert "QUESTION_DEADLINE_S=1200" in out
+    # This is the mode where nothing leaves the machine, so the two tracing flags
+    # the SDK reads are written off rather than left to the inherited shell.
+    assert "LANGSMITH_TRACING_V2=false" in out
+    assert "LANGCHAIN_TRACING_V2=false" in out
     # Nothing that could carry a key is ever echoed, in either mode.
     assert "OPENROUTER_API_KEY=" not in out
 
@@ -167,6 +181,41 @@ def test_no_demo_points_at_ayl_add_instead(sandbox):
     assert "skipped (--no-demo)" in out
     assert "uv run ayl-add ~/books" in out
     assert "ingest_demo_corpus.py" not in out
+
+
+@mac_only
+def test_a_failing_tool_exits_1_and_names_the_command(sandbox, tmp_path):
+    """A refusal has to arrive as one of the documented codes. `run` invokes the
+    tool directly, so without a status check `set -e` ends the script with that
+    tool's own status — 17 here — and nothing of the script's own printed."""
+    root, _, env = sandbox
+    bindir = tmp_path / "failing-bin"
+    bindir.mkdir()
+    stub = bindir / "brew"          # and no uv on this PATH, so step 5 installs it
+    stub.write_text("#!/bin/sh\nexit 17\n")
+    stub.chmod(0o755)
+    env = {**env, "PATH": os.pathsep.join([str(bindir), "/usr/bin", "/bin"])}
+    result = subprocess.run([BASH, "scripts/install-mac.sh", "--no-demo"],
+                            cwd=root, env=env, capture_output=True, text=True)
+    assert result.returncode == 1, result.stdout
+    assert "brew install uv failed with status 17" in result.stderr
+
+
+@mac_only
+def test_refuses_to_start_a_server_that_is_not_on_this_machine(sandbox):
+    """Nothing answers on OLLAMA_URL, and the address is not one this machine
+    could be serving: starting a local Ollama would not be the server that was
+    asked for, so the script says so and stops."""
+    root, _, env = sandbox
+    bindir = Path(env["PATH"].split(os.pathsep)[0])      # the stubs, first on PATH
+    curl = bindir / "curl"
+    curl.write_text("#!/bin/sh\nexit 7\n")               # /api/tags answers nowhere
+    curl.chmod(0o755)
+    env = {**env, "OLLAMA_URL": "http://ollama.example.com"}
+    result = subprocess.run([BASH, "scripts/install-mac.sh", "--no-demo"],
+                            cwd=root, env=env, capture_output=True, text=True)
+    assert result.returncode == 1, result.stdout
+    assert "not an address on this machine" in result.stderr
 
 
 @mac_only
