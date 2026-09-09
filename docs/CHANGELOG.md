@@ -22,8 +22,12 @@
   gate knows words, not titles hidden in a question: routing beyond that vocabulary stays the
   planner's reading, measured by the set's negative controls). The list never reaches the model: the conversation memory keeps only the
   shape of a catalogue answer (operation, counts, the name asked about), never the titles, in
-  the CLI, the web UI and a resumed chat. A book that also carries a canary-sourced row stays
-  listed: only a key whose every row is a canary is a fixture. New eval set
+  the CLI, the web UI and a resumed chat (a tracing exporter, when enabled, still receives the
+  graph state, the list included; the privacy section says so). An explicit author in a name
+  ("Shared Title — Author Two", "Shared Title by Author Two") is a constraint: the other
+  author's book with the same title is never confirmed, and an author who wrote neither
+  resolves to nothing with both books as the closest. A book that also carries a
+  canary-sourced row stays listed: only a key whose every row is a canary is a fixture. New eval set
   `eval/golden/en-demo-catalog.yaml`: type `catalog`, scored on the structured result with strict
   set equality against the manifest (one book too many fails, the count must be the length of
   the list), three content questions as negative controls (one scored on routing alone) and one

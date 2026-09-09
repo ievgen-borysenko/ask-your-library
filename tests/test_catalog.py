@@ -239,6 +239,28 @@ def test_strict_resolution_refuses_a_fragment_of_a_longer_title():
     assert [m.key for m in resolve_title("Ivanho", ALL, strict=True)[0]] == [IVANHOE]
 
 
+def test_an_explicit_author_is_a_constraint_not_a_hint():
+    """Two books share a title. The full key picks one; a typo in the surname
+    still picks it; an author who wrote neither resolves to nothing and names
+    both as the closest; no author given keeps both, as before."""
+    one, two = key("Shared Title", "Author One"), key("Shared Title", "Author Two")
+    shelf = ALL + entries(one, two)
+    assert [m.key for m in resolve_title("Shared Title — Author Two", shelf)[0]] == [two]
+    assert [m.key for m in resolve_title("Shared Title by Author One", shelf)[0]] == [one]
+    assert [m.key for m in resolve_title("Shared Title — Author Twoo", shelf)[0]] == [two]
+    assert [m.key for m in resolve_title("Shared Title — Author Two", shelf, strict=True)[0]] == [two]
+    matches, suggestions = resolve_title("Shared Title — Missing Author", shelf)
+    assert matches == [] and sorted(suggestions) == sorted([one, two])
+    assert sorted(m.key for m in resolve_title("Shared Title", shelf)[0]) == sorted([one, two])
+
+
+def test_a_title_that_contains_the_separator_still_resolves_as_a_whole():
+    perec = key("Life — A User's Manual", "Georges Perec")
+    shelf = ALL + entries(perec)
+    assert [m.key for m in resolve_title("Life — A User's Manual", shelf)[0]] == [perec]
+    assert [m.key for m in resolve_title("Life — A User's Manual — Georges Perec", shelf)[0]] == [perec]
+
+
 def test_an_author_resolves_by_full_name_surname_or_typo():
     assert [m.key for m in resolve_author("Herman Melville", ALL)[0]] == [MOBY]
     assert [m.key for m in resolve_author("melville", ALL)[0]] == [MOBY]

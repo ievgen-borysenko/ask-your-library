@@ -620,6 +620,10 @@ Yellow boxes leave the machine (the LLM provider, optionally LangSmith); everyth
 - A catalogue answer (the list of your books) is computed locally from the index tables and is
   not sent to the provider; the conversation memory keeps only its shape (the operation and the
   counts, and the name you asked about), so a later question does not carry the titles either.
+  Two different guarantees: the list never reaches the *model*; a *tracing exporter*, when you
+  enable one, receives the graph state, the catalogue list and the answer included, like every
+  other run's state. Keep tracing off (the recipe under Configuration) if the list must stay
+  on the machine.
 - Embeddings are computed **locally** by Ollama by default; nothing leaves the machine for
   retrieval. `EMBED_BACKEND=openrouter` sends chunk text to the embedding API too.
 - Every run writes a scratchpad with the **retrieved passages as the model saw them** (sanitized,

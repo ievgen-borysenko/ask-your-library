@@ -17,7 +17,7 @@ import unicodedata
 from dataclasses import dataclass, field
 
 from .i18n import t
-from .library import BookEntry, list_books
+from .library import TITLE_SEPARATOR, BookEntry, list_books
 
 CATALOG_OPS = ("count", "list", "has", "by_author")
 CLOSE_MATCH_CUTOFF = 0.8      # a typo still resolves ("Ivanho" -> Ivanhoe)
@@ -90,8 +90,8 @@ def _contains_words(haystack: str, needle: str) -> bool:
     return bool(needle) and re.search(rf"(?<!\w){re.escape(needle)}(?!\w)", haystack) is not None
 
 
-def _resolve(name: str, entries: list[BookEntry], field_of,
-             last_word_too: bool = False, strict: bool = False) -> tuple[list[BookEntry], list[str]]:
+def _resolve(name: str, entries: list[BookEntry], field_of, last_word_too: bool = False,
+             strict: bool = False, fuzzy: bool = True) -> tuple[list[BookEntry], list[str]]:
     """Entries whose `field_of(entry)` the reader means by `name`, and, when
     none, up to MAX_SUGGESTIONS closest values for the "not found" line.
     Exact (folded, a leading article ignored) first; then the name contained in
@@ -102,7 +102,8 @@ def _resolve(name: str, entries: list[BookEntry], field_of,
     "Melville", not of "Herman Melville". Several matches are returned as
     several: "Holmes" is every Holmes book. `strict` (the retrieval filter of
     the hybrid) accepts a name contained in a longer title only when it is
-    several words or most of the title: "Time" is not The Time Machine."""
+    several words or most of the title: "Time" is not The Time Machine.
+    `fuzzy=False` stops before the close-match step (exact or contained only)."""
     wanted = fold(name)
     if not wanted:
         return [], []
@@ -119,6 +120,8 @@ def _resolve(name: str, entries: list[BookEntry], field_of,
     contained = [e for e, v in values.items() if contained_in(v)]
     if contained:
         return contained, []
+    if not fuzzy:
+        return [], []
     variants = {e: ({v, v.split()[-1]} if last_word_too and " " in v else {v}) for e, v in values.items()}
     pool = sorted({variant for vs in variants.values() for variant in vs})
     close = set(difflib.get_close_matches(wanted, pool, n=MAX_SUGGESTIONS, cutoff=CLOSE_MATCH_CUTOFF))
@@ -135,14 +138,43 @@ def _resolve(name: str, entries: list[BookEntry], field_of,
     return [], suggestions
 
 
+def _split_author(name: str) -> tuple[str, str] | None:
+    """("Title", "Author") when the name carries an explicit author — the index
+    key's separator or " by " — split on the LAST one, since a title may itself
+    contain a dash or a "by"; None otherwise."""
+    if TITLE_SEPARATOR in name:
+        title, _, author = name.rpartition(TITLE_SEPARATOR)
+        if title.strip() and author.strip():
+            return title.strip(), author.strip()
+    by = re.search(r"^(.+)\s+by\s+(\S.*)$", name, re.I)        # greedy: the last " by "
+    if by and by.group(1).strip():
+        return by.group(1).strip(), by.group(2).strip()
+    return None
+
+
 def resolve_title(name: str, entries: list[BookEntry],
                   strict: bool = False) -> tuple[list[BookEntry], list[str]]:
-    """Books the reader means by a title (or a full "Title — Author" key)."""
+    """Books the reader means by a title. An explicit author ("Title — Author",
+    "Title by Author") is a constraint, not a hint: the title is resolved, then
+    the author must match as well (full name, surname or a typo); a wrong author
+    resolves to nothing, with the same-title books as the suggestions, so "has"
+    can never confirm another author's book. A title that itself contains the
+    separator is tried as a whole key (exact or contained, never fuzzy) before
+    giving up."""
+    split = _split_author(name)
+    if split:
+        title_part, author_part = split
+        by_title, suggestions = _resolve(title_part, entries, lambda e: e.title, strict=strict)
+        if by_title:
+            by_author, _ = _resolve(author_part, by_title, lambda e: e.author, last_word_too=True)
+            if by_author:
+                return by_author, []
+            whole, _ = _resolve(name, entries, lambda e: e.key, strict=strict, fuzzy=False)
+            return (whole, []) if whole else ([], [e.key for e in by_title][:MAX_SUGGESTIONS])
+        whole, _ = _resolve(name, entries, lambda e: e.key, strict=strict, fuzzy=False)
+        return (whole, []) if whole else ([], suggestions)
     by_title, suggestions = _resolve(name, entries, lambda e: e.title, strict=strict)
-    if by_title:
-        return by_title, []
-    by_key, _ = _resolve(name, entries, lambda e: e.key, strict=strict)
-    return (by_key, []) if by_key else ([], suggestions)
+    return (by_title, []) if by_title else ([], suggestions)
 
 
 def resolve_author(name: str, entries: list[BookEntry]) -> tuple[list[BookEntry], list[str]]:

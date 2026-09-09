@@ -53,6 +53,8 @@ A separate, deterministic path for questions about what the library holds:
   routing stays the planner's reading, measured by the controls of the catalogue eval set.
 - The list never reaches the model: the answer is a template, and the conversation memory that
   the next turn's planner sees keeps only the operation, the counts and the name asked about.
+  A tracing exporter, when enabled, is a different channel: it receives the graph state, the
+  list included, as it does for every run; the README's privacy section says so.
 
 ## Options considered
 
