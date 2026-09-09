@@ -134,5 +134,5 @@ quote provenance: OK: all 4 quotes found verbatim in the passages they cite
   measures.
 - **One step was enough here.** For a question with one clear target that is the right
   behaviour; the same "enough after one step" reflex is what makes the agent under-clarify on
-  ambiguous identify questions (see Known limits in the README), and what stops it going after the
+  ambiguous identify questions (see [Known limits](../known-limits.md)), and what stops it going after the
   chapter it never retrieved in [the c06 trace](c06-fogg-missing-day.md).

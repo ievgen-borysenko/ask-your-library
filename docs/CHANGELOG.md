@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- **The README is a front page, and the long text is in `docs/`.** What the project is, the
+  architecture and the quote check, the manual quick start, the settings table, the evaluation
+  narrative, privacy and the threat model, the injection layers, cost and the known limits moved
+  out of the README into nine pages under `docs/` — `overview.md`, `architecture.md`,
+  `quick-start.md`, `configuration.md`, `add-your-own-books.md`, `evaluation.md`,
+  `privacy-and-threat-model.md`, `cost.md` and `known-limits.md` — sentence for sentence, with
+  only the relative links rewritten. The README keeps the macOS install, the first question, the
+  measured-results table and a five-line privacy-and-cost summary, and gains two Mermaid
+  diagrams: the flow in plain terms and the architecture as an offline and an online subgraph,
+  both reconciled against `graph.py` and `nodes.py` (the catalogue node and `validate` are in
+  them; the CRAG gate sits on the `reflect` edge, where the code puts it). The course-demo
+  Excalidraw originals are kept as editable sources in `docs/diagrams/`. Every reference that
+  pointed into the README — `SECURITY.md`, the ADRs, the backlog, an example trace, four test
+  docstrings and the message `install-mac.sh` prints on a non-macOS system — now names the page
+  that holds the text.
+
 ## 0.2.0 (2026-09-09)
 
 The first public release. Everything below was merged after the `0.2.0-rc1` candidate of 07.09

@@ -3,19 +3,22 @@
 ## Scope
 
 Ask Your Library is a local, single-user tool. The CLI runs on your machine. The web UI is meant
-to run on loopback: every launch command in the README and in `ui.py` passes `--host 127.0.0.1`,
+to run on loopback: every launch command in `docs/quick-start.md` and in `ui.py` passes
+`--host 127.0.0.1`,
 because Chainlit's own default binds to all interfaces and the UI does not override it; it asks for
 a password and is not designed to be exposed to a network or run for several users. Loopback is not
 by itself a boundary against the browser on the same machine, so `ui.py` also refuses every `Host`
 header other than `localhost` and `127.0.0.1` (Starlette's `TrustedHostMiddleware`) and sets its
 login cookie to `SameSite=strict` on Chainlit's cookie module, `CHAINLIT_COOKIE_SAMESITE` being
-already read by the time `chainlit run` loads `ui.py`; see "Threat model" in the README. Prompts,
+already read by the time `chainlit run` loads `ui.py`; see "Threat model" in
+`docs/privacy-and-threat-model.md`. Prompts,
 retrieved passages and answers leave the machine only as calls to the providers you configure:
 the answering model (`LLM_BACKEND`), the embedding model (`EMBED_BACKEND`, local Ollama by
 default) and, if a LangSmith key and tracing flag are in the environment (either the `LANGCHAIN_`
 or the `LANGSMITH_` prefix), tracing. With `LLM_BACKEND=ollama`, `EMBED_BACKEND=ollama`, an
 `OLLAMA_URL` on this machine, and `LANGSMITH_TRACING_V2=false` plus `LANGCHAIN_TRACING_V2=false`
-nothing leaves the machine; see "Privacy and data flow" and "Threat model" in the README for what
+nothing leaves the machine; see "Privacy and data flow" and "Threat model" in
+`docs/privacy-and-threat-model.md` for what
 is protected and what is not.
 
 ## Reporting a vulnerability

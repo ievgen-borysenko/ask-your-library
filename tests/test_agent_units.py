@@ -1020,8 +1020,8 @@ def test_observe_window_is_a_config_knob_and_the_quote_cap_follows_it(monkeypatc
 
 
 def test_valid_evidence_drops_a_non_list_container_instead_of_crashing():
-    """"evidence": 42 or "evidence": "none" is valid JSON; the README promises
-    malformed output is dropped, not crashed on, and that holds for the
+    """"evidence": 42 or "evidence": "none" is valid JSON; the injection layers of
+    docs/privacy-and-threat-model.md promise malformed output is dropped, not crashed on, and that holds for the
     container too (audit 06.09: TypeError)."""
     from ask_your_library.provenance import _valid_evidence
 

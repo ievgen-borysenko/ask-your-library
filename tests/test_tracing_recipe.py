@@ -1,4 +1,5 @@
-"""The README's "keep tracing off" recipe, pinned against the installed LangSmith SDK.
+"""The "keep tracing off" recipe of docs/configuration.md, pinned against the installed
+LangSmith SDK.
 
 The SDK reads two prefixes (LANGSMITH_ first, then LANGCHAIN_) and prefers the
 *_TRACING_V2 variables over the legacy *_TRACING ones, so a shell that

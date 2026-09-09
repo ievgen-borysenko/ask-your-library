@@ -133,7 +133,7 @@ os_name="$(uname -s)"
 step "macOS: uname reports $os_name $(uname -m)"
 if [ "$os_name" != "Darwin" ]; then
     fail "this installer is for macOS only; uname -s reports $os_name."
-    fail "on other systems follow the manual Quick start in README.md."
+    fail "on other systems follow the manual Quick start in docs/quick-start.md."
     exit 1
 fi
 
