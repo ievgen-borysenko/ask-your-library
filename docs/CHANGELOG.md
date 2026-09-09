@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-09-09)
+
+The first public release. Everything below was merged after the `0.2.0-rc1` candidate of 07.09
+and measured or reviewed on its own: the catalogue path, the hardening pass, the decision
+records in the tree and the macOS install path.
 
 - **A macOS install path.** `scripts/install-mac.sh` takes a fresh clone to a working local setup
   in one command. Homebrew is checked, never installed: the official command is printed and the

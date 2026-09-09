@@ -1,6 +1,6 @@
 [project]
 name = "ask-your-library"
-version = "0.2.0rc1"
+version = "0.2.0"
 description = "Agentic RAG over your own book library: LangGraph orchestrator, hybrid retrieval, quote-provenance validation, evals"
 readme = "README.md"
 license = "Apache-2.0"
