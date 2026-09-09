@@ -21,6 +21,15 @@ def manifest_titles() -> list[str]:
     return [entry["title"] for entry in entries]
 
 
+def manifest_keys() -> list[str]:
+    """The book keys the index carries, "title — author" exactly as
+    scripts/ingest_demo_corpus.py builds them from the manifest. Canaries are
+    left out: they are fixtures, and list_books drops them by their source
+    column, so a catalogue item could never list one."""
+    manifest = yaml.safe_load(MANIFEST.read_text(encoding="utf-8"))
+    return [f"{entry['title']} — {entry['author']}" for entry in manifest["books"]]
+
+
 def golden_files() -> list[Path]:
     return sorted(GOLDEN_DIR.glob("*.yaml"))
 
@@ -42,11 +51,12 @@ def fold(text: str) -> str:
 
 
 def test_every_expected_book_is_in_manifest():
-    titles = manifest_titles()
+    names = manifest_titles() + manifest_keys()
 
     def known(expected: str) -> bool:
-        # same matching rule as the eval harness: case-insensitive substring
-        return any(expected.lower() in title.lower() for title in titles)
+        # same matching rule as the eval harness: case-insensitive substring of a
+        # manifest title, or of the key a catalog item names it by
+        return any(expected.lower() in name.lower() for name in names)
 
     problems = []
     for path in golden_files():
@@ -58,12 +68,14 @@ def test_every_expected_book_is_in_manifest():
     assert not problems, "expected_books outside the demo manifest:\n" + "\n".join(problems)
 
 
-def test_catalog_items_name_manifest_titles_exactly():
-    """A `catalog` item is scored on set EQUALITY against the titles the code
+def test_catalog_items_name_manifest_keys_exactly():
+    """A `catalog` item is scored on set EQUALITY against the KEYS the code
     listed, folded (run_agent_eval.score): a substring of a manifest title,
-    which is all the check above asks for, can never equal one, so such an item
-    could only ever fail. The stricter rule belongs where the typo is made."""
-    folded = {fold(title) for title in manifest_titles()}
+    which is all the check above asks for, can never equal one, and a bare
+    title never equals the key "Title — Author" the index carries — so such an
+    item could only ever fail. The stricter rule belongs where the typo is
+    made."""
+    folded = {fold(key) for key in manifest_keys()}
     problems = []
     for path in golden_files():
         golden = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -72,9 +84,27 @@ def test_catalog_items_name_manifest_titles_exactly():
                 continue
             for expected in item.get("expected_books") or []:
                 if fold(expected) not in folded:
-                    problems.append(f"{path.name}:{item['id']}: {expected!r} is no manifest title")
-    assert not problems, ("catalog expected_books that are not manifest titles:\n"
+                    problems.append(f"{path.name}:{item['id']}: {expected!r} is no manifest key")
+    assert not problems, ("catalog expected_books that are not manifest keys:\n"
                           + "\n".join(problems))
+
+
+def test_catalog_items_expect_the_whole_corpus_as_the_total():
+    """expected_total is the catalogue's own size, not the item's answer: it is
+    what stops a targeted run (k03-k05 alone) from passing over a partial index,
+    where a "no" and a short list are honest answers about the wrong library.
+    The scorer fails an item that names no total; this says which number it is."""
+    total = len(manifest_keys())
+    problems = []
+    for path in golden_files():
+        golden = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for item in golden["questions"]:
+            if item["type"] != "catalog":
+                continue
+            if item.get("expected_total") != total:
+                problems.append(f"{path.name}:{item['id']}: expected_total "
+                                f"{item.get('expected_total')!r}, the manifest has {total} books")
+    assert not problems, "\n".join(problems)
 
 
 def test_a_catalog_item_counts_the_books_it_lists():

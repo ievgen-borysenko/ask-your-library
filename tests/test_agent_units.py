@@ -838,6 +838,31 @@ def test_plan_persists_the_chosen_book(monkeypatch):
     assert result["clarify_chosen"] == CANDIDATES[1] and result["evidence"] == [] and not result["clarify_unresolved"]
 
 
+@pytest.mark.parametrize("stale", [{}, {"book_filter": "Ivanhoe — Walter Scott"}])
+def test_a_clarify_on_the_last_step_settles_the_book_fields_it_planned_around(stale):
+    """A node's update is the whole answer for the channels it names, and a
+    channel it omits keeps the value it had. The plan that answers a clarify on
+    the last allowed step returned no book fields of its own, so a run that had
+    started with a name the catalogue does not hold ("War and Peace") and ended
+    with the reader choosing a book that IS on the shelf still opened its answer
+    with the "not in the library catalogue" note — about a book the answer is
+    not about, and behind a stale retrieval filter. Both fields are settled
+    here: from now on the chosen book governs retrieval."""
+    from ask_your_library import nodes
+    from ask_your_library.i18n import t
+
+    state = {"question": "q", "history": [], "mode": "answer", "clarification": "the first one",
+             "clarify_asked": True, "clarify_candidates": [CANDIDATES[0]],
+             "evidence": [{"book": CANDIDATES[0], "section": "1", "quote": "q", "why": "w"}],
+             "steps_taken": config.MAX_STEPS, "book_unresolved": "War and Peace",
+             "book_filter": "", **stale}
+    update = nodes.plan(state)
+    assert update["clarify_chosen"] == CANDIDATES[0] and update["current_query"] == ""
+    assert update["book_filter"] == "" and update["book_unresolved"] == ""
+    answer = nodes.synthesize({**state, **update, "evidence": []})["answer"]
+    assert answer == t("refusal_answer")                    # no note in front of it
+
+
 def test_plan_tells_the_planner_which_book_was_chosen(monkeypatch):
     from ask_your_library import nodes
 

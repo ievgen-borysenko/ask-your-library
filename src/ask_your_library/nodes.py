@@ -90,13 +90,18 @@ def plan(state: AgentState) -> dict:
     # Clarify can fire on the last allowed step; re-planning a search we may
     # not run would only cost an LLM call — filter the evidence and let
     # route_after_plan go straight to synthesize.
+    # Both book fields are answered here, not omitted: a channel an update does
+    # not carry keeps its previous value, and a clarification that settled a
+    # held book would otherwise reach synthesize behind the "not in the library
+    # catalogue" note of the name asked before it. From here on the chosen book
+    # governs retrieval (clarify_chosen), so no earlier filter survives either.
     if _after_clarify(state) and _budget_spent(state):
         evidence, unresolved = _evidence_after_clarify(state)
         chosen = _chosen_book(state, unresolved)
         out_of_steps = state.get("steps_taken", 0) >= MAX_STEPS
         return {"mode": "answer" if chosen else (state.get("mode") or "identify"), "queries": [],
                 "current_query": "", "evidence": evidence, "clarify_unresolved": unresolved,
-                "clarify_chosen": chosen,
+                "clarify_chosen": chosen, "book_filter": "", "book_unresolved": "",
                 "steps_taken": state.get("steps_taken", 0), "empty_streak": 0,
                 "stop_reason": t("stop_limit", n=MAX_STEPS) if out_of_steps else _deadline_reason()}
 
@@ -140,8 +145,10 @@ def plan(state: AgentState) -> dict:
         # The catalogue path (ADR-016): the planner named an operation of ours
         # and code runs it; no query, no search step. Never after a clarify:
         # the reader's reply settled a book of the research loop, not a listing.
+        # The two book fields are answered for the same reason as above: a
+        # listing neither filters retrieval nor claims a name is missing.
         return {"mode": "catalog", "catalog_request": catalog_request, "queries": [],
-                "current_query": "", **common}
+                "current_query": "", "book_filter": "", "book_unresolved": "", **common}
     # "catalog" without a usable operation, after a clarify reply, or on a
     # question that also asks about content (a content word the gate in
     # catalog.py knows, outside the title of a book the library holds), is the

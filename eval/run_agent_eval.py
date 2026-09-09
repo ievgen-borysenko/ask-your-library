@@ -4,7 +4,8 @@ the observable behaviour against the golden set.
 Clarify interrupts are answered automatically, so the run is non-interactive.
 Scored per question (no LLM judge; heuristics, not proof):
   titles_mentioned  every expected book title occurs in the answer text (type catalog:
-                    the expected titles the code listed; strict set equality is the verdict)
+                    the expected KEYS "Title — Author" the code listed; strict set equality
+                    against them, and the catalogue's own total, are the verdict)
                     (accent-folded substring) - NOT a citation check
   behavior  refusal -> the answer carries an explicit refusal marker
             ("not in the library", "cannot answer", "не знаю", ...); an answer
@@ -245,20 +246,24 @@ def score(item: dict, r: dict) -> dict:
     if item["type"] == "catalog":
         # The catalogue path is scored on its structured result, not on wording:
         # the set of books the code listed must EQUAL the expected set (strict,
-        # by title: one book too many fails), the count carried in the state
-        # must be the length of that list, the catalogue must have held
-        # something at all, and "has"/"by_author" must resolve as expected. A
+        # by the full index key "Title — Author": one book too many fails, and
+        # so does the right title under the wrong author), the count carried in
+        # the state must be the length of that list, the catalogue must hold the
+        # whole corpus, and "has"/"by_author" must resolve as expected. A
         # catalogue question that took the research loop has no result here and
         # fails.
         listing = r.get("catalog") or {}
-        listed = {fold(title_of(k)) for k in listing.get("books") or []}
+        listed = {fold(k) for k in listing.get("books") or []}
         wanted = {fold(b) for b in expected}
-        # total > 0: an item that expects nothing to be found ("is War and Peace
-        # in my library?") passes over an EMPTY index otherwise: the honest
-        # "no" of a library with no books is not the answer being measured.
+        # expected_total: an item that expects nothing to be found ("is War and
+        # Peace in my library?") passes over an EMPTY index otherwise, and a
+        # targeted run of k03-k05 passes over a half-built one — the honest "no"
+        # of a library with three books is not the answer being measured. An
+        # item that names no total can therefore not pass at all.
+        expected_total = item.get("expected_total")
         ok = (bool(listing) and listed == wanted
               and listing.get("count") == len(listing.get("books") or [])
-              and listing.get("total", 0) > 0)
+              and expected_total is not None and listing.get("total") == expected_total)
         if "expected_op" in item:
             # Which operation code ran, not only what it returned: "has" and
             # "count" can both come back with an empty list on an empty question.

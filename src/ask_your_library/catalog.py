@@ -32,15 +32,22 @@ STRICT_CONTAINED_SHARE = 0.6  # strict mode: a one-word name inside a longer tit
 # Dracula, and why does Harker stay?"); code then sends it to the research loop
 # as a mixed intent, with the named book as the retrieval filter. Conservative
 # on purpose: a false positive costs a search where a listing would have done,
-# never the reverse. "who" is NOT here: an author is a catalogue attribute, and
-# "how many books do I have, and who wrote them?" is answered by the listing
-# itself. A title hidden inside a question ("the names of the three musketeers")
-# is beyond this gate: that routing stays the planner's reading, measured by the
-# controls of the catalogue eval set.
+# never the reverse. "who" is a content word like the rest ("do I have Dracula,
+# and who kills Lucy?" asks about the book), with ONE exemption: the authorship
+# construction, where the author is a catalogue attribute and the listing
+# ("Title — Author") answers the question itself — "who wrote them", "who are
+# their authors", and in Ukrainian "хто (їх) написав", where the object stands
+# between the pronoun and the verb. A title hidden inside a question ("the names
+# of the three musketeers") is beyond this gate: that routing stays the
+# planner's reading, measured by the controls of the catalogue eval set.
 CONTENT_CLUES = re.compile(
-    r"(?<!\w)(?:why|how(?!\s+many)|whom|whose|where|when|what happens|explain|describe|"
+    r"(?<!\w)(?:why|how(?!\s+many)|"
+    r"who(?!\s+(?:wrote|authored|(?:is|are)\s+(?:the|their)\s+authors?))|whom|whose|"
+    r"where|when|what happens|explain|describe|"
     r"tell me about|summar\w*|plot|character\w*|about|mention\w*|discuss\w*|deals? with|"
-    r"чому|як(?!\s+багато)|кого|де|коли|про що|про|поясни|розкажи|опиши|сюжет|"
+    r"чому|як(?!\s+багато)|"
+    r"хто(?!\s+(?:\w+\s+)?(?:написав|написала|автор|авторка|автори))|"
+    r"кого|де|коли|про що|про|поясни|розкажи|опиши|сюжет|"
     r"згаду\w*|йдеться)(?!\w)",
     re.I,
 )
@@ -63,9 +70,11 @@ def mixed_intent(question: str, title: str, entries: list[BookEntry]) -> bool:
     happen to carry a content word, and they used to end as "I don't know"
     about a book on the shelf. Only a title that resolves strictly to exactly
     one held book is removed: anything else is not the library's title, so the
-    question is read as it stands."""
+    question is read as it stands. Exactly ONE occurrence goes: the title is
+    mentioned once, and for a book called "Why" the rest of "Do I have Why, and
+    why does it end there?" is the reader's own content question."""
     if title and len(resolve_title(title, entries, strict=True)[0]) == 1:
-        question = re.sub(re.escape(title), " ", question, flags=re.I)
+        question = re.sub(re.escape(title), " ", question, count=1, flags=re.I)
     return content_clue(question) != ""
 
 
@@ -108,7 +117,8 @@ def _contains_words(haystack: str, needle: str) -> bool:
 
 
 def _resolve(name: str, entries: list[BookEntry], field_of, last_word_too: bool = False,
-             strict: bool = False, fuzzy: bool = True) -> tuple[list[BookEntry], list[str]]:
+             strict: bool = False, fuzzy: bool = True,
+             longer_name_is_another: bool = False) -> tuple[list[BookEntry], list[str]]:
     """Entries whose `field_of(entry)` the reader means by `name`, and, when
     none, up to MAX_SUGGESTIONS closest values for the "not found" line.
     Exact (folded, a leading article ignored) first; then the name contained in
@@ -124,7 +134,15 @@ def _resolve(name: str, entries: list[BookEntry], field_of, last_word_too: bool 
     either mode: "Dracula's Guest" holds "Dracula" and is another book, and
     confirming it as one the library owns is the silent wrong answer this
     refuses. It is reported as the closest name instead, so "do I have X" says
-    no and names what is there. `fuzzy=False` stops after the contained step."""
+    no and names what is there. WHEN it is decided differs by field, and
+    `longer_name_is_another` says which way round. TITLES decide it BEFORE the
+    close-match step (resolve_title sets the flag), because a longer title is
+    another work and the typo step would otherwise confirm it: "Dracula II" is
+    0.824 alike to a held "Dracula", above CLOSE_MATCH_CUTOFF. AUTHORS decide it
+    after, because a longer author name is usually the same person with an
+    honorific or a middle name ("Sir Arthur Conan Doyle", 0.9 alike to the held
+    "Arthur Conan Doyle"), and that must still resolve to the books held.
+    `fuzzy=False` stops after the contained step."""
     wanted = fold(name)
     if not wanted:
         return [], []
@@ -143,18 +161,19 @@ def _resolve(name: str, entries: list[BookEntry], field_of, last_word_too: bool 
         return contained, []
     if not fuzzy:
         return [], []
+    # A held name inside the one asked about: the closest name, never a match.
+    inside = [field_of(e) for e, v in values.items()
+              if len(v) >= MIN_CONTAINED_CHARS and _contains_words(wanted, v)]
+    if inside and longer_name_is_another:
+        return [], inside[:MAX_SUGGESTIONS]     # titles: before the typo step
     variants = {e: ({v, v.split()[-1]} if last_word_too and " " in v else {v}) for e, v in values.items()}
     pool = sorted({variant for vs in variants.values() for variant in vs})
     close = set(difflib.get_close_matches(wanted, pool, n=MAX_SUGGESTIONS, cutoff=CLOSE_MATCH_CUTOFF))
     matches = [e for e, vs in variants.items() if vs & close]
     if matches:
         return matches, []
-    # A held name inside the one asked about, after the typo step so that a
-    # near-identical spelling ("Sir Arthur Conan Doyle") still resolves.
-    inside = [field_of(e) for e, v in values.items()
-              if len(v) >= MIN_CONTAINED_CHARS and _contains_words(wanted, v)]
     if inside:
-        return [], inside[:MAX_SUGGESTIONS]
+        return [], inside[:MAX_SUGGESTIONS]     # authors: after it, for the honorific
     near = difflib.get_close_matches(wanted, list(values.values()), n=MAX_SUGGESTIONS,
                                      cutoff=SUGGESTION_CUTOFF)
     suggestions: list[str] = []
@@ -191,7 +210,8 @@ def resolve_title(name: str, entries: list[BookEntry],
     split = _split_author(name)
     if split:
         title_part, author_part = split
-        by_title, suggestions = _resolve(title_part, entries, lambda e: e.title, strict=strict)
+        by_title, suggestions = _resolve(title_part, entries, lambda e: e.title, strict=strict,
+                                         longer_name_is_another=True)
         if by_title:
             by_author, _ = _resolve(author_part, by_title, lambda e: e.author, last_word_too=True)
             if by_author:
@@ -200,12 +220,16 @@ def resolve_title(name: str, entries: list[BookEntry],
             return (whole, []) if whole else ([], [e.key for e in by_title][:MAX_SUGGESTIONS])
         whole, _ = _resolve(name, entries, lambda e: e.key, strict=strict, fuzzy=False)
         return (whole, []) if whole else ([], suggestions)
-    by_title, suggestions = _resolve(name, entries, lambda e: e.title, strict=strict)
+    by_title, suggestions = _resolve(name, entries, lambda e: e.title, strict=strict,
+                                     longer_name_is_another=True)
     return (by_title, []) if by_title else ([], suggestions)
 
 
 def resolve_author(name: str, entries: list[BookEntry]) -> tuple[list[BookEntry], list[str]]:
-    """Books by an author named in full, by surname, or with a typo."""
+    """Books by an author named in full, by surname, or with a typo. A held name
+    inside a longer one is decided AFTER the close match here, unlike a title:
+    "Sir Arthur Conan Doyle" is the man on the shelf, while "Dracula II" is
+    another book."""
     return _resolve(name, entries, lambda e: e.author, last_word_too=True)
 
 

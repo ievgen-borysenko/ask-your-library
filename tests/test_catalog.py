@@ -7,12 +7,13 @@ catalogue request after a clarify, an operation that is not ours, an index that
 cannot be read) that keep a question in the research loop. The graph-level runs
 are in test_graph_e2e.py."""
 import contextvars
+import difflib
 
 import lancedb
 import pytest
 
 from ask_your_library import i18n, library, llm, nodes, provenance
-from ask_your_library.catalog import (CatalogResult, content_clue, mixed_intent,
+from ask_your_library.catalog import (CatalogResult, content_clue, fold, mixed_intent,
                                       parse_catalog_request, render_catalog, resolve_author,
                                       resolve_title, run_catalog)
 from ask_your_library.i18n import t
@@ -281,7 +282,8 @@ def test_a_title_that_is_not_there_resolves_to_nothing_and_names_the_closest():
 
 
 CONTAINS_A_HELD_TITLE = [
-    ("Dracula's Guest", DRACULA), ("Frankenstein in Baghdad", FRANKENSTEIN),
+    ("Dracula's Guest", DRACULA), ("Dracula II", DRACULA),
+    ("Frankenstein in Baghdad", FRANKENSTEIN),
     ("Meditations on First Philosophy", MEDITATIONS), ("Emma Bovary", EMMA),
     ("Moby Dick and Other Whales", MOBY),
 ]
@@ -300,6 +302,36 @@ def test_a_title_that_merely_contains_a_held_one_is_the_closest_name_not_a_match
     assert result.resolved is False and result.books == []
     assert library.title_of(held) in result.suggestions
     assert render_catalog(result).startswith(t("catalog_has_no", q=name))
+
+
+def test_a_longer_title_is_refused_before_the_typo_step_can_confirm_it():
+    """The order, not only the rule. A held title inside the asked name is
+    decided BEFORE the close match, because the typo step is close enough to
+    confirm another work: "Dracula II" is 0.824 alike to "Dracula", above
+    CLOSE_MATCH_CUTOFF (0.8), and both modes answered "yes, Dracula" to a book
+    nobody has — as "has", and as a retrieval filter that hid the rest of the
+    library. "Dracula's Guest" (0.636) never reached the cutoff; after the
+    reorder the two behave alike. The ratios are pinned here so that lowering
+    the cutoff cannot revive this quietly."""
+    shelf = ALL + entries(DRACULA)
+    for name, ratio in (("Dracula II", 0.824), ("Dracula's Guest", 0.636)):
+        assert round(difflib.SequenceMatcher(None, fold(name), "dracula").ratio(), 3) == ratio
+        assert resolve_title(name, shelf, strict=True)[0] == []
+        matches, suggestions = resolve_title(name, shelf)
+        assert matches == [] and suggestions == ["Dracula"]
+    assert [m.key for m in resolve_title("Ivanho", shelf)[0]] == [IVANHOE]   # the typo still lands
+
+
+def test_an_author_name_that_contains_a_held_one_still_resolves():
+    """Authors decide the same containment the other way round, which is why it
+    is a parameter of the resolver and not one rule: a longer title is another
+    work, a longer author name is the same person with an honorific or a middle
+    name. "Sir Arthur Conan Doyle" is 0.9 alike to the name held, so it resolves
+    at the close-match step, which a title reaches only when no held title sits
+    inside the name asked about."""
+    doyle = resolve_author("Sir Arthur Conan Doyle", ALL)[0]
+    assert sorted(m.key for m in doyle) == sorted([HOLMES_A, HOLMES_B, SCARLET])
+    assert [m.key for m in resolve_author("Mr Herman Melville", ALL)[0]] == [MOBY]
 
 
 def test_the_other_direction_and_the_typo_path_are_untouched():
@@ -437,10 +469,13 @@ def test_the_answers_follow_the_session_language():
     "Do I have Ivanhoe?", "Is War and Peace in my library?", "What do I have by Jules Verne?",
     "Скільки книжок у моїй бібліотеці?", "Які книжки в мене є?", "Чи є в мене Айвенго?",
     # The author is a catalogue attribute: the listing answers both halves, and
-    # "who" used to send the whole question to the research loop instead.
+    # "who" used to send the whole question to the research loop instead. Only
+    # the authorship construction is exempt; "who kills Lucy?" is a clue below.
     "How many books do I have, and who wrote them?",
     "Which books do I have, and who are their authors?",
+    "Which books do I have, and who is the author of each?",
     "Скільки книжок у мене є і хто їх написав?",
+    "Скільки в мене книжок і хто їх написав?",
 ])
 def test_a_pure_holdings_question_carries_no_content_clue(question):
     assert content_clue(question) == ""
@@ -448,6 +483,10 @@ def test_a_pure_holdings_question_carries_no_content_clue(question):
 
 @pytest.mark.parametrize("question, clue", [
     ("Do I have Dracula, and why does Jonathan Harker stay at the castle?", "why"),
+    # "who" is a content word again: only the authorship construction is exempt,
+    # and a question about a character asks about the book, not the shelf.
+    ("Do I have Dracula, and who kills Lucy?", "who"),
+    ("Чи є в мене Дракула, і хто вбиває Люсі?", "хто"),
     ("What do I have about whaling?", "about"),
     ("Which of my books mention London?", "mention"),
     ("Is Moby Dick in my library, and what happens to the Pequod?", "what happens"),
@@ -485,6 +524,17 @@ def test_a_content_word_inside_a_held_title_is_not_the_readers_word():
     # count / list carry no title: the whole question, as before.
     assert mixed_intent("What do I have about whaling?", "", ALL) is True
     assert mixed_intent("How many books do I have?", "", ALL) is False
+
+
+def test_only_the_title_mention_is_removed_not_every_occurrence_of_the_word():
+    """A title can be an ordinary word of the question too. Removing every
+    occurrence took the reader's content question with it: for a book called
+    "Why", "Do I have Why, and why does it end there?" came out with no content
+    word at all and was answered with a plain "yes, it is on the shelf"."""
+    why = key("Why", "Adam Zagajewski")
+    shelf = ALL + entries(why)
+    assert mixed_intent("Do I have Why, and why does it end there?", "Why", shelf) is True
+    assert mixed_intent("Do I have Why?", "Why", shelf) is False
 
 
 # ---------------------------------------------------------------- the planner-side guards (nodes.plan, no graph)

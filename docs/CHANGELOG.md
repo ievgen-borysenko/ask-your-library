@@ -29,8 +29,11 @@
   resolves to nothing with both books as the closest. A book that also carries a
   canary-sourced row stays listed: only a key whose every row is a canary is a fixture. New eval set
   `eval/golden/en-demo-catalog.yaml`: type `catalog`, scored on the structured result with strict
-  set equality against the manifest (one book too many fails, the count must be the length of
-  the list), three content questions as negative controls (one scored on routing alone) and one
+  set equality against the manifest KEYS, "Title — Author" (one book too many fails, so does the
+  right title under a wrong author, and the count must be the length of the list), against the
+  size of the catalogue the item was written for
+  (`expected_total`, which a targeted run of one or two items would otherwise never touch),
+  three content questions as negative controls (one scored on routing alone) and one
   hybrid item that pins the named-book filter; a research question answered by the catalogue
   path fails its item. Tests: `tests/test_catalog.py` (`list_books` on a real index
   in tmp, the resolver, the answers in both languages, the planner-side guards) and ten
@@ -42,15 +45,29 @@
   ("Time Machine" is The Time Machine), a title inside a longer name never does. "Dracula's
   Guest" is a different book from "Dracula", and the answer now says so and names Dracula as
   the closest title, where before it confirmed the book as held (and, as a retrieval filter,
-  quietly searched Dracula alone). An empty strict result is no longer read as "no such book"
+  quietly searched Dracula alone). For titles that is decided before the close match for a
+  typo, which is close enough to confirm another work by itself: "Dracula II" is 0.824 alike to
+  a held "Dracula", over the 0.8 cutoff, so both the loose and the strict resolver used to
+  answer it with Dracula. For authors the order is the other way round, so that "Sir Arthur
+  Conan Doyle" (0.9) still resolves to the man on the shelf — a longer title is another work, a
+  longer author name is usually the same person with an honorific or a middle name.
+  An empty strict result is no longer read as "no such book"
   either: a one-word fragment of a held title ("Time") sets no filter and says nothing, instead
   of opening the answer with a note that a book on the shelf is not in the catalogue.
-  The gate's vocabulary drops "who" / "хто", because an author is a catalogue attribute and the
-  listing answers "how many books do I have, and who wrote them?" itself; and the title of a
-  book the catalogue resolves is removed from the question before the vocabulary check, so
+  The gate's vocabulary keeps "who" / "хто" as content words ("do I have Dracula, and who kills
+  Lucy?" asks about the book), exempting only the authorship construction — "who wrote them",
+  "who is the author", "who are their authors", "хто (їх) написав" — where an author is a
+  catalogue attribute and the listing answers that half itself. And the title of a
+  book the catalogue resolves is removed from the question before the vocabulary check, one
+  occurrence of it, so that a book called "Why" does not take the reader's own "why" with it:
   "Do I have Where the Wild Things Are?" and "Чи є в мене «Як гартувалася сталь»?" are answered
   from the catalogue instead of ending as "I don't know" about a book on the shelf; the same
   question shape about a book nobody has still takes the research loop.
+  A clarify that fires on the last allowed step settles both book fields too. The plan that
+  answers it returns no search, and a state channel an update leaves out keeps the value it
+  had, so a run that started with a name the catalogue does not hold and ended with the reader
+  choosing a book that IS on the shelf still opened its answer with the "not in the library
+  catalogue" note about the earlier name.
   The catalogue reader refuses a partial index: the listing is presented as exhaustive, so the
   full-text table is required (as it is for the preflight) and a table that disappears between
   the check and the read is an error naming the table, not a short list; a table without the
@@ -59,13 +76,17 @@
   and the whole library is searched, since before this path `plan` never touched the index and
   a failure there would end a question the research loop could still answer.
   The eval scorer pins more of the same result: the operation the code ran (`expected_op` on
-  k01-k06), a catalogue that holds something at all (an item expecting nothing found used to
-  pass over an empty index), and, for the research control, that the planner routed the question
+  k01-k06), the size of the whole catalogue (`expected_total`, required on every `catalog` item
+  — an item expecting nothing found used to pass over an empty index, and a targeted run of
+  k03-k05 over any non-empty one), and, for the research control, that the planner routed the
+  question
   itself, since a planner or catalogue fallback searched for another reason. The golden checksum in
-  the run fingerprint changes with those keys, so numbers measured before and after are not the
+  the run fingerprint changes with those keys and with the switch to full book keys, so numbers
+  measured before and after are not the
   same run. The CI guard on the golden files now requires a `catalog` item's `expected_books` to
-  BE manifest titles (they are scored by set equality, where a substring can only fail) and its
-  `expected_count` to agree with them.
+  BE manifest keys (they are scored by set equality, where a substring or a bare title can only
+  fail), its `expected_count` to agree with them, and its `expected_total` to be the number of
+  books in the manifest.
   A resumed web chat rebuilds its conversation memory unescaped: the persisted answer carries
   the HTML escaping it was rendered with, and `&amp;` belongs on the page, not in the next
   planner and synthesize prompt.

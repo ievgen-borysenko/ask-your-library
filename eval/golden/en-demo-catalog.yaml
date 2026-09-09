@@ -1,58 +1,63 @@
 # Catalogue set: questions about what the library HOLDS, answered by the deterministic
 # catalogue path (ADR-016). Scored on the structured result, not on the answer's wording
 # (eval/run_agent_eval.py, type catalog): the set of books the code listed must EQUAL
-# expected_books (strict set equality, by title), the count carried in the state must be
-# len() of that list, the operation run must be expected_op, the catalogue must hold
-# something at all (an item that expects nothing found would otherwise pass over an empty
-# index), and a "has" question must resolve (or not) as expected_resolved says.
+# expected_books (strict set equality, by the full index key "Title — Author", so a right
+# title under a wrong author fails), the count carried in the state must be len() of that
+# list, the operation run must be expected_op, the catalogue as a whole must hold
+# expected_total books (a targeted run over a partial index would otherwise pass), and a
+# "has" question must resolve (or not) as expected_resolved says. Every catalog item
+# carries expected_total; one without it cannot pass.
 # The research-type items are the negative controls: content questions that look like a
 # listing must NOT take the catalogue path (a catalogue result on any of them fails the item;
 # k09 is scored on routing alone, and the planner must route it there itself, so a planner or
 # catalogue fallback fails it), and k10 pins the hybrid (a named book becomes a retrieval
 # filter). Routing is the planner's reading; these items measure it, no code enforces it.
-# Titles are the demo manifest's (CI guard: tests/test_golden_books_in_manifest.py).
+# The keys are the demo manifest's, "title — author" as scripts/ingest_demo_corpus.py builds
+# them (CI guard: tests/test_golden_books_in_manifest.py). The research-type items below keep
+# bare titles: they are scored on titles mentioned in the answer text.
 # Run: GOLDEN_PATH=eval/golden/en-demo-catalog.yaml uv run python eval/run_agent_eval.py
-all_titles: &all_titles
-- "Robinson Crusoe"
-- "Frankenstein"
-- "Treasure Island"
-- "The Time Machine"
-- "The War of the Worlds"
-- "Dracula"
-- "Meditations"
-- "Seneca's Morals"
-- "Pride and Prejudice"
-- "Moby Dick"
-- "The Adventures of Sherlock Holmes"
-- "Alice's Adventures in Wonderland"
-- "The Call of the Wild"
-- "The Odyssey"
-- "The Hound of the Baskervilles"
-- "A Study in Scarlet"
-- "The Extraordinary Adventures of Arsène Lupin"
-- "The Secret Adversary"
-- "Wuthering Heights"
-- "Jane Eyre"
-- "The Picture of Dorian Gray"
-- "Twenty Thousand Leagues Under the Sea"
-- "Around the World in Eighty Days"
-- "A Journey to the Interior of the Earth"
-- "Ivanhoe"
-- "Adventures of Huckleberry Finn"
-- "Gulliver's Travels"
-- "The Three Musketeers"
-- "Don Quixote"
-- "Romeo and Juliet"
-- "Celebrated Crimes"
-- "Memoirs of Napoleon Bonaparte"
-- "The Kobzar of the Ukraine"
+all_books: &all_books
+- "Robinson Crusoe — Daniel Defoe"
+- "Frankenstein — Mary Shelley"
+- "Treasure Island — Robert Louis Stevenson"
+- "The Time Machine — H. G. Wells"
+- "The War of the Worlds — H. G. Wells"
+- "Dracula — Bram Stoker"
+- "Meditations — Marcus Aurelius"
+- "Seneca's Morals — Lucius Annaeus Seneca"
+- "Pride and Prejudice — Jane Austen"
+- "Moby Dick — Herman Melville"
+- "The Adventures of Sherlock Holmes — Arthur Conan Doyle"
+- "Alice's Adventures in Wonderland — Lewis Carroll"
+- "The Call of the Wild — Jack London"
+- "The Odyssey — Homer"
+- "The Hound of the Baskervilles — Arthur Conan Doyle"
+- "A Study in Scarlet — Arthur Conan Doyle"
+- "The Extraordinary Adventures of Arsène Lupin — Maurice Leblanc"
+- "The Secret Adversary — Agatha Christie"
+- "Wuthering Heights — Emily Brontë"
+- "Jane Eyre — Charlotte Brontë"
+- "The Picture of Dorian Gray — Oscar Wilde"
+- "Twenty Thousand Leagues Under the Sea — Jules Verne"
+- "Around the World in Eighty Days — Jules Verne"
+- "A Journey to the Interior of the Earth — Jules Verne"
+- "Ivanhoe — Walter Scott"
+- "Adventures of Huckleberry Finn — Mark Twain"
+- "Gulliver's Travels — Jonathan Swift"
+- "The Three Musketeers — Alexandre Dumas"
+- "Don Quixote — Miguel de Cervantes"
+- "Romeo and Juliet — William Shakespeare"
+- "Celebrated Crimes — Alexandre Dumas"
+- "Memoirs of Napoleon Bonaparte — Louis Antoine Fauvelet de Bourrienne"
+- "The Kobzar of the Ukraine — Taras Shevchenko"
 questions:
 - id: k01-count
   question: How many books do I have in my library?
   type: catalog
   expected_op: count
   expected_count: 33
-  expected_books: *all_titles
+  expected_total: 33
+  expected_books: *all_books
   notes: The number must be len() of the list the code produced, and that list must be the
     whole manifest (canaries excluded by their source column). No search step, one model call.
 - id: k02-list
@@ -60,7 +65,8 @@ questions:
   type: catalog
   expected_op: list
   expected_count: 33
-  expected_books: *all_titles
+  expected_total: 33
+  expected_books: *all_books
   notes: Strict set equality against the manifest; a sample of 14 with a heading that says 17
     (the owner's smoke of 08.09 through the research loop) is exactly what this item rejects.
 - id: k03-has-yes
@@ -68,31 +74,39 @@ questions:
   type: catalog
   expected_op: has
   expected_resolved: true
+  expected_total: 33
   expected_books:
-  - Ivanhoe
+  - "Ivanhoe — Walter Scott"
+  notes: 'The key, not the title: "Ivanhoe — Wrong Author" would be another book. expected_total
+    keeps a targeted run of this item from passing over a partial index, where the one right
+    answer says nothing about the other thirty-two books.'
 - id: k04-has-no
   question: Is War and Peace in my library?
   type: catalog
   expected_op: has
   expected_resolved: false
+  expected_total: 33
   expected_books: []
   notes: Not in the demo corpus; the answer says so (closest titles may follow), nothing is
-    searched, and no title is listed.
+    searched, and no title is listed. expected_total is what keeps this item from passing over
+    an empty or half-built index, where nothing is found either.
 - id: k05-by-author
   question: What do I have by Jules Verne?
   type: catalog
   expected_op: by_author
   expected_resolved: true
+  expected_total: 33
   expected_books:
-  - "Twenty Thousand Leagues Under the Sea"
-  - "Around the World in Eighty Days"
-  - "A Journey to the Interior of the Earth"
+  - "Twenty Thousand Leagues Under the Sea — Jules Verne"
+  - "Around the World in Eighty Days — Jules Verne"
+  - "A Journey to the Interior of the Earth — Jules Verne"
 - id: k06-count-ua
   question: Скільки книжок у моїй бібліотеці?
   type: catalog
   expected_op: count
   expected_count: 33
-  expected_books: *all_titles
+  expected_total: 33
+  expected_books: *all_books
   notes: The same intent in Ukrainian; the planner recognises it, the code answers.
 - id: k07-content-not-catalog
   question: What are the names of the three musketeers?

@@ -33,8 +33,9 @@ A separate, deterministic path for questions about what the library holds:
   and the event says so. `library.list_books()` reads the distinct book keys of both index tables,
   excluding the demo's canary fixtures by their `source` column, never by name. A title or an
   author is resolved against that list by code: exact (case, accents and apostrophes folded, a
-  leading article ignored), then contained as whole words, then a close match for a typo
-  (surname alone for authors); several matches are returned as several. The answer is a
+  leading article ignored), then contained as whole words, then — for titles — a held title
+  inside the name asked about, then a close match for a typo (surname alone for authors);
+  several matches are returned as several. The answer is a
   template over the result; the number in it is `len()` of the list under it.
 - A new `catalog` node between `plan` and `validate`; `validate` reports a catalogue answer
   (`provenance.catalog = {op, count, total}` next to the zero quote counts) and the interfaces
@@ -47,7 +48,7 @@ A separate, deterministic path for questions about what the library holds:
   settled a book of the research loop), and sends a question that also asks about content
   ("Do I have Dracula, and why does Harker stay?") to the research loop, with the named book as
   the filter when the request carries a title that resolves to one book: a conservative gate on
-  content vocabulary (why, how, about, mention, ...),
+  content vocabulary (why, how, about, mention, who — except where it asks who wrote them),
   because the planner labelled exactly that question "has" once. The event says which happened.
   The gate knows words, not titles: "the names of the three musketeers" is beyond it, so that
   routing stays the planner's reading, measured by the controls of the catalogue eval set.
@@ -76,16 +77,27 @@ every number and every list into code.
   The Time Machine); a title inside a longer name is not, in either mode: "Dracula's Guest"
   is a different book, and confirming it as one the library owns was the silent wrong answer
   this refuses. It becomes the closest title instead, so "do I have X" answers no and names
-  what is there. The retrieval filter (strict) additionally refuses a one-word fragment of a
+  what is there. For titles that is decided BEFORE the close match, because the typo step is
+  close enough to confirm another work: "Dracula II" is 0.824 alike to a held "Dracula", over
+  the 0.8 cutoff. For authors it is decided after, and a held name inside a longer one still
+  resolves — "Sir Arthur Conan Doyle" (0.9) is the man on the shelf, not another person. The
+  two fields differ because a longer title is another work while a longer author name is
+  usually the same person with an honorific or a middle name; the order is a parameter of the
+  resolver, set by `resolve_title` and `resolve_author`. The retrieval filter (strict)
+  additionally refuses a one-word fragment of a
   longer title, and an empty strict result is not "no such book": the loose resolver decides
   that, or an answer about The Time Machine would open by saying it is not in the catalogue.
-- The gate's vocabulary does not carry "who" / "хто": an author is a catalogue attribute and
-  the listing ("Title — Author") answers "how many books do I have, and who wrote them?"
-  itself. And the gate reads the reader's words, not the library's: when the request carries a
+- The gate's vocabulary carries "who" / "хто" like any other content word ("do I have Dracula,
+  and who kills Lucy?" asks about the book), with one exemption: the authorship construction,
+  where the author is a catalogue attribute and the listing ("Title — Author") answers the
+  question itself — "who wrote them", "who is the author", "who are their authors", and in
+  Ukrainian "хто (їх) написав", where the object stands between the pronoun and the verb.
+  And the gate reads the reader's words, not the library's: when the request carries a
   title that resolves strictly to one held book, that title is removed from the question before
-  the vocabulary check, so "Do I have Where the Wild Things Are?" is a holdings question while
-  the same shape about a book nobody has ("How to Cook Everything") still goes to the research
-  loop. Everything else about the gate is unchanged, including its known limit.
+  the vocabulary check — one occurrence of it, so that a book called "Why" does not take the
+  reader's own "why" with it — so "Do I have Where the Wild Things Are?" is a holdings question
+  while the same shape about a book nobody has ("How to Cook Everything") still goes to the
+  research loop. Everything else about the gate is unchanged, including its known limit.
 - A catalogue read that fails inside `plan` costs the retrieval filter, not the answer: the
   question is planned as if no book had been named (no filter, and no "not in the catalogue"
   note, which would be a claim about a list nobody read) and the whole library is searched.
@@ -95,10 +107,12 @@ every number and every list into code.
   and the read (the window `ingest/publish.py` opens) is an error naming the table rather than
   a short list. A missing cards table stays a supported shape.
 - The eval gains a set of its own, `eval/golden/en-demo-catalog.yaml`, scored on the structured
-  result with strict set equality against the manifest, plus three negative controls (content
-  questions that look like listings; one scored on routing alone) and one hybrid item that
-  pins the named-book filter; a research question answered by the catalogue path fails its
-  item.
+  result with strict set equality against the manifest KEYS ("Title — Author", so the right
+  title under a wrong author fails) and against the catalogue's own size (`expected_total`, or
+  a targeted run of two or three items would certify a partial index), plus three negative
+  controls (content questions that look like listings; one scored on routing alone) and one
+  hybrid item that pins the named-book filter; a research question answered by the catalogue
+  path fails its item.
 
 ## Not in scope
 

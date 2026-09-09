@@ -79,17 +79,23 @@ question -> planner queries (2-4, English) -> LanceDB hybrid search (vectors + B
   (exact, contained as whole words, or a close match for a typo) and formats the answer, so
   nothing can be listed that is not in the index and a count is the length of the same list a
   listing shows. Containment reads one way: a name inside a title is a match, a title inside a
-  longer name is not, in either mode: "Dracula's Guest" is a different book, answered with a no
-  and the closest title. The same resolver limits a content question that names one book to that
+  longer name is not, in either mode: "Dracula's Guest" and "Dracula II" are different books,
+  answered with a no and the closest title — for titles that is settled before the typo step,
+  which on its own is close enough to confirm one ("Dracula II" is 0.824 alike to "Dracula"),
+  while an author name that contains a held one still resolves ("Sir Arthur Conan Doyle" is the
+  man on the shelf). The same resolver limits a content question that names one book to that
   book (a name that fits several books, or only a fragment of a title, sets no filter and claims
   nothing). The listing is exhaustive or it is an error: the full-text table is required here, as
   it is for the preflight. An operation
   the planner invents falls back to the research loop, and so does a question that also asks
   about content ("Do I have Dracula, and why does Harker stay?"): a conservative gate on content
   vocabulary sends it to the research loop, with the named book as the filter when the request
-  carries a title that resolves to one book. The gate reads the reader's words, not the
-  library's (the title of a book the catalogue holds is taken out of the question before the
-  check, so "Do I have Where the Wild Things Are?" is a holdings question), but it knows
+  carries a title that resolves to one book. "Who" is one of those words ("and who kills
+  Lucy?"), except where it asks who wrote them: there the author is a catalogue attribute and
+  the listing "Title — Author" answers that half itself. The gate reads the reader's words, not
+  the library's (one mention of the title of a book the catalogue holds is taken out of the
+  question before the check, so "Do I have Where the Wild Things Are?" is a holdings question
+  and a book called "Why" keeps the reader's own "why"), but it knows
   words, not titles hidden in a question, so that routing stays the planner's reading, which
   the catalogue eval set measures with negative controls. The list never reaches the model: not
   in the answer, and not on a later turn (the conversation memory keeps only the operation and
@@ -429,8 +435,10 @@ check), refusal questions answering with an explicit refusal (an evidence-free a
 model knowledge fails), `expected_behavior: clarify` questions actually triggering a clarify
 interrupt, `expects_chapter_read` questions actually drilling into a chapter of an expected
 book, and `catalog` questions on their structured result (the set of books the code listed must
-equal the expected set, the count must be the length of that list, the operation must be the one
-the item names, and the catalogue must hold something at all; a research question answered
+equal the expected set of index keys, "Title — Author", so the right title under a wrong author
+fails; the count must be the length of that list, the operation must be the one
+the item names, and the catalogue as a whole must hold the `expected_total` the item was written
+for, or a run of two or three items could certify a partial index; a research question answered
 by the catalogue path fails, and so does a research control the planner did not route itself,
 where a planner or catalogue fallback searched instead). Quote provenance totals come from
 `validate`. Scoring is heuristic, no LLM judge -
@@ -451,9 +459,12 @@ removed; its notes were checked against the source text by an AI session only, s
 exploratory.
 **Catalogue** (`eval/golden/en-demo-catalog.yaml`, 10 questions): six questions about what the
 library holds (count, the full list, a title that is there, one that is not, an author, the count
-in Ukrainian), scored on the structured result against the manifest; three content questions
+in Ukrainian), scored on the structured result against the manifest's book keys and its size;
+three content questions
 that look like listings as negative controls (one scored on routing alone); and one hybrid item
-that pins the named-book retrieval filter. Measured on `b0d1321` (09.09, single run): 10/10;
+that pins the named-book retrieval filter. Measured on `b0d1321` (09.09, single run), before the
+items moved from titles to keys and gained `expected_total` — the golden checksum in the run
+fingerprint separates the two versions of the set: 10/10;
 the six catalogue items with 0 search steps and one model call each; the three controls through
 the research loop (1, 1 and 3 steps); the hybrid item with retrieval limited to Dracula; 17/17
 quotes confirmed; $0.16 for the set, of which the six catalogue items cost $0.014 together.
