@@ -90,9 +90,14 @@ def sandbox(tmp_path):
         stub.chmod(0o755)
 
     # The Ollama knobs are dropped so the script has to read its model names and
-    # endpoint from config.py, which is where the app reads them from.
+    # endpoint from config.py, which is where the app reads them from. The rest
+    # of conftest's pinned configuration goes with them: this suite exports
+    # LLM_BACKEND=openrouter into every test process, and the script now refuses
+    # a fully local run under exactly that, so a scrubbed environment is what
+    # "nothing in this shell decides the run" has to mean here. The tests that
+    # describe an exported variable put it back themselves.
     env = {k: v for k, v in os.environ.items()
-           if not k.startswith("OLLAMA_") and k != "LIBRARY_DB_PATH"}
+           if k not in SCRUBBED and not k.startswith("OLLAMA_")}
     # Stubs first, then the system directories only: no /opt/homebrew, no
     # ~/.local/bin, so `uv` and friends cannot resolve to the real binaries.
     env["PATH"] = os.pathsep.join([str(bindir), "/usr/bin", "/bin", "/usr/sbin", "/sbin"])
@@ -235,14 +240,16 @@ def test_a_failing_tool_exits_1_and_names_the_command(sandbox, tmp_path):
 def test_refuses_to_start_a_server_that_is_not_on_this_machine(sandbox):
     """Nothing answers on OLLAMA_URL, and the address is not one this machine
     could be serving: starting a local Ollama would not be the server that was
-    asked for, so the script says so and stops."""
+    asked for, so the script says so and stops. Under --hosted, because in the
+    fully local mode the same URL is refused earlier, by the guard: an endpoint
+    off this machine contradicts the mode outright, answering or not."""
     root, _, env = sandbox
     bindir = Path(env["PATH"].split(os.pathsep)[0])      # the stubs, first on PATH
     curl = bindir / "curl"
     curl.write_text("#!/bin/sh\nexit 7\n")               # /api/tags answers nowhere
     curl.chmod(0o755)
     env = {**env, "OLLAMA_URL": "http://ollama.example.com"}
-    result = subprocess.run([BASH, "scripts/install-mac.sh", "--no-demo"],
+    result = subprocess.run([BASH, "scripts/install-mac.sh", "--no-demo", "--hosted"],
                             cwd=root, env=env, capture_output=True, text=True)
     assert result.returncode == 1, result.stdout
     assert "not an address on this machine" in result.stderr
@@ -322,6 +329,81 @@ def test_an_existing_env_decides_the_mode_and_says_so(sandbox):
     assert f"pull {llm_model}" not in pulled
 
 
+# --- the shell the script is started from ------------------------------------
+# config.py calls load_dotenv() without override, so a variable already exported
+# wins over every line step 10 writes. A shell carrying another project's hosted
+# settings therefore walked the whole "fully local" install to "Done." while the
+# application it configured answered on OpenRouter, embedded on OpenRouter and
+# uploaded traces. The .env was right; nothing read it.
+HOSTED_SHELL = {"LLM_BACKEND": "openrouter", "EMBED_BACKEND": "openrouter",
+                "LANGSMITH_TRACING_V2": "true"}
+
+
+@mac_only
+def test_exported_hosted_settings_stop_the_fully_local_install(sandbox):
+    """Exit 2, before anything is pulled or written, naming every variable, where
+    the value comes from, and the two ways to drop it."""
+    root, records, _ = sandbox
+    result = real_run(sandbox, "--no-demo", **HOSTED_SHELL)
+    assert result.returncode == 2, result.stdout
+    for name, value in HOSTED_SHELL.items():
+        assert f"{name}={value} (exported in this shell)" in result.stderr
+    assert "unset LLM_BACKEND EMBED_BACKEND LANGSMITH_TRACING_V2" in result.stderr
+    assert "env -u LLM_BACKEND -u EMBED_BACKEND -u LANGSMITH_TRACING_V2" in result.stderr
+    assert "--hosted" in result.stderr                    # the mode that means this on purpose
+    assert not (records / "ollama").exists(), "a model was pulled before the refusal"
+    assert not (root / ".env").exists(), "a .env was written before the refusal"
+
+
+@mac_only
+def test_an_ollama_url_off_this_machine_stops_the_fully_local_install(sandbox):
+    """The endpoint counts too: a remote Ollama that answers is a remote Ollama.
+    Step 7 only ever refused one that did not answer, so this one walked
+    through — the whole library embedded off the machine under "fully local"."""
+    root, _, _ = sandbox
+    result = real_run(sandbox, "--no-demo", OLLAMA_URL="http://ollama.example.com")
+    assert result.returncode == 2, result.stdout
+    assert "OLLAMA_URL=http://ollama.example.com (exported in this shell)" in result.stderr
+    assert "not on this machine" in result.stderr
+    assert not (root / ".env").exists()
+
+
+@mac_only
+def test_a_clean_shell_passes_the_guard_and_writes_the_local_env(sandbox):
+    """The other half: with nothing exported the guard says so and the run goes
+    through to the local .env it was always meant to write."""
+    root, _, _ = sandbox
+    result = real_run(sandbox, "--no-demo")
+    assert result.returncode == 0, result.stderr
+    assert "Nothing exported in this shell decides where data goes" in result.stdout
+    assert "LLM_BACKEND=ollama" in (root / ".env").read_text()
+
+
+@mac_only
+def test_hosted_mode_reports_the_same_shell_instead_of_refusing_it(sandbox):
+    """--hosted is the mode those values describe, so they are reported, not
+    refused: the run is hosted either way and nothing is being misrepresented."""
+    root, _, _ = sandbox
+    result = real_run(sandbox, "--no-demo", "--hosted", **HOSTED_SHELL)
+    assert result.returncode == 0, result.stderr
+    assert "LLM_BACKEND=openrouter (exported in this shell)" in result.stdout
+    assert "reported only" in result.stdout
+    assert (root / ".env").exists()
+
+
+@mac_only
+def test_the_dry_run_refuses_the_same_shell_and_says_it_wrote_nothing(sandbox):
+    """A dry run that printed a plan it could not carry out would be the same
+    lie one step earlier, so the guard runs there too."""
+    root, records, _ = sandbox
+    result = real_run(sandbox, "--dry-run", "--no-demo", **HOSTED_SHELL)
+    assert result.returncode == 2, result.stdout
+    assert "LLM_BACKEND=openrouter (exported in this shell)" in result.stderr
+    assert "nothing was installed, downloaded or written" in result.stderr
+    assert sorted(path.name for path in records.iterdir()) == []
+    assert not (root / ".env").exists()
+
+
 @mac_only
 def test_refuses_outside_the_repository_root(tmp_path):
     # Steps 1 and 2 only read; nothing is stubbed here because nothing runs.
@@ -356,16 +438,18 @@ def preflight_snippet():
     return match.group(1)
 
 
-def run_preflight(expected, tmp_path):
+def run_preflight(expected, tmp_path, mode="", **environment):
     """The snippet in a fresh interpreter that has an OpenRouter key and no
     index: the key half of check_environment passes and no Ollama is contacted,
-    so the missing index is the only problem — the condition being classified."""
+    so the missing index is the only problem — the condition being classified.
+    `mode` is the second argument the script passes: the mode the run set up,
+    which the loaded configuration is then held to."""
     env = {k: v for k, v in os.environ.items() if k not in SCRUBBED}
     env["PYTHONPATH"] = str(REPO)
     env.update(LLM_BACKEND="openrouter", EMBED_BACKEND="openrouter",
                OPENROUTER_API_KEY="not-a-real-key",
-               LIBRARY_DB_PATH=str(tmp_path / "nothing-here"))
-    return subprocess.run([sys.executable, "-c", preflight_snippet(), expected],
+               LIBRARY_DB_PATH=str(tmp_path / "nothing-here"), **environment)
+    return subprocess.run([sys.executable, "-c", preflight_snippet(), expected, mode],
                           cwd=tmp_path, env=env, capture_output=True, text=True)
 
 
@@ -382,6 +466,34 @@ def test_the_preflight_snippet_fails_a_problem_this_run_did_not_leave(tmp_path):
     problem is exit 1, which is what ends the run."""
     result = run_preflight("", tmp_path)
     assert result.returncode == 1, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(not have_package, reason="the package is not importable here")
+def test_the_preflight_snippet_reports_the_configuration_the_loader_resolves(tmp_path):
+    """The last word belongs to the loader, not to the file the script wrote: a
+    .env rewrite is no fix while the same shell exports something else. A local
+    run whose loaded configuration is hosted ends at exit 6, with the values
+    that decided it named."""
+    result = run_preflight("no-index", tmp_path, mode="local", LANGSMITH_TRACING_V2="true")
+    assert result.returncode == 6, result.stdout + result.stderr
+    assert "LLM_BACKEND=openrouter, EMBED_BACKEND=openrouter" in result.stdout
+    assert "https://openrouter.ai" in result.stdout          # the endpoint it would call
+    assert "tracing: LANGSMITH_TRACING_V2" in result.stdout
+    assert "not the fully local one" in result.stdout
+    for named in ("LLM_BACKEND=openrouter", "EMBED_BACKEND=openrouter", "LANGSMITH_TRACING_V2"):
+        assert named in result.stdout.split("not the fully local one")[1]
+
+
+@pytest.mark.skipif(not have_package, reason="the package is not importable here")
+def test_the_preflight_snippet_prints_the_configuration_it_agrees_with(tmp_path):
+    """The same environment under the hosted mode is the mode that run set up:
+    the configuration is still printed, and the run goes on to the ordinary
+    classification of what it knowingly left behind."""
+    result = run_preflight("no-index", tmp_path, mode="hosted")
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "LLM_BACKEND=openrouter, EMBED_BACKEND=openrouter" in result.stdout
+    assert "OLLAMA_URL=http://localhost:11434" in result.stdout
+    assert "tracing: off" in result.stdout
 
 
 def test_help_lists_every_flag(tmp_path):

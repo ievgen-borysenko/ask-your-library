@@ -14,9 +14,12 @@ def test_ollama_backend_points_the_client_at_ollama_with_no_key_and_no_price():
     env = {"LLM_BACKEND": "ollama", "OLLAMA_LLM_MODEL": "qwen2.5:3b", "OLLAMA_URL": "http://localhost:11434"}
     backend, model, base, needs_key, pin, pout = json.loads(_out(code, **env))
     assert (backend, model, base, needs_key, pin, pout) == ("ollama", "qwen2.5:3b", "http://localhost:11434/v1", False, 0.0, 0.0)
-    # the default stays OpenRouter with a key and list prices
+    # the default stays OpenRouter with a key and list prices. The endpoint is
+    # compared whole: a prefix test against a host name reads as an allow-list
+    # check, and https://openrouter.ai.example.com would pass one.
     backend, model, base, needs_key, pin, pout = json.loads(_out(code))
-    assert backend == "openrouter" and needs_key and base.startswith("https://openrouter.ai") and pin == 3.0
+    assert backend == "openrouter" and needs_key and pin == 3.0
+    assert base == "https://openrouter.ai/api/v1"
 
 
 def test_ollama_backend_needs_no_key_in_preflight_and_in_the_llm_factory():

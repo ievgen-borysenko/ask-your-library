@@ -18,7 +18,8 @@
 #   bash scripts/install-mac.sh --hosted        # keep the OpenRouter answering model
 #
 # Exit codes: 0 done, 1 a prerequisite is missing or a step failed (both are printed
-# with the fix), 2 bad usage.
+# with the fix), 2 bad usage, or a configuration the application would not load —
+# an exported variable that contradicts the mode this run sets up.
 # -E, not just -e: without it the ERR trap below is not inherited by functions,
 # command substitutions or subshells, so every failure inside one of them ended
 # the script at the failing command's own status with nothing of ours printed.
@@ -62,7 +63,9 @@ Run it from the repository root.
 
 Exit codes: 0 done, 1 a prerequisite is missing or a step failed (both are
 printed with the fix), 2 bad usage (an unknown option, or not run from the
-repository root).
+repository root) or a shell whose exported settings contradict the mode: the
+application reads .env without overriding what is already exported, so those
+values, not this script's, would decide where your data goes.
 USAGE
 }
 
@@ -249,6 +252,193 @@ fi
 # --hosted (or its absence) decide.
 env_backend="$(dotenv_value LLM_BACKEND)"
 effective_backend="${env_backend:-$requested_backend}"
+if [ "$effective_backend" = "ollama" ]; then
+    effective_mode="fully local"
+else
+    effective_mode="hosted"
+fi
+
+local_env() {
+    # The lines local mode changes. LLM_TIMEOUT_S is one of them because
+    # config.py defaults it to 600 s under LLM_BACKEND=ollama, while a value
+    # copied from .env.example is an environment value and wins — which would
+    # leave a local model on the hosted 120 s per-attempt budget.
+    # QUESTION_DEADLINE_S has no such per-backend default: it is 300 s in both
+    # modes, and 300 s is the whole wall clock of a question, checked before each
+    # next decision. A local model that loads cold can spend that in the plan
+    # node alone, so local mode gets twenty minutes — room for four steps of it.
+    # The two tracing lines are uncommented for the same reason the README gives
+    # them: this mode is the one where nothing leaves the machine, and the SDK
+    # reads a LANGSMITH_/LANGCHAIN_ flag another project's shell exported.
+    sed -e 's/^LLM_BACKEND=.*/LLM_BACKEND=ollama/' \
+        -e 's/^LLM_TIMEOUT_S=.*/LLM_TIMEOUT_S=600/' \
+        -e 's/^QUESTION_DEADLINE_S=.*/QUESTION_DEADLINE_S=1200/' \
+        -e 's/^# LANGSMITH_TRACING_V2=false/LANGSMITH_TRACING_V2=false/' \
+        -e 's/^# LANGCHAIN_TRACING_V2=false/LANGCHAIN_TRACING_V2=false/' .env.example
+}
+
+# Hosted mode keeps the example as it is. A function so it goes through the same
+# writer as the local one, and fails the same way.
+hosted_env() { cat .env.example; }
+
+# --- the configuration the application will actually load -------------------
+# config.py calls load_dotenv() without override, so a variable this shell
+# exports wins over every line step 10 writes. A shell already carrying another
+# project's hosted settings therefore produced a "fully local" install that
+# answered on OpenRouter, embedded on OpenRouter and uploaded traces, while
+# every line printed here still said local. The variables below are the ones
+# that decide where data goes: which backend answers, which one embeds, the
+# endpoint each one calls, and whether prompts and answers are uploaded as
+# traces — both prefixes, and the v1 names langchain_core still reads.
+BACKEND_VARS="LLM_BACKEND EMBED_BACKEND"
+ENDPOINT_VARS="OLLAMA_URL OLLAMA_HOST OPENROUTER_BASE_URL"
+TRACING_VARS="LANGSMITH_TRACING_V2 LANGCHAIN_TRACING_V2 LANGSMITH_TRACING LANGCHAIN_TRACING LANGCHAIN_HANDLER"
+DATA_FLOW_VARS="$BACKEND_VARS $ENDPOINT_VARS $TRACING_VARS"
+
+# The .env the application will read: the one already in the clone, or the one
+# step 10 is about to write, resolved once so the guard judges the same text the
+# writer produces. An unreadable .env.example leaves this empty — that is step
+# 10's failure to report, with its own message, so the guard judges nothing.
+if [ -f .env ]; then
+    planned_env="$(cat .env 2>/dev/null || true)"
+    planned_env_source="the .env already in this clone"
+elif [ "$hosted" -eq 1 ]; then
+    planned_env="$(hosted_env 2>/dev/null || true)"
+    planned_env_source="the .env this run writes"
+else
+    planned_env="$(local_env 2>/dev/null || true)"
+    planned_env_source="the .env this run writes"
+fi
+
+planned_value() { first_line "$(printf '%s\n' "$planned_env" | sed -n "s/^$1=//p")"; }
+
+# config.py's own order: an exported variable first, then .env, then the default.
+effective_value() {
+    local value="${!1-}"
+    [ -n "$value" ] || value="$(planned_value "$1")"
+    [ -n "$value" ] || value="$(config_default "$1")"
+    printf '%s\n' "$value"
+}
+
+# Where that value comes from. The exported environment is the only source this
+# script cannot rewrite, and the only one whose remedy is `unset`.
+value_source() {
+    if [ -n "${!1-}" ]; then
+        printf 'exported in this shell\n'
+    elif [ -n "$(planned_value "$1")" ]; then
+        printf '%s\n' "$planned_env_source"
+    else
+        printf 'the default in config.py\n'
+    fi
+}
+
+# The spellings of this machine a URL host may take. Quoted patterns are
+# literal, which the IPv6 form needs: bare [::1] is a bracket expression.
+url_is_loopback() {
+    local host="${1#*//}"
+    host="${host%%/*}"
+    case "$host" in
+        localhost|localhost:*|127.0.0.1|127.0.0.1:*|"[::1]"|"[::1]:"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Off in every spelling the SDK accepts; anything else is tracing on.
+tracing_is_off() {
+    case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+        ""|false|0|no|off) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# What contradicts "fully local". OLLAMA_HOST is reported but not judged here:
+# it decides what a server started by this script binds, not where the
+# application sends anything, and step 7 refuses every non-loopback value of it
+# with its own message. OPENROUTER_BASE_URL is reported for a similar reason:
+# with both backends on Ollama nothing reads it, and a backend that does read it
+# is refused on the backend variable itself.
+contradicts_local() {
+    case "$1" in
+        LLM_BACKEND|EMBED_BACKEND) [ "$2" != "ollama" ] ;;
+        OLLAMA_URL) ! url_is_loopback "$2" ;;
+        LANGSMITH_TRACING_V2|LANGCHAIN_TRACING_V2|LANGSMITH_TRACING|LANGCHAIN_TRACING|LANGCHAIN_HANDLER)
+            ! tracing_is_off "$2" ;;
+        *) false ;;
+    esac
+}
+
+# What each contradiction would do, so the refusal is a consequence and not a
+# list of names.
+local_effect() {
+    case "$1" in
+        LLM_BACKEND) printf 'the answering model would run on OpenRouter, not on Ollama\n' ;;
+        EMBED_BACKEND) printf 'every passage would be embedded by OpenRouter\n' ;;
+        OLLAMA_URL) printf 'that endpoint is not on this machine\n' ;;
+        *) printf 'prompts and answers would be uploaded as traces\n' ;;
+    esac
+}
+
+conflict_names=""
+conflict_lines=""
+exported_lines=""
+for name in $DATA_FLOW_VARS; do
+    value="$(effective_value "$name")"
+    origin="$(value_source "$name")"
+    if [ -n "${!name-}" ]; then
+        exported_lines="$exported_lines$name=$value ($origin)"$'\n'
+    fi
+    # Nothing to judge when the file that decides could not be read: step 10
+    # stops the run on it, and a config.py default would read as a conflict of
+    # its own making (its defaults are the hosted ones).
+    if [ -n "$planned_env" ] && [ "$effective_mode" = "fully local" ] \
+        && contradicts_local "$name" "$value"; then
+        conflict_names="$conflict_names $name"
+        conflict_lines="$conflict_lines  $name=$value ($origin) — $(local_effect "$name")"$'\n'
+    fi
+done
+
+if [ -n "$conflict_names" ]; then
+    fail "this run sets up the fully local configuration, but that is not what the"
+    fail "application would load. These values decide where your data goes:"
+    printf '%s' "$conflict_lines" | while IFS= read -r line; do fail "$line"; done
+    fail "config.py reads .env without overriding what is already exported, so an"
+    fail "exported variable wins over every line this script writes."
+    exported_conflicts=""
+    dotenv_conflicts=""
+    for name in $conflict_names; do
+        if [ -n "${!name-}" ]; then
+            exported_conflicts="$exported_conflicts $name"
+        else
+            dotenv_conflicts="$dotenv_conflicts $name"
+        fi
+    done
+    if [ -n "$exported_conflicts" ]; then
+        fail "remove them from this shell:"
+        fail " unset$exported_conflicts"
+        unset_flags=""
+        for name in $exported_conflicts; do unset_flags="$unset_flags -u $name"; done
+        fail "or start the script without them:"
+        fail " env$unset_flags bash scripts/install-mac.sh"
+    fi
+    if [ -n "$dotenv_conflicts" ]; then
+        fail "and edit .env (or move it aside and re-run) for:$dotenv_conflicts"
+    fi
+    fail "to answer on OpenRouter on purpose, run: bash scripts/install-mac.sh --hosted"
+    if [ "$dry_run" -eq 1 ]; then
+        fail "(dry run: nothing was installed, downloaded or written; a real run stops here too)"
+    fi
+    exit 2
+fi
+
+if [ -n "$exported_lines" ]; then
+    printf 'Exported in this shell, and read before .env — this is what decides the run:\n'
+    printf '%s' "$exported_lines" | while IFS= read -r line; do note "$line"; done
+    if [ "$effective_mode" != "fully local" ]; then
+        note "the hosted configuration is what this run sets up, so these are reported only"
+    fi
+elif [ -n "$planned_env" ]; then
+    printf 'Nothing exported in this shell decides where data goes; .env does.\n'
+fi
 
 # --- 7. Ollama --------------------------------------------------------------
 ollama_ready() { curl -fsS --max-time 3 "$ollama_url/api/tags" >/dev/null 2>&1; }
@@ -269,64 +459,57 @@ if [ "$dry_run" -eq 1 ]; then
 elif ollama_ready; then
     note "already answering"
 else
-    # Only a server on this machine is ours to start. Quoted patterns are
-    # literal, which the IPv6 form needs: bare [::1] is a bracket expression.
-    ollama_host="${ollama_url#*//}"
-    ollama_host="${ollama_host%%/*}"
-    case "$ollama_host" in
-        localhost|localhost:*|127.0.0.1|127.0.0.1:*|"[::1]"|"[::1]:"*)
-            # What the server binds is OLLAMA_HOST, not OLLAMA_URL: the URL only
-            # says where to look for one. So an exported OLLAMA_HOST decides what
-            # the server started here listens on, and putting one on the network
-            # is not this script's call. The gate is therefore closed by default:
-            # through it go an empty value (Ollama's own loopback default) and the
-            # spellings of loopback, with an optional scheme and port — nothing
-            # else. A bare port is refused with the rest: ":11434" is a host/port
-            # pair whose empty host means every interface, and "0" is 0.0.0.0.
-            ollama_bind="${OLLAMA_HOST-}"
-            case "$ollama_bind" in
-                http://*)  ollama_bind_host="${ollama_bind#http://}" ;;
-                https://*) ollama_bind_host="${ollama_bind#https://}" ;;
-                *)         ollama_bind_host="$ollama_bind" ;;
-            esac
-            # Unlike a URL host, a bind address may be a bare ::1 — and that form
-            # carries no port, ::1:11434 being an address in its own right; the
-            # bracketed form is the one that takes one.
-            case "$ollama_bind_host" in
-                ""|localhost|localhost:*|127.0.0.1|127.0.0.1:*|"::1"|"[::1]"|"[::1]:"*) ;;
-                *)
-                    fail "OLLAMA_HOST=$ollama_bind is not one of the loopback forms this script"
-                    fail "will start a server on, so it could listen beyond this machine. Run"
-                    fail "'unset OLLAMA_HOST' and re-run, or start Ollama yourself with the"
-                    fail "binding you want."
-                    exit 1
-                    ;;
-            esac
-            # `run`, not `start`: `start` writes a LaunchAgent and brings Ollama
-            # up at every login. Making it permanent is the reader's call, and
-            # the command for it is printed in the next steps.
-            if brew services run ollama >/dev/null 2>&1; then
-                note "started for this session: brew services run ollama (no login item)"
-                ollama_service=1
-            else
-                # mktemp, not a fixed name: TMPDIR can be world-writable, and a
-                # symlink planted at a name we would pick is a symlink nohup
-                # follows.
-                serve_log="$(mktemp "${TMPDIR:-/tmp}/ask-your-library-ollama.XXXXXX")"
-                note "brew services could not start it; running 'ollama serve' in the background"
-                note "server log: $serve_log"
-                nohup ollama serve >"$serve_log" 2>&1 &
-                ollama_pid=$!
-                note "pid $ollama_pid — it outlives this script; the last block stops it"
-            fi
-            ollama_started=1
-            ;;
+    # Only a server on this machine is ours to start, by the same rule the guard
+    # above holds an Ollama endpoint to.
+    if ! url_is_loopback "$ollama_url"; then
+        fail "nothing answers on $ollama_url, and it is not an address on this machine."
+        fail "start Ollama there (or unset OLLAMA_URL to use the default) and re-run."
+        exit 1
+    fi
+    # What the server binds is OLLAMA_HOST, not OLLAMA_URL: the URL only says
+    # where to look for one. So an exported OLLAMA_HOST decides what the server
+    # started here listens on, and putting one on the network is not this
+    # script's call. The gate is therefore closed by default: through it go an
+    # empty value (Ollama's own loopback default) and the spellings of loopback,
+    # with an optional scheme and port — nothing else. A bare port is refused
+    # with the rest: ":11434" is a host/port pair whose empty host means every
+    # interface, and "0" is 0.0.0.0.
+    ollama_bind="${OLLAMA_HOST-}"
+    case "$ollama_bind" in
+        http://*)  ollama_bind_host="${ollama_bind#http://}" ;;
+        https://*) ollama_bind_host="${ollama_bind#https://}" ;;
+        *)         ollama_bind_host="$ollama_bind" ;;
+    esac
+    # Unlike a URL host, a bind address may be a bare ::1 — and that form
+    # carries no port, ::1:11434 being an address in its own right; the
+    # bracketed form is the one that takes one.
+    case "$ollama_bind_host" in
+        ""|localhost|localhost:*|127.0.0.1|127.0.0.1:*|"::1"|"[::1]"|"[::1]:"*) ;;
         *)
-            fail "nothing answers on $ollama_url, and it is not an address on this machine."
-            fail "start Ollama there (or unset OLLAMA_URL to use the default) and re-run."
+            fail "OLLAMA_HOST=$ollama_bind is not one of the loopback forms this script"
+            fail "will start a server on, so it could listen beyond this machine. Run"
+            fail "'unset OLLAMA_HOST' and re-run, or start Ollama yourself with the"
+            fail "binding you want."
             exit 1
             ;;
     esac
+    # `run`, not `start`: `start` writes a LaunchAgent and brings Ollama up at
+    # every login. Making it permanent is the reader's call, and the command for
+    # it is printed in the next steps.
+    if brew services run ollama >/dev/null 2>&1; then
+        note "started for this session: brew services run ollama (no login item)"
+        ollama_service=1
+    else
+        # mktemp, not a fixed name: TMPDIR can be world-writable, and a symlink
+        # planted at a name we would pick is a symlink nohup follows.
+        serve_log="$(mktemp "${TMPDIR:-/tmp}/ask-your-library-ollama.XXXXXX")"
+        note "brew services could not start it; running 'ollama serve' in the background"
+        note "server log: $serve_log"
+        nohup ollama serve >"$serve_log" 2>&1 &
+        ollama_pid=$!
+        note "pid $ollama_pid — it outlives this script; the last block stops it"
+    fi
+    ollama_started=1
     waited=0
     while [ "$waited" -lt "$OLLAMA_WAIT_S" ] && ! ollama_ready; do
         sleep 1
@@ -380,29 +563,6 @@ step "Dependencies: the locked environment, with the web UI extra"
 run uv sync --locked --extra ui
 
 # --- 10. configuration ------------------------------------------------------
-local_env() {
-    # The lines local mode changes. LLM_TIMEOUT_S is one of them because
-    # config.py defaults it to 600 s under LLM_BACKEND=ollama, while a value
-    # copied from .env.example is an environment value and wins — which would
-    # leave a local model on the hosted 120 s per-attempt budget.
-    # QUESTION_DEADLINE_S has no such per-backend default: it is 300 s in both
-    # modes, and 300 s is the whole wall clock of a question, checked before each
-    # next decision. A local model that loads cold can spend that in the plan
-    # node alone, so local mode gets twenty minutes — room for four steps of it.
-    # The two tracing lines are uncommented for the same reason the README gives
-    # them: this mode is the one where nothing leaves the machine, and the SDK
-    # reads a LANGSMITH_/LANGCHAIN_ flag another project's shell exported.
-    sed -e 's/^LLM_BACKEND=.*/LLM_BACKEND=ollama/' \
-        -e 's/^LLM_TIMEOUT_S=.*/LLM_TIMEOUT_S=600/' \
-        -e 's/^QUESTION_DEADLINE_S=.*/QUESTION_DEADLINE_S=1200/' \
-        -e 's/^# LANGSMITH_TRACING_V2=false/LANGSMITH_TRACING_V2=false/' \
-        -e 's/^# LANGCHAIN_TRACING_V2=false/LANGCHAIN_TRACING_V2=false/' .env.example
-}
-
-# Hosted mode keeps the example as it is. A function so it goes through the same
-# writer as the local one, and fails the same way.
-hosted_env() { cat .env.example; }
-
 # `local_env > .env` truncated .env into existence before the writer produced a
 # byte, so a sed that failed — an unreadable .env.example is enough — left an
 # empty file behind. And an empty .env is not an obvious ruin: step 10 refuses to
@@ -534,14 +694,23 @@ fi
 # the message check_environment itself would produce for a condition this run
 # knowingly left behind, rendered through i18n.t with the same arguments — the
 # comparison is against those strings, never against an English fragment.
+# It also prints the configuration the application resolves — the same import
+# the CLI performs, so the run ends with the values the app will use and not
+# with the ones step 10 wrote. Those differ whenever a variable is exported:
+# config.py loads .env without override. A second argument names the mode this
+# run set up, and a local mode the loader does not agree with ends the run.
 # Exit: 0 nothing to report, 3 only the missing index, 4 only the missing key,
-# 5 both, 1 anything else — including a package that will not import, which is
-# what a bad LLM_BACKEND in a pre-existing .env does at config import time.
+# 5 both, 6 the effective configuration is not the mode this run set up, 1
+# anything else — including a package that will not import, which is what a bad
+# LLM_BACKEND in a pre-existing .env does at config import time.
 preflight_code='
+import os
 import sys
+from urllib.parse import urlsplit
 
 try:
-    from ask_your_library.config import DB_PATH, TABLES
+    from ask_your_library.config import (DB_PATH, EMBED_BACKEND, LLM_BACKEND, LLM_BASE_URL,
+                                         OLLAMA_URL, TABLES)
     from ask_your_library.i18n import t
     from ask_your_library.preflight import check_environment
 
@@ -551,6 +720,18 @@ except Exception as error:
     raise SystemExit(1)
 
 expected = sys.argv[1].split() if len(sys.argv) > 1 else []
+mode = sys.argv[2] if len(sys.argv) > 2 else ""
+# Both prefixes and the v1 names: langchain_core reads all of them, and any
+# value that is not one of these spellings of off means traces are uploaded.
+TRACING = ("LANGSMITH_TRACING_V2", "LANGCHAIN_TRACING_V2", "LANGSMITH_TRACING",
+           "LANGCHAIN_TRACING", "LANGCHAIN_HANDLER")
+OFF = ("", "false", "0", "no", "off")
+tracing_on = [name for name in TRACING
+              if os.environ.get(name, "").strip().lower() not in OFF]
+print(f"       LLM_BACKEND={LLM_BACKEND}, EMBED_BACKEND={EMBED_BACKEND}")
+print(f"       LLM_BASE_URL={LLM_BASE_URL}, OLLAMA_URL={OLLAMA_URL}")
+print("       tracing: " + (", ".join(tracing_on) if tracing_on else "off"))
+
 # The only required table is the transcripts one, so the missing-tables message
 # preflight would build has exactly that name in it.
 no_index = set()
@@ -566,6 +747,18 @@ if result.notices:
     print(f"       {notice_header}")
     for notice in result.notices:
         print(f"       - {notice}")
+
+if mode == "local":
+    wrong = [f"{name}={value}" for name, value in
+             (("LLM_BACKEND", LLM_BACKEND), ("EMBED_BACKEND", EMBED_BACKEND))
+             if value != "ollama"]
+    if urlsplit(OLLAMA_URL).hostname not in ("localhost", "127.0.0.1", "::1"):
+        wrong.append(f"OLLAMA_URL={OLLAMA_URL}")
+    wrong += tracing_on
+    if wrong:
+        print("       - the loaded configuration is not the fully local one: "
+              + ", ".join(wrong))
+        raise SystemExit(6)
 
 problems = set(result)
 if not problems:
@@ -588,11 +781,19 @@ fi
 if [ "$effective_backend" != "ollama" ]; then
     preflight_expect="$preflight_expect no-key"
 fi
+# The mode the loader is held to. A .env that already selected the other backend
+# is what this run set up, so the check follows the effective backend, not the flag.
+preflight_mode="hosted"
+if [ "$effective_backend" = "ollama" ]; then
+    preflight_mode="local"
+fi
 if [ "$dry_run" -eq 1 ]; then
     plan "run ask_your_library.preflight.check_environment() and report its problems"
+    plan "print the configuration ask_your_library.config resolves, and stop the run when"
+    plan "it is not the $effective_mode one this run set up"
 else
     preflight_status=0
-    uv run python -c "$preflight_code" "$preflight_expect" || preflight_status=$?
+    uv run python -c "$preflight_code" "$preflight_expect" "$preflight_mode" || preflight_status=$?
     case "$preflight_status" in
         0)
             note "no problems"
@@ -610,6 +811,13 @@ else
             note "both problems are this run's own: no index yet, and no OPENROUTER_API_KEY."
             note "build the demo corpus (or point LIBRARY_DB_PATH at one of your own), and"
             note "set the key in .env before the first question."
+            ;;
+        6)
+            fail "the configuration the application loads is not the $effective_mode one this"
+            fail "run set up — the values printed above are what config.py resolved. It reads"
+            fail ".env without overriding what is already exported, so a .env rewrite is no"
+            fail "fix: unset the variables named above (or use env -u) and re-run."
+            exit 2
             ;;
         *)
             fail "the preflight reported the problems above."

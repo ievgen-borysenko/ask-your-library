@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.2.1 (unreleased)
+
+- **The installer no longer promises a locality the application does not have.** `config.py` loads
+  `.env` through `load_dotenv()`, which never overrides a variable that is already exported, so a
+  shell carrying another project's `LLM_BACKEND=openrouter`, `EMBED_BACKEND=openrouter` or tracing
+  flag decided the run while every line the script printed — and the `.env` it wrote — still said
+  fully local. The script now resolves what the application will actually see, in `config.py`'s own
+  order (the exported environment, then the `.env` that is there or the one it is about to write,
+  then the default), for the values that decide where data goes: both backends, the Ollama
+  endpoint, the hosted base URL, and the five tracing names across both prefixes. In the local mode
+  a value that contradicts the mode stops the run at exit 2, naming each variable, where its value
+  came from and the two ways to drop it (`unset`, or `env -u`); `--hosted` reports the same values
+  instead, because there they are the mode. The dry run refuses in the same place and says it wrote
+  nothing. Step 12 then prints the configuration `ask_your_library.config` resolves and ends the
+  run when that is not the mode which was set up — a rewritten `.env` is no fix for a variable the
+  shell exports, and only the loader can say which of the two won.
+- **`SECURITY.md` describes the branch rules that are actually in force.** The paragraph on
+  required checks said the repository was private on the free plan until its first release and that
+  a red check was honoured by hand. It is public, and the ruleset on `main` lists all seven checks
+  as required, wants the branch up to date before it merges, and refuses force-pushes and deletion
+  with no bypass.
+- **Assertions that read as URL allow-list checks, and a character class that reads wider than it
+  is.** Three assertions checked a host name as a substring or a prefix of a URL (`example.org`
+  after neutralization, twice; the default endpoint once); they now compare whole URLs, parsed
+  with `urlsplit` where the text around them varies. `CONTROL_CHARS_RE` is written one block per
+  line with the invisible formatting characters spelled out singly instead of as spans, because a
+  span between two `\u` escapes reads to a checker as the range between their ASCII characters.
+  The set is unchanged, and `test_sanitize.py` now pins it over the whole of Unicode: 43 code
+  points.
+
 ## 0.2.0 (2026-09-09)
 
 The first public release. Everything below was merged after the `0.2.0-rc1` candidate of 07.09
