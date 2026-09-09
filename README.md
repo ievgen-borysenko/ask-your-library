@@ -797,8 +797,8 @@ The metrics also carry a cache-read counter, and it stays at zero by constructio
 never marks a prompt prefix for caching (no `cache_control` is sent), and even if it did, the
 system prompts are below the provider's minimum cacheable prefix and the large user message —
 question, results, evidence — changes at every step, so no prompt caching happens and there is
-nothing to discount "Cache reads not discounted" in the eval reports' cost line is a statement about the
-configured rates, not a discount those runs missed.
+nothing to discount. "Cache reads not discounted" in the eval reports' cost line is a statement
+about the configured rates, not a discount those runs missed.
 
 ## Project layout
 

@@ -211,7 +211,7 @@
 
 ## 0.2.0-rc1 (2026-09-07) — release candidate
 
-- **Measured.** Tag `v0.2.0-rc1` = `33dba3f` (the documentation merge of 07.09), single runs on 07.09 with
+- **Measured.** Tag `v0.2.0-rc1` = `33dba3f` (merged 07.09), single runs on 07.09 with
   `--require-clean`, strict hit-id, the same bge-m3 index as v0.1.0, Sonnet 4.6 via OpenRouter:
   core (11 questions) behaviour 11/11, quote provenance 47 / 0 / 0, $0.0488 mean per question, AI
   pre-check 10 correct / 0 incorrect / 1 incomplete (c06: the discovery scene not retrieved, the
