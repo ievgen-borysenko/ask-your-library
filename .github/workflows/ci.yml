@@ -31,7 +31,9 @@ jobs:
       - name: Install (locked)
         run: uv sync --locked --group dev
       - name: Unit tests + golden-set guard
-        run: uv run pytest -q
+        # -rs prints the skip reasons: this job runs on Linux, where the whole
+        # macOS installer file skips itself, and a silent skip reads as a pass.
+        run: uv run pytest -q -rs
 
   test-ui:
     # The UI tests skip themselves without the chainlit extra; this job is the
@@ -67,3 +69,21 @@ jobs:
         env:
           AYL_ALLOW_START_WITHOUT_KEY: "1"
         run: uv run eval/injection_canary.py --no-live
+
+  install-script:
+    # scripts/install-mac.sh refuses to run anywhere but macOS, so most of its
+    # tests skip themselves on the two Linux jobs above: this is the one place
+    # the dry run is actually exercised. That file only, and no backend matrix —
+    # the script reads config.py, it does not import the package.
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.10"
+      - name: Install (locked)
+        run: uv sync --locked --group dev
+      - name: The macOS installer, dry run against recorders
+        run: uv run pytest -q tests/test_install_script.py -rs

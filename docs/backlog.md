@@ -139,6 +139,14 @@ open ones often refer to them.
   multi-user deployment: isolation, budgets, retention, deployment security, a separate SCA.
 - A shorter README and a first-answer path that does not start with a 30-minute ingest (a small
   demo subset with ready questions).
+- One-command install: `scripts/install-mac.sh` is the first step of it, not the item. macOS
+  only — no Linux, no Windows — and no packaging: no formula, no installer, no published wheel,
+  so a reader still clones the repository and runs a script from it. Homebrew stays a
+  prerequisite they install themselves (the script prints the official command and exits 1), and
+  Ollama stays a prerequisite of the product, one the script installs and starts for the session
+  but does not replace — keeping it up across reboots is a login item the reader registers
+  themselves. The demo corpus is still a ~30-minute build behind a prompt, so the first answer is
+  not one command away either (same item as above).
 
 ## Resolved (kept because the open items refer to them)
 
