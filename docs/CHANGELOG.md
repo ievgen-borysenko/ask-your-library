@@ -2,6 +2,43 @@
 
 ## 0.2.1 (unreleased)
 
+- **`--print-env-resolution` no longer prints the keys it read.** The flag dumped every value of
+  the `.env` verbatim, and a `.env` is where the credentials live: a run of it reproduced
+  `OPENROUTER_API_KEY`, `LANGCHAIN_API_KEY` and `CHAINLIT_PASSWORD` on stdout, from the one flag
+  whose whole audience is people pasting its output into a bug report. A value whose name has the
+  shape of a credential (`*_API_KEY`, `*_KEY`, `*_TOKEN`, `*_SECRET`, `*PASSWORD*`, `*_PASS`,
+  folded) is now printed as `<set, N chars>`, and the guard's own summary lines redact by that
+  same list instead of a narrower one of their own. The equivalence tests still hold the whole
+  file against `dotenv_values()`: names and order, values for everything that is not a credential,
+  and for the ones that are, that both readings agree the name is set and on the length of the
+  value.
+- **A `.env` whose whitespace this parser cannot classify stops the run.** python-dotenv's parser
+  is Python's own `\s` class — around the `=`, before an inline `#`, and in the `rstrip()` that
+  ends an unquoted value — which is wider than the space and tab the shell reading handles. So
+  `LLM_BACKEND=ollama<FF># local` resolved to `ollama` for the application and kept the form feed
+  here: `LLM_BACKEND` never equalled `ollama`, the run classified itself as hosted, and the
+  `EMBED_BACKEND=openrouter` on the next line walked past the fully local guard under a banner
+  that said fully local. Reproducing that class in bash means classifying UTF-8 by hand in
+  whatever locale the run inherits, so a vertical tab, a form feed, the four ASCII separators, a
+  non-breaking space and every other Unicode space character are refused by line number instead,
+  wherever on the line they appear.
+- **`OLLAMA_HOST` is judged with the rest of the resolution, before anything is installed.** The
+  check stood in step 7, behind `brew install uv` and `uv python install`: on a PATH with no uv —
+  a fresh Mac, which is this script's whole audience — a run that was about to be refused for a
+  variable pointing a server, and an `ollama pull`, at somebody else's machine had already
+  downloaded and written a package manager's worth of software. It reads one exported variable and
+  needs no tool, so it now sits with the other refusals, ahead of step 3.
+- **The v1 tracing names are read by the rule langchain_core applies to them.** One truth table
+  covered all five names, and `langchain_core.utils.env.env_var_is_set` is not that table: it
+  counts every value but `""`, `0`, `false` and `False` as set, so `LANGCHAIN_TRACING=off` and
+  `LANGCHAIN_HANDLER=off` are set. The installer accepted either, reported tracing off and
+  finished, while `CallbackManager.configure()` raised `RuntimeError` on the first model call. The
+  two v1 names are now judged by that rule — refused in the local mode with the consequence named,
+  and reported in the hosted one as the `RuntimeError` it is rather than as an upload that cannot
+  happen — while the three v2-only names keep the wider list of off spellings, deliberately
+  stricter than langsmith's own (it uploads on the exact string `true`). Step 12 imports
+  `env_var_is_set` rather than keeping a copy of the rule, and reports the v1 names on their own
+  line.
 - **The installer no longer promises a locality the application does not have.** `config.py` loads
   `.env` through `load_dotenv()`, which never overrides a variable that is already exported, so a
   shell carrying another project's `LLM_BACKEND=openrouter`, `EMBED_BACKEND=openrouter` or tracing

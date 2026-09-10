@@ -114,11 +114,11 @@ def dry_run(sandbox, *flags):
 
 
 def reaches_the_start_path(sandbox):
-    """Make the run take the branch that starts Ollama — where the OLLAMA_HOST
-    gate is — and then let it finish. `curl` answers only once something has
-    started a server, which here means once `brew` has been called: before that
-    /api/tags is unreachable and the script has to start one, after it the server
-    is up and the wait loop ends on its first check instead of after a minute."""
+    """Make the run take the branch that starts Ollama, and then let it finish.
+    `curl` answers only once something has started a server, which here means
+    once `brew` has been called: before that /api/tags is unreachable and the
+    script has to start one, after it the server is up and the wait loop ends on
+    its first check instead of after a minute."""
     _, records, env = sandbox
     curl = Path(env["PATH"].split(os.pathsep)[0]) / "curl"
     curl.write_text(f'#!/bin/sh\necho "$@" >> "{records}/curl"\n'
@@ -296,15 +296,13 @@ def test_a_non_loopback_ollama_host_is_refused(sandbox, bind):
     rest: ':11434' is a host/port pair whose empty host is every interface, and
     '0' is 0.0.0.0 — the two spellings that read most like loopback and are not."""
     _, records, _ = sandbox
-    reaches_the_start_path(sandbox)
     result = real_run(sandbox, "--no-demo", OLLAMA_HOST=bind)
     assert result.returncode == 1, result.stdout
     assert f"OLLAMA_HOST={bind}" in result.stderr
     assert "unset OLLAMA_HOST" in result.stderr           # the fix is named
-    # Step 6's `uv python find` is the only thing in front of this gate, and it
-    # only looks; nothing installed, nothing started, nothing pulled.
-    assert invoked(records) == ["uv"], "the gate let a tool run past it"
-    assert (records / "uv").read_text().splitlines() == ["python find >=3.11"]
+    # The gate is judged with the rest of the resolution, ahead of step 3, so
+    # nothing at all runs in front of it — `uv python find` included.
+    assert invoked(records) == [], "the gate let a tool run past it"
 
 
 @mac_only
@@ -596,8 +594,7 @@ def test_a_non_loopback_ollama_host_is_refused_even_when_a_server_answers(sandbo
     assert result.returncode == 1, result.stdout
     assert ("OLLAMA_HOST=ollama.example.com:11434 is not one of the loopback forms this "
             "script will") in error_lines(result.stderr)
-    assert invoked(records) == ["uv"], "a tool ran past the gate"
-    assert not (records / "ollama").exists(), "a model was pulled onto another machine"
+    assert invoked(records) == [], "a tool ran past the gate"
 
 
 @mac_only
@@ -723,12 +720,67 @@ def test_the_preflight_snippet_runs_the_tracing_switch_the_application_runs(tmp_
     assert "tracing: off" in printed_lines(result.stdout)
 
 
+@pytest.mark.skipif(not have_package, reason="the package is not importable here")
+@pytest.mark.parametrize("name", ["LANGCHAIN_TRACING", "LANGCHAIN_HANDLER"])
+def test_the_preflight_snippet_reads_the_v1_names_as_langchain_core_does(tmp_path, name):
+    """The app-level truth, checked where the run ends. `off` is not an off value
+    for langchain_core: env_var_is_set counts every value but "", "0", "false"
+    and "False" as set, and a set v1 name with v2 tracing off makes
+    CallbackManager.configure() raise RuntimeError on the first model call. The
+    snippet read all five names through one list of spellings, printed
+    "tracing: off" and let the run finish. It now imports env_var_is_set — the
+    function langchain_core itself calls — rather than keeping a copy of the rule
+    that could drift from it."""
+    result = run_preflight("no-index", tmp_path, mode="local", LLM_BACKEND="ollama",
+                           EMBED_BACKEND="ollama", **{name: "off"})
+    assert result.returncode == 6, result.stdout + result.stderr
+    printed = printed_lines(result.stdout)
+    assert "tracing: off" in printed             # the v2 reading, still true
+    assert (f"tracing (v1): {name} is set as langchain_core reads it — the first model "
+            "call raises RuntimeError unless v2 tracing is on") in printed
+    assert name in result.stdout.split("not the fully local one")[1]
+
+
+@pytest.mark.skipif(not have_package, reason="the package is not importable here")
+@pytest.mark.parametrize("off", ["", "0", "false", "False"])
+def test_the_preflight_snippet_keeps_the_v1_off_values_off(tmp_path, off):
+    """The four values env_var_is_set does read as off, so the check is not the
+    blunt one that would end every run carrying a LANGCHAIN_TRACING=false.
+
+    What is asserted is the mode check, not the exit code: a local run's
+    classification is `check_environment()`'s, which contacts Ollama, and there
+    is none on a CI runner. So this pins that the run does NOT end at the mode
+    mismatch and that the v1 line is not printed — the two things these four
+    values decide — and leaves the classification to the tests that describe
+    it."""
+    result = run_preflight("no-index", tmp_path, mode="local", LLM_BACKEND="ollama",
+                           EMBED_BACKEND="ollama", LANGCHAIN_TRACING=off,
+                           LANGCHAIN_HANDLER=off)
+    assert result.returncode != 6, result.stdout + result.stderr
+    assert "not the fully local one" not in result.stdout
+    assert "tracing: off" in printed_lines(result.stdout)
+    assert "tracing (v1)" not in result.stdout
+
+
+@pytest.mark.skipif(not have_package, reason="the package is not importable here")
+def test_the_preflight_snippet_reports_a_v1_name_in_the_hosted_mode_too(tmp_path):
+    """The hosted mode does not refuse a configuration it was asked for, so the
+    v1 name is reported there rather than ending the run — as the RuntimeError it
+    is, not as an upload."""
+    result = run_preflight("no-index", tmp_path, mode="hosted", LANGCHAIN_HANDLER="off")
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert ("tracing (v1): LANGCHAIN_HANDLER is set as langchain_core reads it — the "
+            "first model call raises RuntimeError unless v2 tracing is on"
+            ) in printed_lines(result.stdout)
+
+
 def test_help_lists_every_flag(tmp_path):
     # Parsed before the platform and repository checks, so it answers anywhere.
     result = subprocess.run([BASH, str(SCRIPT), "--help"], cwd=tmp_path,
                             capture_output=True, text=True)
     assert result.returncode == 0
-    for flag in ("--dry-run", "--yes", "--no-demo", "--hosted", "--help"):
+    for flag in ("--dry-run", "--yes", "--no-demo", "--hosted", "--print-env-resolution",
+                 "--help"):
         assert flag in result.stdout
 
 
@@ -779,8 +831,17 @@ LAST_WINS=second
 # What is refused, and the reason the refusal has to name. Each is a form
 # python-dotenv accepts (or silently drops) and this parser will not guess at:
 # reading it differently from the application is how a "fully local" install
-# ends up embedding the library somewhere else.
+# ends up embedding the library somewhere else. The first five are whitespace:
+# python-dotenv's parser is Python's own \s class, which is every one of these
+# as well as the space and tab the shell reading handles, and reproducing that
+# class in bash means classifying UTF-8 by hand in whatever locale the run
+# inherits. They are refused by line number wherever on the line they appear.
 REFUSED_FORMS = [
+    ("BAD=x\fy\n", "a form feed (U+000C)"),
+    ("BAD=x\vy\n", "a vertical tab (U+000B)"),
+    ("BAD=x\u00a0y\n", "a non-breaking space (U+00A0)"),
+    ("BAD=x\u2028y\n", "a line separator (U+2028)"),
+    ("BAD=x\u3000y\n", "an ideographic space (U+3000)"),
     ('BAD="oops\n', "the \" quote is never closed on this line"),
     ('BAD="line one\nline two"\n', "the \" quote is never closed on this line"),
     ("BAD='oops\n", "the ' quote is never closed on this line"),
@@ -818,6 +879,107 @@ def env_resolution(sandbox):
     return resolved, order
 
 
+# --- and never printing what it read -----------------------------------------
+# `--print-env-resolution` printed every value verbatim, and a .env is where the
+# keys live: a stub run of it reproduced OPENROUTER_API_KEY, LANGCHAIN_API_KEY
+# and CHAINLIT_PASSWORD on stdout, from the flag whose whole audience is people
+# pasting its output into a bug report. The names below are the ones the script
+# redacts, by the shape of the name rather than by a list of the ones this
+# project happens to use. Written out here rather than parsed out of the script,
+# so a change to either list has to be made deliberately in both.
+SECRET_SUFFIXES = ("_API_KEY", "_KEY", "_TOKEN", "_SECRET", "_PASS")
+# Realistic names, and values that are visibly not keys: the shape of the NAME is
+# what the redaction reads, and a fixture written in a provider's real key format
+# is a secret-scanner finding in this repository's own history for nothing.
+SECRET_VALUES = {
+    "OPENROUTER_API_KEY": "not-a-real-openrouter-key",
+    "LANGCHAIN_API_KEY": "lsv2-not-a-real-langchain-key",
+    "LANGSMITH_API_KEY": "lsv2-not-a-real-langsmith-key-either",
+    "CHAINLIT_PASSWORD": "not-the-real-one-either",
+    "CHAINLIT_AUTH_SECRET": "not-a-real-auth-secret",
+    "HF_TOKEN": "not-a-real-hugging-face-token",
+    "DB_PASS": "not-a-real-database-password",
+}
+# ... beside the names that only look like them. MAX_OUTPUT_TOKENS is a number,
+# not a token, and it ships in .env.example.
+SECRET_FORMS = "".join(f"{name}={value}\n" for name, value in SECRET_VALUES.items()) + """\
+EMPTY_API_KEY=
+LLM_BACKEND=ollama
+EMBED_BACKEND=ollama
+LANGCHAIN_TRACING_V2=false
+MAX_OUTPUT_TOKENS=2048
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+"""
+
+
+def is_secret_name(name):
+    """The rule scripts/install-mac.sh redacts by (is_secret_name there)."""
+    upper = name.upper()
+    return "PASSWORD" in upper or upper.endswith(SECRET_SUFFIXES)
+
+
+@mac_only
+def test_the_env_resolution_never_prints_a_credential(sandbox):
+    """Every value in the file, and not one of the secrets in either stream. The
+    record still says whether the name is set and how long the value is — which
+    is what an argument about how the file was read turns on — and the values
+    that are not credentials are printed as they were read."""
+    root, _, env = sandbox
+    (root / ".env").write_text(SECRET_FORMS, encoding="utf-8")
+    result = subprocess.run([BASH, "scripts/install-mac.sh", "--print-env-resolution"],
+                            cwd=root, env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    for name, value in SECRET_VALUES.items():
+        assert value not in result.stdout, f"{name} was printed to stdout"
+        assert value not in result.stderr, f"{name} was printed to stderr"
+    printed = result.stdout.splitlines()
+    for name in ("OPENROUTER_API_KEY", "CHAINLIT_PASSWORD", "DB_PASS", "HF_TOKEN",
+                 "CHAINLIT_AUTH_SECRET"):
+        assert (f"env-resolution\t{name}\t<set, {len(SECRET_VALUES[name])} chars>"
+                in printed), name
+    assert "env-resolution\tEMPTY_API_KEY\t" in printed        # set to nothing stays that
+    # The names that are not credentials, printed as the parser read them.
+    assert "env-resolution\tMAX_OUTPUT_TOKENS\t2048" in printed
+    assert "env-resolution\tLLM_BACKEND\tollama" in printed
+
+
+@mac_only
+def test_a_credential_in_the_env_reaches_neither_stream_of_a_whole_run(sandbox):
+    """Not only the debug flag: the same .env through all twelve steps, with the
+    guard's own summary lines among them."""
+    root, _, _ = sandbox
+    (root / ".env").write_text(SECRET_FORMS, encoding="utf-8")
+    reaches_the_start_path(sandbox)
+    result = real_run(sandbox, "--no-demo")
+    assert result.returncode == 0, result.stderr
+    for name, value in SECRET_VALUES.items():
+        assert value not in result.stdout + result.stderr, f"{name} was printed"
+
+
+@mac_only
+def test_the_redacted_resolution_still_agrees_with_python_dotenv(sandbox):
+    """The equivalence proof survives the redaction: same names, same order,
+    same values for everything that is not a credential — and for the ones that
+    are, both sides agree on whether the name is set, and the record's character
+    count is the length of the value the library read."""
+    from dotenv import dotenv_values
+
+    root, _, _ = sandbox
+    (root / ".env").write_text(SECRET_FORMS, encoding="utf-8")
+    resolved, order = env_resolution(sandbox)
+    real = dotenv_values(root / ".env")
+    assert order == list(real)
+    for name, value in real.items():
+        if not is_secret_name(name):
+            assert resolved[name] == value, name
+        elif value:
+            assert resolved[name] == f"<set, {len(value)} chars>", name
+        else:
+            assert resolved[name] == "", name
+    assert [name for name in real if is_secret_name(name)] == [
+        *SECRET_VALUES, "EMPTY_API_KEY"], "the file stopped covering the redacted shapes"
+
+
 @mac_only
 def test_the_env_parser_reads_every_supported_form_as_python_dotenv_does(sandbox):
     """The equivalence proof. One .env carrying every form the parser claims to
@@ -843,6 +1005,38 @@ def test_the_env_parser_reads_every_supported_form_as_python_dotenv_does(sandbox
     assert resolved["DOUBLE"] == "a quoted value"
     assert resolved["DOUBLE_NEWLINE"] == "line one\nline two"
     assert resolved["LAST_WINS"] == "second"
+
+
+# Where the difference between the two whitespace classes actually decides a
+# run: python-dotenv strips a comment on any of these, so LLM_BACKEND is
+# "ollama" and the fully local guard applies to the whole file. The shell
+# reading kept the character in the value, LLM_BACKEND never equalled "ollama",
+# the run classified itself as hosted, and EMBED_BACKEND=openrouter on the next
+# line went through — the whole library embedded off the machine by a run whose
+# banner said "fully local".
+WHITESPACE_BEFORE_A_COMMENT = [("\f", "a form feed (U+000C)"),
+                               ("\v", "a vertical tab (U+000B)"),
+                               ("\u00a0", "a non-breaking space (U+00A0)")]
+
+
+@mac_only
+@pytest.mark.parametrize("char,reason", WHITESPACE_BEFORE_A_COMMENT,
+                         ids=[reason[-7:-1] for _, reason in WHITESPACE_BEFORE_A_COMMENT])
+def test_whitespace_this_parser_cannot_classify_stops_the_run(sandbox, char, reason):
+    from dotenv import dotenv_values
+
+    root, records, _ = sandbox
+    (root / ".env").write_text(f"LLM_BACKEND=ollama{char}# local\nEMBED_BACKEND=openrouter\n",
+                               encoding="utf-8")
+    # The half that makes it a security question and not a formatting one.
+    assert dotenv_values(root / ".env")["LLM_BACKEND"] == "ollama"
+    result = real_run(sandbox, "--no-demo")
+    assert result.returncode == 2, result.stdout
+    assert f"the .env already in this clone, line 1: {reason}" in " ".join(
+        error_lines(result.stderr))
+    assert invoked(records) == []
+    assert not any("warning: EMBED_BACKEND" in line for line in printed_lines(result.stdout)), (
+        "the run classified itself as hosted instead of refusing the line")
 
 
 @mac_only
@@ -916,6 +1110,30 @@ def test_the_guard_refuses_before_brew_would_install_uv(sandbox, tmp_path):
 
 
 @mac_only
+def test_the_ollama_host_gate_refuses_before_brew_would_install_uv(sandbox, tmp_path):
+    """The same for OLLAMA_HOST, which stood in step 7 instead: on a PATH with no
+    uv — a fresh Mac — `brew install uv` and `uv python install` had already run
+    by the time the run was refused for a variable that points a server, and an
+    `ollama pull`, at somebody else's machine. It reads one exported variable and
+    needs no tool, so it is judged with the rest of the resolution."""
+    root, records, env = sandbox
+    bindir = tmp_path / "no-uv-bin"
+    bindir.mkdir()
+    for name in ("brew", "ollama", "curl"):          # every recorder except uv
+        stub = bindir / name
+        stub.write_text(f'#!/bin/sh\necho "$@" >> "{records}/{name}"\nexit 0\n')
+        stub.chmod(0o755)
+    env = {**env, "PATH": os.pathsep.join([str(bindir), "/usr/bin", "/bin"]),
+           "OLLAMA_HOST": "ollama.example.com:11434"}
+    result = subprocess.run([BASH, "scripts/install-mac.sh", "--no-demo"],
+                            cwd=root, env=env, capture_output=True, text=True)
+    assert result.returncode == 1, result.stdout
+    assert "[3/12] Homebrew" not in result.stdout          # it never got that far
+    assert invoked(records) == []
+    assert not (root / ".env").exists()
+
+
+@mac_only
 def test_a_missing_uv_is_installed_when_the_guard_lets_the_run_through(sandbox, tmp_path):
     """The other half, so the test above is not passing on a script that simply
     stopped installing uv: with nothing exported, the same PATH gets uv."""
@@ -935,8 +1153,23 @@ def test_a_missing_uv_is_installed_when_the_guard_lets_the_run_through(sandbox, 
 
 
 # --- the five tracing flags, the two key names, the two endpoints ------------
-TRACING_FLAGS = ["LANGSMITH_TRACING_V2", "LANGCHAIN_TRACING_V2", "LANGSMITH_TRACING",
-                 "LANGCHAIN_TRACING", "LANGCHAIN_HANDLER"]
+# Two truth tables, not one. The three v2-only names are read by langsmith, which
+# uploads on the exact string "true"; the two v1 names are read by
+# langchain_core's env_var_is_set, whose only off values are "", "0", "false" and
+# "False" — so LANGCHAIN_TRACING=off is SET, and a set v1 name with v2 tracing
+# off makes CallbackManager.configure() raise RuntimeError on the first model
+# call. LANGCHAIN_TRACING is in both lists: langsmith reads it as the fallback
+# for TRACING_V2 and langchain_core as a v1 switch, so it has to pass both.
+TRACING_V2_FLAGS = ["LANGSMITH_TRACING_V2", "LANGCHAIN_TRACING_V2", "LANGSMITH_TRACING"]
+TRACING_V1_FLAGS = ["LANGCHAIN_TRACING", "LANGCHAIN_HANDLER"]
+TRACING_FLAGS = TRACING_V2_FLAGS + TRACING_V1_FLAGS
+# The spellings each side reads as off, and the ones that read as off and are not.
+OFF_FOR_V2 = ["false", "0", "no", "off", "FALSE", "Off", ""]
+OFF_FOR_V1 = ["false", "False", "0", ""]
+ON_FOR_V1 = ["off", "no", "FALSE", "Off", "true", "1"]
+V2_EFFECT = "prompts and answers would be uploaded as traces"
+V1_EFFECT = ("the v1 names have only 0, false and False as off values, so this is tracing "
+             "on: prompts and answers uploaded, or a RuntimeError on the first model call")
 
 
 @mac_only
@@ -947,23 +1180,74 @@ def test_every_tracing_flag_stops_the_fully_local_install(sandbox, flag):
     off means prompts, retrieved passages and answers are uploaded. One test
     covered one flag; the other four were an assumption."""
     root, records, _ = sandbox
+    effect = V1_EFFECT if flag in TRACING_V1_FLAGS else V2_EFFECT
     result = real_run(sandbox, "--no-demo", **{flag: "true"})
     assert result.returncode == 2, result.stdout
-    assert (f"{flag}=true (exported in this shell) — prompts and answers would be "
-            "uploaded as traces") in error_lines(result.stderr)
+    assert f"{flag}=true (exported in this shell) — {effect}" in error_lines(result.stderr)
     assert invoked(records) == []
     assert not (root / ".env").exists()
 
 
 @mac_only
-@pytest.mark.parametrize("off", ["false", "0", "no", "off", "FALSE", "Off", ""])
-def test_a_tracing_flag_that_is_off_is_not_a_conflict(sandbox, off):
-    """The other half of the same rule: these are the spellings the SDK reads as
-    off, and a guard that refused them would refuse the .env it writes itself."""
+@pytest.mark.parametrize("flag", TRACING_V2_FLAGS)
+@pytest.mark.parametrize("off", OFF_FOR_V2)
+def test_a_v2_tracing_flag_that_is_off_is_not_a_conflict(sandbox, flag, off):
+    """The other half of the same rule, across every v2 name rather than one of
+    them: these are the spellings langsmith reads as off, and a guard that
+    refused them would refuse the .env this script writes itself."""
     root, _, _ = sandbox
-    result = real_run(sandbox, "--no-demo", LANGSMITH_TRACING_V2=off)
+    result = real_run(sandbox, "--no-demo", **{flag: off})
     assert result.returncode == 0, result.stderr
     assert "LLM_BACKEND=ollama" in (root / ".env").read_text()
+
+
+@mac_only
+@pytest.mark.parametrize("flag", TRACING_V1_FLAGS)
+@pytest.mark.parametrize("off", OFF_FOR_V1)
+def test_a_v1_tracing_name_at_its_own_off_values_is_not_a_conflict(sandbox, flag, off):
+    """env_var_is_set has exactly four off values, and all four have to go
+    through: a gate that refused `false` on the v1 names would refuse the way out
+    it recommends."""
+    root, _, _ = sandbox
+    result = real_run(sandbox, "--no-demo", **{flag: off})
+    assert result.returncode == 0, result.stderr
+    assert "LLM_BACKEND=ollama" in (root / ".env").read_text()
+
+
+@mac_only
+@pytest.mark.parametrize("flag", TRACING_V1_FLAGS)
+@pytest.mark.parametrize("value", ON_FOR_V1)
+def test_a_v1_tracing_name_that_only_looks_off_stops_the_fully_local_install(sandbox, flag,
+                                                                            value):
+    """`LANGCHAIN_TRACING=off` is set as far as langchain_core is concerned, and
+    a set v1 name with v2 tracing off raises RuntimeError inside
+    CallbackManager.configure() on the first model call. One truth table for all
+    five names accepted it, reported "tracing off", installed everything and left
+    an application that could not answer a question."""
+    root, records, _ = sandbox
+    result = real_run(sandbox, "--no-demo", **{flag: value})
+    assert result.returncode == 2, result.stdout
+    assert f"{flag}={value} (exported in this shell) — {V1_EFFECT}" in error_lines(result.stderr)
+    assert any("every value but 0, false and False counts as" in line
+               for line in error_lines(result.stderr)), "the rule is not named"
+    assert invoked(records) == []
+    assert not (root / ".env").exists()
+
+
+@mac_only
+@pytest.mark.parametrize("flag", TRACING_V1_FLAGS)
+def test_hosted_mode_reports_a_v1_name_as_the_runtime_error_it_is(sandbox, flag):
+    """The hosted mode reports rather than refuses — but not as an upload: a set
+    v1 name with v2 tracing off sends nothing anywhere, it stops the first model
+    call. `tracing is on: ... uploaded to <endpoint>` described the wrong
+    consequence, and for LANGCHAIN_HANDLER it described one that cannot happen."""
+    result = real_run(sandbox, "--no-demo", "--hosted", **{flag: "off"})
+    assert result.returncode == 0, result.stderr
+    printed = printed_lines(result.stdout)
+    assert f"set as langchain_core reads it: {flag} — it counts every value but 0," in printed
+    assert ("false and False as tracing on, so the first model call raises RuntimeError"
+            in printed)
+    assert not any(line.startswith("tracing is on:") for line in printed)
 
 
 @mac_only
@@ -1040,12 +1324,10 @@ def test_a_host_that_only_looks_like_loopback_is_refused(sandbox, bind):
     compared exactly; a bind address has no userinfo at all, so an @ in one is
     refused outright."""
     _, records, _ = sandbox
-    reaches_the_start_path(sandbox)
     result = real_run(sandbox, "--no-demo", OLLAMA_HOST=bind)
     assert result.returncode == 1, result.stdout
     assert f"OLLAMA_HOST={bind}" in result.stderr
-    assert not (records / "ollama").exists(), "a model was pulled onto another machine"
-    assert not (records / "brew").exists(), "the gate let a server be started"
+    assert invoked(records) == [], "the gate let a tool run past it"
 
 
 @mac_only

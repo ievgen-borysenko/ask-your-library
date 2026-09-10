@@ -214,6 +214,20 @@ hosted_env() { cat .env.example; }
 # runs, so a key alone is a tracing switch that none of the five flags shows.
 BACKEND_VARS="LLM_BACKEND EMBED_BACKEND"
 ENDPOINT_VARS="OLLAMA_URL OLLAMA_HOST OPENROUTER_BASE_URL LANGCHAIN_ENDPOINT LANGSMITH_ENDPOINT"
+# The tracing names are read by two libraries with two different truth tables,
+# and one table applied to all of them is what let LANGCHAIN_TRACING=off through.
+# V2: langsmith's get_env_var reads these four for "is tracing on", and uploads
+# on the exact string "true" — every other value is off.
+# V1: langchain_core's env_var_is_set reads these two, and counts a name as SET
+# unless its value is "", "0", "false" or "False". A set v1 name with v2 tracing
+# off makes CallbackManager.configure() raise RuntimeError before the first
+# answer, so "off" and "no" on them are not off at all.
+# LANGCHAIN_TRACING is deliberately in both lists: langchain_core reads it as a
+# v1 switch and langsmith reads it as the fallback for TRACING_V2, so it has to
+# satisfy both rules. TRACING_VARS is the reported and judged list — the union,
+# in the order the two prefixes are named everywhere else in this script.
+TRACING_V2_VARS="LANGSMITH_TRACING_V2 LANGCHAIN_TRACING_V2 LANGSMITH_TRACING LANGCHAIN_TRACING"
+TRACING_V1_VARS="LANGCHAIN_TRACING LANGCHAIN_HANDLER"
 TRACING_VARS="LANGSMITH_TRACING_V2 LANGCHAIN_TRACING_V2 LANGSMITH_TRACING LANGCHAIN_TRACING LANGCHAIN_HANDLER"
 # LANGCHAIN_API_KEY is the one that is judged. LANGSMITH_API_KEY is reported
 # beside it because a reader who has one usually has the other, but nothing in
@@ -346,8 +360,56 @@ dotenv_scan_quoted() {
     return 1
 }
 
+# Whitespace python-dotenv counts as whitespace and this script does not. Its
+# parser is Python's own class: [^\S\r\n] around the `=` and after `export`,
+# `re.sub(r"\s+#.*", "")` for an inline comment, and `rstrip()` at the end of an
+# unquoted value — all of which match every character below as well as the space
+# and tab the trimming above handles. `LLM_BACKEND=ollama<FF># local` is the
+# shape that decides a run: dotenv_values() reads "ollama" because the form feed
+# starts the comment, the reading here kept it, LLM_BACKEND never equalled
+# "ollama", and the fully local guard was skipped for the whole file — the
+# EMBED_BACKEND=openrouter line on the next one with it. Reproducing Python's
+# class in bash 3.2 means classifying UTF-8 by hand in whatever locale the run
+# inherits, so these are refused by line number instead, wherever on the line
+# they appear: the same fail-closed answer the rest of this parser gives a form
+# it cannot promise to read exactly. Indexed arrays only — macOS ships bash 3.2,
+# which has no associative ones — and the bytes are spelled out in octal so the
+# match is on the character and not on a range that a locale might widen.
+DOTENV_ODD_WS=($'\013' $'\014' $'\034' $'\035' $'\036' $'\037'
+               $'\302\205' $'\302\240' $'\341\232\200'
+               $'\342\200\200' $'\342\200\201' $'\342\200\202' $'\342\200\203'
+               $'\342\200\204' $'\342\200\205' $'\342\200\206' $'\342\200\207'
+               $'\342\200\210' $'\342\200\211' $'\342\200\212'
+               $'\342\200\250' $'\342\200\251' $'\342\200\257'
+               $'\342\201\237' $'\343\200\200')
+DOTENV_ODD_WS_NAME=("a vertical tab (U+000B)"
+                    "a form feed (U+000C)"
+                    "a file separator (U+001C)"
+                    "a group separator (U+001D)"
+                    "a record separator (U+001E)"
+                    "a unit separator (U+001F)"
+                    "a next-line control character (U+0085)"
+                    "a non-breaking space (U+00A0)"
+                    "a Unicode space character (U+1680)"
+                    "a Unicode space character (U+2000)"
+                    "a Unicode space character (U+2001)"
+                    "a Unicode space character (U+2002)"
+                    "a Unicode space character (U+2003)"
+                    "a Unicode space character (U+2004)"
+                    "a Unicode space character (U+2005)"
+                    "a Unicode space character (U+2006)"
+                    "a Unicode space character (U+2007)"
+                    "a Unicode space character (U+2008)"
+                    "a Unicode space character (U+2009)"
+                    "a Unicode space character (U+200A)"
+                    "a line separator (U+2028)"
+                    "a paragraph separator (U+2029)"
+                    "a narrow non-breaking space (U+202F)"
+                    "a Unicode space character (U+205F)"
+                    "an ideographic space (U+3000)")
+
 dotenv_parse() {
-    local line number=0 trimmed key value tail
+    local line number=0 trimmed key value tail odd=0
     dotenv_names=""
     while IFS= read -r line || [ -n "$line" ]; do
         number=$((number + 1))
@@ -355,6 +417,16 @@ dotenv_parse() {
         case "$line" in
             *$'\r'*) dotenv_refuse "$number" "a carriage return inside the line" ;;
         esac
+        odd=0
+        while [ "$odd" -lt "${#DOTENV_ODD_WS[@]}" ]; do
+            case "$line" in
+                *"${DOTENV_ODD_WS[odd]}"*)
+                    dotenv_refuse "$number" \
+                        "${DOTENV_ODD_WS_NAME[odd]}, which python-dotenv counts as whitespace"\
+" and this script does not read anywhere on a line" ;;
+            esac
+            odd=$((odd + 1))
+        done
         dotenv_ltrim "$line"
         trimmed="$dotenv_trimmed"
         [ -n "$trimmed" ] || continue                   # a blank line
@@ -428,15 +500,44 @@ dotenv_parse() {
     done <<< "$1"
 }
 
+# The names whose VALUE is a credential — one list, because both places that
+# print a resolved .env have to agree on it: the guard's summary lines below,
+# and --print-env-resolution, which printed every value verbatim and so handed a
+# run's OPENROUTER_API_KEY, LANGCHAIN_API_KEY and CHAINLIT_PASSWORD to stdout.
+# That is the flag whose whole audience is people pasting its output into a bug
+# report. Matched on the shape of the name rather than against the names this
+# project happens to use — a .env is the reader's file, and HF_TOKEN or
+# CHAINLIT_AUTH_SECRET is as much a credential as the three above — and folded,
+# so a lower-case spelling is caught too. It over-matches on purpose: a flag
+# whose name ends in _KEY (AYL_ALLOW_START_WITHOUT_KEY) is redacted with the
+# keys, because a redacted flag costs a reader one line of a file they have and
+# a printed key costs them the key.
+is_secret_name() {
+    case "$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')" in
+        *_API_KEY|*_KEY|*_TOKEN|*_SECRET|*PASSWORD*|*_PASS) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 # The debug flag, and the way the tests prove this parser and python-dotenv
 # agree: one record per name, in the order the file defines them, with the
 # value escaped so a newline inside one (a \n in a double-quoted value) cannot
-# be mistaken for the end of the record.
+# be mistaken for the end of the record. A credential's value is not in the
+# record: whether the name is set, and how long the value is, is everything an
+# argument about how this file was read turns on.
 print_env_resolution() {
     local name variable value out index char
     for name in $dotenv_names; do
         variable="dotenv_v_$name"
         value="${!variable-}"
+        if is_secret_name "$name"; then
+            if [ -n "$value" ]; then
+                printf 'env-resolution\t%s\t<set, %s chars>\n' "$name" "${#value}"
+            else
+                printf 'env-resolution\t%s\t\n' "$name"
+            fi
+            continue
+        fi
         out=""
         index=0
         while [ "$index" -lt "${#value}" ]; do
@@ -583,14 +684,15 @@ value_source() {
 }
 
 # A key is a credential: whether it is set is what decides here, and its value is
-# never printed. Everything else is shown as it stands.
+# never printed. Everything else is shown as it stands. The list of names is the
+# one --print-env-resolution redacts by, so the two cannot disagree about what a
+# credential is.
 shown_value() {
-    case "$1" in
-        *_API_KEY)
-            if [ -n "$2" ]; then printf '<set>\n'; else printf '\n'; fi
-            ;;
-        *) printf '%s\n' "$2" ;;
-    esac
+    if is_secret_name "$1"; then
+        if [ -n "$2" ]; then printf '<set>\n'; else printf '\n'; fi
+    else
+        printf '%s\n' "$2"
+    fi
 }
 
 # host[:port], compared against the spellings of this machine EXACTLY. A match
@@ -655,12 +757,42 @@ ollama_host_is_loopback() {
     authority_is_loopback "$authority" 1
 }
 
-# Off in every spelling the SDK accepts; anything else is tracing on.
+# Off in every spelling the v2 flags accept; anything else is tracing on. Wider
+# than langsmith's own rule — it uploads on the exact string "true" and reads
+# everything else as off — so a value outside both lists ("yes", "1") is refused
+# rather than assumed. Failing that way costs a reader one edit; failing the
+# other way uploads their library's passages.
 tracing_is_off() {
     case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
         ""|false|0|no|off) return 0 ;;
         *) return 1 ;;
     esac
+}
+
+# The v1 names, by langchain_core's rule and not by the list above.
+# env_var_is_set(name) is `name in os.environ and os.environ[name] not in
+# {"", "0", "false", "False"}` — no folding, and "off" is not in it. So
+# LANGCHAIN_TRACING=off is SET: CallbackManager.configure() sees v1 tracing on
+# with v2 off and raises RuntimeError before the first answer, while the list
+# above read the same value as off, reported "tracing: off" and finished the
+# install. Case matters here: "false" and "False" are off, "FALSE" is not.
+tracing_v1_is_off() {
+    case "$1" in
+        ""|0|false|False) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Off for the name it is given, under every rule that reads that name.
+# LANGCHAIN_TRACING is in both lists and has to satisfy both.
+tracing_flag_is_off() {
+    case " $TRACING_V1_VARS " in
+        *" $1 "*) tracing_v1_is_off "$2" || return 1 ;;
+    esac
+    case " $TRACING_V2_VARS " in
+        *" $1 "*) tracing_is_off "$2" || return 1 ;;
+    esac
+    return 0
 }
 
 # graph.py's own rule, in the shell. enable_tracing_if_key_present() sets
@@ -675,11 +807,14 @@ key_enables_tracing() {
     return 0
 }
 
-# Tracing as the application resolves it: any of the five flags at a value that
-# is not one of the spellings of off, or the key rule above.
+# Traces actually leaving: one of the four names langsmith reads at a value that
+# is not one of the spellings of off, or the key rule above. The v1 names are
+# judged separately (v1_tracing_set below): LANGCHAIN_HANDLER cannot turn v2
+# tracing on, it can only stop the run with a RuntimeError, so counting it here
+# named an upload that would never happen.
 tracing_resolves_on() {
     local flag
-    for flag in $TRACING_VARS; do
+    for flag in $TRACING_V2_VARS; do
         if ! tracing_is_off "$(effective_value "$flag")"; then return 0; fi
     done
     key_enables_tracing
@@ -709,7 +844,7 @@ contradicts_local() {
         OLLAMA_URL) ! url_is_loopback "$2" ;;
         LANGCHAIN_API_KEY) key_enables_tracing ;;
         LANGSMITH_TRACING_V2|LANGCHAIN_TRACING_V2|LANGSMITH_TRACING|LANGCHAIN_TRACING|LANGCHAIN_HANDLER)
-            ! tracing_is_off "$2" ;;
+            ! tracing_flag_is_off "$1" "$2" ;;
         *) false ;;
     esac
 }
@@ -724,6 +859,10 @@ local_effect() {
         LANGCHAIN_API_KEY)
             printf 'a key with no LANGCHAIN_TRACING_V2 set turns tracing on by itself: '
             printf 'prompts and answers would be uploaded to %s\n' "$(trace_endpoint)" ;;
+        LANGCHAIN_TRACING|LANGCHAIN_HANDLER)
+            printf 'the v1 names have only 0, false and False as off values, so this is '
+            printf 'tracing on: prompts and answers uploaded, or a RuntimeError on the '
+            printf 'first model call\n' ;;
         *) printf 'prompts and answers would be uploaded as traces\n' ;;
     esac
 }
@@ -787,11 +926,48 @@ if [ -n "$conflict_names" ]; then
             fail "local mode carries that line, so a run with no .env yet is already covered."
             ;;
     esac
+    case " $conflict_names " in
+        *" LANGCHAIN_TRACING "*|*" LANGCHAIN_HANDLER "*)
+            fail "LANGCHAIN_TRACING and LANGCHAIN_HANDLER are the v1 names, and langchain_core"
+            fail "reads them with env_var_is_set: every value but 0, false and False counts as"
+            fail "set, \"off\" and \"no\" included. Unset the name, or write false."
+            ;;
+    esac
     fail "to answer on OpenRouter on purpose, run: bash scripts/install-mac.sh --hosted"
     if [ "$dry_run" -eq 1 ]; then
         fail "(dry run: nothing was installed, downloaded or written; a real run stops here too)"
     fi
     exit 2
+fi
+
+# OLLAMA_HOST is read twice by ollama and not at all by config.py — the
+# application's endpoint is OLLAMA_URL. A server started by step 7 BINDS it, and
+# the CLI reads it as the address of the server it talks to, so it is also where
+# the `ollama list` and `ollama pull` of step 8 go. Both readings are refused
+# beyond loopback: one would put a server on the network, the other would pull
+# this run's models onto somebody else's machine. It is judged HERE, with the
+# rest of the resolution and before step 3, because that is the only place a
+# refusal costs nothing: standing in step 7 it had `brew install uv` and `uv
+# python install` in front of it, so a fresh Mac — this script's whole audience —
+# had a package manager's worth of software downloaded and written for a run
+# that was never going to be allowed to start anything. Nothing in this check
+# needs a tool: it reads one exported variable.
+# The gate is closed by default: through it go an empty value (Ollama's own
+# loopback default) and the spellings of loopback, with an optional scheme and
+# port — nothing else. A bare port is refused with the rest: ":11434" is a
+# host/port pair whose empty host means every interface, and "0" is 0.0.0.0. The
+# host is compared exactly, not by prefix: "localhost:11434@ollama.example.com"
+# begins with the loopback spelling and IS ollama.example.com, so `localhost:*`
+# let this run's models be pulled onto that machine. ollama_host_is_loopback
+# refuses an @ outright — a bind address has no userinfo — along with a port that
+# is not digits and anything carrying a path.
+ollama_bind="${OLLAMA_HOST-}"
+if ! ollama_host_is_loopback "$ollama_bind"; then
+    fail "OLLAMA_HOST=$ollama_bind is not one of the loopback forms this script will"
+    fail "start a server on, or send an 'ollama pull' to, so it could listen — or"
+    fail "fetch — beyond this machine. Run 'unset OLLAMA_HOST' and re-run, or start"
+    fail "Ollama yourself with the binding you want."
+    exit 1
 fi
 
 # Past the guard, so this is the configuration the run is going to carry out —
@@ -828,6 +1004,23 @@ if tracing_resolves_on; then
     note "tracing is on: prompts, retrieved passages and answers are uploaded to"
     note "  $(trace_endpoint)"
     note "set LANGCHAIN_TRACING_V2=false (and LANGSMITH_TRACING_V2=false) to stop that"
+fi
+
+# And the v1 names, which are not a third spelling of that switch: a set one with
+# v2 tracing off is not an upload, it is a RuntimeError out of
+# CallbackManager.configure() before the first answer. Reported here rather than
+# refused, for the same reason the values above are: the hosted mode reports what
+# it finds. In the local mode the same names are a conflict and the run stopped.
+v1_tracing_set=""
+for name in $TRACING_V1_VARS; do
+    if ! tracing_v1_is_off "$(effective_value "$name")"; then
+        v1_tracing_set="$v1_tracing_set $name"
+    fi
+done
+if [ -n "$v1_tracing_set" ]; then
+    note "set as langchain_core reads it:$v1_tracing_set — it counts every value but 0,"
+    note "false and False as tracing on, so the first model call raises RuntimeError"
+    note "unless LANGCHAIN_TRACING_V2 is on. Unset those names, or write false."
 fi
 
 # --hosted moves the ANSWERING model off this machine and nothing else, so
@@ -923,31 +1116,11 @@ fi
 ollama_ready() { curl -fsS --max-time 3 "$ollama_url/api/tags" >/dev/null 2>&1; }
 
 step "Ollama: the binary, and a server answering on $ollama_url/api/tags"
-# OLLAMA_HOST is read twice by ollama and not at all by config.py — the
-# application's endpoint is OLLAMA_URL. A server started here BINDS it, and the
-# CLI reads it as the address of the server it talks to, so it is also where the
-# `ollama list` and `ollama pull` of step 8 go. Both readings are refused beyond
-# loopback: one would put a server on the network, the other would pull this
-# run's models onto somebody else's machine. That second one used to walk
-# straight through, because the gate sat inside the branch that starts a server
-# and a server already answering skips it. The gate is closed by default:
-# through it go an empty value (Ollama's own loopback default) and the spellings
-# of loopback, with an optional scheme and port — nothing else. A bare port is
-# refused with the rest: ":11434" is a host/port pair whose empty host means
-# every interface, and "0" is 0.0.0.0. The host is compared exactly, not by
-# prefix: "localhost:11434@ollama.example.com" begins with the loopback spelling
-# and IS ollama.example.com, so `localhost:*` let this run's models be pulled
-# onto that machine. ollama_host_is_loopback refuses an @ outright — a bind
-# address has no userinfo — along with a port that is not digits and anything
-# carrying a path.
-ollama_bind="${OLLAMA_HOST-}"
-if ! ollama_host_is_loopback "$ollama_bind"; then
-    fail "OLLAMA_HOST=$ollama_bind is not one of the loopback forms this script will"
-    fail "start a server on, or send an 'ollama pull' to, so it could listen — or"
-    fail "fetch — beyond this machine. Run 'unset OLLAMA_HOST' and re-run, or start"
-    fail "Ollama yourself with the binding you want."
-    exit 1
-fi
+# OLLAMA_HOST — what a server started below binds, and where step 8's `ollama
+# pull` goes — was judged with the rest of the resolution, before step 3. The
+# gate used to sit here, and it sat inside the branch that starts a server, so a
+# server already answering skipped it entirely and the pull went to whatever
+# machine the variable named.
 if command -v ollama >/dev/null 2>&1; then
     note "$(command -v ollama)"
 else
@@ -1205,6 +1378,10 @@ try:
     from ask_your_library.graph import enable_tracing_if_key_present
     from ask_your_library.i18n import t
     from ask_your_library.preflight import check_environment
+    # The rule that decides the v1 names, imported rather than copied: it is
+    # what CallbackManager.configure() itself calls, and a second copy of it
+    # here is exactly the drift this check exists to catch.
+    from langchain_core.utils.env import env_var_is_set
 
     # Tracing is not decided by the flags alone. build_graph calls this before
     # the first node, and it turns a LANGCHAIN_API_KEY with no
@@ -1220,13 +1397,21 @@ except Exception as error:
 
 expected = sys.argv[1].split() if len(sys.argv) > 1 else []
 mode = sys.argv[2] if len(sys.argv) > 2 else ""
-# Both prefixes and the v1 names: langchain_core reads all of them, and any
-# value that is not one of these spellings of off means traces are uploaded.
+# Both prefixes, and two truth tables rather than one. These four are what
+# langsmith reads for "is tracing on", and any value that is not one of these
+# spellings of off is taken as an upload.
 TRACING = ("LANGSMITH_TRACING_V2", "LANGCHAIN_TRACING_V2", "LANGSMITH_TRACING",
-           "LANGCHAIN_TRACING", "LANGCHAIN_HANDLER")
+           "LANGCHAIN_TRACING")
 OFF = ("", "false", "0", "no", "off")
 tracing_on = [name for name in TRACING
               if os.environ.get(name, "").strip().lower() not in OFF]
+# The v1 names are judged by the rule langchain_core applies, not by that list:
+# env_var_is_set counts every value but "", "0", "false" and "False" as set, so
+# LANGCHAIN_TRACING=off is set. Set, with v2 tracing off, is what makes
+# CallbackManager.configure() raise RuntimeError on the first model call — while
+# the list above reported "tracing: off" and this run finished.
+TRACING_V1 = ("LANGCHAIN_TRACING", "LANGCHAIN_HANDLER")
+v1_tracing_set = [name for name in TRACING_V1 if env_var_is_set(name)]
 print(f"       LLM_BACKEND={LLM_BACKEND}, EMBED_BACKEND={EMBED_BACKEND}")
 print(f"       LLM_BASE_URL={LLM_BASE_URL}, OLLAMA_URL={OLLAMA_URL}")
 if tracing_on:
@@ -1239,6 +1424,10 @@ if tracing_on:
     print("       tracing: " + ", ".join(tracing_on) + " -> " + endpoint)
 else:
     print("       tracing: off")
+if v1_tracing_set:
+    print("       tracing (v1): " + ", ".join(v1_tracing_set) + " is set as "
+          "langchain_core reads it — the first model call raises RuntimeError "
+          "unless v2 tracing is on")
 
 # The only required table is the transcripts one, so the missing-tables message
 # preflight would build has exactly that name in it.
@@ -1263,6 +1452,7 @@ if mode == "local":
     if urlsplit(OLLAMA_URL).hostname not in ("localhost", "127.0.0.1", "::1"):
         wrong.append(f"OLLAMA_URL={OLLAMA_URL}")
     wrong += tracing_on
+    wrong += [name for name in v1_tracing_set if name not in tracing_on]
     if wrong:
         print("       - the loaded configuration is not the fully local one: "
               + ", ".join(wrong))
