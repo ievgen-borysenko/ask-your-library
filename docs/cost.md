@@ -6,11 +6,18 @@ Ollama serves on your own machine, priced at `OLLAMA_PRICE_IN_PER_MTOK` /
 that is the arithmetic, not a rounded-down estimate. There is no account and no billing to set up,
 and nothing below applies to it except the paragraph on cache reads at the end.
 
-**It is slower, and that is the whole trade: local is free but slow, hosted answers a research
-question in tens of seconds for cents.** Per question, on one Mac, from single measured runs. Every
-cell covers one kind of question: a catalogue figure is computed from catalogue rows only, a
-research figure from research rows only, and no cell is a mean over a set that mixes the two —
-those sets exist, and their whole-set means are between six fast rows and four slow ones.
+**Speed is not the whole trade.** Local is free but slow — hosted answers a research question in
+tens of seconds for cents — and it also answers research questions less reliably: 8/10 with
+41 / 1 / 2 quotes confirmed / unattributed / broken for the default `qwen2.5:14b` on the local run
+of 2026-09-10, whose own verdict is that neither local candidate "is good enough to advertise as a
+strong default" ([`eval-results/2026-09-10-local-models.md`](eval-results/2026-09-10-local-models.md),
+and [Known limits](known-limits.md) for the full entry). This page prices and times that trade; it
+does not measure the accuracy half.
+
+Per question, on one Mac, from single measured runs. Every cell covers one kind of question: a
+catalogue figure is computed from catalogue rows only, a research figure from research rows only,
+and no cell is a mean over a set that mixes the two — those sets exist, and their whole-set means
+are between six fast rows and four slow ones.
 
 | | Catalogue question | Research question | Cost per question |
 |---|---|---|---|

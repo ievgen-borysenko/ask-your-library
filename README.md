@@ -63,7 +63,9 @@ No account, no API key, nothing to pay: the answering model and the embeddings b
 own machine through Ollama, and the cost line under the answer reads $0.0000. A hosted model is
 available (`bash scripts/install-mac.sh --hosted`) and is the only thing here that needs a key.
 
-**Local is slower, and that is the trade.** On a Mac the default `qwen2.5:14b` answers a catalogue
+**Local is slower and less accurate, and that is the trade** — the accuracy half is measured under
+[Privacy and cost](#privacy-and-cost) below and in
+[`docs/known-limits.md`](docs/known-limits.md). On a Mac the default `qwen2.5:14b` answers a catalogue
 question ("how many books do I have?") in 1 to 12 s and a research one in 61 to 217 s, at $0; the
 hosted `claude-sonnet-4.6` takes 1 to 2 s and 8 to 61 s — a mean of 27 to 28 s over the eleven
 research questions of the core eval set — for about $0.002 and $0.05 respectively. Free costs time.
@@ -121,6 +123,19 @@ themselves are in [`docs/eval-results/`](docs/eval-results/).
   A hosted answering model (`LLM_BACKEND=openrouter`) is an option, not a requirement; choose it
   and it needs a key and costs what [`docs/cost.md`](docs/cost.md) works out —
   [`docs/configuration.md`](docs/configuration.md).
+- **Is that default as accurate as the hosted model?** No, and this project's own measurement of it
+  says so. Catalogue questions are clean: the default `qwen2.5:14b` scores 10/10 with 17 / 0 / 0
+  quotes confirmed / unattributed / broken. Research questions are where it shows — 8/10 with
+  41 / 1 / 2, so 18/20 and 58 / 1 / 2 over both sets, against 19/20 and 36 / 2 / 1 for the smaller
+  `qwen2.5:7b`. The report's verdict is quoted here rather than softened: "Neither model is good
+  enough to advertise as a strong default: 19/20 and 18/20 with genuine unattributed and broken
+  quotes in both." A local model still fabricates — a quote the passage it cites does not contain,
+  a quote lifted from a different passage than the one it names — and `validate` reports those,
+  it does not prevent them. The hosted baselines in the table above are 47 / 0 / 0, 53 / 0 / 0 and
+  73 / 0 / 0, but they were measured on other sets, so that is not a like-for-like comparison. The
+  runs, and the caveat that only part of them was re-measured after the last prompt change:
+  [`docs/eval-results/2026-09-10-local-models.md`](docs/eval-results/2026-09-10-local-models.md);
+  the hosted path is `LLM_BACKEND=openrouter` ([`docs/configuration.md`](docs/configuration.md)).
 - Run this on your own machine, over books you legally own.
 - By default nothing leaves the machine: the answering model and the embeddings both run on this
   Ollama, and with tracing off there is no other path out. Set `LLM_BACKEND=openrouter` and the

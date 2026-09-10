@@ -1,7 +1,26 @@
 # Known limits
 
-From `backlog.md`, confirmed by the runs of 2026-09-05, 06 and 07 (`v0.2.0-rc1`):
+From `backlog.md`, confirmed by the runs of 2026-09-05, 06 and 07 (`v0.2.0-rc1`), and — for the
+local default that ships since 0.3.0 — by the local run of 2026-09-10:
 
+- **The default local answering model is measurably less reliable than the hosted one.** Measured
+  on the local backend on 2026-09-10
+  ([`eval-results/2026-09-10-local-models.md`](eval-results/2026-09-10-local-models.md)): the
+  default `qwen2.5:14b` scores 10/10 on the catalogue set with 17 / 0 / 0 quotes confirmed /
+  unattributed / broken, and 8/10 on the research set with 41 / 1 / 2 — 18/20 and 58 / 1 / 2 over
+  both, a 95.1 % (58/61) quote-confirmation rate. `qwen2.5:7b` scores 19/20 with 36 / 2 / 1, 92.3 %
+  (36/39). That report's own verdict: "Neither model is good enough to advertise as a strong
+  default: 19/20 and 18/20 with genuine unattributed and broken quotes in both." `c10`
+  (aggregation) fails on both models, and `c09` (identify) fails on `qwen2.5:14b`. The quote check
+  is a report, not a gate: it names an unattributed or a broken quote, it does not stop the answer
+  from carrying one. Scope of those numbers: the harness's automatic score, no human graded the
+  answers (the manual-correctness checkboxes in the report are unticked), single runs, and only
+  `qwen2.5:7b`'s research subset was re-measured after the last prompt change, so `qwen2.5:14b`'s
+  numbers describe the prompt as it stood in Runs 1-6. The hosted figures in the
+  [README](../README.md#measured) table come from other sets and are not a like-for-like
+  comparison; `LLM_BACKEND=openrouter` ([Configuration](configuration.md)) is the hosted path, and
+  [Cost](cost.md) is what it costs. Measure your own model before trusting it:
+  `LLM_BACKEND=ollama uv run eval/run_agent_eval.py`.
 - **Identify mode can still stop at one book.** The coverage gate (ADR-013, since 0.2.0-rc1) spends the
   planner's next queued query before `reflect` may say "enough" with a single book, which is
   what brought Gulliver (c09) and the second gothic candidate (h22) into the clarify list; q06

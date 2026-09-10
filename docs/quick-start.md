@@ -47,7 +47,9 @@ uv run scripts/ingest_demo_corpus.py     # build the demo corpus (~30 min first 
 
 To answer on a hosted model instead, set `LLM_BACKEND=openrouter` in that `.env`, uncomment the
 three OpenRouter lines beside it, and put your key in `OPENROUTER_API_KEY`. That path costs money
-per question ([Cost](cost.md)); the local one does not.
+per question ([Cost](cost.md)); the local one does not, and answers research questions less
+reliably — 8/10 with 41 / 1 / 2 quotes confirmed / unattributed / broken for the default
+`qwen2.5:14b`, measured in [Known limits](known-limits.md).
 
 The ingest is staged and cached in `data/`, so it is safe to interrupt and re-run:
 `--stage prepare-text|prepare-audio|prepare-canaries|ingest|cards` runs one stage, `--book <substring>`

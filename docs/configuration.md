@@ -106,7 +106,9 @@ OpenRouter), and the agent nodes
 expect strict JSON, which small local models return less reliably. A malformed reply is retried
 once with the parse error shown to the model; if it fails again, `observe` keeps no evidence from
 that step, `reflect` stops the loop ("no usable decision") and `plan` searches the raw question
-as its one query and says so in the plan step and in the eval report. Measure your model on the
+as its one query and says so in the plan step and in the eval report. What the shipped default
+model does score, and the report that says neither local candidate is good enough to advertise as
+a strong default, are in [Known limits](known-limits.md). Measure your model on the
 core set before trusting it: `LLM_BACKEND=ollama uv run eval/run_agent_eval.py`. In this mode the answering model is configured by the `OLLAMA_*`
 variables only (`OLLAMA_LLM_MODEL`, `OLLAMA_URL`, optional `OLLAMA_PRICE_*`): `ORCHESTRATOR_MODEL`
 and the OpenRouter prices in a copied `.env` are OpenRouter settings and are not applied, so
