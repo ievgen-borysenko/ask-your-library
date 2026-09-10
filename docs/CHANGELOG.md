@@ -338,28 +338,6 @@
   above, no other alert at error level), wants the branch up to date before it merges, and refuses
   force-pushes and deletion with no bypass. CodeQL runs from GitHub's default setup, so its two
   analyses are not among the seven: what the ruleset requires is the result of the scan.
-- **The secret scan reads merge commits' own diffs.** gitleaks parses `git log -p`, and `git log -p`
-  prints no diff at all for a merge commit unless it is asked for one, so anything a merge introduced
-  by itself was never read — the plain case is a conflict resolved by writing a key into the file
-  being reconciled, content no side-branch commit holds. The range still resolved and
-  `git rev-list --count` still reported commits, so the step announced a scan and exited 0 over a
-  range it had never read whole. All three invocations — the pull-request range, the push range and
-  the whole history — now carry `--diff-merges=first-parent`, and the two complete option strings
-  live once in the job `env` (`HISTORY_OPTS`, `RANGE_OPTS`) with every caller reading them verbatim,
-  so nothing composes a string of its own. `first-parent` rather than `-m`: both find such a key, but
-  `first-parent` reports it once, attributed to the merge, and it is a diff-format option and not
-  `--first-parent` traversal, so the walk is untouched — a key that exists only in a side-branch
-  commit which a later commit removed before the merge is still found, still attributed to that
-  commit. The whole-history mode passes `--log-opts`, and that REPLACES gitleaks' own options rather
-  than extending them, so `--full-history --all --diff-filter=tuxdb` is repeated inside
-  `HISTORY_OPTS`; without `--all` the mode would have narrowed from every ref to the commits
-  reachable from `HEAD`. The step's log line and `SECURITY.md` now say "every commit reachable from
-  any ref", which is what it always did and never claimed. This was a coverage gap and not a leak:
-  the history was rescanned whole with the fixed options and is clean. Unchanged: the empty-range and
-  unresolvable-range failures, `--redact`, `--exit-code 1`, the pinned binary and its SHA-256.
-  `.gitignore` also picks up `*.db-wal`, `*.db-shm` and `*.db-journal` for the whole tree rather than
-  only beside `.chainlit/chat.db`, because `AYL_CHAINLIT_DIR` moves the chat database anywhere and a
-  write-ahead log holds message text the `.db` file does not hold yet.
 - **Assertions that read as URL allow-list checks, and a character class that reads wider than it
   is.** Four assertions checked a host name as a substring or a prefix of a URL (`example.org`
   after neutralization, twice; the hosted endpoint; the local one); they now compare whole URLs,

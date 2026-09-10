@@ -19,7 +19,7 @@ dependencies = [
     # `lancedb.expr` (the chapter filters in library.py) is imported at module
     # import time; 0.34 is the oldest version verified to have col/lit/contains
     # and expression pushdown (older ones are untested, not known to lack it);
-    # the lockfile resolves 0.37.1.
+    # the lockfile resolves 0.38.0.
     "lancedb>=0.34",
     # Imported directly by the ingest package (kept_rows, the staged publish
     # batches), not only pulled in by lancedb; the bound is the version the
