@@ -143,9 +143,11 @@ def data_block(tag: str, text: str, trusted: bool = False, **attrs: str) -> str:
 
 def llm_invoke(system: str, user: str, role: str):
     """Single point of model invocation: rules go in the system message, data
-    in the user message; tracks token usage per node role."""
-    reply = llm().invoke([SystemMessage(content=f"{system}\n\n{DATA_RULE}"),
-                          HumanMessage(content=user)])
+    in the user message; tracks token usage per node role. The role travels
+    into the client factory too: it decides whether what is left of the
+    question's time budget may cap this call (see `call_timeout_s`)."""
+    reply = llm(role).invoke([SystemMessage(content=f"{system}\n\n{DATA_RULE}"),
+                              HumanMessage(content=user)])
     meta = getattr(reply, "usage_metadata", None) or {}
     tokens_in = meta.get("input_tokens", 0)
     tokens_out = meta.get("output_tokens", 0)
@@ -170,27 +172,43 @@ def llm_invoke(system: str, user: str, role: str):
 
 CONNECT_TIMEOUT_S = 5.0   # the OpenAI SDK's default connect timeout, kept on purpose
 MIN_CALL_TIMEOUT_S = 5.0  # floor: a call started with seconds left still gets a real attempt
+# Node roles the remaining budget never caps. `synthesize` writes the answer
+# out of the evidence already collected and is the last call of a run: it is
+# what the budget was spent FOR, not a way of spending more of it.
+UNCAPPED_ROLES = ("synthesize",)
 
 
-def call_timeout_s() -> float:
+def call_timeout_s(role: str = "") -> float:
     """Read/write timeout for the NEXT call: the configured per-attempt bound,
-    but never more than what is left of the question's deadline.
+    capped by what is left of the question's deadline — for the calls that
+    decide whether to keep searching, and only while there is budget left.
 
     `deadline_passed` is only consulted between steps, so on its own it bounds
     the loop and not a call: with LLM_TIMEOUT_S above QUESTION_DEADLINE_S — the
-    local default pair, 600 against 300 — one call could run past the whole
-    question's budget, and then retry. A reasoning model over Ollama does
+    local default pair, 600 against 300 — one loop call could run past the
+    whole question's budget, and then retry. A reasoning model over Ollama does
     exactly that, because its thinking tokens are not counted against
     max_tokens. Floored at MIN_CALL_TIMEOUT_S so a call the loop did start
     inside the budget fails on the provider rather than instantly on a timeout
-    of zero; that floor is the only way past the deadline, and it is seconds."""
+    of zero.
+
+    Two calls are deliberately NOT capped by the remaining budget, because the
+    deadline is a budget for CONTINUING the search and never a cut mid-call:
+    the final `synthesize`, and any call issued once `deadline_passed` is
+    already true. Capping those would spend the budget searching and then time
+    the answer out at the floor — `run_question` has no `except` around the
+    stream, so the CLI and the web UI would turn that APITimeoutError into an
+    error string and a deadline-stopped run would return nothing at all,
+    instead of the degraded answer the deadline exists to produce."""
+    if role in UNCAPPED_ROLES or deadline_passed():
+        return float(LLM_TIMEOUT_S)
     left = deadline_remaining_s()
     if left is None:
         return float(LLM_TIMEOUT_S)
     return max(MIN_CALL_TIMEOUT_S, min(float(LLM_TIMEOUT_S), left))
 
 
-def llm() -> ChatOpenAI:
+def llm(role: str = "") -> ChatOpenAI:
     # Ollama's OpenAI-compatible endpoint ignores the key but the client
     # requires one; a fixed placeholder keeps the local mode key-free.
     #
@@ -217,7 +235,7 @@ def llm() -> ChatOpenAI:
         # (httpx read timeouts are per read, so a server dripping bytes is the
         # one shape this does not bound; the question deadline catches it
         # between steps.)
-        timeout=httpx.Timeout(call_timeout_s(), connect=CONNECT_TIMEOUT_S),
+        timeout=httpx.Timeout(call_timeout_s(role), connect=CONNECT_TIMEOUT_S),
         max_retries=LLM_MAX_RETRIES,
         **local_only,
     )

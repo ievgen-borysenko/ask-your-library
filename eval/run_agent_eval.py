@@ -233,16 +233,47 @@ def group_of(item: dict) -> str:
 # whether it writes it actively is not what decides the score. Kept to shapes whose
 # subject can only be the evidence or the library: "does not mention" is
 # deliberately absent, because an answer that answers can still say that one
-# chapter does not mention some detail. The limit is the one the whole list has: a
-# model that narrates from memory AND says the evidence is short still passes,
-# which is what the manual-correctness checkbox in the report is for.
+# chapter does not mention some detail.
 REFUSAL_MARKERS = ("not included", "not in this", "not in the library", "not in my library",
                    "cannot answer", "can't answer", "cannot provide", "don't know", "do not have",
                    "not available", "no evidence", "not part of",
                    "does not contain", "do not contain", "is not contained", "are not contained",
                    "does not include", "do not include", "does not cover", "do not cover",
-                   "is not covered", "are not covered", "не містить",
+                   "is not covered", "are not covered", "не містить", "не містять",
                    "не знаю", "немає", "нема ", "не входить", "не можу відповісти", "доказів")
+
+# A marker is where a refusal ENDS, so how much text may follow it is the second
+# half of the rule. Without it, "The library does not contain this, but in the
+# novel the captain ..." scores PASS: a marker, and then the episode told from
+# the model's own memory, which is the exact failure a refusal item measures.
+# The wider list above makes that shape likelier, because it now covers hedges
+# models emit constantly ("the evidence does not include the exact wording,
+# but ..."), so the two changes belong together.
+#
+# The budget comes from the real c08 answers of both local models
+# (docs/eval-results/2026-09-10-local-models.md): 37 words after "does not
+# contain" (qwen2.5:7b), 36 after "does not cover" (14b), 11 after "no evidence"
+# (the 14b probe) — in each case a marker sentence that restates the question
+# plus one more sentence about the evidence. 40 leaves those a margin and has no
+# room for a retold episode. Deliberately NOT part of the rule: the provenance
+# count. An honest refusal quotes the card that says the thing is not in this
+# edition, and c08 confirmed 3 quotes on 7b and 4 on 14b while declining, so
+# "no confirmed quote" would fail the very answers this must keep passing.
+# The heuristic's remaining limit, stated: a model that declines and then
+# narrates in a dozen words still passes, which is what the manual-correctness
+# checkbox in the report is for.
+REFUSAL_TAIL_WORDS = 40
+
+
+def is_refusal(answer: str) -> bool:
+    """Does this (already folded) answer refuse — an explicit marker, and the
+    answer ending there rather than carrying on with the story?"""
+    hits = [(answer.find(m), len(m)) for m in REFUSAL_MARKERS if m in answer]
+    if not hits:
+        return False
+    # the earliest marker, and the longest one starting there
+    start, length = min(hits, key=lambda h: (h[0], -h[1]))
+    return len(answer[start + length:].split()) <= REFUSAL_TAIL_WORDS
 
 
 def fold(text: str) -> str:
@@ -290,8 +321,9 @@ def score(item: dict, r: dict) -> dict:
                 "catalog_listed": len(listed), "behavior_ok": ok}
     if item["type"] == "refusal":
         # Evidence-free answers are NOT automatically refusals: the model may
-        # have answered from its own knowledge. Only an explicit refusal passes.
-        ok = any(m in answer for m in REFUSAL_MARKERS)
+        # have answered from its own knowledge. Only an explicit refusal passes,
+        # and a marker with the story told after it is not one (see is_refusal).
+        ok = is_refusal(answer)
     elif behavior == "research":
         # Routing only: a question that reads like a listing but needs the books'
         # content must take the research loop (at least one search, no catalogue

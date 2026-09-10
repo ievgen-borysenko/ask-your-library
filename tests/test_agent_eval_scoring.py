@@ -80,7 +80,8 @@ def test_refusal_markers_cover_the_evidence_does_not_contain_it_phrasing():
                    "The provided evidence does not cover how Tom Sawyer made the boys pay him.",
                    "The passages here do not cover the fence at all.",
                    "That episode is not covered by the books here.",
-                   "Бібліотека не містить цієї книжки."):
+                   "Бібліотека не містить цієї книжки.",
+                   "Ці книжки не містять цього епізоду."):
         assert harness.score(item, run(answer, checked=1))["behavior_ok"], answer
     # the metric's meaning is unchanged: told from model memory, with no such
     # phrase anywhere, it is still a FAIL
@@ -92,6 +93,56 @@ def test_refusal_markers_cover_the_evidence_does_not_contain_it_phrasing():
     assert not harness.score(item, run(
         "Chapter II does not mention the rat, but Tom traded the whitewashing for marbles.",
         checked=2))["behavior_ok"]
+
+
+def test_a_refusal_that_goes_on_to_narrate_from_memory_is_not_a_refusal():
+    """A marker is where a refusal ENDS. Declining and then telling the story
+    anyway is the failure the item measures, and the widened marker list makes
+    that shape likelier — it now covers hedges models emit constantly. So the
+    rule is: an explicit marker, and at most REFUSAL_TAIL_WORDS words after it."""
+    item = {"type": "refusal", "expected_books": []}
+    # (a) a pure refusal: the marker, and nothing after it but the apology
+    pure = ("The Adventures of Tom Sawyer is not in the library, so I cannot answer this "
+            "from the evidence I have.")
+    assert harness.score(item, run(pure, checked=0))["behavior_ok"]
+    # (b) the same refusal that then narrates the episode from the model's memory
+    narrated = ("The library does not contain The Adventures of Tom Sawyer. In the novel Tom is "
+                "set to whitewash his aunt's fence as a punishment, and when Ben Rogers comes by "
+                "to jeer at him he pretends the work is a rare privilege; Ben begs for a turn and "
+                "gives up his apple for it, and by the afternoon every boy in the village has "
+                "traded a kite, twelve marbles, a piece of blue bottle glass and a dead rat on a "
+                "string for the chance to paint.")
+    assert not harness.score(item, run(narrated, checked=0))["behavior_ok"]
+    # (c) an ANSWER item that mentions the phrase about a sub-point is untouched:
+    # the tail rule lives on the refusal branch only, and this is scored on titles
+    answer_item = {"type": "answer", "expected_books": ["Moby Dick"]}
+    hedged = ("Moby Dick has it, though the evidence does not include the exact wording of the "
+              "sermon: Ishmael ships aboard the Pequod under Ahab, who has sworn to kill the "
+              "white whale that took his leg, and the voyage ends with the ship destroyed and "
+              "Ishmael the only man left alive to tell it. [Moby Dick, Summary]")
+    assert harness.score(answer_item, run(hedged, checked=3))["behavior_ok"]
+
+
+def test_the_tail_budget_still_passes_the_c08_answers_that_were_measured():
+    """The three c08 refusals in docs/eval-results/2026-09-10-local-models.md,
+    verbatim: the budget was chosen from them (37 / 36 / 11 words after the
+    first marker) and must not re-score the report's own runs."""
+    item = {"type": "refusal", "expected_books": []}
+    measured = [
+        # qwen2.5:7b, both research runs
+        'The evidence provided does not contain information about Tom Sawyer making the other '
+        'boys pay him for the chance to paint the fence. This information is from "Adventures of '
+        'Huckleberry Finn" by Mark Twain, but it does not address the specific question asked.',
+        # qwen2.5:14b, research run
+        'The provided evidence does not cover how Tom Sawyer made the other boys pay him for the '
+        'chance to paint the fence. The evidence is from "Adventures of Huckleberry Finn" and '
+        'does not relate to the question about Tom Sawyer\'s fence-painting trick.',
+        # qwen3.6 probe (the code's own refusal text)
+        "I searched both the book cards and the transcripts, but found no evidence for this "
+        "question in the library. Honest answer: I don't know.",
+    ]
+    for answer in measured:
+        assert harness.score(item, run(answer, checked=3))["behavior_ok"], answer
 
 
 def test_drilldown_ignores_empty_reads_but_counts_partial_ones():

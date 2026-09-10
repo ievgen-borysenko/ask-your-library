@@ -26,9 +26,17 @@
   scene from memory and both said in plain words that the evidence does not hold it. The list gains
   three verbs whose subject can only be the evidence or the library — contain, include, cover — in both
   voices and both numbers, so that which one a model reaches for is not what decides the score, plus
-  `не містить`. Deliberately not "does not mention", which an answer that answers may say about one
-  chapter. The metric keeps its meaning: an evidence-free answer told from model memory is still a
-  failure, and the manual-correctness checkbox in the report is still where that is caught.
+  `не містить` / `не містять`. Deliberately not "does not mention", which an answer that answers may
+  say about one chapter. Because that family also covers hedges a model emits constantly ("the
+  evidence does not include the exact wording, but ..."), the scorer no longer accepts a marker on its
+  own: a refusal is a marker with the answer ENDING there, at most 40 words after it. Otherwise
+  "The library does not contain this, but in the novel the captain ..." would score PASS while telling
+  the story from model memory, which is the exact failure the item measures. The budget is read off
+  the measured `c08` answers — 37 words after the marker on `qwen2.5:7b`, 36 on `14b`, 11 on the
+  `qwen3.6` probe — and the provenance count is deliberately not part of the rule, because an honest
+  refusal quotes the card that says the thing is not in this edition. The metric keeps its meaning:
+  an evidence-free answer told from model memory is still a failure, and the manual-correctness
+  checkbox in the report is still where a mixed answer is caught.
 - **A local thinking model is told not to think, and no single call outlives the question deadline.**
   Ollama does not count reasoning tokens against `max_tokens`, so `qwen3.6` over its OpenAI-compatible
   endpoint reasoned past `LLM_TIMEOUT_S` without beginning an answer, timed out, retried twice, and the
@@ -37,11 +45,16 @@
   `reasoning_effort: "none"`, which is the one form Ollama 0.33.3 honours there (`think`,
   `chat_template_kwargs.enable_thinking` and an `options` block are all accepted and ignored — measured
   on this machine, not assumed) and which is inert for a model without the thinking capability, so it
-  goes on every local call and never on a hosted one. Separately, the per-attempt timeout is now the
-  smaller of `LLM_TIMEOUT_S` and what is left of `QUESTION_DEADLINE_S`: 600 against 300 is the local
-  default pair, so one call could outlive the whole question's budget and then retry. It is floored at
-  five seconds, so a call the loop did start inside the budget fails on the provider rather than
-  instantly on a timeout of zero.
+  goes on every local call and never on a hosted one. Separately, a search-loop call's per-attempt
+  timeout is now the smaller of `LLM_TIMEOUT_S` and what is left of `QUESTION_DEADLINE_S`: 600 against
+  300 is the local default pair, so one call could outlive the whole question's budget and then retry.
+  It is floored at five seconds, so a call the loop did start inside the budget fails on the provider
+  rather than instantly on a timeout of zero. The cap belongs to the loop and to nothing else: the
+  final `synthesize`, and any call issued once the deadline has already passed, keep the full
+  `LLM_TIMEOUT_S`. Capping those would have been the worse bug — the call bounded at the moment the
+  budget runs out is the synthesis, `run_question` has no `except` around the stream, and the CLI and
+  the web UI both turn the resulting `APITimeoutError` into an error string, so a deadline-stopped run
+  would have returned nothing at all instead of the degraded answer the deadline exists to produce.
 - **`--print-env-resolution` no longer prints the keys it read.** The flag dumped every value of
   the `.env` verbatim, and a `.env` is where the credentials live: a run of it reproduced
   `OPENROUTER_API_KEY`, `LANGCHAIN_API_KEY` and `CHAINLIT_PASSWORD` on stdout, from the one flag

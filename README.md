@@ -751,13 +751,20 @@ From `docs/backlog.md`, confirmed by the runs of 2026-09-05, 06 and 07 (`v0.2.0-
   is a budget for continuing the search: it is checked before each next decision, never
   mid-call, so the step in flight and the synthesis still complete. `LLM_TIMEOUT_S` is httpx's
   read timeout, which bounds the wait for the next chunk of a response, not the whole request:
-  a provider that keeps sending slowly is not cut off. For the usual failure shapes (no answer,
-  a transient error) one call takes up to `LLM_TIMEOUT_S` x (1 + `LLM_MAX_RETRIES`) plus the
-  SDK's backoff (up to two minutes per retry when a 429 carries `Retry-After`), and a node that
-  asks for JSON may call twice, so a step in flight is around 720 s hosted / 3,600 s on a cold
-  local model in those shapes; that is an estimate for them, not a guaranteed upper bound on a
-  question. When the deadline is spent the answer is written from the evidence so far and the
-  stop reason says so. The web UI additionally waits at most 300 s for a clarify reply.
+  a provider that keeps sending slowly is not cut off. A search-loop call (plan, observe,
+  reflect) is bounded per attempt by the smaller of `LLM_TIMEOUT_S` and what is left of the
+  question's budget, never below 5 s, so with the local pair — 600 s a call against 300 s a
+  question — no single loop call outlives the whole question and then retries. Two calls keep
+  the full `LLM_TIMEOUT_S`: the final synthesis, and anything the loop issues once the budget
+  is already spent. Bounding those by the seconds left would end a deadline-stopped run in a
+  timeout instead of the degraded answer the deadline exists to produce. For the usual failure
+  shapes (no answer, a transient error) one call takes up to its own bound x
+  (1 + `LLM_MAX_RETRIES`) plus the SDK's backoff (up to two minutes per retry when a 429
+  carries `Retry-After`), and a node that asks for JSON may call twice, so an uncapped call in
+  flight is around 720 s hosted / 3,600 s on a cold local model in those shapes; that is an
+  estimate for them, not a guaranteed upper bound on a question. When the deadline is spent the
+  answer is written from the evidence so far and the stop reason says so. The web UI
+  additionally waits at most 300 s for a clarify reply.
 - **Chapter reads are capped at 12,000 characters** and the cut is marked in-band within that
   budget; an empty read (chapter not in the index) yields no hit at all and is logged in the
   scratchpad, so nothing synthetic can be quoted as evidence.

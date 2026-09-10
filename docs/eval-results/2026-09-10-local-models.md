@@ -110,6 +110,21 @@ on `c02` says the design intends. The rest is the prompt: `c03` and `c04` for 7b
 14b, all answer-type items whose score depends on the answer naming its book, which a filled citation
 does and a bare `[book, chapter]` does not.
 
+**How a refusal is scored, and why the marker alone is not enough.** The widened marker family also
+covers hedges a model emits constantly ("the evidence does not include the exact wording, but ..."), so
+a marker on its own would let "The library does not contain this, but in the novel the captain ..."
+score PASS while telling the story from model memory — the exact failure `c08` exists to catch. The
+rule is therefore two-part: an explicit marker, **and the answer ending there** — at most 40 words
+after the first marker (`REFUSAL_TAIL_WORDS` in `eval/run_agent_eval.py`). The budget is read off the
+answers in this report: 37 words after `does not contain` in 7b's `c08`, 36 after `does not cover` in
+14b's, 11 after `no evidence` in the `qwen3.6` probe — in each case a marker sentence that restates the
+question plus one more sentence about the evidence, and no room for a retold episode. The provenance
+count is deliberately not part of the rule: an honest refusal cites the card that says the thing is not
+in this edition, and `c08` confirmed 3 quotes on 7b and 4 on 14b while declining. The rule's remaining
+limit, stated: a model that declines and then narrates in a dozen words still passes, which is what the
+manual-correctness checkbox is for. The tail rule landed **after** the runs below were made — the
+answers are unchanged and were re-scored against it, and every `c08` output in this file still PASSes.
+
 **One broken quote left for 7b, two for 14b, and both models still fabricate.** The count moved from 2
 to 1 for 7b and stayed at 2 for 14b. `c10` (aggregation) fails for both, before and after, and `c09`
 still fails for 14b. Neither model is good enough to advertise as a strong default: 19/20 and 18/20
