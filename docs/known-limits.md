@@ -1,7 +1,48 @@
 # Known limits
 
-From `backlog.md`, confirmed by the runs of 2026-09-05, 06 and 07 (`v0.2.0-rc1`):
+From `backlog.md`, confirmed by the runs of 2026-09-05, 06 and 07 (`v0.2.0-rc1`), and — for the
+local default that ships since 0.3.0 — by the local run of 2026-09-10:
 
+- **The default local answering model is not good enough to advertise as a strong default, and
+  this project's own measurement of it says so.** Measured on the local backend on 2026-09-10
+  ([`eval-results/2026-09-10-local-models.md`](eval-results/2026-09-10-local-models.md)). Two
+  measurements, and they are not the same kind of thing: the scores below are **behavioural
+  compliance**, the harness's own heuristic (titles by substring, refusals by phrase marker,
+  clarify, drill-down), and the quote triples are **provenance**, checked by plain code against the
+  stored passage. Neither is answer correctness, which nobody graded on any local run. The
+  default `qwen2.5:14b` scores 10/10 on the catalogue set with 17 / 0 / 0 quotes confirmed /
+  unattributed / broken, and 8/10 on the research set with 41 / 1 / 2 — 18/20 and 58 / 1 / 2 over
+  both, a 95.1 % (58/61) quote-confirmation rate. `qwen2.5:7b` scores 19/20 with 36 / 2 / 1, 92.3 %
+  (36/39). That report's own verdict: "Neither model is good enough to advertise as a strong
+  default: 19/20 and 18/20 with genuine unattributed and broken quotes in both." `c10`
+  (aggregation) fails on both models, and `c09` (identify) fails on `qwen2.5:14b`. The quote check
+  is a report, not a gate: it names an unattributed quote (text from another retrieved passage, not
+  from the one the answer cites) and a broken one (in no retrieved passage at all), and it does not
+  stop the answer from carrying either.
+
+  What the hosted configuration does on the nearest sets, and how near they are. The catalogue set
+  is the same golden file at the same checksum (`en-demo-catalog.yaml@14b001e26f5e`): hosted
+  Sonnet 4.6 scored 10/10 with 21 / 0 / 0 on 2026-09-10
+  ([`eval-results/2026-09-10-catalogue-set.md`](eval-results/2026-09-10-catalogue-set.md)) — that
+  set is clean on both, and on both runs every checked quote comes from its four research items
+  (`k07`-`k10`, three negative controls and the hybrid), the six catalogue questions being answered
+  from the index tables with no quotes to check. That hosted run says of itself: "Single run,
+  hosted planner, not reader-graded". The research questions are the ten `c*` items of
+  `en-demo.yaml`; the nearest hosted run of that file is the core set of 2026-09-07 (`v0.2.0-rc1`),
+  those ten plus the Ukrainian `h06`, at 11/11 with 47 / 0 / 0 — passing both `c09` and `c10`.
+  That one **was** read against the golden
+  notes, and the reader's verdicts are ten `correct` and one `incomplete` (`c06`), so 11/11 there
+  is behavioural compliance and 10 / 0 / 1 is what a reader made of the same eleven answers — the
+  only reader grading anywhere in this comparison, and it is on the hosted side. Neither hosted run
+  is a paired measurement: different code, a different index build, and for the research one a
+  different golden checksum. Read them as the shape of the gap. `LLM_BACKEND=openrouter`
+  ([Configuration](configuration.md)) is the hosted path and [Cost](cost.md) is what it costs.
+  Scope of the local numbers: the harness's automatic score, no human graded the answers (the
+  manual-correctness checkboxes in the report are unticked), single runs, and the last prompt
+  change was followed by one re-measurement only — `qwen2.5:7b`'s research subset — so
+  `qwen2.5:14b` throughout and the catalogue half of both combined rows describe the prompt as it
+  stood in Runs 1-6. Measure your own model before trusting it:
+  `LLM_BACKEND=ollama uv run eval/run_agent_eval.py`.
 - **Identify mode can still stop at one book.** The coverage gate (ADR-013, since 0.2.0-rc1) spends the
   planner's next queued query before `reflect` may say "enough" with a single book, which is
   what brought Gulliver (c09) and the second gothic candidate (h22) into the clarify list; q06

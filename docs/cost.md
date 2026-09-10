@@ -6,11 +6,21 @@ Ollama serves on your own machine, priced at `OLLAMA_PRICE_IN_PER_MTOK` /
 that is the arithmetic, not a rounded-down estimate. There is no account and no billing to set up,
 and nothing below applies to it except the paragraph on cache reads at the end.
 
-**It is slower, and that is the whole trade: local is free but slow, hosted answers a research
-question in tens of seconds for cents.** Per question, on one Mac, from single measured runs. Every
-cell covers one kind of question: a catalogue figure is computed from catalogue rows only, a
-research figure from research rows only, and no cell is a mean over a set that mixes the two —
-those sets exist, and their whole-set means are between six fast rows and four slow ones.
+**Speed is not the whole trade.** Local is free but slow — hosted answers a research question in
+tens of seconds for cents — and it also quotes less reliably. On the local run of 2026-09-10 the
+default `qwen2.5:14b` left 1 unattributed and 2 broken quotes among the 61 checked by code, and
+scored 8/10 on the research set by the harness's behavioural heuristic; the report's own verdict is
+that neither local candidate "is good enough to advertise as a strong default"
+([`eval-results/2026-09-10-local-models.md`](eval-results/2026-09-10-local-models.md)). Single run,
+nobody graded the answers, `qwen2.5:14b`'s figures predate the last prompt change, and no hosted
+run is paired with them — [Known limits](known-limits.md) carries the entry in full, with the
+nearest hosted runs and how near they are. This page prices and times the trade; it does not
+measure the other half.
+
+Per question, on one Mac, from single measured runs. Every cell covers one kind of question: a
+catalogue figure is computed from catalogue rows only, a research figure from research rows only,
+and no cell is a mean over a set that mixes the two — those sets exist, and their whole-set means
+are between six fast rows and four slow ones.
 
 | | Catalogue question | Research question | Cost per question |
 |---|---|---|---|
