@@ -2,16 +2,27 @@
 
 ## 0.2.1 (unreleased)
 
-- **The synthesize rules show a filled citation, so a small model stops printing the template.**
+- **Every evidence line carries the citation to use, and the rules name no book at all.**
   `Every claim must cite its source as [book, chapter]` named the format without ever showing one
   filled in, and `qwen2.5:7b` ended 11 of the 20 answers of the local mini-eval with the literal
   string `[book, chapter]` — including every answer that was otherwise good enough to put in front of
-  a reader, while `qwen2.5:14b` substituted it in all 20. The rule now carries one worked example from
-  the demo corpus, `[Don Quixote — Miguel de Cervantes, CHAPTER VIII.]`, whose book and section are
-  written exactly as the evidence line the model is reading writes them, and says in one clause that
-  "book" and "chapter" are placeholders. Two lines longer, the documented format unchanged; the golden
-  files are untouched, so only the code SHA of an eval fingerprint moves. Measured after the change:
-  0 of 20 for 7b, 0 of 20 for 14b (`docs/eval-results/2026-09-10-local-models.md`).
+  a reader, while `qwen2.5:14b` substituted it in all 20. The first fix put a worked example in the
+  rules, taken from the demo corpus. Review round 2 rejected that: the example is a REAL title and
+  section, it sits in the shared system message of every question, and a model that copies it into an
+  answer about an unrelated book is caught by nothing — provenance checks that evidence quotes come
+  from the passages they name, never that the answer's citations do. So the example is gone, and each
+  evidence line opens with its own filled label instead — `- [Book — Author, Section] "quote"` — and the
+  rule points at that label rather than showing one: cite as `[book, chapter]`, with the book and the
+  section filled in, by copying the label the evidence line opens with, never writing the two
+  placeholder words literally and never writing a label the evidence does not carry. The only titles
+  the model can cite are the ones the evidence put in front of it. It is deliberately the smallest
+  edit to a prompt whose behaviour is measured — the example swapped for a pointer, the rest of the
+  sentence intact; two rewrites that restructured the rule were measured first and both scored worse
+  on the local research subset, which the report records. The ablation's retrieve-and-answer arm
+  builds the same line shape, since it shares the rules. The documented citation format is unchanged
+  and the golden files are untouched, so only the code SHA of an eval fingerprint moves. Measured:
+  0 of 20 placeholder answers for 7b and 0 of 20 for 14b after the first fix, and 0 of 10 again on the
+  labelled form (`docs/eval-results/2026-09-10-local-models.md`).
 - **Project Gutenberg's italics markup no longer breaks a correctly copied quote.** `_normalize` maps
   punctuation to whitespace through `[^\w\s...]`, and `\w` keeps the underscore, so the `_go_` of
   "All right, then, I'll _go_ to hell" survived as its own token: a quote copied character for
@@ -36,7 +47,11 @@
   `qwen3.6` probe — and the provenance count is deliberately not part of the rule, because an honest
   refusal quotes the card that says the thing is not in this edition. The metric keeps its meaning:
   an evidence-free answer told from model memory is still a failure, and the manual-correctness
-  checkbox in the report is still where a mixed answer is caught.
+  checkbox in the report is still where a mixed answer is caught. The tail is counted over prose
+  only: a bracketed citation is not narration, and now that every evidence line carries a filled
+  label, a refusal that ends by naming the chapters it read pays six or seven whitespace tokens per
+  label — 13 of the 55 tail tokens of the measured `c08` answer, a third of the budget spent on
+  being more accountable rather than less.
 - **A local thinking model is told not to think, and no single call outlives the question deadline.**
   Ollama does not count reasoning tokens against `max_tokens`, so `qwen3.6` over its OpenAI-compatible
   endpoint reasoned past `LLM_TIMEOUT_S` without beginning an answer, timed out, retried twice, and the
@@ -55,6 +70,24 @@
   budget runs out is the synthesis, `run_question` has no `except` around the stream, and the CLI and
   the web UI both turn the resulting `APITimeoutError` into an error string, so a deadline-stopped run
   would have returned nothing at all instead of the degraded answer the deadline exists to produce.
+- **The retry loop is ours, so a retry cannot spend the question's budget a second time.** The cap
+  above was handed to the SDK client, which samples its timeout ONCE, when the client is built, and
+  reuses that number for every retry it makes: a `reflect` call capped at the 300 s left of the
+  question could still take three 300 s attempts plus backoff, which is exactly what the cap exists to
+  prevent and what the README paragraph promised it did not. `llm_invoke` now runs the attempts
+  itself, with `max_retries=0` on the client, building a client per attempt so the bound is recomputed
+  against the budget that is really left; and when a failure and its backoff would leave five seconds
+  or less, it stops retrying instead of buying an attempt that could only be given the floor. A capped
+  call therefore stays inside the seconds the question had left when it began. Whether the deadline
+  caps a call is decided once, before the first attempt, and reused for all of them — asked again
+  after the first attempt exhausted the budget, the rule would have read "deadline passed" and handed
+  that call an UNCAPPED retry. The exemptions are unchanged: the final `synthesize`, and anything the
+  loop issues after the deadline, keep the full `LLM_TIMEOUT_S` per attempt and the full retry count.
+  So are the exceptions (the SDK's own rule: connection failures and timeouts, `x-should-retry`,
+  408/409/429 and 5xx, never a `Retry-After` longer than two minutes) and the backoff (0.5 s doubling
+  to 8 s with jitter, or the server's own `Retry-After`). Usage accounting is untouched — it is read
+  off the reply that came back, so `llm_calls` counts what it counted before and every number in a run
+  report keeps its meaning.
 - **`--print-env-resolution` no longer prints the keys it read.** The flag dumped every value of
   the `.env` verbatim, and a `.env` is where the credentials live: a run of it reproduced
   `OPENROUTER_API_KEY`, `LANGCHAIN_API_KEY` and `CHAINLIT_PASSWORD` on stdout, from the one flag

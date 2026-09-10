@@ -97,8 +97,12 @@ def test_retrieve_answer_cuts_and_sanitizes_exactly_as_observe_would(captured_ll
     assert len(captured_llm) == 1
     call = captured_llm[0]
     assert call["role"] == "synthesize"
-    assert "[book, chapter]" in call["system"]          # the shipped synthesize rules
-    assert "Chapter XXXI" in call["user"] and ITEM["question"] in call["user"]
+    # The shipped synthesize rules, and the evidence block they describe: each
+    # line opens with the citation label the answer is told to copy, exactly as
+    # the agent's own synthesize node writes it.
+    assert "[book, chapter]" in call["system"] and "opens with exactly that label" in call["system"]
+    assert '- [Huck Finn — Mark Twain, Chapter XXXI] "' in call["user"]
+    assert ITEM["question"] in call["user"]
     assert INJECTION not in call["user"]
     assert r["evidence_items"] == 2 and r["steps_taken"] == 1
     assert r["provenance"] == {} and r["verification"].startswith("n/a")

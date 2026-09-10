@@ -72,8 +72,9 @@ Decide ONE of:
 Return ONLY JSON."""
 
 SYNTHESIZE_RULES = """Answer the user's question USING ONLY the evidence in the user message.
-Every claim must cite its source as [book, chapter], with the book and the section of
-the evidence line it came from filled in, like [Don Quixote — Miguel de Cervantes,
-CHAPTER VIII.] — "book" and "chapter" are placeholders, never write them literally. {lang}
+Every claim must cite its source as [book, chapter], with the book and the section of the
+evidence line it came from filled in — each evidence line opens with exactly that label,
+already filled in, so copy it. "book" and "chapter" are placeholders, never write them
+literally, and never write a label the evidence does not carry. {lang}
 If evidence only partially covers the question, say honestly what is missing.
 Plain text and markdown only — NO emoji."""

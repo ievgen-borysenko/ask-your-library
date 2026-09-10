@@ -266,6 +266,19 @@ REFUSAL_MARKERS = ("not included", "not in this", "not in the library", "not in 
 # checkbox in the report is for.
 REFUSAL_TAIL_WORDS = 40
 
+# Citations do not count against that budget. The rule forbids NARRATION after
+# the marker, and a bracketed citation is the opposite of narration: it says
+# which passages the refusal looked at, which the marker list above was widened
+# to keep passing. Since the evidence block began carrying a filled label per
+# line, a refusal that ends by naming what it read pays six or seven whitespace
+# tokens per label — the two labels that end the measured c08 answer are 13 of
+# its 55 tail tokens, a third of the budget spent on being MORE accountable. So
+# labels are stripped before the words are counted and the budget stays a budget
+# for prose. (A markdown link's text would be stripped too; prose does not live
+# in brackets.) This does not rescue that particular answer, whose prose alone
+# is 42 words — the report says so, and the budget is the reviewer's to move.
+CITATION_RE = re.compile(r"\[[^\[\]]*\]")
+
 
 def is_refusal(answer: str) -> bool:
     """Does this (already folded) answer refuse — an explicit marker, and the
@@ -275,7 +288,8 @@ def is_refusal(answer: str) -> bool:
         return False
     # the earliest marker, and the longest one starting there
     start, length = min(hits, key=lambda h: (h[0], -h[1]))
-    return len(answer[start + length:].split()) <= REFUSAL_TAIL_WORDS
+    tail = CITATION_RE.sub(" ", answer[start + length:])
+    return len(tail.split()) <= REFUSAL_TAIL_WORDS
 
 
 def fold(text: str) -> str:

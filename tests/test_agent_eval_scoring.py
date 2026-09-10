@@ -145,6 +145,37 @@ def test_the_tail_budget_still_passes_the_c08_answers_that_were_measured():
         assert harness.score(item, run(answer, checked=3))["behavior_ok"], answer
 
 
+def test_a_refusal_may_end_by_naming_the_passages_it_read():
+    """The tail budget is for prose, not for citations. Once every evidence line
+    carried a filled label, a refusal that ends by naming the chapters it read
+    pays six or seven whitespace tokens per label, and the measured c08 answer
+    of `qwen2.5:7b` spends 13 of its 55 tail tokens that way. So labels are
+    stripped before the words are counted: the answer below is the c08 refusal
+    the budget was READ OFF (37 words, docs/eval-results/2026-09-10-local-models.md)
+    with two labels appended, and appending them must not fail it."""
+    item = {"type": "refusal", "expected_books": []}
+    cited = ('The evidence provided does not contain information about Tom Sawyer making the '
+             'other boys pay him for the chance to paint the fence. This information is from '
+             '"Adventures of Huckleberry Finn" by Mark Twain, but it does not address the '
+             'specific question asked. '
+             "[Adventures of Huckleberry Finn — Mark Twain, CHAPTER XXXIV.] "
+             "[Adventures of Huckleberry Finn — Mark Twain, CHAPTER XLII.]")
+    marker = "does not contain"
+    tail = cited[cited.find(marker) + len(marker):]
+    assert len(tail.split()) > harness.REFUSAL_TAIL_WORDS     # raw, the labels blow the budget
+    assert len(harness.CITATION_RE.sub(" ", tail).split()) == 37   # the prose is the measured one
+    assert harness.score(item, run(cited, checked=3))["behavior_ok"]
+    # and the rule keeps its teeth: brackets buy no room for a retold episode
+    narrated_with_a_citation = (
+        "The library does not contain The Adventures of Tom Sawyer. "
+        "[Adventures of Huckleberry Finn — Mark Twain, CHAPTER II.] In the novel Tom is set to "
+        "whitewash his aunt's fence as a punishment, and when Ben Rogers comes by to jeer at him "
+        "he pretends the work is a rare privilege; Ben begs for a turn and gives up his apple "
+        "for it, and by the afternoon every boy in the village has traded a kite, twelve "
+        "marbles, a piece of blue bottle glass and a dead rat on a string for the chance.")
+    assert not harness.score(item, run(narrated_with_a_citation, checked=0))["behavior_ok"]
+
+
 def test_drilldown_ignores_empty_reads_but_counts_partial_ones():
     item = {"type": "answer", "expected_books": ["Moby Dick"], "expects_chapter_read": True}
     empty = harness.score(item, run("Moby Dick", chapters=["Moby Dick — Herman Melville|Chapter 59|empty"]))

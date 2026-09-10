@@ -140,7 +140,7 @@ def run(monkeypatch, tmp_path):
 
     def _run(model: ScriptedModel, library: FakeLibrary, question: str,
              reply_to_clarify: str = "", history: list[str] | None = None):
-        monkeypatch.setattr(llm, "llm", lambda role="": model)
+        monkeypatch.setattr(llm, "llm", lambda role="", capped=None: model)
         monkeypatch.setattr(nodes, "search_both", library.search_both)
         monkeypatch.setattr(nodes, "read_chapter", library.read_chapter)
         monkeypatch.setattr(nodes, "list_books", library.list_books)
@@ -537,7 +537,7 @@ def test_deadline_spent_after_a_step_answers_from_what_was_found(monkeypatch, tm
         synthesize=["Ishmael, so far [Moby Dick, Chapter 1]."],
     )
     library = FakeLibrary(lambda q: [MOBY])
-    monkeypatch.setattr(llm, "llm", lambda role="": model)
+    monkeypatch.setattr(llm, "llm", lambda role="", capped=None: model)
     monkeypatch.setattr(nodes, "search_both", library.search_both)
     monkeypatch.setattr(nodes, "read_chapter", library.read_chapter)
     real_reset = llm.reset_usage
