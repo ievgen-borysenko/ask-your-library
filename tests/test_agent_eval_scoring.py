@@ -64,6 +64,140 @@ def test_refusal_may_cite_evidence_when_it_says_so():
     assert harness.score(item, honest)["behavior_ok"]
 
 
+def test_refusal_markers_cover_the_evidence_does_not_contain_it_phrasing():
+    """c08 is declined by both local models as "the evidence provided does not
+    contain information about ..." or "... does not cover how ...", which is a
+    refusal by any reading and used to score FAIL for want of a marker. The
+    family added is the one whose subject can only be the evidence or the
+    library, in both voices: which verb a model reaches for, and whether it
+    writes it actively, must not be what decides the score."""
+    item = {"type": "refusal", "expected_books": []}
+    for answer in ("The evidence provided does not contain information about Tom Sawyer making "
+                   "the other boys pay him for the chance to paint the fence.",
+                   "The retrieved passages do not contain that episode.",
+                   "That episode is not contained in the evidence.",
+                   "The evidence does not include the whitewashing scene.",
+                   "The provided evidence does not cover how Tom Sawyer made the boys pay him.",
+                   "The passages here do not cover the fence at all.",
+                   "That episode is not covered by the books here.",
+                   "Бібліотека не містить цієї книжки.",
+                   "Ці книжки не містять цього епізоду."):
+        assert harness.score(item, run(answer, checked=1))["behavior_ok"], answer
+    # the metric's meaning is unchanged: told from model memory, with no such
+    # phrase anywhere, it is still a FAIL
+    told_from_memory = ("Tom Sawyer persuaded the other boys that whitewashing the fence was a "
+                        "privilege, and they paid him with an apple and a dead rat for a turn.")
+    assert not harness.score(item, run(told_from_memory, checked=0))["behavior_ok"]
+    # and an answer that answers may say a chapter does not MENTION a detail
+    # without that turning it into a refusal — the phrase is deliberately absent
+    assert not harness.score(item, run(
+        "Chapter II does not mention the rat, but Tom traded the whitewashing for marbles.",
+        checked=2))["behavior_ok"]
+
+
+def test_a_refusal_that_goes_on_to_narrate_from_memory_is_not_a_refusal():
+    """A marker is where a refusal ENDS. Declining and then telling the story
+    anyway is the failure the item measures, and the widened marker list makes
+    that shape likelier — it now covers hedges models emit constantly. So the
+    rule is: an explicit marker, and at most REFUSAL_TAIL_WORDS words after it."""
+    item = {"type": "refusal", "expected_books": []}
+    # (a) a pure refusal: the marker, and nothing after it but the apology
+    pure = ("The Adventures of Tom Sawyer is not in the library, so I cannot answer this "
+            "from the evidence I have.")
+    assert harness.score(item, run(pure, checked=0))["behavior_ok"]
+    # (b) the same refusal that then narrates the episode from the model's memory
+    narrated = ("The library does not contain The Adventures of Tom Sawyer. In the novel Tom is "
+                "set to whitewash his aunt's fence as a punishment, and when Ben Rogers comes by "
+                "to jeer at him he pretends the work is a rare privilege; Ben begs for a turn and "
+                "gives up his apple for it, and by the afternoon every boy in the village has "
+                "traded a kite, twelve marbles, a piece of blue bottle glass and a dead rat on a "
+                "string for the chance to paint.")
+    assert not harness.score(item, run(narrated, checked=0))["behavior_ok"]
+    # this is the control the budget is set against: 82 words after the marker,
+    # where the longest honest refusal measured is 42
+    marker = "does not contain"
+    assert len(narrated[narrated.find(marker) + len(marker):].split()) == 82
+    # (c) an ANSWER item that mentions the phrase about a sub-point is untouched:
+    # the tail rule lives on the refusal branch only, and this is scored on titles
+    answer_item = {"type": "answer", "expected_books": ["Moby Dick"]}
+    hedged = ("Moby Dick has it, though the evidence does not include the exact wording of the "
+              "sermon: Ishmael ships aboard the Pequod under Ahab, who has sworn to kill the "
+              "white whale that took his leg, and the voyage ends with the ship destroyed and "
+              "Ishmael the only man left alive to tell it. [Moby Dick, Summary]")
+    assert harness.score(answer_item, run(hedged, checked=3))["behavior_ok"]
+
+
+def test_the_tail_budget_still_passes_the_c08_answers_that_were_measured():
+    """Every c08 refusal in docs/eval-results/2026-09-10-local-models.md,
+    verbatim: the budget is set from them (11 / 36 / 37 / 42 words of prose
+    after the first marker) and must not re-score the report's own runs."""
+    item = {"type": "refusal", "expected_books": []}
+    measured = [
+        # qwen2.5:7b, both round-1 research runs
+        'The evidence provided does not contain information about Tom Sawyer making the other '
+        'boys pay him for the chance to paint the fence. This information is from "Adventures of '
+        'Huckleberry Finn" by Mark Twain, but it does not address the specific question asked.',
+        # qwen2.5:14b, research run
+        'The provided evidence does not cover how Tom Sawyer made the other boys pay him for the '
+        'chance to paint the fence. The evidence is from "Adventures of Huckleberry Finn" and '
+        'does not relate to the question about Tom Sawyer\'s fence-painting trick.',
+        # qwen3.6 probe (the code's own refusal text)
+        "I searched both the book cards and the transcripts, but found no evidence for this "
+        "question in the library. Honest answer: I don't know.",
+        # qwen2.5:7b, Run 8: the same refusal, longer because it also says what
+        # the evidence holds instead and names the chapters it read. Its 42
+        # words are the longest honest refusal measured, and the FAIL it scored
+        # under the round-1 budget of 40 is why that budget is now 60.
+        "The evidence provided does not contain information about Tom Sawyer making the other "
+        "boys pay him for the chance to paint the fence. The evidence instead discusses Tom "
+        "Sawyer helping Jim escape and setting him free. Therefore, the specific information "
+        "requested is not available in the given evidence. "
+        "[Adventures of Huckleberry Finn — Mark Twain, CHAPTER XXXIV.] "
+        "[Adventures of Huckleberry Finn — Mark Twain, CHAPTER XLII.]",
+    ]
+    for answer in measured:
+        assert harness.score(item, run(answer, checked=3))["behavior_ok"], answer
+
+
+def test_a_refusal_may_end_by_naming_the_passages_it_read():
+    """The tail budget is for prose, not for citations. Once every evidence line
+    carried a filled label, a refusal that ends by naming the chapters it read
+    pays seven to nine whitespace tokens per label. Below is the measured Run 8
+    c08 refusal of `qwen2.5:7b` (docs/eval-results/2026-09-10-local-models.md):
+    42 words of prose, and 18 more tokens spent on the two labels. A refusal
+    that names all four chapters such a run reads pays 36, which is past the
+    budget on labels alone — so they are stripped before the words are counted
+    and the same prose scores the same either way."""
+    item = {"type": "refusal", "expected_books": []}
+    prose = ("The evidence provided does not contain information about Tom Sawyer making the "
+             "other boys pay him for the chance to paint the fence. The evidence instead "
+             "discusses Tom Sawyer helping Jim escape and setting him free. Therefore, the "
+             "specific information requested is not available in the given evidence. ")
+    labels = ["[Adventures of Huckleberry Finn — Mark Twain, CHAPTER XXXIV.]",
+              "[Adventures of Huckleberry Finn — Mark Twain, CHAPTER XLII.]",
+              "[Adventures of Huckleberry Finn — Mark Twain, CHAPTER XXXI.]",
+              "[Adventures of Huckleberry Finn — Mark Twain, CHAPTER II.]"]
+    marker = "does not contain"
+    for count in (2, 4):
+        cited = prose + " ".join(labels[:count])
+        tail = cited[cited.find(marker) + len(marker):]
+        assert len(tail.split()) == 42 + 9 * count                     # raw: nine tokens a label
+        assert len(harness.CITATION_RE.sub(" ", tail).split()) == 42   # the prose is the measured one
+        assert harness.score(item, run(cited, checked=3))["behavior_ok"], count
+    # four labels: raw, the citations alone put the answer past the budget
+    all_cited = prose + " ".join(labels)
+    assert len(all_cited[all_cited.find(marker) + len(marker):].split()) > harness.REFUSAL_TAIL_WORDS
+    # and the rule keeps its teeth: brackets buy no room for a retold episode
+    narrated_with_a_citation = (
+        "The library does not contain The Adventures of Tom Sawyer. "
+        "[Adventures of Huckleberry Finn — Mark Twain, CHAPTER II.] In the novel Tom is set to "
+        "whitewash his aunt's fence as a punishment, and when Ben Rogers comes by to jeer at him "
+        "he pretends the work is a rare privilege; Ben begs for a turn and gives up his apple "
+        "for it, and by the afternoon every boy in the village has traded a kite, twelve "
+        "marbles, a piece of blue bottle glass and a dead rat on a string for the chance.")
+    assert not harness.score(item, run(narrated_with_a_citation, checked=0))["behavior_ok"]
+
+
 def test_drilldown_ignores_empty_reads_but_counts_partial_ones():
     item = {"type": "answer", "expected_books": ["Moby Dick"], "expects_chapter_read": True}
     empty = harness.score(item, run("Moby Dick", chapters=["Moby Dick — Herman Melville|Chapter 59|empty"]))

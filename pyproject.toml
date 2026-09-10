@@ -9,6 +9,13 @@ authors = [{ name = "Ievgen Borysenko" }]
 dependencies = [
     "langgraph>=0.4",
     "langchain-openai>=0.3",
+    # llm.py imports both at module import time, so neither is a transitive
+    # detail any more: the retry loop is ours and speaks the SDK's exception
+    # vocabulary (`openai.APIConnectionError`, `APIStatusError`), and it builds
+    # each attempt's client with an `httpx.Timeout` of its own. Bounds are the
+    # versions the lockfile resolves and CI tests against.
+    "openai>=3.1",
+    "httpx>=0.28",
     # `lancedb.expr` (the chapter filters in library.py) is imported at module
     # import time; 0.34 is the oldest version verified to have col/lit/contains
     # and expression pushdown (older ones are untested, not known to lack it);

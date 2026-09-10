@@ -183,7 +183,11 @@ def run_retrieve_answer(item: dict) -> dict:
     if not passages:
         answer = t("refusal_answer")
     else:
-        evidence_text = "\n".join(f"- {p['book']} — {p['section']}: \"{p['text']}\""
+        # The same line shape the agent's synthesize node builds (nodes.py): the
+        # citation label first, because SYNTHESIZE_RULES tells the model to cite
+        # by copying it. This arm replaces the LOOP with a single retrieval, not
+        # the answering contract.
+        evidence_text = "\n".join(f"- [{p['book']}, {p['section']}] \"{p['text']}\""
                                   for p in passages)
         data = [llm_mod.data_block("question", item["question"]),
                 llm_mod.data_block("evidence", evidence_text)]

@@ -140,7 +140,7 @@ def run(monkeypatch, tmp_path):
 
     def _run(model: ScriptedModel, library: FakeLibrary, question: str,
              reply_to_clarify: str = "", history: list[str] | None = None):
-        monkeypatch.setattr(llm, "llm", lambda: model)
+        monkeypatch.setattr(llm, "llm", lambda role="", capped=None: model)
         monkeypatch.setattr(nodes, "search_both", library.search_both)
         monkeypatch.setattr(nodes, "read_chapter", library.read_chapter)
         monkeypatch.setattr(nodes, "list_books", library.list_books)
@@ -537,7 +537,7 @@ def test_deadline_spent_after_a_step_answers_from_what_was_found(monkeypatch, tm
         synthesize=["Ishmael, so far [Moby Dick, Chapter 1]."],
     )
     library = FakeLibrary(lambda q: [MOBY])
-    monkeypatch.setattr(llm, "llm", lambda: model)
+    monkeypatch.setattr(llm, "llm", lambda role="", capped=None: model)
     monkeypatch.setattr(nodes, "search_both", library.search_both)
     monkeypatch.setattr(nodes, "read_chapter", library.read_chapter)
     real_reset = llm.reset_usage
@@ -555,6 +555,62 @@ def test_deadline_spent_after_a_step_answers_from_what_was_found(monkeypatch, tm
     assert by_name(events, "reflect")[0]["stop_reason"] == t("stop_deadline", s=30)
     assert by_name(events, "metrics")[0]["stop_reason"] == t("stop_deadline", s=30)
     assert by_name(events, "validate")[0]["provenance"]["confirmed"] == 1 and answer.startswith("Ishmael")
+
+
+def test_a_spent_deadline_does_not_time_the_final_synthesize_out(monkeypatch, tmp_path):
+    """What the deadline is for is a degraded ANSWER: it is checked before each
+    next decision, never mid-call, so the step in flight and the synthesis
+    still complete. A per-call timeout capped by the seconds LEFT breaks that
+    at the worst moment — when the budget runs out, the call being bounded is
+    the final `synthesize`; `run_question` has no `except` around the stream
+    and both interfaces turn the resulting APITimeoutError into an error
+    string, so the run would return nothing at all instead of the answer.
+
+    Fake clock, and the stub sits at ChatOpenAI rather than at `llm.llm`, so
+    the timeout each call is really built with is the thing under test."""
+    model = ScriptedModel(
+        plan=[{"mode": "answer", "queries": ["Ishmael sails", "Pequod voyage"]}],
+        observe=[{"evidence": [evidence(MOBY, "transcripts", "s1h2")]}],
+        synthesize=["Ishmael, so far [Moby Dick, Chapter 1]."],
+    )
+    library = FakeLibrary(lambda q: [MOBY])
+    clock = type("FakeClock", (), {"t": 1_000.0, "monotonic": lambda self: self.t})()
+    monkeypatch.setattr(llm, "time", clock)            # the deadline reads the clock through this name
+    monkeypatch.setattr(llm, "LLM_TIMEOUT_S", 600)     # the local pair: 600 s a call against 30 s a question
+    monkeypatch.setattr(llm, "openrouter_api_key", lambda: "sk-test")
+    timeouts: list[float] = []
+
+    def stub_chat_openai(**kw):
+        timeouts.append(kw["timeout"].read)
+        return model
+
+    def slow_search(query, k=4, book=None):
+        clock.t += 100          # the one step in flight outlasts the whole budget
+        return library.search_both(query, k=k, book=book)
+
+    monkeypatch.setattr(llm, "ChatOpenAI", stub_chat_openai)
+    monkeypatch.setattr(nodes, "search_both", slow_search)
+    monkeypatch.setattr(nodes, "read_chapter", library.read_chapter)
+    monkeypatch.setattr(nodes, "list_books", library.list_books)
+    real_reset = llm.reset_usage
+
+    def reset_on_the_fake_clock(deadline_s=None):
+        real_reset(deadline_s)
+        llm._usage().started = clock.t      # the dataclass default read the real clock
+    monkeypatch.setattr("ask_your_library.runner.reset_usage", reset_on_the_fake_clock)
+
+    events = []
+    answer = run_question(build_graph(), "Who narrates Moby Dick?", [], Path(tmp_path),
+                          on_event=lambda n, u: events.append((n, u)), on_clarify=lambda q: "",
+                          deadline_s=30)
+
+    assert model.roles() == ["plan", "observe", "synthesize"]          # reflect spent no call
+    assert by_name(events, "reflect")[0]["stop_reason"] == t("stop_deadline", s=30)
+    assert answer == "Ishmael, so far [Moby Dick, Chapter 1]."         # the answer, not an error string
+    # plan was decided inside the budget, so the budget caps it; by observe the
+    # budget is spent and by synthesize it is long spent — neither is cut to the
+    # 5 s floor, which is what used to leave the run with no answer at all
+    assert timeouts == [30.0, 600.0, 600.0]
 
 
 def test_a_planner_that_never_produces_json_does_not_end_the_question(run):

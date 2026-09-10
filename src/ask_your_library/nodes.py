@@ -563,7 +563,14 @@ def synthesize(state: AgentState) -> dict:
     if not state["evidence"]:
         return {"answer": note + t("refusal_answer")}
 
-    evidence_text = "\n".join(f"- {e['book']} — {e['section']}: \"{e['quote']}\""
+    # Each line carries the citation the answer should use, ready to copy. The
+    # label is the ONLY place a title reaches the model as something to write
+    # down: the system rules name no book at all, so the model has nothing to
+    # cite but the evidence in front of it, and a title from its own memory has
+    # no label to hide behind. Book and section come from the index metadata,
+    # already control-char-stripped in `act`, and are shown exactly as the
+    # block header and the evidence card show them.
+    evidence_text = "\n".join(f"- [{e['book']}, {e['section']}] \"{e['quote']}\""
                               for e in state["evidence"])
     data = [data_block("question", state["question"])]
     if state.get("clarification"):
