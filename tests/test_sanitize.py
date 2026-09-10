@@ -30,6 +30,21 @@ def test_a_line_break_is_text_and_survives_the_strip():
     assert strip_control_chars("a​b‮c﻿") == "abc"
 
 
+def test_the_stripped_set_is_exactly_the_characters_the_comment_names():
+    """The class names one block per line, so what it matches is written out
+    here code point by code point: a rewrite that widened or narrowed it by a
+    single character fails this. The sweep is the whole of Unicode, not a
+    sample, because a range is exactly the thing that reaches further than it
+    reads."""
+    named = ({*range(0x00, 0x09), *range(0x0e, 0x20), 0x7f}     # C0 controls, minus tab
+             | {0x200b, 0x200c, 0x200d}                         # zero-width space, joiners
+             | {0x200e, 0x200f}                                 # the LTR and RTL marks
+             | {0x202a, 0x202b, 0x202c, 0x202d, 0x202e}         # bidi embeddings, pop, overrides
+             | {0x2066, 0x2067, 0x2068, 0x2069}                 # bidi isolates and their pop
+             | {0xfeff})                                        # BOM
+    assert {cp for cp in range(0x110000) if strip_control_chars(chr(cp)) == ""} == named
+
+
 def test_a_break_inside_a_quote_normalizes_to_a_space():
     """The quote check compares word sequences, so every break form and the tab
     are separators there — the same reading of the text on both sides."""

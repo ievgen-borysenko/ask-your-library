@@ -134,6 +134,10 @@ def clean_run_state():
 # that is meant to see a default.
 SCRUBBED = frozenset(DEFAULTS) | frozenset(TRACING_OFF) | frozenset(BLANKED) | {
     "LLM_TIMEOUT_S", "LANGCHAIN_TRACING", "LANGSMITH_TRACING", "LANGCHAIN_PROJECT",
+    # The tracing destination, under both prefixes. Nothing here sets it, but a
+    # child that reports where traces would go must not name the developer's own
+    # LangSmith region instead of the default the SDK falls back to.
+    "LANGCHAIN_ENDPOINT", "LANGSMITH_ENDPOINT",
     "ASK_SCRATCH_DIR", "ASK_DEBUG",
     "AYL_ALLOW_START_WITHOUT_KEY", "AYL_ALLOW_DEFAULT_LOGIN", "AYL_CHAINLIT_DIR",
     "CHAINLIT_AUTH_SECRET", "CHAINLIT_USERNAME", "CHAINLIT_PASSWORD",

@@ -50,12 +50,18 @@ leaves a range of no commits, one whose "before" the repository no longer holds 
 git cannot resolve, and neither of them is a scan.
 OSV-Scanner runs over `uv.lock`, the resolved dependency set CI installs from. A secret, or an
 advisory without a recorded exception, fails the job — and so does a scanner that cannot run, which
-is why neither job is marked `continue-on-error`. A failed job blocks the merge once the
-repository's branch protection lists it as a required check; GitHub offers that setting on public
-repositories and on paid plans, and this repository is private on the free plan until its first
-release, so until then a red check is honoured by hand and nothing merges over it. An exception is
-an `[[IgnoredVulns]]` entry in `osv-scanner.toml` naming the advisory, the mitigation that keeps it
-out of this repository, an owner and a review date after which the scanner reports it again.
+is why neither job is marked `continue-on-error`. A failed job blocks the merge: this repository is
+public, and the ruleset on `main` — "Protection rule for main" — lists all seven checks as required
+(`test (openrouter)`, `test (ollama)`, `test-ui (openrouter)`, `test-ui (ollama)`, `install-script`,
+`secrets`, `dependencies`), requires code scanning results from `CodeQL` — no security alert of high
+severity or above, and no other alert at error level — requires the branch to be up to date with
+`main` before it merges, and refuses force-pushes and deletion of the branch, with no bypass for
+anyone. CodeQL itself runs from GitHub's default setup rather than from a workflow in this
+repository, which is why its two analyses (`Analyze (python)`, `Analyze (actions)`) are not in the
+list above: what the ruleset requires is the result of the scan, not the job that produced it. An
+exception is an `[[IgnoredVulns]]` entry in `osv-scanner.toml` naming the advisory, the mitigation
+that keeps it out of this repository, an owner and a review date after which the scanner reports it
+again.
 Both workflows pin every third-party action to a commit SHA
 with its version in a comment; the pin covers the action's code, not the container image the
 OSV action fetches at run time by version. `.github/dependabot.yml` proposes those
