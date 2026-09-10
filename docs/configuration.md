@@ -13,7 +13,7 @@ win). See `.env.example`.
 | `OLLAMA_EMBED_MODEL` | `bge-m3` | Embedding model, 1024 dims, multilingual |
 | `OPENROUTER_EMBED_MODEL` | `openai/text-embedding-3-small` | Embeddings when `EMBED_BACKEND=openrouter`, 1536 dims |
 | `LLM_BACKEND` | `openrouter` | `ollama` runs every agent node on a local model through Ollama's OpenAI-compatible endpoint: no key, no cost |
-| `OLLAMA_LLM_MODEL` | `qwen3.6` | Local model for the agent nodes when `LLM_BACKEND=ollama` (must be pulled; preflight checks). In that mode the answering model runs at `OLLAMA_URL/v1`; `ORCHESTRATOR_MODEL` and `PRICE_*` are not applied; `OLLAMA_PRICE_IN_PER_MTOK` / `OLLAMA_PRICE_OUT_PER_MTOK` (default 0) price the local model if you want to |
+| `OLLAMA_LLM_MODEL` | `qwen2.5:14b` | Local model for the agent nodes when `LLM_BACKEND=ollama` (must be pulled; preflight checks). In that mode the answering model runs at `OLLAMA_URL/v1`; `ORCHESTRATOR_MODEL` and `PRICE_*` are not applied; `OLLAMA_PRICE_IN_PER_MTOK` / `OLLAMA_PRICE_OUT_PER_MTOK` (default 0) price the local model if you want to |
 | `OPENROUTER_API_KEY` | (unset) | Required when the answering model or the embeddings come from OpenRouter; not needed with `LLM_BACKEND=ollama` and the default local embeddings |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Any OpenAI-compatible endpoint works; serves the answering model when `LLM_BACKEND=openrouter` and the embeddings when `EMBED_BACKEND=openrouter` |
 | `OPENROUTER_ENV_FILE` | (unset) | Opt-in file scanned for the key; never read unless set |
@@ -55,7 +55,7 @@ Indexing your own books needs no account by default: `ayl-add` chunks locally an
 `bge-m3` by default. Only the answering model needs OpenRouter. To run everything on this machine:
 
 ```bash
-ollama pull qwen3.6                        # or any chat model; the default OLLAMA_LLM_MODEL
+ollama pull qwen2.5:14b                        # or any chat model; the default OLLAMA_LLM_MODEL
 LLM_BACKEND=ollama uv run ask-library "..."        # no key, cost lines read $0.0000
 LLM_BACKEND=ollama uv run --extra ui chainlit run ui.py -w --host 127.0.0.1   # the UI's key gate is off in this mode
 ```

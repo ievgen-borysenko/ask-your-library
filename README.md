@@ -33,8 +33,8 @@ flowchart TB
 ![The CLI naming Robinson Crusoe from a half-remembered description, over the demo corpus with a local model](docs/img/ask-library-demo.gif)
 
 *"I remember a book in which a man happened to end up on an island and came across cannibals.
-What is the name of the book, and why did that happen?" — a local model (qwen2.5:14b) on the demo
-corpus, no API key. 124.6 s by the CLI's own metrics line in the last frame.*
+What is the name of the book, and why did that happen?" — the default local model (qwen2.5:14b) on
+the demo corpus, no API key. 147.7 s by the CLI's own metrics line in the last frame.*
 
 ![The same question in the web UI: the answer, the quote-provenance badge, and one evidence passage opened under it](docs/img/ask-library-ui.gif)
 
@@ -125,7 +125,12 @@ diagram sources, the backlog and the changelog.
 [`docs/CHANGELOG.md`](docs/CHANGELOG.md) and the open gaps in
 [`docs/backlog.md`](docs/backlog.md).
 
-The code and the project's own files are under Apache-2.0 (`LICENSE`, attribution in `NOTICE`).
+The code and the project's own files are under Apache-2.0 (`LICENSE`, attribution in
+[`NOTICE`](NOTICE)); one file in the tree is somebody else's — Chainlit's own
+`.chainlit/translations/en-US.json`, Apache-2.0, copied here with a single string changed, which
+[`NOTICE`](NOTICE) and [`.chainlit/translations/README.md`](.chainlit/translations/README.md)
+record.
+
 The demo corpus is built from Project Gutenberg texts and LibriVox recordings, public domain in the
 United States by their sources' own statements; what that means for a given edition or translation
 in your country, and what exactly is committed here (machine transcripts, book cards, tables of
