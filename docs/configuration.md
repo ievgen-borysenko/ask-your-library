@@ -25,7 +25,7 @@ win). See `.env.example`.
 | `MAX_EMPTY_STREAK` | `2` | CRAG gate: the loop stops after this many dry steps in a row |
 | `MAX_CLARIFY_CANDIDATES` | `5` | Longest list of books a clarify question offers; at most 5, the ordinals the reply resolver understands |
 | `LLM_TIMEOUT_S` | `120` (`600` with `LLM_BACKEND=ollama`) | Per-attempt read/write timeout of one model call (the SDK's default was 600 s; connect stays 5 s) |
-| `LLM_MAX_RETRIES` | `2` | Extra attempts the client makes on a timeout or a transient provider error (the SDK's default, now explicit); on those failures a call takes up to timeout x (1 + retries) plus the SDK's backoff (see [Known limits](known-limits.md): a slowly streaming response is not bounded) |
+| `LLM_MAX_RETRIES` | `2` | Extra attempts on a timeout or a transient provider error, made by `llm_invoke`'s own loop with the SDK's retries switched off, so every attempt is re-bounded by what is left of the question; an uncapped call then takes up to timeout x (1 + retries) plus backoff, a capped one stops when the budget does (see [Known limits](known-limits.md): a slowly streaming response is not bounded) |
 | `QUESTION_DEADLINE_S` | `300` | Time budget per question, checked before each next decision: the loop stops searching and answers from what it found, stop reason shown; clarify waiting time excluded; `0` = none; `ask-library --deadline` overrides it for a run |
 | `PRICE_IN_PER_MTOK` / `PRICE_OUT_PER_MTOK` | `3.0` / `15.0` | USD per 1M tokens, for the cost estimate |
 | `ASK_LANG` | `en` | UI language: `en` or `ua` |

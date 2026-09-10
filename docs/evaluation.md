@@ -78,6 +78,12 @@ named book is not in the catalogue. Single run, not reader-graded; the report is
 `eval-results/2026-09-09-catalogue-branch-core.md`. The table below keeps the two tagged
 baselines.
 
+A local-backend run of both sets, 2026-09-10 on `qwen2.5:7b` and `qwen2.5:14b` with a `qwen3.6`
+probe, records what the loop does with no hosted key present — `$0.0000` on every run, nothing left
+the machine; not reader-graded, and only the research subset was re-measured after the last prompt
+change, which the report's own coverage caveat states:
+[`eval-results/2026-09-10-local-models.md`](eval-results/2026-09-10-local-models.md).
+
 ## Where the measured code lives
 
 The measurements were made in the private development repository before this repository was
