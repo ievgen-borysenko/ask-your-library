@@ -1003,19 +1003,16 @@ def test_observe_window_is_a_config_knob_and_the_quote_cap_follows_it(monkeypatc
     are that same value (the provenance check compares against the same cut).
     A fresh interpreter reads the override; the running one is not reloaded
     (reloading a shared module would leave nodes and config disagreeing)."""
-    import subprocess
-    import sys
+    from conftest import fresh_output, run_fresh
     from ask_your_library import config, nodes
 
     assert nodes.per_hit_limit(8) == config.SEARCH_HIT_CHARS == provenance.MAX_QUOTE_CHARS
     assert nodes.per_hit_limit(1) == config.CHAPTER_HIT_CHARS
     code = ("from ask_your_library import config, nodes, provenance; "
             "print(config.SEARCH_HIT_CHARS, nodes.per_hit_limit(8), provenance.MAX_QUOTE_CHARS)")
-    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True,
-                         env={**__import__("os").environ, "SEARCH_HIT_CHARS": "4000"}).stdout.split()
+    out = fresh_output(code, SEARCH_HIT_CHARS="4000").split()
     assert out == ["4000", "4000", "4000"]
-    bad = subprocess.run([sys.executable, "-c", "from ask_your_library import config"], capture_output=True,
-                         text=True, env={**__import__("os").environ, "SEARCH_HIT_CHARS": "0"})
+    bad = run_fresh("from ask_your_library import config", check=False, SEARCH_HIT_CHARS="0")
     assert bad.returncode != 0 and "positive" in bad.stderr
 
 
@@ -1271,35 +1268,28 @@ def test_loop_budgets_are_config_knobs_read_once():
     """MAX_STEPS / MAX_EMPTY_STREAK / MAX_CLARIFY_CANDIDATES come from the
     environment through config, like the observe window; a non-positive value
     refuses to start, and the nodes read the same numbers config holds."""
-    import subprocess
-    import sys
+    from conftest import fresh_output, run_fresh
     from ask_your_library import nodes, coverage
     assert nodes.MAX_STEPS == coverage.MAX_STEPS == config.MAX_STEPS
     code = ("from ask_your_library import config, nodes; "
             "print(config.MAX_STEPS, nodes.MAX_STEPS, config.MAX_EMPTY_STREAK, config.MAX_CLARIFY_CANDIDATES)")
-    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True,
-                         env={**__import__("os").environ, "MAX_STEPS": "6", "MAX_EMPTY_STREAK": "3",
-                              "MAX_CLARIFY_CANDIDATES": "2"}).stdout.split()
+    out = fresh_output(code, MAX_STEPS="6", MAX_EMPTY_STREAK="3", MAX_CLARIFY_CANDIDATES="2").split()
     assert out == ["6", "6", "3", "2"]
-    bad = subprocess.run([sys.executable, "-c", "from ask_your_library import config"], capture_output=True,
-                         text=True, env={**__import__("os").environ, "MAX_STEPS": "0"})
+    bad = run_fresh("from ask_your_library import config", check=False, MAX_STEPS="0")
     assert bad.returncode != 0 and "positive number of steps" in bad.stderr
     # the resolver understands ordinals 1..5 only: a sixth candidate could be shown, never chosen by number
     from ask_your_library import clarify
     assert config.MAX_CLARIFY_CANDIDATES <= len(clarify.ORDINALS) == 5
-    six = subprocess.run([sys.executable, "-c", "from ask_your_library import config"], capture_output=True,
-                         text=True, env={**__import__("os").environ, "MAX_CLARIFY_CANDIDATES": "6"})
+    six = run_fresh("from ask_your_library import config", check=False, MAX_CLARIFY_CANDIDATES="6")
     assert six.returncode != 0 and "at most 5 books" in six.stderr
 
 
 def test_a_blank_knob_line_in_a_copied_env_means_the_default():
     """`cp .env.example .env` and clearing a value must not crash at import
     (the same policy _env applies to the string settings)."""
-    import subprocess
-    import sys
+    from conftest import fresh_output
     code = "from ask_your_library import config; print(config.MAX_STEPS, config.SEARCH_HIT_CHARS)"
-    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True,
-                         env={**__import__("os").environ, "MAX_STEPS": "", "SEARCH_HIT_CHARS": " "}).stdout.split()
+    out = fresh_output(code, MAX_STEPS="", SEARCH_HIT_CHARS=" ").split()
     assert out == ["4", "2500"]
 
 
@@ -1307,8 +1297,7 @@ def test_llm_factory_bounds_every_call_with_timeout_and_retries(monkeypatch):
     """MAX_STEPS is a step budget, not a time budget: a hung provider must not
     hold a question forever. The client gets the configured timeout and retry
     count; the local backend's longer default is checked in a fresh interpreter."""
-    import subprocess
-    import sys
+    from conftest import fresh_output, run_fresh
     captured = {}
 
     class Fake:
@@ -1323,23 +1312,42 @@ def test_llm_factory_bounds_every_call_with_timeout_and_retries(monkeypatch):
     assert timeout.read == timeout.write == config.LLM_TIMEOUT_S and timeout.connect == llm.CONNECT_TIMEOUT_S == 5.0
     assert captured["max_retries"] == config.LLM_MAX_RETRIES
     code = "from ask_your_library import config; print(config.LLM_TIMEOUT_S, config.LLM_MAX_RETRIES, config.QUESTION_DEADLINE_S)"
-    env = {k: v for k, v in __import__("os").environ.items() if k not in ("LLM_TIMEOUT_S", "LLM_MAX_RETRIES", "QUESTION_DEADLINE_S")}
-    hosted = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True,
-                            env={**env, "LLM_BACKEND": "openrouter"}).stdout.split()
+    # The defaults are read in a child that has none of the three names AND no
+    # .env to fill them back in: run_fresh scrubs the names and starts the child
+    # in an empty directory. Dropping the names from os.environ alone is not
+    # enough — `config.load_dotenv()` reads the working directory at the first
+    # package import, so the .env the macOS installer writes into the checkout
+    # (LLM_TIMEOUT_S=600, QUESTION_DEADLINE_S=1200) became the "default" here.
+    hosted = fresh_output(code, LLM_BACKEND="openrouter").split()
     assert hosted == ["120", "2", "300"]
-    local = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True,
-                           env={**env, "LLM_BACKEND": "ollama"}).stdout.split()
+    local = fresh_output(code, LLM_BACKEND="ollama").split()
     assert local == ["600", "2", "300"]
-    tuned = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True,
-                           env={**env, "LLM_BACKEND": "openrouter", "LLM_TIMEOUT_S": "30", "LLM_MAX_RETRIES": "0",
-                                "QUESTION_DEADLINE_S": "0"}).stdout.split()
+    tuned = fresh_output(code, LLM_BACKEND="openrouter", LLM_TIMEOUT_S="30", LLM_MAX_RETRIES="0",
+                         QUESTION_DEADLINE_S="0").split()
     assert tuned == ["30", "0", "0"]
-    bad = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
-                         env={**env, "LLM_BACKEND": "openrouter", "QUESTION_DEADLINE_S": "-1"})
+    bad = run_fresh(code, check=False, LLM_BACKEND="openrouter", QUESTION_DEADLINE_S="-1")
     assert bad.returncode != 0 and "0 or a positive" in bad.stderr
-    zero = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
-                          env={**env, "LLM_BACKEND": "openrouter", "LLM_TIMEOUT_S": "0"})
+    zero = run_fresh(code, check=False, LLM_BACKEND="openrouter", LLM_TIMEOUT_S="0")
     assert zero.returncode != 0 and "positive number of seconds" in zero.stderr
+
+
+def test_a_dotenv_in_the_checkout_cannot_decide_what_a_fresh_child_reads(tmp_path):
+    """Every test above that reads a default in a child interpreter depends on
+    this: a .env is a real configuration source, so a child started in the
+    repository measures whatever is in the checkout, not the default. The macOS
+    installer writes one, the README sends contributors to
+    `uv run --group dev pytest -q` right after it, and it carries LLM_TIMEOUT_S
+    and QUESTION_DEADLINE_S.
+
+    Both directions, so the pin has teeth: pointed at a directory with a .env
+    the child reads it, and the working directory run_fresh picks by itself is
+    not the checkout, so nothing there reaches the child."""
+    from conftest import fresh_output
+
+    code = "from ask_your_library import config; print(config.LLM_TIMEOUT_S, config.QUESTION_DEADLINE_S)"
+    (tmp_path / ".env").write_text("LLM_TIMEOUT_S=601\nQUESTION_DEADLINE_S=1201\n", encoding="utf-8")
+    assert fresh_output(code, cwd=str(tmp_path)) == "601 1201"
+    assert fresh_output(code) == "120 300"
 
 
 def test_deadline_is_per_run_off_at_zero_and_excludes_the_clarify_pause(monkeypatch):
