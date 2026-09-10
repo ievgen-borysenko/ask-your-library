@@ -27,7 +27,11 @@ When it goes red, on the book the job named:
 #    --no-verify because the pin is, by assumption, the one that no longer matches.
 uv run scripts/ingest_demo_corpus.py --stage prepare-text --refetch --no-verify --book "Treasure Island"
 
-# 2. read what actually changed. The old copy is next to the new one, never deleted.
+# 2. read what actually changed. The old copy is next to the new one, never deleted —
+#    and a second --refetch refuses rather than overwrite it: for a Gutenberg text that
+#    .prev is the only copy of the pinned edition anywhere, and diffing one fresh
+#    download against another would come back clean and mean nothing. If you really
+#    need a third fetch, move the backup aside by hand under a name of your own first.
 diff data/raw/pg120.txt.prev data/raw/pg120.txt
 
 # 3. the chapter split, regenerated in step 1 from the NEW file: empty = same book.

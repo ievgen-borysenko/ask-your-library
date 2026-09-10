@@ -24,7 +24,8 @@ one is complete); --book re-ingests replace that book's rows instead of
 appending. Sources are checksum-pinned in the manifest (--no-verify to skip;
 an entry with no pin at all is a failure, not a skip). A cached download is
 reused, so investigating a drifted pin needs --refetch, which downloads again
-and keeps the old copy as pg<id>.txt.prev to diff against.
+and keeps the old copy as pg<id>.txt.prev to diff against; a second --refetch
+over the same book refuses rather than overwrite that backup.
 
 The LanceDB lives in data/lancedb by default (LIBRARY_DB_PATH overrides, the
 same variable the agent reads). Table names: cards_<backend> / transcripts_<backend>.
@@ -233,6 +234,42 @@ def save_prepared(entry: dict, chapters: list[tuple[str, str]], provenance: str)
     print(f"  {entry['id']}: {len(chapters)} chapters, {total:,} chars")
 
 
+def backup_path(raw_file: Path) -> Path:
+    """Where --refetch parks the copy already on disk. One fixed name, never a
+    numbered series: `.prev` means "the edition the manifest pinned", and the
+    recipe in corpus/README.md diffs exactly that name."""
+    return raw_file.with_name(raw_file.name + ".prev")
+
+
+def refuse_overwriting_backups(entries: list[dict]) -> None:
+    """--refetch twice over the same book destroys what it was run to preserve.
+
+    The second run moves the file the FIRST one downloaded onto `.prev`, and
+    the pinned edition goes with it — that copy is the only one anywhere, since
+    the Gutenberg texts are not committed and the mirror now serves the newer
+    file. What is left compares one new download against another: usually
+    byte-identical, and a clean diff read as "nothing drifted" is worse than no
+    diff at all. So a rerun stops before it touches anything and the human
+    decides what to keep."""
+    taken = [(entry["id"], raw, backup_path(raw))
+             for entry in entries if entry["source"] == "gutenberg"
+             for raw in [RAW_DIR / f"pg{entry['pg_id']}.txt"]
+             if backup_path(raw).exists()]
+    if not taken:
+        return
+    listing = "\n".join(f"  {book}: {prev.relative_to(REPO)}" for book, _raw, prev in taken)
+    _book, raw, prev = taken[0]
+    sys.exit(
+        f"--refetch would overwrite a backup that already exists:\n{listing}\n"
+        f"Each of those is the copy an earlier --refetch set aside, and for a Gutenberg text "
+        f"that is the only copy of that edition anywhere — nothing here commits it and the "
+        f"mirror serves the newer file. Overwriting it leaves you diffing one fresh download "
+        f"against another.\n"
+        f"Finish the investigation with the backup you have "
+        f"(diff {prev.relative_to(REPO)} {raw.relative_to(REPO)}), or move it aside by hand "
+        f"under a name of your own, and then run --refetch again.")
+
+
 def prepare_text(entries: list[dict], refetch: bool = False) -> None:
     """Prepare the Gutenberg books; download the ones not already in data/raw.
 
@@ -241,14 +278,18 @@ def prepare_text(entries: list[dict], refetch: bool = False) -> None:
     pin re-prepared the STALE text, regenerated corpus/toc/ from it, and the
     toc diff that is supposed to say "still the same book" came back clean
     about the old edition. The previous copy is moved aside, never removed:
-    reading the diff between the two is the point of the exercise."""
+    reading the diff between the two is the point of the exercise, and a rerun
+    that would overwrite one refuses (see refuse_overwriting_backups) before
+    anything is downloaded or moved."""
     RAW_DIR.mkdir(parents=True, exist_ok=True)
+    if refetch:
+        refuse_overwriting_backups(entries)
     for entry in entries:
         if entry["source"] != "gutenberg":
             continue
         raw_file = RAW_DIR / f"pg{entry['pg_id']}.txt"
         if refetch and raw_file.exists():
-            previous = raw_file.with_name(raw_file.name + ".prev")
+            previous = backup_path(raw_file)
             raw_file.replace(previous)
             print(f"  {entry['id']}: previous copy kept as {previous.name}")
         if not raw_file.exists():
@@ -504,7 +545,8 @@ def main() -> None:
                     help="skip manifest checksum verification of sources")
     ap.add_argument("--refetch", action="store_true",
                     help="re-download the Gutenberg texts even when a copy is cached "
-                         "(the old copy is kept next to it as pg<id>.txt.prev)")
+                         "(the old copy is kept next to it as pg<id>.txt.prev; refuses "
+                         "when such a backup is already there)")
     ap.add_argument("--retranscribe", action="store_true",
                     help="ignore shipped audio transcripts and run Whisper (macOS)")
     args = ap.parse_args()

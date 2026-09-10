@@ -138,7 +138,10 @@
   `--stage checksums`, each with the re-pin date and one line on what drifted. The reports in
   `docs/eval-results/` keep `manifest@f093bb27dab1`, the manifest their numbers were produced from;
   `eval/run_agent_eval.py` computes that fingerprint from the file at run time, so runs from now on
-  carry `manifest@35d116b157cd` instead.
+  carry `manifest@ed94677aa3a3` instead. That value is a SHA-256 over the whole file as it sits on
+  disk, comments included — and the re-pin dates and the drift notes are comments — so an edit that
+  changes nothing a build reads still moves it. It names one exact file rather than one set of
+  checksums, which is the property a provenance line needs.
 - **A weekly job now watches the pins.** `.github/workflows/corpus.yml` runs the download-and-verify
   stages — no Ollama, no model, no embedding — every Monday and on every pull request that touches
   `corpus/**`, the ingest script or `ingest/chapters.py`, where the chapter splitter that writes
@@ -158,7 +161,14 @@
   `corpus/toc/` from it, and the toc diff you were told to trust came back clean about the old
   edition. `--refetch` downloads regardless and moves the copy you had to `pg<id>.txt.prev` (kept,
   not deleted: the diff between the two is the point), and the README recipe is now four numbered
-  commands. Separately, `verify_checksum` returned early when an entry had no `sha256` at all, so
+  commands. A second `--refetch` over the same book refuses instead of parking this run's download
+  on that backup: for a Gutenberg text the `.prev` is the only copy of the pinned edition anywhere
+  — nothing here commits those texts and the mirror serves the newer file — and overwriting it
+  leaves you diffing one fresh download against another, which comes back clean and says nothing.
+  The refusal names the file and the two ways on — read the diff you already have, or move the
+  backup aside by hand — and it comes before anything is downloaded or moved, so a run over all 31
+  books stops at the check rather than part way through. Separately, `verify_checksum` returned
+  early when an entry had no `sha256` at all, so
   deleting a pin removed a book from verification without failing anything; a missing pin now exits
   with the two explicit ways out, and `tests/test_corpus_pins.py` refuses a `books` entry without a
   64-hex digest — and a canary with one — on every pull request, without a network round trip.
