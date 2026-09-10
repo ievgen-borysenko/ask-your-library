@@ -129,13 +129,14 @@ themselves are in [`docs/eval-results/`](docs/eval-results/).
   and 58 / 1 / 2 together. `qwen2.5:7b` scored 19/20 with 36 / 2 / 1; it is not the default because
   14b grounds more heavily, 61 quotes checked against 39 and 95.1 % confirmed against 92.3 %. The
   report's verdict is quoted rather than softened: "Neither model is good enough to advertise as a
-  strong default: 19/20 and 18/20 with genuine unattributed and broken quotes in both." The nearest
-  hosted number is the core run of 07.09 — the same golden file, those ten research questions plus
-  one — at 11/11 with 47 / 0 / 0, but on a different tree and a different index, so read it as the
-  shape of the gap and not as a paired measurement: `c09` (identify) and `c10` (aggregation) pass
-  there and fail on `qwen2.5:14b`. A local model still fabricates, and `validate` reports a broken
-  quote rather than preventing one. The runs, and the caveat that only part of them was re-measured
-  after the last prompt change:
+  strong default: 19/20 and 18/20 with genuine unattributed and broken quotes in both." Hosted, on
+  the catalogue set at the same golden checksum, ties at 10/10 and is clean too (21 / 0 / 0); on the
+  research side the nearest hosted number is the core run of 07.09 — the same golden file, those ten
+  questions plus one — at 11/11 with 47 / 0 / 0, but on a different tree and a different index, so
+  read it as the shape of the gap and not as a paired measurement: `c09` (identify) and `c10`
+  (aggregation) pass there and fail on `qwen2.5:14b`. A local model still fabricates, and `validate`
+  reports a broken quote rather than preventing one. The runs, and the caveat that only part of them
+  was re-measured after the last prompt change:
   [`docs/eval-results/2026-09-10-local-models.md`](docs/eval-results/2026-09-10-local-models.md);
   the hosted path is `LLM_BACKEND=openrouter` ([`docs/configuration.md`](docs/configuration.md)).
 - Run this on your own machine, over books you legally own.

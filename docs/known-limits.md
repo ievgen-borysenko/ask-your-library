@@ -12,17 +12,19 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   (36/39). That report's own verdict: "Neither model is good enough to advertise as a strong
   default: 19/20 and 18/20 with genuine unattributed and broken quotes in both." `c10`
   (aggregation) fails on both models, and `c09` (identify) fails on `qwen2.5:14b`. The quote check
-  is a report, not a gate: it names an unattributed quote (real corpus text, but not in the passage
-  the answer cites) and a broken one (in no retrieved passage at all), and it does not stop the
-  answer from carrying either.
+  is a report, not a gate: it names an unattributed quote (text from another retrieved passage, not
+  from the one the answer cites) and a broken one (in no retrieved passage at all), and it does not
+  stop the answer from carrying either.
+
   What the hosted configuration does on the nearest sets, and how near they are. The catalogue set
   is the same golden file at the same checksum (`en-demo-catalog.yaml@14b001e26f5e`): hosted
   Sonnet 4.6 scored 10/10 with 21 / 0 / 0 on 2026-09-10
   ([`eval-results/2026-09-10-catalogue-set.md`](eval-results/2026-09-10-catalogue-set.md)) — that
-  set is clean on both, and on both runs every checked quote comes from its four research controls
-  (`k07`-`k10`), the six catalogue questions being answered from the index tables with no quotes to
-  check. The research questions are the ten `c*` items of `en-demo.yaml`; the nearest hosted run of
-  that file is the core set of 2026-09-07 (`v0.2.0-rc1`), those ten plus the Ukrainian `h06`, at
+  set is clean on both, and on both runs every checked quote comes from its four research items
+  (`k07`-`k10`, three negative controls and the hybrid), the six catalogue questions being answered
+  from the index tables with no quotes to check. The research questions are the ten `c*` items of
+  `en-demo.yaml`; the nearest hosted run of that file is the core set of 2026-09-07
+  (`v0.2.0-rc1`), those ten plus the Ukrainian `h06`, at
   11/11 with 47 / 0 / 0 — passing both `c09` and `c10`. Neither hosted run is a paired
   measurement: different code, a different index build, and for the research one a different golden
   checksum. Read them as the shape of the gap. `LLM_BACKEND=openrouter`

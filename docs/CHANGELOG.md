@@ -6,7 +6,8 @@
   "the warning that a small local model is less reliable than the hosted default stands unchanged".
   It did not: the README rewrite had already removed it, and after the default flip the front page
   presented the local configuration as pure upside — no key, no cost, nothing leaves the machine —
-  with nothing about answer quality, and none of the thirteen entries in
+  with no measured number about answer quality (the Measured table's note that none of its figures
+  describes the local default is as far as it went), and none of the thirteen entries in
   [`known-limits.md`](known-limits.md) covered it either. So the only place outside this changelog
   where a new reader met the measurement was the report nobody opens first. The README's "Privacy
   and cost" FAQ now carries the numbers next to "Do you need an API key? No.", `known-limits.md`
