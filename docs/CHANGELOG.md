@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.1 (unreleased)
+## 0.2.1 (2026-09-10)
 
 - **The README is a front page, and the long text is in `docs/`.** What the project is, the
   architecture and the quote check, the manual quick start, the settings table, the evaluation
@@ -412,6 +412,11 @@
   and `QUESTION_DEADLINE_S=1200` came back as the "defaults". Every test that reads configuration
   in a child now goes through `conftest.run_fresh`, which already starts one in an empty directory
   with those inputs scrubbed, and a new test pins both directions of that isolation.
+- **The grouped weekly lockfile update.** `langchain-openai` 1.5.1 -> 1.6.0, `lancedb` 0.37.1 ->
+  0.38.0 and `python-dotenv` 1.2.2 -> 1.2.3, with `langchain-core` following from 1.5.5 to 1.6.2.
+  Nothing else in the lock moves and no constraint in `pyproject.toml` changes; the suite passes on
+  the new versions, and the parity tests that hold the installer's shell reader against
+  `dotenv_values()` run against the python-dotenv the lockfile now resolves.
 - **The catalogue set re-measured on the released code.** One run of `eval/golden/en-demo-catalog.yaml`
   on `466fc82` with the hosted planner and the 04.09 index: behaviour 10/10, quote provenance
   21 / 0 / 0 on the four research items, $0.1762 for the set and $0.0136 for the six catalogue items —
