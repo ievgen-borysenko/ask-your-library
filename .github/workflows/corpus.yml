@@ -1,0 +1,79 @@
+name: corpus
+
+on:
+  # No push trigger: what a merge to main would verify, the pull request that
+  # produced it has just verified, and a download of 31 books is not free.
+  pull_request:
+    paths:
+      - "corpus/**"
+      - "scripts/ingest_demo_corpus.py"
+      # The toc files this job diffs are written by split_chapters, which lives
+      # in the package, not in the script — a change there moves chapter
+      # boundaries with nothing under corpus/ or scripts/ touched. Only this
+      # module: the rest of src/ decides what happens after the split, and the
+      # download of 31 books is not worth spending on every source edit.
+      - "src/ask_your_library/ingest/chapters.py"
+      - ".github/workflows/corpus.yml"
+  schedule:
+    # The pins answer to Project Gutenberg, not to this repository: PG
+    # regenerates a book's plain text whenever its source is corrected, and the
+    # first person to notice is otherwise a visitor running the documented
+    # `uv run scripts/ingest_demo_corpus.py` and watching it exit 1 on a
+    # checksum mismatch. Weekly, at an hour of its own so it does not queue
+    # behind the security scan (17 5 * * 1). Scheduled runs come from the
+    # default branch only, so this schedule starts working once it is on main.
+    - cron: "41 7 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  pins:
+    runs-on: ubuntu-latest
+    # 31 downloads plus a chapter split; a run that has not finished in twenty
+    # minutes is a hung request, not a slow one, and holds a runner until the
+    # six-hour default gives up on it.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The job fetches from the open internet and pushes nothing back, so
+          # the checkout token has no work here and is not left in the config.
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          # The uv the lockfile is maintained with, as in ci.yml.
+          version: "0.12.10"
+      - name: Install (locked)
+        # The lockfile's default environment. No `--extra ui`: nothing here
+        # starts the web chat, and no embedding model is loaded at any point.
+        run: uv sync --locked
+      - name: Download the sources and verify every pinned checksum
+        # prepare-text downloads the 31 Gutenberg texts and checks each against
+        # its manifest sha256; prepare-audio checks the two committed LibriVox
+        # transcripts against theirs. Between them that is every checksum the
+        # manifest holds. Neither stage embeds, so no Ollama and no model is
+        # involved, and a mismatch exits 1 — which is the whole point of the job.
+        run: |
+          uv run scripts/ingest_demo_corpus.py --stage prepare-text
+          uv run scripts/ingest_demo_corpus.py --stage prepare-audio
+      - name: Re-split the canaries too (no network)
+        # corpus/canaries/** is in the path filter above, and their text is
+        # committed — so an edit to a canary changes its toc with nothing
+        # downloaded. Without this stage the two canary toc files were the only
+        # ones the diff below could never have anything to say about.
+        run: uv run scripts/ingest_demo_corpus.py --stage prepare-canaries
+      - name: The chapter split still matches the committed tables of contents
+        # The stages above rewrite corpus/toc/*.json from the sources they just
+        # read. A re-pin makes the checksums green by construction; this is what
+        # says the new upstream file is still the same book — same chapters, same
+        # titles. Red here means a re-pin changed the corpus, not just its bytes.
+        #
+        # Staged, not `git diff` alone: a book added to the manifest without its
+        # toc file, or an id renamed, writes a NEW file, and an untracked file is
+        # invisible to a plain diff — the one shape of drift that would have
+        # passed here silently. `git add -A` stages the additions and the
+        # deletions too, and the cached diff then prints what changed.
+        run: |
+          git add -A -- corpus/toc
+          git diff --cached --exit-code -- corpus/toc

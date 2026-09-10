@@ -8,6 +8,46 @@ not pinned and not committed), and the two canaries carry no checksum because th
 committed as is. `scripts/ingest_demo_corpus.py` builds the library from it; the Gutenberg texts
 are not committed, they are fetched at build time.
 
+**Pins drift, and a weekly job is meant to notice before a reader does.** A Gutenberg pin is the
+SHA-256 of the file as downloaded, and Project Gutenberg regenerates that file whenever the book's
+source is corrected: a new "Most recently updated" line in the header, a typo fixed in the text, a
+transcriber credit dropped. The pin then stops matching and `scripts/ingest_demo_corpus.py` exits 1
+on that book, which is the intended behaviour — the numbers in `docs/eval-results/` were measured
+on the pinned files, and their fingerprint names the manifest they came from.
+`.github/workflows/corpus.yml` runs the download-and-verify stages every Monday, and on any pull
+request that touches `corpus/**`, the ingest script or the chapter splitter, so a drifted pin turns
+up as a red job here rather than as a failed first build somewhere else.
+
+When it goes red, on the book the job named:
+
+```sh
+# 1. fetch again, keeping the copy you have. --refetch is what makes this work:
+#    a cached data/raw/pg<id>.txt short-circuits the download, so without it you
+#    would re-prepare the STALE text and regenerate corpus/toc/ from that.
+#    --no-verify because the pin is, by assumption, the one that no longer matches.
+uv run scripts/ingest_demo_corpus.py --stage prepare-text --refetch --no-verify --book "Treasure Island"
+
+# 2. read what actually changed. The old copy is next to the new one, never deleted —
+#    and a second --refetch refuses rather than overwrite it: for a Gutenberg text that
+#    .prev is the only copy of the pinned edition anywhere, and diffing one fresh
+#    download against another would come back clean and mean nothing. If you really
+#    need a third fetch, move the backup aside by hand under a name of your own first.
+diff data/raw/pg120.txt.prev data/raw/pg120.txt
+
+# 3. the chapter split, regenerated in step 1 from the NEW file: empty = same book.
+git status --porcelain corpus/toc
+
+# 4. only then re-pin, and write the date and the drift into manifest.yaml.
+uv run scripts/ingest_demo_corpus.py --stage checksums
+```
+
+Step 3 is the one that matters: a re-pin makes the checksums green by construction, and only the
+chapter split still says whether the book changed. A drift that moves chapters is not a re-pin: it
+is a different edition, and the book cards, the tables of contents and the golden questions have to
+be re-checked against it. (`--book` takes a substring of the title and is optional; without it all
+31 texts are fetched again.) A manifest entry with no `sha256` at all is a failure, not a skipped
+check — the escape hatch is the same explicit `--no-verify`, and a test refuses a pin-less book.
+
 **Texts: 31 books from Project Gutenberg.** Project Gutenberg distributes them as public domain
 **in the United States** and says so on its own terms: it does not guarantee the same status in
 other countries, and for a translated work (this corpus has English translations of at least Cervantes,

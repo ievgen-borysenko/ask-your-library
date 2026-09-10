@@ -150,7 +150,14 @@ def run_fresh(code: str, cwd=None, check=True, **env) -> subprocess.CompletedPro
     and then `env` applied, in an empty working directory (`load_dotenv` reads
     the cwd and its parents, so running in the repository would read its .env).
     `cwd` overrides that for the tests that plant a .env of their own.
-    check=True: an import-time SystemExit in the child fails the test."""
+    check=True: an import-time SystemExit in the child fails the test.
+
+    The empty directory is half of what makes a child's reading a default and
+    not the developer's: scrubbing a name from the environment FREES it, and a
+    .env in the checkout then fills it in. The macOS installer writes such a
+    .env (LLM_TIMEOUT_S=600, QUESTION_DEADLINE_S=1200), and the documented
+    `uv run --group dev pytest -q` runs right after it — so every child that
+    reads configuration goes through here, never a subprocess.run of its own."""
     base = {k: v for k, v in os.environ.items() if k not in SCRUBBED}
     # REPO for `import ui` (the package itself is installed); this directory so a
     # child can `from conftest import pin_environment` and start from exactly the
