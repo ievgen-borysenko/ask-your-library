@@ -156,14 +156,14 @@ def test_a_reply_that_cannot_be_read_is_not_reported_as_a_dead_ollama(monkeypatc
         preflight = local_llm(monkeypatch, tmp_path, Tags(payload))
         problems = preflight.check_environment()
         assert problems == [t("pf_ollama_bad_reply", url=preflight.OLLAMA_URL, status=200)]
-        assert t("pf_no_ollama", url=preflight.OLLAMA_URL) not in problems
+        assert t("pf_no_ollama", url=preflight.OLLAMA_URL, pulls=preflight.pull_commands()) not in problems
 
 
 def test_a_dead_ollama_in_the_local_mode_is_still_a_dead_ollama(monkeypatch, tmp_path):
     from ask_your_library.i18n import t
 
     preflight = local_llm(monkeypatch, tmp_path, requests.ConnectionError("refused"))
-    assert preflight.check_environment() == [t("pf_no_ollama", url=preflight.OLLAMA_URL)]
+    assert preflight.check_environment() == [t("pf_no_ollama", url=preflight.OLLAMA_URL, pulls=preflight.pull_commands())]
 
 
 def test_an_http_error_is_a_bad_reply_and_names_the_status(monkeypatch, tmp_path):
@@ -181,7 +181,7 @@ def test_an_http_error_is_a_bad_reply_and_names_the_status(monkeypatch, tmp_path
     problems = preflight.check_environment()
     assert problems == [t("pf_ollama_bad_reply", url=preflight.OLLAMA_URL, status=503)]
     assert "503" in problems[0]
-    assert t("pf_no_ollama", url=preflight.OLLAMA_URL) not in problems
+    assert t("pf_no_ollama", url=preflight.OLLAMA_URL, pulls=preflight.pull_commands()) not in problems
 
 
 def test_local_embeddings_need_their_model_pulled_too(monkeypatch, tmp_path):
@@ -257,7 +257,12 @@ def test_a_repo_env_file_cannot_hand_the_suite_a_provider_key(tmp_path):
 
     Driven through the shared fresh-interpreter helper, with a planted .env as
     the working directory: the pin only ever happens before the first import,
-    so nothing in this process can show whether it worked."""
+    so nothing in this process can show whether it worked.
+
+    On the HOSTED backend, named here rather than left to the default. Under the
+    shipped local one check_api_key() returns None whether a key is present or
+    not — it is the gate that is off, not the key that is absent — so the
+    planted key could sail through and this test would still be green."""
     from conftest import fresh_output
 
     planted = 'OPENROUTER_API_KEY="sk-planted-not-a-real-key"\n'
@@ -267,4 +272,96 @@ def test_a_repo_env_file_cannot_hand_the_suite_a_provider_key(tmp_path):
             "import os\n"
             "from ask_your_library import preflight\n"
             "print(repr(os.environ['OPENROUTER_API_KEY']), preflight.check_api_key() is not None)")
-    assert fresh_output(code, cwd=str(tmp_path)) == "'' True"
+    assert fresh_output(code, cwd=str(tmp_path), LLM_BACKEND="openrouter") == "'' True"
+
+
+# --- the exit code a first run gets ------------------------------------------
+# The shipped default answers on a local model, so the two ways a fresh clone
+# fails — no Ollama yet, no index yet — are the ordinary first-run path and not
+# the caller's mistake. A wrapper script has to tell them apart, and the only
+# thing it can read is the status: the messages are translated, and matching on
+# prose is what this classification exists to replace.
+
+def test_a_clean_environment_exits_zero():
+    from ask_your_library import preflight
+
+    assert preflight.exit_code(preflight.PreflightResult()) == preflight.EXIT_OK
+
+
+def test_a_missing_ollama_and_a_missing_index_are_different_statuses(monkeypatch, tmp_path):
+    """The two first-run conditions, each on its own, each with its own code."""
+    from ask_your_library import preflight as pf
+
+    preflight = local_llm(monkeypatch, tmp_path, requests.ConnectionError("refused"))
+    result = preflight.check_environment()
+    assert result.kinds == ["no_ollama"]
+    assert pf.exit_code(result) == pf.EXIT_NO_LOCAL_RUNTIME == 5
+
+    # Ollama up with both models pulled, and nothing indexed yet: the other half
+    # of a first run, and the half whose remedy is a command, not an install.
+    preflight = local_llm(monkeypatch, tmp_path,
+                          Tags({"models": [{"name": "qwen3.6:latest"}, {"name": "bge-m3:latest"}]}))
+    monkeypatch.setattr(preflight, "DB_PATH", tmp_path / "not-built-yet")
+    result = preflight.check_environment()
+    assert result.kinds == ["no_db"]
+    assert pf.exit_code(result) == pf.EXIT_NO_INDEX == 3
+    # And it says which command builds one.
+    assert "ingest_demo_corpus.py" in result[0] and "ayl-add" in result[0]
+
+
+def test_a_missing_key_keeps_its_own_status_on_the_hosted_backend(monkeypatch, tmp_path):
+    """The hosted configuration's own first-run failure, unchanged by the flip:
+    it is neither of the two above and must not borrow either code."""
+    from ask_your_library import preflight as pf
+    preflight = healthy(monkeypatch, tmp_path, list(pf.TABLES.values()))
+    monkeypatch.setattr(preflight, "openrouter_api_key",
+                        lambda: (_ for _ in ()).throw(RuntimeError("no key")))
+
+    result = preflight.check_environment()
+    assert result.kinds == ["no_key"]
+    assert pf.exit_code(result) == pf.EXIT_NO_KEY == 4
+
+
+def test_the_status_names_the_problem_to_fix_first(monkeypatch, tmp_path):
+    """A fresh clone usually has several at once — no Ollama AND no index. The
+    code is a precedence, not a subset test: with nothing to answer with, the
+    index is not the remedy to send the reader to, and a 30-minute build is a
+    poor first instruction to someone who cannot finish it either way. Every
+    problem is still in the list."""
+    from ask_your_library import preflight as pf
+
+    preflight = local_llm(monkeypatch, tmp_path, requests.ConnectionError("refused"))
+    monkeypatch.setattr(preflight, "DB_PATH", tmp_path / "not-built-yet")
+    result = preflight.check_environment()
+    assert set(result.kinds) == {"no_ollama", "no_db"}
+    assert len(result) == 2
+    assert pf.exit_code(result) == pf.EXIT_NO_LOCAL_RUNTIME
+
+
+def test_anything_else_keeps_the_status_it_always_had(monkeypatch, tmp_path):
+    """An index built by another embedding model is not a first-run condition
+    and has no remedy of its own to name, so it stays the 1 every caller that
+    only tests for non-zero already handles."""
+    from ask_your_library import preflight as pf
+    preflight = healthy(monkeypatch, tmp_path, list(pf.TABLES.values()))
+    monkeypatch.setattr(preflight, "check_index", lambda *a: "bge-m3 vs nomic-embed-text")
+
+    result = preflight.check_environment()
+    assert set(result.kinds) == {"index_mismatch"}
+    assert pf.exit_code(result) == pf.EXIT_NOT_READY == 1
+
+
+def test_the_remedy_names_the_models_this_configuration_will_open(monkeypatch, tmp_path):
+    """`ollama pull bge-m3` printed to somebody running nomic-embed-text sends
+    them to fetch a model their run never opens. The message is built from the
+    configured names, and it carries the whole first-run remedy: install, start,
+    pull, or the one command that does all three."""
+    preflight = local_llm(monkeypatch, tmp_path, requests.ConnectionError("refused"),
+                          model="qwen2.5:3b")
+    monkeypatch.setattr(preflight, "OLLAMA_EMBED_MODEL", "nomic-embed-text")
+
+    message = preflight.check_environment()[0]
+    assert "ollama pull qwen2.5:3b" in message and "ollama pull nomic-embed-text" in message
+    assert "bge-m3" not in message and "qwen2.5:14b" not in message
+    assert "brew install ollama" in message and "ollama serve" in message
+    assert "bash scripts/install-mac.sh" in message

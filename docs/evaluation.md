@@ -3,6 +3,12 @@
 The harnesses, the golden sets and the runs behind the results table; the README carries the
 same table without this text around it.
 
+Every measured run on this page and in [`eval-results/`](eval-results/) was produced on the
+**hosted** configuration (`LLM_BACKEND=openrouter`, `anthropic/claude-sonnet-4.6`), which is not
+the shipped default: the default is local and free, a different answering model and therefore a
+different system, and no number here describes it. Each report's fingerprint names the model and
+the backend it ran with, so a local run of your own is told apart from these by its own header.
+
 **`eval/run_retrieval_eval.py` - component baseline, no LLM calls.** Feeds the *raw* golden
 question to the retriever and asks whether the resulting window (top-4 card chunks + top-4
 transcript chunks, exactly what `search_both` gives the agent) contains the expected book(s).

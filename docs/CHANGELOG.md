@@ -2,6 +2,50 @@
 
 ## 0.2.1 (unreleased)
 
+- **The shipped default is fully local: no account, no key, no money to try it.** `LLM_BACKEND`
+  defaults to `ollama` instead of `openrouter`, so a clone that follows any path — the installer,
+  the manual quick start, or `uv run ask-library "..."` with no `.env` at all — answers on a model
+  Ollama serves on this machine, and its cost lines read $0.0000 because `OLLAMA_PRICE_*` are 0.
+  Nobody has to create a paid account to see whether the thing works. The hosted path is unchanged
+  and is now opt-in: `LLM_BACKEND=openrouter` behaves exactly as the default used to, key, prices
+  and endpoint included. Everything that hung off the old default followed. The key gates
+  (`OPENROUTER_NEEDS_KEY`, `preflight.check_api_key`, `ui.py`'s startup refusal) were already
+  conditional and simply stop firing; the UI's refusal now names the local configuration as a way
+  out rather than only the key. `.env.example` **is** the local configuration — including the
+  local time budgets, `LLM_TIMEOUT_S=600` and `QUESTION_DEADLINE_S=1200`, because a value in a
+  copied `.env` wins over `config.py`'s per-backend default — with `ORCHESTRATOR_MODEL` and the
+  two `PRICE_*` lines shipped commented out beside a note on what the hosted path costs and that
+  it needs an account. That inverts `scripts/install-mac.sh`: `--hosted` is now the mode that
+  transforms the example (backend, both time budgets, the three commented lines), and the local
+  mode writes it out as it stands. An invalid `LLM_BACKEND` still refuses to start rather than
+  falling back — to either backend now, since falling back to the local one would leave a run
+  meant for a hosted model asking Ollama for something nobody pulled.
+- **A first run with nothing configured ends in an instruction, not a stack trace — and in a
+  distinct exit code.** `preflight.check_environment()` records the KIND of each problem beside
+  its prose, and `preflight.exit_code()` turns those kinds into the status the CLI exits with:
+  `3` no index yet, `4` a hosted backend with no key, `5` Ollama unreachable, not answering as
+  Ollama, or missing a configured model, `1` anything else — the status it always was. It is a
+  precedence, not a subset test: a fresh clone usually has several problems at once, every one is
+  still printed, and the code names the one to fix first, so a wrapper script can act on it
+  without matching on translated prose. The unreachable-Ollama message now carries the whole
+  remedy, because on a machine where nothing is installed yet the missing step was the install:
+  `brew install ollama`, `ollama serve`, then one `ollama pull` per model **this** configuration
+  will open (read from `OLLAMA_LLM_MODEL` / `OLLAMA_EMBED_MODEL`, so a run on `nomic-embed-text`
+  is not sent to fetch `bge-m3`), or `bash scripts/install-mac.sh`, which does all of it. The
+  missing-index message names `ayl-add` beside the demo build. `install-mac.sh` closes on the
+  exact next command, in the order it works: the corpus build first when there is no index
+  (`ask-library` before it would exit 3 on that same message), the reader's own `ayl-add` instead
+  under `--no-demo`, then the first question with the sentence the mode exists for — no account,
+  no key, nothing to pay, the local model named.
+- **Every eval harness states the backend it ran with.** `run_fingerprint()` — and therefore
+  `run_ablation.py`, which imports it — prints `model <name> via <backend>`; the injection canary
+  opens with the answering model and backend it is about to test; `run_retrieval_eval.py`, which
+  calls no answering model, names the embedder instead. The backend used to go unsaid, and unsaid
+  meant the hosted default, which would now leave the reports in `docs/eval-results/`
+  indistinguishable from a free local run. **No measured number was touched.** Those reports were
+  produced on the hosted configuration, and the README's results table, `docs/evaluation.md` and
+  `docs/cost.md` now say so where they present them, together with the fact that the default
+  configuration is local and free and is not what any of them measures.
 - **The README is a front page, and the long text is in `docs/`.** What the project is, the
   architecture and the quote check, the manual quick start, the settings table, the evaluation
   narrative, privacy and the threat model, the injection layers, cost and the known limits moved
@@ -37,7 +81,7 @@
   `cache: 436 tokens read from cache`, so it is what a first ask costs on this machine rather than
   a warm-cache artefact. `docs/img/ask-library-ui.gif` (828 KB) is the web UI on a different
   question — what d'Artagnan said before fighting three men at once, and why — answered by the
-  hosted default model, `anthropic/claude-sonnet-4.6` through OpenRouter, with the embeddings still
+  hosted model `anthropic/claude-sonnet-4.6` through OpenRouter, with the embeddings still
   local. It ends on the green quote-provenance badge reading `evidence passages 5/5 traced to their
   source`, with the Chapter V passage opened under it and the quote sitting on the text it was
   checked against; the caption quotes the $0.0724 the UI's own metrics line reports. That question

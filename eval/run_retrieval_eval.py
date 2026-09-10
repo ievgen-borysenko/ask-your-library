@@ -81,6 +81,14 @@ def main() -> None:
     multi_full = sum(1 for r in multi if len(r["found"]) == len(r["expected"]))
     multi_cov = (sum(len(r["found"]) / len(r["expected"]) for r in multi) / len(multi)) if multi else None
 
+    # This harness never calls an answering model, so LLM_BACKEND says nothing
+    # about its numbers — the embedder does, and it produced both the query
+    # vectors and the indexed ones. Named for the reason the agent eval names
+    # its backend: a published number should not need its configuration
+    # inferred by the reader.
+    from ask_your_library.config import EMBED_BACKEND, OLLAMA_EMBED_MODEL, OPENROUTER_EMBED_MODEL
+    embed_model = OLLAMA_EMBED_MODEL if EMBED_BACKEND == "ollama" else OPENROUTER_EMBED_MODEL
+    print(f"\nEmbeddings: {embed_model} via {EMBED_BACKEND} (no answering model is called here)")
     print("\nRetriever-window metrics (raw question as query; window = top-4 cards + top-4 transcripts):")
     print(f"  single-book presence: {single_hits}/{len(single)}"
           + (f" = {single_hits / len(single):.0%}" if single else ""))

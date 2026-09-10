@@ -25,12 +25,15 @@ flowchart LR
     class Obs,Ref,Syn,LS ext
 ```
 
-Yellow boxes leave the machine (the LLM provider, optionally LangSmith); everything else stays local.
+Yellow boxes are the ones that CAN leave the machine (a hosted LLM provider, optionally
+LangSmith); everything else stays local. **In the shipped configuration none of them do**:
+`LLM_BACKEND=ollama` and `EMBED_BACKEND=ollama` are the defaults, tracing is off unless you set a
+key, and the diagram's yellow describes what the hosted alternative would send.
 
-- The question **and retrieved corpus fragments** go to the orchestrator LLM provider -
-  OpenRouter by default, and on to the model vendor. Point `OPENROUTER_BASE_URL` elsewhere to
-  change that, or set `LLM_BACKEND=ollama`: with local embeddings (the default) and tracing off,
-  nothing leaves the machine at all.
+- The question **and retrieved corpus fragments** stay on this machine by default: the
+  orchestrator LLM is a local model served by Ollama. Set `LLM_BACKEND=openrouter` and both go to
+  OpenRouter, and on to the model vendor; `OPENROUTER_BASE_URL` points that elsewhere if you have
+  another OpenAI-compatible endpoint.
 - A catalogue answer (the list of your books) is computed locally from the index tables and is
   not sent to the provider; the conversation memory keeps only its shape (the operation and the
   counts, and the name you asked about), so a later question does not carry the titles either.

@@ -5,11 +5,18 @@
   uv run ask-library --help / --version     # no API key, no index needed
 
 The web UI (ui.py, Chainlit) shares the same core: runner.run_question.
-Answering a question requires an embedding backend (local Ollama with bge-m3 by
-default), a LanceDB built by scripts/ingest_demo_corpus.py or pointed to by
-LIBRARY_DB_PATH, and OPENROUTER_API_KEY when the answering model or the embeddings come from
-OpenRouter (not with LLM_BACKEND=ollama and local embeddings) — checked by the preflight, which runs
-only when a run is actually about to start.
+Answering a question requires an answering model and an embedding backend —
+both a local Ollama by default (qwen2.5:14b and bge-m3), so a fresh clone needs
+no account and no key — plus a LanceDB built by scripts/ingest_demo_corpus.py or
+`ayl-add`, or pointed to by LIBRARY_DB_PATH. OPENROUTER_API_KEY is needed only
+when the answering model or the embeddings are moved to OpenRouter. All of it is
+checked by the preflight, which runs only when a run is actually about to start.
+
+Exit codes: 0 an answer, 1 the environment is not ready (or the run failed),
+3 no index yet, 4 a hosted backend with no key, 5 Ollama is not there yet — the
+codes preflight.exit_code assigns, so a wrapper script can tell the first-run
+conditions apart without matching on translated text. 2 is argparse's own, for a
+bad command line.
 """
 import argparse
 import os
@@ -20,7 +27,7 @@ from pathlib import Path
 from .config import QUESTION_DEADLINE_S, SUPPORTED_LANGS
 from .graph import build_graph
 from .i18n import set_lang, status_word, t
-from .preflight import check_environment
+from .preflight import check_environment, exit_code
 from .runner import history_entry, run_question
 from .sanitize import LINE_BREAK_RE, strip_control_chars
 
@@ -230,7 +237,11 @@ def main(argv: list[str] | None = None) -> None:
         say(t("pf_header"), error=True)
         for problem in problems:
             say(f"  - {problem}", error=True)
-        raise SystemExit(1)
+        # Every problem is printed; the status names the one to fix first. A
+        # missing Ollama and a missing index are the two ways a fresh clone
+        # fails, they are not the same failure, and neither is a traceback —
+        # so they do not share the one exit code they used to.
+        raise SystemExit(exit_code(problems))
     # Non-fatal: the agent runs, but the user is told how the index is degraded.
     notices = getattr(problems, "notices", [])
     if notices:

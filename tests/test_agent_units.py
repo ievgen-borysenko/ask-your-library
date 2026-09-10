@@ -1415,7 +1415,13 @@ def test_a_dotenv_in_the_checkout_cannot_decide_what_a_fresh_child_reads(tmp_pat
     code = "from ask_your_library import config; print(config.LLM_TIMEOUT_S, config.QUESTION_DEADLINE_S)"
     (tmp_path / ".env").write_text("LLM_TIMEOUT_S=601\nQUESTION_DEADLINE_S=1201\n", encoding="utf-8")
     assert fresh_output(code, cwd=str(tmp_path)) == "601 1201"
-    assert fresh_output(code) == "120 300"
+    # No .env in reach: config.py's own defaults. LLM_TIMEOUT_S has a
+    # per-backend one, and the shipped backend is the local model — slower, and
+    # it may load cold — so 600 s, not the hosted 120 s. The deadline has no
+    # per-backend default and stays 300 s; the installer and .env.example raise
+    # it for local runs, and this child sees neither of them.
+    assert fresh_output(code) == "600 300"
+    assert fresh_output(code, LLM_BACKEND="openrouter") == "120 300"
 
 
 def test_a_loop_call_cannot_outlive_the_question_deadline(monkeypatch):

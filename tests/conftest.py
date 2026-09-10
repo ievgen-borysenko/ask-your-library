@@ -26,13 +26,22 @@ import tempfile
 # value sets it itself (monkeypatch, or a fresh interpreter through run_fresh).
 DEFAULTS = {
     "ASK_LANG": "en",
-    "LLM_BACKEND": "openrouter",
+    # The shipped default, pinned like every other knob — and a pin, not a
+    # hiding place: LLM_BACKEND is in SCRUBBED below, so a test that asks what
+    # the DEFAULT is goes through run_fresh, into a child that has the name
+    # unset and reads config.py's own answer. Nothing written here can make
+    # that child agree with this file by accident.
+    "LLM_BACKEND": "ollama",
     "EMBED_BACKEND": "ollama",
     "OLLAMA_URL": "http://localhost:11434",
     "OLLAMA_EMBED_MODEL": "bge-m3",
     "OLLAMA_LLM_MODEL": "qwen2.5:14b",
     "OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
     "OPENROUTER_EMBED_MODEL": "openai/text-embedding-3-small",
+    # Read by config only under LLM_BACKEND=openrouter, so with the default
+    # pinned above these three are inert — and they are pinned anyway, because
+    # CI runs this whole suite a second time with LLM_BACKEND=openrouter
+    # exported, and that leg must not read the developer's own model or rates.
     "ORCHESTRATOR_MODEL": "anthropic/claude-sonnet-4.6",
     "PRICE_IN_PER_MTOK": "3.0",
     "PRICE_OUT_PER_MTOK": "15.0",

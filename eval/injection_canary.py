@@ -643,6 +643,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     total = len(STAGES) + (0 if args.no_live else 1)
 
+    # Which system this run tested. The live stage puts a poisoned passage in
+    # front of the answering model, so "the model resisted" is a claim about
+    # that model on that backend and about nothing else. It used to go unsaid,
+    # and unsaid meant the hosted default; the default is local now, so the
+    # backend is stated rather than assumed either way.
+    from ask_your_library.config import LLM_BACKEND, ORCHESTRATOR_MODEL
+    print(f"answering model: {ORCHESTRATOR_MODEL} via {LLM_BACKEND}")
+
     payloads: dict = {}
     skipped: list[str] = []
     for number, stage in enumerate(STAGES, 1):
@@ -669,7 +677,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.no_live:
         print("\nCANARY MECHANICS PASSED (--no-live: the live observe stage was skipped, "
-              "nothing was proven about the hosted model's resistance)")
+              "nothing was proven about the answering model's resistance)")
     else:
         print("\nCANARY TEST PASSED")
     return 0

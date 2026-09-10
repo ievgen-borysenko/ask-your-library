@@ -16,6 +16,13 @@ jobs:
       # config resolves LLM_BACKEND once, at import time, so tests that describe
       # one backend must pin it. Running the suite under both is what keeps those
       # pins honest: no Ollama is started here, and no test needs one.
+      # Both legs EXPORT the name, neither leans on config.py's default. That is
+      # not decoration since the default flipped to ollama: the openrouter leg
+      # would otherwise run the local configuration under a job called
+      # "test (openrouter)" and prove nothing about the hosted path.
+      # The job names are required checks in the branch ruleset — "test
+      # (openrouter)", "test (ollama)" — so this list is order- and
+      # spelling-sensitive; renaming or reordering it blocks every merge.
       matrix:
         backend: [openrouter, ollama]
     env:

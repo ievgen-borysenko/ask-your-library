@@ -321,3 +321,41 @@ def test_each_question_starts_with_no_passages(monkeypatch):
 def test_verbose_flag_parses():
     assert cli.build_parser().parse_args(["--verbose", "q"]).verbose is True
     assert cli.build_parser().parse_args(["q"]).verbose is False
+
+
+# --- the exit status of a first run ------------------------------------------
+
+@pytest.mark.parametrize("kind, expected", [
+    ("no_ollama", 5),          # nothing to answer with yet
+    ("no_db", 3),              # nothing to search yet
+    ("no_key", 4),             # a hosted backend without its key
+    ("index_mismatch", 1),     # anything else: the status it always had
+])
+def test_the_preflight_status_reaches_the_shell(monkeypatch, capsys, kind, expected):
+    """The CLI exits with preflight's classification, not a flat 1. A wrapper
+    script around `ask-library` has nothing else to read: the messages are
+    translated, so matching on their prose is what these codes replace."""
+    from ask_your_library.preflight import PreflightResult
+
+    monkeypatch.setattr(cli, "check_environment",
+                        lambda: PreflightResult(["the problem, in prose"], (), [kind]))
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main(["a question"])
+    assert exit_info.value.code == expected
+    # Whatever the status, the reader still gets the sentence with the remedy.
+    assert "the problem, in prose" in capsys.readouterr().err
+
+
+def test_a_first_run_prints_every_problem_and_leads_with_one(monkeypatch, capsys):
+    """No Ollama and no index at once is the ordinary shape of a fresh clone.
+    Both are printed; the status names the one that has to be fixed first."""
+    from ask_your_library.preflight import PreflightResult
+
+    monkeypatch.setattr(cli, "check_environment",
+                        lambda: PreflightResult(["no ollama", "no index"], (),
+                                                ["no_ollama", "no_db"]))
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main(["a question"])
+    assert exit_info.value.code == 5
+    err = capsys.readouterr().err
+    assert "no ollama" in err and "no index" in err

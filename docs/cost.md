@@ -1,6 +1,16 @@
 # Cost
 
-The orchestrator is Claude Sonnet via OpenRouter by default. A typical question costs roughly
+**The default configuration costs nothing.** `LLM_BACKEND=ollama` runs every agent node on a model
+Ollama serves on your own machine, priced at `OLLAMA_PRICE_IN_PER_MTOK` /
+`OLLAMA_PRICE_OUT_PER_MTOK` (both `0`), so the metrics line under every answer reads $0.0000 —
+that is the arithmetic, not a rounded-down estimate. There is no account and no billing to set up,
+and nothing below applies to it except the paragraph on cache reads at the end.
+
+Everything else on this page is the hosted alternative, `LLM_BACKEND=openrouter`: what it costs,
+and the configuration every measured number here and in [`eval-results/`](eval-results/) was run
+on.
+
+The hosted orchestrator is Claude Sonnet via OpenRouter. A typical question costs roughly
 **$0.04-0.05 per question on the demo set** at v0.2.0-rc1 (core mean $0.049, extended $0.043;
 $0.03-0.04 at v0.1.0, before the 2,500-character window and the coverage gate): 4 to 12 LLM calls
 (plan, then one observe and one reflect per step up to the 4-step budget, then synthesize; one more
@@ -19,6 +29,6 @@ nothing to discount. "Cache reads not discounted" in the eval reports' cost line
 about the configured rates, not a discount those runs missed.
 
 That paragraph describes the hosted path, which every measured number on this page was run on.
-On `LLM_BACKEND=ollama` the counter is not zero: Ollama serves a repeated prefix from its own
+On the default `LLM_BACKEND=ollama` the counter is not zero: Ollama serves a repeated prefix from its own
 prompt cache and reports what it served, so the CLI prints a `cache: N tokens read from cache`
 line — 436 tokens in the recorded CLI run on the [README](../README.md) front page.

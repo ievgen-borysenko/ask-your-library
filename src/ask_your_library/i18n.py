@@ -177,16 +177,30 @@ _T = {
 
     # ---- preflight: the three typical first-run environment failures
     "pf_no_key": {
-        "ua": "Нема ключа OpenRouter: експортуй OPENROUTER_API_KEY (або додай у .env).",
-        "en": "OpenRouter key missing: export OPENROUTER_API_KEY (or put it in .env).",
+        "ua": "Нема ключа OpenRouter: експортуй OPENROUTER_API_KEY (або додай у .env). "
+              "Ключ потрібен лише хмарній конфігурації; типова — локальна "
+              "(LLM_BACKEND=ollama), і їй ключ не потрібен.",
+        "en": "OpenRouter key missing: export OPENROUTER_API_KEY (or put it in .env). "
+              "Only the hosted configuration needs a key; the default one is local "
+              "(LLM_BACKEND=ollama) and needs none.",
     },
+    # The first-run failure of the shipped default, so it carries the whole
+    # remedy rather than the one step that used to be missing: nothing is
+    # installed yet on the machine this is printed on. The pulls are the models
+    # THIS configuration reads (preflight.pull_commands), never a fixed pair.
     "pf_no_ollama": {
-        "ua": "Не вдалося звернутися до Ollama на {url} (помилка з'єднання або запиту): "
-              "запусти `ollama serve` і "
-              "`ollama pull bge-m3` (або задай OLLAMA_URL / EMBED_BACKEND).",
-        "en": "Could not reach Ollama at {url} (a connection or request error): "
-              "run `ollama serve` and "
-              "`ollama pull bge-m3` (or set OLLAMA_URL / EMBED_BACKEND).",
+        "ua": "Не вдалося звернутися до Ollama на {url} (помилка з'єднання або запиту). "
+              "Типова конфігурація відповідає локально, і саме Ollama її запускає: "
+              "встанови (`brew install ollama`), запусти (`ollama serve`), потім {pulls}. "
+              "Одна команда робить усе це: `bash scripts/install-mac.sh`. "
+              "Якщо сервер в іншому місці — задай OLLAMA_URL; щоб відповідати на хмарній "
+              "моделі — LLM_BACKEND=openrouter (потрібен ключ, і це коштує грошей).",
+        "en": "Could not reach Ollama at {url} (a connection or request error). "
+              "The default configuration answers locally, and Ollama is what runs it: "
+              "install it (`brew install ollama`), start it (`ollama serve`), then {pulls}. "
+              "One command does all of that: `bash scripts/install-mac.sh`. "
+              "Set OLLAMA_URL if your server is elsewhere, or LLM_BACKEND=openrouter to "
+              "answer on a hosted model instead (that needs a key, and costs money).",
     },
     "pf_ollama_bad_reply": {
         "ua": "Щось на {url} відповіло (HTTP {status}), але це не придатна відповідь /api/tags "
@@ -198,11 +212,11 @@ _T = {
     },
     "pf_no_db": {
         "ua": "Бази нема: {path}. Побудуй демо-корпус "
-              "(`uv run scripts/ingest_demo_corpus.py`, ~30 хв) або вкажи "
-              "LIBRARY_DB_PATH на свою LanceDB.",
+              "(`uv run scripts/ingest_demo_corpus.py`, ~30 хв), проіндексуй свої книжки "
+              "(`uv run ayl-add <тека>`) або вкажи LIBRARY_DB_PATH на свою LanceDB.",
         "en": "Database not found: {path}. Build the demo corpus "
-              "(`uv run scripts/ingest_demo_corpus.py`, ~30 min) or point "
-              "LIBRARY_DB_PATH at your LanceDB.",
+              "(`uv run scripts/ingest_demo_corpus.py`, ~30 min), index your own books "
+              "(`uv run ayl-add <folder>`) or point LIBRARY_DB_PATH at your LanceDB.",
     },
     "pf_no_tables": {
         "ua": "У базі {path} нема таблиць: {tables}. Заверши інжест "
