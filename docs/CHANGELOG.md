@@ -16,8 +16,10 @@
   `configuration.md`. Every one of them is a separate added sentence, not a rewrite of the moved
   text; a line-by-line check of the base README against the new tree leaves no prose residual.
   The README keeps the macOS install, the first question, the measured-results table and a
-  five-line privacy-and-cost summary, and gains two Mermaid diagrams: the flow in plain terms
-  and the architecture as an offline and an online subgraph, both reconciled against `graph.py`
+  five-line privacy-and-cost summary, and gains one Mermaid diagram: the flow in plain terms. The
+  architecture as an offline and an online subgraph opens `docs/architecture.md` instead, above the
+  control-flow diagram that page already carried, which now wears the same CODE / AI / HUMAN legend
+  with its nodes and edge labels untouched; both diagrams are reconciled against `graph.py`
   and `nodes.py` — the catalogue node and `validate` are in them, `synthesize` runs before
   `validate` and `validate` only reports, and both the CRAG gate and the deterministic coverage
   gate sit on the `reflect` edge, where the code puts them. The course-demo
@@ -310,6 +312,11 @@
   and `QUESTION_DEADLINE_S=1200` came back as the "defaults". Every test that reads configuration
   in a child now goes through `conftest.run_fresh`, which already starts one in an empty directory
   with those inputs scrubbed, and a new test pins both directions of that isolation.
+- **The catalogue set re-measured on the released code.** One run of `eval/golden/en-demo-catalog.yaml`
+  on `466fc82` with the hosted planner and the 04.09 index: behaviour 10/10, quote provenance
+  21 / 0 / 0 on the four research items, $0.1762 for the set and $0.0136 for the six catalogue items —
+  the same verdicts and the same routing as the 09.09 run on `50b9347`, with the citations now carrying
+  the full index key the evidence label supplies (`docs/eval-results/2026-09-10-catalogue-set.md`).
 
 ## 0.2.0 (2026-09-09)
 

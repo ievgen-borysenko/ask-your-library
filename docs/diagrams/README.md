@@ -1,8 +1,9 @@
 # Diagram sources
 
 The two `.excalidraw` files here are the author's course-demo originals from September 2026, kept
-as the editable sources; the Mermaid diagrams in the [README](../../README.md) are the current
-ones and are the drawings to trust.
+as the editable sources; the Mermaid diagrams in this repository — the flow in plain terms on the
+[README](../../README.md) front page, the whole system and the loop's control flow in
+[`architecture.md`](../architecture.md) — are the current ones and are the drawings to trust.
 
 | File | What it drew |
 |---|---|

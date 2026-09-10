@@ -52,6 +52,11 @@ measurement): 10/10; the six catalogue items with 0 search steps and one model c
 controls through the research loop (1, 2 and 3 steps); the hybrid item with retrieval limited to
 Dracula; 22/22 quotes confirmed on the four research items; $0.17 for the set, of which the six
 catalogue items cost $0.014 together (`eval-results/2026-09-09-catalogue-set.md`).
+Re-measured on `466fc82` (10.09, this repository's `main` at the merge of `#18`, same golden checksum and the same
+04.09 index): 10/10 again with the same routing question by question, 21/21 quotes confirmed on the
+four research items — one evidence item fewer on the London question — and $0.1762 for the set, of
+which the six catalogue items again cost $0.0136
+([`eval-results/2026-09-10-catalogue-set.md`](eval-results/2026-09-10-catalogue-set.md)).
 
 Two measured trees, both single runs, clean tree (`--require-clean`), strict hit-id mode, the same
 bge-m3 index: **v0.1.0**, 2026-09-05 on code `88881ee` (the last code commit before tag `v0.1.0`;

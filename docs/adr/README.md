@@ -23,7 +23,8 @@ runs under its own thread id, deleted when the run ends. The alternatives were a
 over the model SDK, which has no interrupt or resume without custom state plumbing, and a role
 framework of the CrewAI or AutoGen kind, which hides the control flow this project exists to show.
 
-The graph is therefore the architecture diagram — the one the README draws — the eval harness
+The graph is therefore the architecture diagram — the one [`architecture.md`](../architecture.md)
+draws — the eval harness
 drives the same graph, and clarify is one node rather than a mode. The price is state discipline:
 every node returns only its deltas, and the reducer on `hits_log` became necessary the moment the
 passages themselves moved into state. A persistent checkpointer is worth adding only if resuming a

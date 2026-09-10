@@ -56,58 +56,18 @@ Every other system, the manual steps, your own books, the web UI and the eval co
 
 ## How it works
 
-```mermaid
-flowchart TB
-    subgraph offline["OFFLINE — build the index, on your machine"]
-        direction LR
-        BK["your .txt / .md books<br/>or the demo corpus"]:::code
-        CRD["book cards: one model call<br/>per book, demo corpus only"]:::ai
-        BK --> CHK["ayl-add: chapters from headings,<br/>chunks packed from whole sentences"]:::code
-        CHK --> EMB["bge-m3 embeddings,<br/>local Ollama by default"]:::ai
-        EMB --> DB[("LanceDB — transcripts, optional cards<br/>hybrid BM25 + vectors, model fingerprint")]:::code
-        CRD --> DB
-    end
-    subgraph online["ONLINE — LangGraph loop, one question"]
-        direction TB
-        Q(["question: CLI or web chat"]):::human --> PLAN["plan: mode plus 2-4 English queries"]:::ai
-        PLAN -->|"catalogue<br/>question"| CAT["catalog: list_books over the index tables,<br/>count = length of that list, no search"]:::code
-        PLAN -->|"steps left"| ACT["act: search_both, hybrid + RRF,<br/>or read_chapter; sanitized, stable hit ids"]:::code
-        PLAN -->|"no query left"| SYN
-        ACT --> OBS["observe: evidence distillate<br/>book, chapter, verbatim quote, hit id"]:::ai
-        OBS --> REF{"reflect:<br/>enough<br/>evidence?"}:::ai
-        REF -->|"next query, or a<br/>chapter not read yet"| ACT
-        REF -->|"step limit, deadline,<br/>CRAG gate after 2 dry steps,<br/>no usable decision"| SYN["synthesize: answer with<br/>book, chapter citations"]:::ai
-        REF -->|"model says<br/>enough or clarify"| COV{"coverage gate: plain code,<br/>no model (ADR-013)"}:::code
-        COV -->|"once per run, before the exit:<br/>a book the question names is in the window<br/>but not in the evidence (identify mode:<br/>one book covered, a queued query left)"| ACT
-        COV -->|"ambiguous,<br/>once per run"| CLR["clarify: the run suspends,<br/>candidates go to the reader"]:::human
-        CLR --> PLAN
-        COV -->|"enough — gate already spent,<br/>after a clarify, or nothing<br/>left uncovered"| SYN
-        SYN --> VAL["validate: plain code, no model —<br/>is each quote in the passage it cites?"]:::code
-        CAT --> VAL
-        VAL --> OUT(["answer with citations and a provenance badge,<br/>or an honest 'not found'"]):::ai
-    end
-    subgraph legend["CODE = deterministic code · AI = a model call: the answering model you configure, and the embedding model · HUMAN = human in the loop"]
-        direction LR
-        L1["CODE"]:::code ~~~ L2["AI"]:::ai ~~~ L3["HUMAN"]:::human
-    end
-    DB --> ACT
-    DB --> CAT
-    classDef code fill:#dbeafe,stroke:#1d4ed8,color:#000
-    classDef ai fill:#fed7aa,stroke:#c2410c,color:#000
-    classDef human fill:#bbf7d0,stroke:#15803d,color:#000
-```
-
-- Two corpora in one LanceDB, each table stamped with the embedding model that built it.
-- Each corpus is searched twice, vectors and BM25, and the lists are fused with Reciprocal Rank Fusion.
+- Offline, on your machine: books become chapters from their own headings and chunks packed from
+  whole sentences, then bge-m3 embeddings — local Ollama by default — in a LanceDB index that is
+  searched both ways, vectors and BM25, fused with Reciprocal Rank Fusion.
 - Only `observe` sees retrieved text, sanitized and cut to a budget; the loop sees distilled evidence.
-- `validate` is plain code: a quote must be a contiguous whole-token run of the passage it names.
-- Catalogue questions skip retrieval; the count is the length of the list read from the tables (ADR-016).
 - A 4-step budget, a CRAG-style stop after 2 dry steps, drill-down, one clarify interrupt per run.
-- `validate` reports; it never gates or edits the answer, which `synthesize` has already written.
-- The coverage gate is code inside `reflect`: before the model's "enough" or "clarify" is acted on,
-  one forced search at a book the question names and the evidence never touched (ADR-013).
-- Per-node calls, tokens and USD after every question, with selectivity and redaction counts.
-- Node by node, with the decision records behind it: [`docs/architecture.md`](docs/architecture.md).
+- Catalogue questions skip retrieval; the count is the length of the list read from the tables (ADR-016).
+- `validate` is plain code: a quote must be a contiguous whole-token run of the passage it names,
+  and it only reports — it never gates or edits the answer, which `synthesize` has already written.
+
+The whole system, offline and online, and the loop's control flow at the level of the code's own
+routing conditions are drawn node by node, with the decision records behind them, in
+[`docs/architecture.md`](docs/architecture.md).
 
 ## Measured
 

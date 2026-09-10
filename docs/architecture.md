@@ -1,7 +1,58 @@
 # Architecture
 
 The graph, the retrieval, the catalogue path and the quote check in full; the README draws
-the same graph as one diagram.
+the flow in plain terms and links here.
+
+## The whole system: offline and online
+
+Everything the project runs, in one picture: the offline index build and the online loop for a
+single question, with every node marked as deterministic code, a model call, or the reader.
+
+```mermaid
+flowchart TB
+    subgraph offline["OFFLINE — build the index, on your machine"]
+        direction LR
+        BK["your .txt / .md books<br/>or the demo corpus"]:::code
+        CRD["book cards: one model call<br/>per book, demo corpus only"]:::ai
+        BK --> CHK["ayl-add: chapters from headings,<br/>chunks packed from whole sentences"]:::code
+        CHK --> EMB["bge-m3 embeddings,<br/>local Ollama by default"]:::ai
+        EMB --> DB[("LanceDB — transcripts, optional cards<br/>hybrid BM25 + vectors, model fingerprint")]:::code
+        CRD --> DB
+    end
+    subgraph online["ONLINE — LangGraph loop, one question"]
+        direction TB
+        Q(["question: CLI or web chat"]):::human --> PLAN["plan: mode plus 2-4 English queries"]:::ai
+        PLAN -->|"catalogue<br/>question"| CAT["catalog: list_books over the index tables,<br/>count = length of that list, no search"]:::code
+        PLAN -->|"steps left"| ACT["act: search_both, hybrid + RRF,<br/>or read_chapter; sanitized, stable hit ids"]:::code
+        PLAN -->|"no query left"| SYN
+        ACT --> OBS["observe: evidence distillate<br/>book, chapter, verbatim quote, hit id"]:::ai
+        OBS --> REF{"reflect:<br/>enough<br/>evidence?"}:::ai
+        REF -->|"next query, or a<br/>chapter not read yet"| ACT
+        REF -->|"step limit, deadline,<br/>CRAG gate after 2 dry steps,<br/>no usable decision"| SYN["synthesize: answer with<br/>book, chapter citations"]:::ai
+        REF -->|"model says<br/>enough or clarify"| COV{"coverage gate: plain code,<br/>no model (ADR-013)"}:::code
+        COV -->|"once per run, before the exit:<br/>a book the question names is in the window<br/>but not in the evidence (identify mode:<br/>one book covered, a queued query left)"| ACT
+        COV -->|"ambiguous,<br/>once per run"| CLR["clarify: the run suspends,<br/>candidates go to the reader"]:::human
+        CLR --> PLAN
+        COV -->|"enough — gate already spent,<br/>after a clarify, or nothing<br/>left uncovered"| SYN
+        SYN --> VAL["validate: plain code, no model —<br/>is each quote in the passage it cites?"]:::code
+        CAT --> VAL
+        VAL --> OUT(["answer with citations and a provenance badge,<br/>or an honest 'not found'"]):::ai
+    end
+    subgraph legend["CODE = deterministic code · AI = a model call: the answering model you configure, and the embedding model · HUMAN = human in the loop"]
+        direction LR
+        L1["CODE"]:::code ~~~ L2["AI"]:::ai ~~~ L3["HUMAN"]:::human
+    end
+    DB --> ACT
+    DB --> CAT
+    classDef code fill:#dbeafe,stroke:#1d4ed8,color:#000
+    classDef ai fill:#fed7aa,stroke:#c2410c,color:#000
+    classDef human fill:#bbf7d0,stroke:#15803d,color:#000
+```
+
+## The loop, step by step
+
+The same online half at the level of the code's own routing conditions: every edge is a branch
+the graph really takes, labelled with the condition that takes it.
 
 ```mermaid
 flowchart TD
@@ -19,6 +70,16 @@ flowchart TD
     R -->|enough / step limit / CRAG gate after 2 dry steps /<br/>chapter already attempted / reflect JSON failed twice| S[synthesize: answer with book, chapter citations]
     S --> V[validate: plain code, confirmed / unattributed / broken]
     V --> E([END])
+    classDef code fill:#dbeafe,stroke:#1d4ed8,color:#000
+    classDef ai fill:#fed7aa,stroke:#c2410c,color:#000
+    classDef human fill:#bbf7d0,stroke:#15803d,color:#000
+    class P,O,R,S ai
+    class A,K,V code
+    class C human
+    subgraph legend["CODE = deterministic code · AI = a model call to the answering model you configure · HUMAN = human in the loop"]
+        direction LR
+        L1["CODE"]:::code ~~~ L2["AI"]:::ai ~~~ L3["HUMAN"]:::human
+    end
 ```
 
 ```
