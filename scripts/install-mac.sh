@@ -171,16 +171,22 @@ config_default() {
 }
 
 local_env() {
-    # The lines local mode changes. LLM_TIMEOUT_S is one of them because
-    # config.py defaults it to 600 s under LLM_BACKEND=ollama, while a value
-    # copied from .env.example is an environment value and wins — which would
-    # leave a local model on the hosted 120 s per-attempt budget.
-    # QUESTION_DEADLINE_S has no such per-backend default: it is 300 s in both
-    # modes, and 300 s is the whole wall clock of a question, checked before each
-    # next decision. A local model that loads cold can spend that in the plan
-    # node alone, so local mode gets twenty minutes — room for four steps of it.
-    # The two tracing lines are uncommented for the same reason docs/configuration.md
-    # gives them: this mode is the one where nothing leaves the machine, and the SDK
+    # .env.example IS the local configuration now, so the first three
+    # substitutions are normally rewrites of a line to itself. They stay, and
+    # they are what this function guarantees rather than what it happens to
+    # find: the three values below are the ones that decide where a local run's
+    # data goes and how long it is given, and this mode may not inherit any of
+    # them from a file that has since been edited.
+    #   LLM_BACKEND: the whole point of the mode.
+    #   LLM_TIMEOUT_S: config.py defaults it to 600 s under LLM_BACKEND=ollama,
+    #     but a value in .env is an environment value and wins over that
+    #     default — which would leave a local model on the hosted 120 s budget.
+    #   QUESTION_DEADLINE_S: per backend by the same rule, and written out for the
+    #     same reason. 300 s is the whole wall clock of a question, checked before
+    #     each next decision, and a local model that loads cold can spend it in
+    #     the plan node alone. Twenty minutes is room for four steps of it.
+    # The two tracing lines are uncommented for the reason docs/configuration.md
+    # gives: this mode is the one where nothing leaves the machine, and the SDK
     # reads a LANGSMITH_/LANGCHAIN_ flag another project's shell exported.
     sed -e 's/^LLM_BACKEND=.*/LLM_BACKEND=ollama/' \
         -e 's/^LLM_TIMEOUT_S=.*/LLM_TIMEOUT_S=600/' \
@@ -189,9 +195,23 @@ local_env() {
         -e 's/^# LANGCHAIN_TRACING_V2=false/LANGCHAIN_TRACING_V2=false/' .env.example
 }
 
-# Hosted mode keeps the example as it is. A function so it goes through the same
-# writer as the local one, and fails the same way.
-hosted_env() { cat .env.example; }
+# Hosted mode is now the one that transforms: `cat .env.example` used to be the
+# hosted configuration and is the local one since the default flipped, so
+# copying the file unchanged under --hosted would have written a fully local
+# .env and announced it as hosted. The same three lines as above, in the other
+# direction, plus the three OpenRouter settings the example ships commented out
+# — ORCHESTRATOR_MODEL and the two prices are read only by this backend, and a
+# hosted .env without them would leave the model and the cost estimate to
+# config.py's defaults instead of stating them where the reader can change them.
+# The key line is NOT touched: it stays empty, and the reader fills it in.
+hosted_env() {
+    sed -e 's/^LLM_BACKEND=.*/LLM_BACKEND=openrouter/' \
+        -e 's/^LLM_TIMEOUT_S=.*/LLM_TIMEOUT_S=120/' \
+        -e 's/^QUESTION_DEADLINE_S=.*/QUESTION_DEADLINE_S=300/' \
+        -e 's/^# ORCHESTRATOR_MODEL=/ORCHESTRATOR_MODEL=/' \
+        -e 's/^# PRICE_IN_PER_MTOK=/PRICE_IN_PER_MTOK=/' \
+        -e 's/^# PRICE_OUT_PER_MTOK=/PRICE_OUT_PER_MTOK=/' .env.example
+}
 
 # --- the configuration the application will actually load -------------------
 # Everything from here to the end of this section reads files and decides; it
@@ -242,8 +262,11 @@ DATA_FLOW_VARS="$BACKEND_VARS $ENDPOINT_VARS $TRACING_VARS $KEY_VARS"
 # writer produces. An unreadable .env.example is the one case where there is
 # nothing to judge — that is step 10's failure to report, with its own message.
 # An EMPTY .env is not that case: it is a real resolution in which every value
-# is config.py's own default, and those defaults are the hosted ones, so a fully
-# local run has to be held to them exactly as it is held to any other text.
+# is config.py's own default, so a fully local run has to be held to those
+# defaults exactly as it is held to any other text. They are the local ones
+# since the shipped default flipped, which is why an empty .env now resolves to
+# a mode the guard passes rather than to the hosted one it used to refuse — the
+# judgement is the same either way, and it is the values that changed.
 planned_env_read=1
 if [ -f .env ]; then
     planned_env="$(cat .env 2>/dev/null || true)"
@@ -646,8 +669,11 @@ env_defines() {
 # config.py resolves a blank in two ways, and the difference decides the run.
 # _env(NAME, default) reads a blank as "the default was meant"; a plain
 # os.environ.get(NAME, default) keeps the blank. So an exported LLM_BACKEND=
-# resolves to the hosted default and never reaches the ollama line in .env —
-# that line is not read at all, the name being in the environment already.
+# resolves to config.py's own default and never reaches the line in .env — that
+# line is not read at all, the name being in the environment already. The
+# default it lands on is the local backend now; under --hosted that is the
+# mismatch step 12 refuses, and it is the same rule that used to bite the other
+# way round when the default was the hosted one.
 blank_is_default() {
     case "$1" in
         LLM_BACKEND|OPENROUTER_BASE_URL) return 0 ;;
@@ -884,10 +910,10 @@ for name in $DATA_FLOW_VARS; do
     if [ -n "${!name+set}" ]; then
         exported_lines="$exported_lines$name=$shown ($origin)"$'\n'
     fi
-    # Nothing to judge when the file that decides could not be read: step 10
-    # stops the run on it, and a config.py default would read as a conflict of
-    # its own making (its defaults are the hosted ones). An empty .env is a
-    # different thing — it resolves to those defaults for real.
+    # Nothing to judge when the file that decides could not be read: there is no
+    # text to hold anything to, and step 10 stops the run on it with its own
+    # message. An empty .env is a different thing — it resolves to config.py's
+    # own defaults for real, and those are judged like any other values.
     if [ "$planned_env_read" -eq 1 ] && [ "$setup_mode" = "fully local" ] \
         && contradicts_local "$name" "$value"; then
         conflict_names="$conflict_names $name"
@@ -1250,10 +1276,12 @@ run uv sync --locked --extra ui
 # `local_env > .env` truncated .env into existence before the writer produced a
 # byte, so a sed that failed — an unreadable .env.example is enough — left an
 # empty file behind. And an empty .env is not an obvious ruin: step 10 refuses to
-# overwrite a .env that exists, and config.py resolves an empty one to the hosted
-# defaults, so the next run of a fully local install came up on OpenRouter and
-# said nothing. The output lands beside it instead, and only a complete,
-# non-empty file is moved into place.
+# overwrite a .env that exists, and config.py resolves an empty one to its own
+# defaults, so what the reader configured was quietly not what ran. That used to
+# put a fully local install on OpenRouter; with the default flipped it puts a
+# --hosted install on a local model that this run pulled nothing for. Both are
+# the same defect, and both are why the output lands beside .env instead, with
+# only a complete, non-empty file moved into place.
 write_env() {
     local tmp=".env.tmp.$$"
     if "$@" >"$tmp" && [ -s "$tmp" ]; then
@@ -1271,6 +1299,10 @@ write_env() {
 SUMMARY_KEYS='LIBRARY_DB_PATH|EMBED_BACKEND|OLLAMA_URL|OLLAMA_EMBED_MODEL'
 SUMMARY_KEYS="$SUMMARY_KEYS|LLM_BACKEND|OLLAMA_LLM_MODEL|LLM_TIMEOUT_S|QUESTION_DEADLINE_S"
 SUMMARY_KEYS="$SUMMARY_KEYS|LANGSMITH_TRACING_V2|LANGCHAIN_TRACING_V2"
+# The three lines only `hosted_env` uncomments. They are in the summary so that
+# every line either writer rewrites is a line the reader sees: without them the
+# hosted plan named values it did not show.
+SUMMARY_KEYS="$SUMMARY_KEYS|ORCHESTRATOR_MODEL|PRICE_IN_PER_MTOK|PRICE_OUT_PER_MTOK"
 
 env_summary() {
     # `|| true`: no match is an empty summary, not a failed script under `set -e`.
@@ -1291,7 +1323,7 @@ if [ -f .env ]; then
     fi
 elif [ "$hosted" -eq 1 ]; then
     if [ "$dry_run" -eq 1 ]; then
-        plan "copy .env.example to .env unchanged"
+        plan "write .env from .env.example with these values"
         hosted_env | env_summary
     else
         write_env hosted_env
@@ -1569,7 +1601,36 @@ else
     printf 'Done.\n'
 fi
 printf 'Next steps:\n'
+# The index comes first when there is none: `ask-library` without one exits 3 on
+# a preflight that says the same thing, so putting the question at the top of
+# this list would hand the reader a command that cannot work yet.
+if [ "$demo_ready" -eq 0 ] && [ "$want_demo" -eq 0 ]; then
+    # --no-demo: the reader said they have their own books, so the index step is
+    # theirs and the demo build is not offered again.
+    printf '  LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books\n'
+    printf '      index your books first — there is no index yet, and the question below\n'
+    printf '      has nothing to search until there is. Ask against the same path:\n'
+    printf '      LIBRARY_DB_PATH=~/ayl-index uv run ask-library "..."\n'
+elif [ "$demo_ready" -eq 0 ]; then
+    printf '  uv run scripts/ingest_demo_corpus.py\n'
+    printf '      build the demo corpus first — about 30 minutes. The question below has\n'
+    printf '      nothing to search until this finishes. Your own books instead:\n'
+    printf '      LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books\n'
+fi
 printf '  uv run ask-library "What does Marcus Aurelius say about anger?"\n'
+# The one sentence this whole mode exists for, printed where the reader is about
+# to type the command: no account, no key, nothing to pay. The answering model is
+# named because it is the thing that makes that true, and it is the model this
+# run actually pulled, not the default this script was written against.
+if [ "$loaded_backend" = "ollama" ]; then
+    printf '      your first question. No account, no key, nothing to pay: %s answers\n' "$llm_model"
+    printf '      it on this machine, and the metrics line under the answer reads $0.0000.\n'
+else
+    printf '      your first question. Set OPENROUTER_API_KEY in .env before you run it:\n'
+    printf '      this run set up the hosted answering model, which needs a key and is\n'
+    printf '      billed per question (docs/cost.md). The fully local mode, which needs\n'
+    printf '      neither, is what this script sets up without --hosted.\n'
+fi
 printf '  AYL_ALLOW_DEFAULT_LOGIN=1 uv run --extra ui chainlit run ui.py -w --host 127.0.0.1\n'
 printf '      the web chat on 127.0.0.1, login admin / change-me (the form asks for an\n'
 printf '      "Email address": type the username there). That variable is what\n'

@@ -30,11 +30,14 @@ TABLES = {
     "transcripts": f"transcripts_{EMBED_BACKEND}",  # full book text, chapter-aware chunks
 }
 
-# --- orchestrator LLM (OpenAI-compatible endpoint; OpenRouter by default) ---
-# LLM_BACKEND=ollama runs every agent node on a local model through Ollama's
-# OpenAI-compatible endpoint: no account, no key, no cost. The measured numbers
-# in the README are for the OpenRouter default; a local model is a different
-# system and is fingerprinted as such in every eval report.
+# --- orchestrator LLM (OpenAI-compatible endpoint; local Ollama by default) --
+# The shipped default is LLM_BACKEND=ollama: every agent node runs on a local
+# model through Ollama's OpenAI-compatible endpoint, so a fresh clone answers
+# with no account, no key and nothing to pay. LLM_BACKEND=openrouter sends the
+# question and the retrieved passages to OpenRouter instead and needs a key.
+# The measured numbers in docs/eval-results/ were produced in that hosted
+# configuration; a local model is a different system, and every eval report
+# names the backend it ran with in its fingerprint.
 def _env(name: str, default: str) -> str:
     """An empty or blank variable (a copied .env.example, an unset shell line)
     means the default, never an empty value."""
@@ -42,11 +45,13 @@ def _env(name: str, default: str) -> str:
     return value if value.strip() else default
 
 
-LLM_BACKEND = _env("LLM_BACKEND", "openrouter")   # openrouter | ollama
+LLM_BACKEND = _env("LLM_BACKEND", "ollama")   # ollama | openrouter
 if LLM_BACKEND not in ("openrouter", "ollama"):
-    # A typo ("ollma") must not silently fall back to the hosted provider: with
-    # a key present that would send the question and passages outside while
-    # the user believes the run is local.
+    # A typo ("ollma") must not silently fall back to either backend. Falling
+    # back to the hosted one would send the question and passages outside while
+    # the user believes the run is local; falling back to the local one would
+    # leave a run that was meant to be hosted asking Ollama for a model nobody
+    # pulled. The value is named in the error, so the typo is visible.
     raise ValueError(f"LLM_BACKEND must be 'openrouter' or 'ollama', got {LLM_BACKEND!r}")
 # qwen2.5:14b (9.0 GB) over qwen2.5:7b (4.7 GB): the local mini-eval in
 # docs/eval-results/2026-09-10-local-models.md is where the two were compared,
@@ -80,7 +85,7 @@ OPENROUTER_ENV_FILE = Path(_env_file).expanduser() if _env_file else None
 # short answer; without a cap the provider pre-authorizes its model maximum
 # (65k tokens for the default model), which is an unbounded cost ceiling and
 # fails with 402 on a low balance.
-MAX_OUTPUT_TOKENS = int(os.environ.get("MAX_OUTPUT_TOKENS", "2048"))
+MAX_OUTPUT_TOKENS = int(_env("MAX_OUTPUT_TOKENS", "2048"))
 
 # What observe sees of each retrieved passage (ADR-012). SEARCH_HIT_CHARS caps a
 # search hit (several per step); CHAPTER_HIT_CHARS caps a chapter read (one
@@ -127,7 +132,7 @@ MAX_CLARIFY_CANDIDATES = _positive_int("MAX_CLARIFY_CANDIDATES", "5", unit="book
 # the reader's clarify reply does not count. A local model is slower and may load
 # cold, hence the longer per-call timeout in LLM_BACKEND=ollama.
 def _non_negative_int(name: str, default: str) -> int:
-    value = int(os.environ.get(name, default))
+    value = int(_env(name, default))      # a blank line in a copied .env means the default
     if value < 0:
         raise ValueError(f"{name} must be 0 or a positive number of seconds, got {value}")
     return value
@@ -135,10 +140,19 @@ def _non_negative_int(name: str, default: str) -> int:
 
 LLM_TIMEOUT_S = _positive_int("LLM_TIMEOUT_S", "600" if LLM_BACKEND == "ollama" else "120", unit="seconds")
 LLM_MAX_RETRIES = _non_negative_int("LLM_MAX_RETRIES", "2")
-QUESTION_DEADLINE_S = _non_negative_int("QUESTION_DEADLINE_S", "300")
+# Per backend, like LLM_TIMEOUT_S and for the same reason: 300 s is a hosted
+# model's whole wall clock for four steps, and a local model that loads cold can
+# spend it inside the first one. It used to be one flat 300 s, which no
+# recommended path ever ran with — .env.example and scripts/install-mac.sh both
+# write 1200 for the local mode, and a value in a copied .env wins over this
+# default — so the only configuration that got 300 was the bare clone-and-ask
+# path this project advertises as equivalent. A flat 300 also capped the local
+# read timeout at what was left of it and never the 600 s LLM_TIMEOUT_S names.
+QUESTION_DEADLINE_S = _non_negative_int("QUESTION_DEADLINE_S", "1200" if LLM_BACKEND == "ollama" else "300")
 
 # Prices in USD per 1M tokens for the cost estimate; override when changing the model.
-# A local model costs nothing per token; the cost lines then read $0.0000.
+# A local model costs nothing per token, so the default configuration's cost
+# lines read $0.0000 — that is the arithmetic, not a rounded-down estimate.
 # OLLAMA_PRICE_* exist for people who want to book electricity; the OpenRouter
 # prices in a copied .env are not applied to the local mode.
 if LLM_BACKEND == "ollama":

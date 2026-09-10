@@ -103,6 +103,19 @@ _T = {
         "ua": "дедлайн питання ({s} с): відповідаю з того, що вже знайдено",
         "en": "question deadline ({s} s) reached: answering from what was found",
     },
+    # A model call the loop needed ran out of time. It ends the LOOP, never the
+    # run: the evidence already collected still goes to synthesize, which the
+    # deadline does not cap. With a budget set, the cap that expired IS what was
+    # left of it, so the reason names the budget; with QUESTION_DEADLINE_S=0
+    # there is none to name and the per-call timeout is what ran out.
+    "stop_deadline_call": {
+        "ua": "дедлайн питання ({s} с) вичерпано під час виклику моделі: відповідаю з того, що вже знайдено",
+        "en": "question deadline ({s} s) ran out during a model call: answering from what was found",
+    },
+    "stop_call_timeout": {
+        "ua": "виклик моделі не вклався в LLM_TIMEOUT_S ({s} с): відповідаю з того, що вже знайдено",
+        "en": "a model call exceeded LLM_TIMEOUT_S ({s} s): answering from what was found",
+    },
     "stop_catalog": {
         "ua": "каталог: відповідь з таблиць індексу, без пошуку",
         "en": "catalog: answered from the index tables, no search",
@@ -177,16 +190,30 @@ _T = {
 
     # ---- preflight: the three typical first-run environment failures
     "pf_no_key": {
-        "ua": "Нема ключа OpenRouter: експортуй OPENROUTER_API_KEY (або додай у .env).",
-        "en": "OpenRouter key missing: export OPENROUTER_API_KEY (or put it in .env).",
+        "ua": "Нема ключа OpenRouter: експортуй OPENROUTER_API_KEY (або додай у .env). "
+              "Ключ потрібен лише хмарній конфігурації; типова — локальна "
+              "(LLM_BACKEND=ollama), і їй ключ не потрібен.",
+        "en": "OpenRouter key missing: export OPENROUTER_API_KEY (or put it in .env). "
+              "Only the hosted configuration needs a key; the default one is local "
+              "(LLM_BACKEND=ollama) and needs none.",
     },
+    # The first-run failure of the shipped default, so it carries the whole
+    # remedy rather than the one step that used to be missing: nothing is
+    # installed yet on the machine this is printed on. The pulls are the models
+    # THIS configuration reads (preflight.pull_commands), never a fixed pair.
     "pf_no_ollama": {
-        "ua": "Не вдалося звернутися до Ollama на {url} (помилка з'єднання або запиту): "
-              "запусти `ollama serve` і "
-              "`ollama pull bge-m3` (або задай OLLAMA_URL / EMBED_BACKEND).",
-        "en": "Could not reach Ollama at {url} (a connection or request error): "
-              "run `ollama serve` and "
-              "`ollama pull bge-m3` (or set OLLAMA_URL / EMBED_BACKEND).",
+        "ua": "Не вдалося звернутися до Ollama на {url} (помилка з'єднання або запиту). "
+              "Типова конфігурація відповідає локально, і саме Ollama її запускає: "
+              "встанови (`brew install ollama`), запусти (`ollama serve`), потім {pulls}. "
+              "Одна команда робить усе це: `bash scripts/install-mac.sh`. "
+              "Якщо сервер в іншому місці — задай OLLAMA_URL; щоб відповідати на хмарній "
+              "моделі — LLM_BACKEND=openrouter (потрібен ключ, і це коштує грошей).",
+        "en": "Could not reach Ollama at {url} (a connection or request error). "
+              "The default configuration answers locally, and Ollama is what runs it: "
+              "install it (`brew install ollama`), start it (`ollama serve`), then {pulls}. "
+              "One command does all of that: `bash scripts/install-mac.sh`. "
+              "Set OLLAMA_URL if your server is elsewhere, or LLM_BACKEND=openrouter to "
+              "answer on a hosted model instead (that needs a key, and costs money).",
     },
     "pf_ollama_bad_reply": {
         "ua": "Щось на {url} відповіло (HTTP {status}), але це не придатна відповідь /api/tags "
@@ -198,11 +225,11 @@ _T = {
     },
     "pf_no_db": {
         "ua": "Бази нема: {path}. Побудуй демо-корпус "
-              "(`uv run scripts/ingest_demo_corpus.py`, ~30 хв) або вкажи "
-              "LIBRARY_DB_PATH на свою LanceDB.",
+              "(`uv run scripts/ingest_demo_corpus.py`, ~30 хв), проіндексуй свої книжки "
+              "(`uv run ayl-add <тека>`) або вкажи LIBRARY_DB_PATH на свою LanceDB.",
         "en": "Database not found: {path}. Build the demo corpus "
-              "(`uv run scripts/ingest_demo_corpus.py`, ~30 min) or point "
-              "LIBRARY_DB_PATH at your LanceDB.",
+              "(`uv run scripts/ingest_demo_corpus.py`, ~30 min), index your own books "
+              "(`uv run ayl-add <folder>`) or point LIBRARY_DB_PATH at your LanceDB.",
     },
     "pf_no_tables": {
         "ua": "У базі {path} нема таблиць: {tables}. Заверши інжест "
@@ -219,15 +246,29 @@ _T = {
         "en": "The environment is not ready:",
     },
     # ---- preflight: non-fatal notices (it works, but in a degraded shape)
+    # An interrupted install lands here, so these carry the same remedy as
+    # pf_no_ollama above: the pull is a download of gigabytes that has to
+    # finish, and the installer is the one command that finishes it. The size
+    # is deliberately not a number: `ollama list` cannot be read for a model
+    # that is not there, and a figure hard-coded per model would go stale the
+    # first time OLLAMA_LLM_MODEL points elsewhere.
     "pf_no_local_model": {
-        "ua": "LLM_BACKEND=ollama, але модель {model} не завантажена: `ollama pull {model}` або OLLAMA_LLM_MODEL=<інша>",
-        "en": "LLM_BACKEND=ollama, but the model {model} is not pulled: `ollama pull {model}` or set OLLAMA_LLM_MODEL",
+        "ua": "LLM_BACKEND=ollama, але модель {model} не завантажена: `ollama pull {model}` "
+              "(кілька гігабайтів — завантаження має завершитися), або OLLAMA_LLM_MODEL=<менша>. "
+              "`bash scripts/install-mac.sh` завантажує моделі саме цієї конфігурації.",
+        "en": "LLM_BACKEND=ollama, but the model {model} is not pulled: `ollama pull {model}` "
+              "(several GB — the download has to finish), or set OLLAMA_LLM_MODEL to a smaller "
+              "one. `bash scripts/install-mac.sh` pulls the models this configuration opens.",
     },
     "pf_no_embed_model": {
         "ua": "EMBED_BACKEND=ollama, але embedding-модель {model} не завантажена: "
-              "`ollama pull {model}` або OLLAMA_EMBED_MODEL=<інша>",
+              "`ollama pull {model}` (кілька гігабайтів — завантаження має завершитися), "
+              "або OLLAMA_EMBED_MODEL=<інша>. "
+              "`bash scripts/install-mac.sh` завантажує моделі саме цієї конфігурації.",
         "en": "EMBED_BACKEND=ollama, but the embedding model {model} is not pulled: "
-              "`ollama pull {model}` or set OLLAMA_EMBED_MODEL",
+              "`ollama pull {model}` (several GB — the download has to finish), or set "
+              "OLLAMA_EMBED_MODEL. `bash scripts/install-mac.sh` pulls the models this "
+              "configuration opens.",
     },
     "pf_no_cards": {
         "ua": "Таблиці карток {table} нема: відповіді спираються лише на повний текст "

@@ -34,14 +34,16 @@ flowchart TB
 
 *"I remember a book in which a man happened to end up on an island and came across cannibals.
 What is the name of the book, and why did that happen?" — the default local model (qwen2.5:14b) on
-the demo corpus, no API key. 147.7 s by the CLI's own metrics line in the last frame.*
+the demo corpus, no API key. 147.7 s by the CLI's own metrics line in the last frame — a cold first
+ask, the same band as the 160.8 s a different first question takes from a clean clone
+([`docs/eval-results/2026-09-10-first-question-local.md`](docs/eval-results/2026-09-10-first-question-local.md)).*
 
 ![The web UI answering what d'Artagnan said before fighting three men at once: the answer, the quote-provenance badge, and one evidence passage opened under it](docs/img/ask-library-ui.gif)
 
 *"What exactly did Dartangnan say before the fight with not 1 but 3 people? And why?" — the same
-library in the web UI, this run on the hosted default model (the answering model you configure;
-here the OpenRouter default): the verified-quotes badge, and the evidence passage under it.
-$0.0724 by the metrics line the UI prints under the answer.*
+library in the web UI, this run on a hosted model (`LLM_BACKEND=openrouter` with Sonnet 4.6, which
+is not the default and is what the $0.0724 on its metrics line paid for): the verified-quotes
+badge, and the evidence passage under it.*
 
 ## Quick start on a Mac
 
@@ -56,6 +58,17 @@ Then the first question:
 ```bash
 uv run ask-library "What does Marcus Aurelius say about anger?"
 ```
+
+No account, no API key, nothing to pay: the answering model and the embeddings both run on your
+own machine through Ollama, and the cost line under the answer reads $0.0000. A hosted model is
+available (`bash scripts/install-mac.sh --hosted`) and is the only thing here that needs a key.
+
+**Local is slower, and that is the trade.** On a Mac the default `qwen2.5:14b` answers a catalogue
+question ("how many books do I have?") in 1 to 12 s and a research one in 61 to 217 s, at $0; the
+hosted `claude-sonnet-4.6` takes 1 to 2 s and 8 to 61 s — a mean of 27 to 28 s over the eleven
+research questions of the core eval set — for about $0.002 and $0.05 respectively. Free costs time.
+Every figure here is a measured single run, over the rows of that one kind of question, and
+[`docs/cost.md`](docs/cost.md) names which run and which rows each one comes from.
 
 Every other system, the manual steps, your own books, the web UI and the eval commands:
 [`docs/quick-start.md`](docs/quick-start.md).
@@ -89,6 +102,12 @@ routing conditions are drawn node by node, with the decision records behind them
 | Chapter drill-down where expected | not in set | 0/1 | 0/1 |
 | Cost per question, mean (Sonnet 4.6 via OpenRouter, configured rates) | $0.049 | $0.027 | $0.043 |
 
+**Every number in this table was measured on the hosted configuration** (`LLM_BACKEND=openrouter`,
+Sonnet 4.6), which is what the cost row prices. The **default configuration is local and free** —
+a different answering model, so a different system, and none of these numbers describes it.
+Measure your own model before trusting it: `uv run eval/run_agent_eval.py` names the backend it
+ran with in every report's fingerprint.
+
 Quote provenance is not faithfulness, and not correctness: a green row says every quote is
 verbatim in the passage it cites, not that the answer reasons well from it. Single runs on tagged
 trees, what the green numbers do not prove, the ablation that separates the loop from the model's
@@ -97,14 +116,17 @@ themselves are in [`docs/eval-results/`](docs/eval-results/).
 
 ## Privacy and cost
 
-- **Do you need an API key?** Only for the answering model: the default is hosted (OpenRouter), and
-  a key covers it. Indexing and embeddings are local and need no account, and with
-  `LLM_BACKEND=ollama` nothing needs one at all —
-  [`docs/configuration.md`](docs/configuration.md), [`docs/cost.md`](docs/cost.md).
+- **Do you need an API key?** No. The default configuration answers on a local model through
+  Ollama and embeds locally: no account, no key, nothing to pay, and the cost lines read $0.0000.
+  A hosted answering model (`LLM_BACKEND=openrouter`) is an option, not a requirement; choose it
+  and it needs a key and costs what [`docs/cost.md`](docs/cost.md) works out —
+  [`docs/configuration.md`](docs/configuration.md).
 - Run this on your own machine, over books you legally own.
-- The question **and retrieved corpus fragments** go to the answering model's provider; embeddings are computed **locally** by Ollama by default.
-- With `LLM_BACKEND=ollama`, local embeddings and tracing off, nothing leaves the machine at all.
-- A typical question costs roughly **$0.04-0.05 on the demo set** at v0.2.0-rc1; `validate` is free, it is plain code.
+- By default nothing leaves the machine: the answering model and the embeddings both run on this
+  Ollama, and with tracing off there is no other path out. Set `LLM_BACKEND=openrouter` and the
+  question **and the retrieved corpus fragments** go to that provider, and on to the model vendor.
+- A question on the default local model costs **nothing**. On the hosted one it costs roughly
+  **$0.04-0.05 on the demo set** at v0.2.0-rc1; `validate` is free in both, it is plain code.
 - Designed for **localhost, single user**, not for internet exposure — the full text, the four injection layers and their limits: [`docs/privacy-and-threat-model.md`](docs/privacy-and-threat-model.md), [`docs/cost.md`](docs/cost.md).
 
 ## Docs
@@ -124,8 +146,10 @@ diagram sources, the backlog and the changelog.
 
 ## Status and licence
 
-`v0.2.1`, a patch release over `v0.2.0`, the first public one; the release history is in
-[`docs/CHANGELOG.md`](docs/CHANGELOG.md) and the open gaps in
+`v0.3.0`, a minor release over `v0.2.1` because the shipped default changed: a clone now answers
+on a local model through Ollama, with no account and nothing to pay, where it used to need an
+OpenRouter key. The hosted path is unchanged and opt-in (`LLM_BACKEND=openrouter`). The release
+history is in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) and the open gaps in
 [`docs/backlog.md`](docs/backlog.md).
 
 The code and the project's own files are under Apache-2.0 (`LICENSE`, attribution in

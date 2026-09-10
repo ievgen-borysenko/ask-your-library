@@ -92,8 +92,8 @@ def sandbox(tmp_path):
     # The Ollama knobs are dropped so the script has to read its model names and
     # endpoint from config.py, which is where the app reads them from. The rest
     # of conftest's pinned configuration goes with them: this suite exports
-    # LLM_BACKEND=openrouter into every test process, and the script now refuses
-    # a fully local run under exactly that, so a scrubbed environment is what
+    # LLM_BACKEND into every test process, and an exported backend is exactly
+    # what several tests here are about, so a scrubbed environment is what
     # "nothing in this shell decides the run" has to mean here. The tests that
     # describe an exported variable put it back themselves.
     env = {k: v for k, v in os.environ.items()
@@ -158,9 +158,12 @@ def printed_lines(text):
 
 
 def env_example_with_local_backend(root):
-    """The .env a reader writes by hand: the example, with the one line the
-    local mode needs. Its two tracing lines stay commented out, which is how
-    .env.example ships them and the state that lets a key decide alone."""
+    """The .env a reader writes by hand: `cp .env.example .env`, nothing edited.
+    The example ships the local backend, so the substitution below is normally a
+    line rewritten to itself — it stays because what this helper promises is the
+    local backend, not whatever the example happens to hold. The two tracing
+    lines stay commented out, which is how .env.example ships them and the state
+    that lets a key decide tracing on its own."""
     text = (root / ".env.example").read_text(encoding="utf-8")
     return re.sub(r"^LLM_BACKEND=.*$", "LLM_BACKEND=ollama", text, flags=re.M)
 
@@ -262,6 +265,34 @@ def test_hosted_mode_keeps_the_hosted_model_and_never_asks_for_a_key(sandbox):
     assert f"ollama pull {embed_model}" in out          # embeddings stay local
     assert f"ollama pull {llm_model}" not in out
     assert "never takes a key as an argument" in out
+    assert "OPENROUTER_API_KEY=" not in out
+
+
+@mac_only
+def test_hosted_dry_run_says_it_transforms_the_example_and_shows_every_line(sandbox):
+    """The hosted plan used to read `would copy .env.example to .env unchanged`
+    while `hosted_env` rewrites six of its lines — the one sentence in the dry
+    run a reader has no way to check without reading the script. The plan now
+    describes a transformed write, and every line the writer touches is in the
+    summary under it, with the value it will carry.
+
+    The expected values are read out of `.env.example` rather than written here:
+    what this pins is the transformation, not today's model or price."""
+    example = (REPO / ".env.example").read_text().splitlines()
+    commented = {line.split("=", 1)[0].removeprefix("# "): line.split("=", 1)[1]
+                 for line in example if line.startswith("# ") and "=" in line}
+    out = dry_run(sandbox, "--hosted")
+    assert "would write .env from .env.example with these values" in out
+    assert "unchanged" not in out
+    # The three lines the sed rewrites, in the hosted direction.
+    assert "LLM_BACKEND=openrouter" in out
+    assert "LLM_TIMEOUT_S=120" in out
+    assert "QUESTION_DEADLINE_S=300" in out
+    # And the three the example ships commented out, uncommented with their values.
+    for key in ("ORCHESTRATOR_MODEL", "PRICE_IN_PER_MTOK", "PRICE_OUT_PER_MTOK"):
+        assert f"{key}={commented[key]}" in out
+        assert f"# {key}=" not in out
+    # Still never the key line.
     assert "OPENROUTER_API_KEY=" not in out
 
 
@@ -550,34 +581,52 @@ def test_an_ollama_url_without_a_scheme_is_refused_by_name(sandbox):
 @mac_only
 def test_an_exported_blank_is_not_an_absent_variable(sandbox):
     """python-dotenv skips a name that is already in the environment, an empty
-    value included, so an exported LLM_BACKEND= hides the ollama line this script
-    writes — and config.py._env reads that blank as the hosted default. The guard
-    read the blank as "nothing exported here" and let the run through."""
+    value included, so an exported LLM_BACKEND= hides the line this script writes
+    and config.py._env resolves the blank to its own default. The guard read the
+    blank as "nothing exported here", which is the one reading that is wrong in
+    both directions: what decides the run is that default, and the script has to
+    name it and act on it.
+
+    That default is the local backend since 10.09.2026, so under --hosted the
+    blank is what decides — and the run has to follow it, not the flag. It used
+    to be the mirror of this: the blank resolved to the hosted default and the
+    fully local run was refused over it."""
     root, records, _ = sandbox
-    result = real_run(sandbox, "--no-demo", LLM_BACKEND="")
-    assert result.returncode == 2, result.stdout
-    assert ("LLM_BACKEND=openrouter (exported empty in this shell, which config.py reads as "
-            "the default) — the answering model would run on OpenRouter, not on Ollama"
-            ) in error_lines(result.stderr)
-    assert "unset LLM_BACKEND" in error_lines(result.stderr)
-    assert not (root / ".env").exists()
-    assert invoked(records) == []
+    result = real_run(sandbox, "--no-demo", "--hosted", LLM_BACKEND="")
+    assert result.returncode == 0, result.stderr
+    out = result.stdout
+    # Named as what it is: exported, empty, and resolved through config.py.
+    assert ("LLM_BACKEND=ollama (exported empty in this shell, which config.py reads as "
+            "the default)") in printed_lines(out)
+    # And acted on, which is the half that costs something to get wrong: the
+    # answering model this run will actually call is the local one, so it is the
+    # one that gets pulled. Following the flag instead would end the run with the
+    # first question about to ask Ollama for a model nobody fetched.
+    assert "ollama pull qwen2.5:14b" in out
 
 
 @mac_only
 def test_an_empty_env_is_a_resolution_and_is_judged_as_one(sandbox):
     """An empty .env is not an unreadable .env.example. Step 10 never overwrites
     a file that exists, and config.py resolves every name in an empty one to its
-    own default — which is the hosted backend. The guard skipped the judgement
-    whenever the text was empty, so this run said fully local and answered on
-    OpenRouter."""
+    own default, so those defaults decide the run and have to be judged like any
+    other text. The guard skipped the judgement whenever the text was empty.
+
+    Since the defaults ARE the fully local configuration, the judgement now
+    passes — which is worth asserting only next to the second half: the same
+    empty .env with one value that is not local, and the refusal is there. The
+    run passes because it was judged, not because it was skipped."""
     root, records, _ = sandbox
     (root / ".env").write_text("")
     result = real_run(sandbox, "--no-demo")
+    assert result.returncode == 0, result.stderr
+    assert "Nothing exported in this shell decides where data goes; .env does." in result.stdout
+
+    (root / ".env").write_text("")
+    result = real_run(sandbox, "--no-demo", EMBED_BACKEND="openrouter")
     assert result.returncode == 2, result.stdout
-    assert ("LLM_BACKEND=openrouter (the default in config.py) — the answering model would "
-            "run on OpenRouter, not on Ollama") in error_lines(result.stderr)
-    assert invoked(records) == []
+    assert ("EMBED_BACKEND=openrouter (exported in this shell) — every passage would be "
+            "embedded by OpenRouter") in error_lines(result.stderr)
 
 
 @mac_only
@@ -1477,3 +1526,78 @@ def test_the_preflight_snippet_runs_the_tracing_hook_before_either_check(tmp_pat
     assert ("tracing: LANGCHAIN_TRACING_V2 -> https://api.smith.langchain.com "
             "(the LangSmith default)") in printed_lines(result.stdout)
     assert "lsv2-not-a-real-key" not in result.stdout + result.stderr
+
+
+# --- .env.example is the local configuration, so --hosted is the transform ----
+
+@mac_only
+def test_hosted_mode_turns_the_local_example_back_into_a_hosted_env(sandbox):
+    """.env.example ships the fully local configuration since 10.09.2026, so
+    --hosted has to transform it. `cat .env.example`, which is what this used to
+    be, would now write a fully local .env under a banner that says hosted."""
+    root, _, _ = sandbox
+    result = real_run(sandbox, "--no-demo", "--hosted")
+    assert result.returncode == 0, result.stderr
+    written = (root / ".env").read_text(encoding="utf-8")
+    assert "\nLLM_BACKEND=openrouter\n" in written
+    # The three OpenRouter settings the example ships commented out. This backend
+    # is the only one that reads them, and a hosted .env without them leaves the
+    # model and the cost estimate to defaults the reader never sees.
+    assert "\nORCHESTRATOR_MODEL=anthropic/claude-sonnet-4.6\n" in written
+    assert "\nPRICE_IN_PER_MTOK=3.0\n" in written
+    assert "\nPRICE_OUT_PER_MTOK=15.0\n" in written
+    # The hosted time budgets, not the longer local ones the example carries.
+    assert "\nLLM_TIMEOUT_S=120\n" in written and "\nQUESTION_DEADLINE_S=300\n" in written
+    # A key is never written by this script, in either mode.
+    assert "\nOPENROUTER_API_KEY=\n" in written
+
+
+@mac_only
+def test_the_local_env_this_script_writes_is_the_example_it_already_ships(sandbox):
+    """The other half: the local mode's substitutions are rewrites of a line to
+    itself now, and that has to stay true — a drift in .env.example would
+    otherwise be invisible until somebody's first question went to a provider."""
+    root, _, _ = sandbox
+    result = real_run(sandbox, "--no-demo")
+    assert result.returncode == 0, result.stderr
+    written = (root / ".env").read_text(encoding="utf-8")
+    assert "\nLLM_BACKEND=ollama\n" in written
+    assert "\nLLM_TIMEOUT_S=600\n" in written and "\nQUESTION_DEADLINE_S=1200\n" in written
+    # Commented out, so nothing routes the local mode's model or prices anywhere.
+    assert "\n# ORCHESTRATOR_MODEL=" in written and "\n# PRICE_IN_PER_MTOK=" in written
+
+
+# --- the closing message -----------------------------------------------------
+
+@mac_only
+def test_the_closing_message_leads_with_the_index_then_the_free_first_question(sandbox):
+    """After this script finishes, one command has to answer a question — and
+    the reader has to be told which, in which order, and that it costs nothing.
+    With no index yet the build comes first: `ask-library` before it exits 3 on
+    a preflight that says the same thing one step later."""
+    out = dry_run(sandbox)
+    build = out.index("uv run scripts/ingest_demo_corpus.py\n      build the demo corpus first")
+    question = out.index('uv run ask-library "What does Marcus Aurelius')
+    assert build < question
+    assert "No account, no key, nothing to pay" in out
+    # The model this run pulled, not a name the script was written against.
+    _, llm_model = config_models()
+    assert f"{llm_model} answers" in out
+
+
+@mac_only
+def test_the_closing_message_of_a_hosted_run_says_the_key_comes_first(sandbox):
+    """The hosted mode is the one that needs an account, and the sentence the
+    local mode gets would be false in it."""
+    out = dry_run(sandbox, "--hosted")
+    assert "Set OPENROUTER_API_KEY in .env before you run it" in out
+    assert "No account, no key, nothing to pay" not in out
+
+
+@mac_only
+def test_no_demo_closes_on_the_reader_s_own_books_not_the_demo_build(sandbox):
+    """--no-demo already said the demo corpus is not wanted; offering it again
+    as the next step reads as the script not having listened."""
+    out = dry_run(sandbox, "--no-demo")
+    assert "index your books first" in out
+    assert "build the demo corpus first" not in out

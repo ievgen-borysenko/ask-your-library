@@ -13,12 +13,14 @@ cl.make_async copies into the worker thread, so concurrent tabs in different
 languages don't clobber each other. ASK_LANG remains the process default and
 the fallback when a thread's profile can't be determined.
 
-Requires the same as the CLI: an embedding backend, a LanceDB built by
-scripts/ingest_demo_corpus.py or pointed to by LIBRARY_DB_PATH, and
-OPENROUTER_API_KEY when the answering model or the embeddings come from OpenRouter
-(not with LLM_BACKEND=ollama and local embeddings). The key is checked at startup (before anyone can log in);
-the rest is checked per session, because a login page for a server that cannot
-answer anything is worse than a refusal in the terminal.
+Requires the same as the CLI: an answering model and an embedding backend, both
+a local Ollama by default, and a LanceDB built by scripts/ingest_demo_corpus.py
+or `ayl-add`, or pointed to by LIBRARY_DB_PATH. OPENROUTER_API_KEY is needed
+only when the answering model or the embeddings are moved to OpenRouter, so with
+the shipped default the key gate below never fires. When a key IS needed it is
+checked at startup (before anyone can log in); the rest is checked per session,
+because a login page for a server that cannot answer anything is worse than a
+refusal in the terminal.
 """
 import functools
 import hmac
@@ -131,13 +133,20 @@ if (_password == "change-me"
 # the embedding backend can legitimately come up later, and this must not touch
 # them. AYL_ALLOW_START_WITHOUT_KEY=1 is for importing ui.py as a module
 # (tests, the injection canary's UI stage), not for serving.
+#
+# check_api_key() returns None whenever no key is needed, which the shipped
+# default (a local answering model and local embeddings) is: this gate is
+# reached only by a configuration that moved one of the two to OpenRouter.
 if os.environ.get("AYL_ALLOW_START_WITHOUT_KEY") != "1":
     _key_problem = check_api_key()
     if _key_problem:
         raise SystemExit(
-            "Refusing to start without an OpenRouter key: export OPENROUTER_API_KEY "
-            "(or put it in .env, or point OPENROUTER_ENV_FILE at a file containing "
-            "it); export AYL_ALLOW_START_WITHOUT_KEY=1 to start anyway.")
+            "Refusing to start without an OpenRouter key: this configuration sends the "
+            "answering model or the embeddings there. Export OPENROUTER_API_KEY (or put "
+            "it in .env, or point OPENROUTER_ENV_FILE at a file containing it), or drop "
+            "back to the default local configuration, which needs no key: LLM_BACKEND="
+            "ollama with EMBED_BACKEND=ollama. Export AYL_ALLOW_START_WITHOUT_KEY=1 to "
+            "start anyway.")
 
 # Compiled once per process: run_question gives every question its own
 # thread_id, so one compiled graph is safe to share across sessions.

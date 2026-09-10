@@ -76,11 +76,15 @@ as one. The demo corpus is cut more aggressively — it *discards* contents line
 chapters, with a pinned manifest behind that — but your own files lose no text, and `--dry-run`
 lists every section that would be indexed.
 
-**Local vs paid.** `ayl-add` makes no paid calls by default (`EMBED_BACKEND=openrouter` is the exception): chunking is local, embeddings are computed by
-your local Ollama (`bge-m3`), and the LanceDB is written on your machine. Only asking questions
-costs money — the orchestrator LLM, roughly $0.03-0.04 per question on the demo set (see the
-eval artifacts). `EMBED_BACKEND=openrouter` would send your book text to the embedding API too;
-the default does not.
+**Local vs paid.** `ayl-add` makes no paid calls by default (`EMBED_BACKEND=openrouter` is the
+exception): chunking is local, embeddings are computed by your local Ollama (`bge-m3`), and the
+LanceDB is written on your machine. Asking questions is free too in the shipped default, which
+answers on that same local Ollama. Only `LLM_BACKEND=openrouter` costs money — the orchestrator
+LLM, roughly $0.04-0.05 per question on the demo set at `v0.2.0-rc1`, the figure and the run
+[`cost.md`](cost.md) works through. (An earlier `v0.1.0` measurement, before the 2,500-character
+window and the coverage gate, read $0.03-0.04; this page used to quote that one.)
+`EMBED_BACKEND=openrouter` would send your book text to the embedding API too; the default does
+not.
 
 **What you do not get:** book cards. The demo corpus carries a distilled card per book (plot,
 characters, takeaways) as a second corpus, and generating one costs an LLM call per book, so

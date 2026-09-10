@@ -12,9 +12,11 @@ usage accounting per role; the library at the two names nodes imports
 import json
 from pathlib import Path
 
+import httpx
 import pytest
+from openai import APITimeoutError
 
-from ask_your_library import config, llm, nodes, provenance
+from ask_your_library import cli, config, llm, nodes, provenance
 from ask_your_library.graph import build_graph
 from ask_your_library.i18n import t
 from ask_your_library.library import TITLE_SEPARATOR, BookEntry, author_of, title_of
@@ -826,3 +828,161 @@ def test_a_topic_question_forced_into_a_listing_is_searched_everywhere(run):
     assert plan["catalog_fallback"] == "mixed_intent" and plan["book_filter"] == "" and plan["book_unresolved"] == ""
     assert library.searches == [(question, None)]
 
+
+
+# --------------------------------------------------- a loop call that times out
+class TimingOutModel(ScriptedModel):
+    """A ScriptedModel whose calls in one role always time out, on every
+    attempt — which is what a model too slow for the budget does. Timed-out
+    attempts go to `timed_out`, never to `calls`: `roles()` keeps meaning
+    "calls that produced a reply", exactly as `llm_calls` does."""
+
+    def __init__(self, *, times_out_on: str, **scripts):
+        super().__init__(**scripts)
+        self.times_out_on = times_out_on
+        self.timed_out: list[str] = []
+
+    def invoke(self, messages):
+        role = next((r for r, head in ROLE_BY_RULES if messages[0].content.startswith(head)), None)
+        if role == self.times_out_on:
+            self.timed_out.append(role)
+            raise APITimeoutError(request=httpx.Request("POST", "http://localhost/v1"))
+        return super().invoke(messages)
+
+
+@pytest.fixture
+def run_on_a_fake_clock(monkeypatch, tmp_path):
+    """`run`, with the deadline clock frozen where the run starts, so a
+    deadline of 30 s is spent by the model calls and by nothing else."""
+    def _run(model, library, question, deadline_s=30):
+        # `sleep` advances it: llm_invoke's backoff between retries is time the
+        # question's budget really spends, and a clock that ignored it would
+        # make a capped retry look free.
+        clock = type("FakeClock", (), {"t": 1_000.0, "monotonic": lambda self: self.t,
+                                       "sleep": lambda self, s: setattr(self, "t", self.t + s)})()
+        monkeypatch.setattr(llm, "time", clock)
+        monkeypatch.setattr(llm, "llm", lambda role="", capped=None: model)
+        monkeypatch.setattr(nodes, "search_both", library.search_both)
+        monkeypatch.setattr(nodes, "read_chapter", library.read_chapter)
+        monkeypatch.setattr(nodes, "list_books", library.list_books)
+        real_reset = llm.reset_usage
+
+        def reset_on_the_fake_clock(deadline=None):
+            real_reset(deadline)
+            llm._usage().started = clock.t
+        monkeypatch.setattr("ask_your_library.runner.reset_usage", reset_on_the_fake_clock)
+        events = []
+
+        def record(node_name, update):
+            events.append((node_name, update))
+            # Every update goes through the CLI's own printer, because the
+            # event CONTRACT is what a degraded path breaks first: an observe
+            # update without `empty_streak` ended a real `--deadline 20` run in
+            # `Run failed: KeyError: 'empty_streak'` — an error string instead
+            # of the answer, which is exactly the failure under test.
+            cli.print_event(node_name, update)
+
+        answer = run_question(build_graph(), question, [], Path(tmp_path),
+                              on_event=record, on_clarify=lambda q: "", deadline_s=deadline_s)
+        return answer, events
+    return _run
+
+
+def test_a_loop_call_that_times_out_ends_the_loop_and_not_the_run(run_on_a_fake_clock):
+    """`deadline_passed` is read between steps, so it never sees a call that
+    used the budget up from the inside. Such a call raises, and nothing above
+    the graph catches it: `uv run ask-library --deadline 20 "..."` printed
+    `Run failed: OpenAITimeoutError: Request timed out.` and no answer at all,
+    which is the opposite of what the README promises the deadline does.
+
+    The second loop call of the run (observe's distillation) times out here.
+    The run still ends in an answer — the honest refusal, because nothing had
+    been distilled yet — the stop reason names the deadline, and `reflect`
+    spends no call on a budget that is gone."""
+    model = TimingOutModel(
+        times_out_on="observe",
+        plan=[{"mode": "answer", "queries": ["Ishmael sails", "Pequod voyage"]}],
+        observe=[{"evidence": [evidence(MOBY, "transcripts", "s1h2")]}],
+    )
+    answer, events = run_on_a_fake_clock(model, FakeLibrary(lambda q: [MOBY]),
+                                         "Who narrates Moby Dick?")
+
+    assert names(events) == ["plan", "act", "observe", "reflect", "synthesize", "validate", "metrics"]
+    assert model.roles() == ["plan"]                       # only plan produced a reply
+    # `ask_json` retries invalid JSON and `llm_invoke` retries a timeout, so the
+    # one observe call is several attempts; every one of them timed out.
+    assert model.timed_out and set(model.timed_out) == {"observe"}
+    assert answer == t("refusal_answer")                   # an answer, not an error string
+    observe = by_name(events, "observe")[0]
+    assert observe["stop_reason"] == t("stop_deadline_call", s=30)
+    # reflect restates it rather than printing "enough, synthesizing", a
+    # decision it never made
+    assert by_name(events, "reflect")[0]["stop_reason"] == t("stop_deadline_call", s=30)
+    # observe's two contract keys are answered as on any other dry step
+    assert observe["evidence"] == [] and observe["empty_streak"] == 1
+    assert by_name(events, "metrics")[0]["stop_reason"] == t("stop_deadline_call", s=30)
+
+
+def test_a_reflect_call_that_times_out_still_answers_from_the_evidence_found(run_on_a_fake_clock):
+    """The same rule one call later, where there IS something to answer from:
+    observe distilled a quote, reflect's call then ran out of time, and
+    `synthesize` — which the deadline never caps — writes the answer from that
+    quote. The evidence is kept and the quote check runs as usual."""
+    model = TimingOutModel(
+        times_out_on="reflect",
+        plan=[{"mode": "answer", "queries": ["Ishmael sails", "Pequod voyage"]}],
+        observe=[{"evidence": [evidence(MOBY, "transcripts", "s1h2")]}],
+        synthesize=["Ishmael, so far [Moby Dick, Chapter 1]."],
+    )
+    answer, events = run_on_a_fake_clock(model, FakeLibrary(lambda q: [MOBY]),
+                                         "Who narrates Moby Dick?")
+
+    assert model.roles() == ["plan", "observe", "synthesize"]   # reflect produced no reply
+    assert set(model.timed_out) == {"reflect"}
+    assert answer == "Ishmael, so far [Moby Dick, Chapter 1]."
+    assert by_name(events, "reflect")[0]["stop_reason"] == t("stop_deadline_call", s=30)
+    assert by_name(events, "validate")[0]["provenance"]["confirmed"] == 1
+    assert by_name(events, "metrics")[0]["stop_reason"] == t("stop_deadline_call", s=30)
+
+
+def test_a_plan_call_that_times_out_ends_the_run_in_an_answer_too(run_on_a_fake_clock):
+    """The first call of the run is a loop call like any other: a timeout there
+    leaves nothing to search with, `route_after_plan` reads the empty query and
+    goes to synthesize, which refuses honestly. No search step ran."""
+    model = TimingOutModel(times_out_on="plan",
+                           plan=[{"mode": "answer", "queries": ["Ishmael sails"]}])
+    library = FakeLibrary(lambda q: [MOBY])
+    answer, events = run_on_a_fake_clock(model, library, "Who narrates Moby Dick?")
+
+    assert names(events) == ["plan", "synthesize", "validate", "metrics"]
+    assert library.searches == [] and answer == t("refusal_answer")
+    assert by_name(events, "metrics")[0]["stop_reason"] == t("stop_deadline_call", s=30)
+
+
+def test_without_a_deadline_a_timed_out_loop_call_names_the_per_call_timeout(run_on_a_fake_clock):
+    """`QUESTION_DEADLINE_S=0` is a run with no budget to name, and the reason
+    says what did run out instead: LLM_TIMEOUT_S. The rule itself is unchanged
+    — the loop ends, the run does not."""
+    model = TimingOutModel(
+        times_out_on="reflect",
+        plan=[{"mode": "answer", "queries": ["Ishmael sails", "Pequod voyage"]}],
+        observe=[{"evidence": [evidence(MOBY, "transcripts", "s1h2")]}],
+        synthesize=["Ishmael, so far [Moby Dick, Chapter 1]."],
+    )
+    answer, events = run_on_a_fake_clock(model, FakeLibrary(lambda q: [MOBY]),
+                                         "Who narrates Moby Dick?", deadline_s=0)
+    assert answer == "Ishmael, so far [Moby Dick, Chapter 1]."
+    assert by_name(events, "metrics")[0]["stop_reason"] == t("stop_call_timeout",
+                                                             s=int(config.LLM_TIMEOUT_S))
+
+
+def test_a_loop_call_that_fails_for_another_reason_still_fails_the_run(run_on_a_fake_clock):
+    """Only a timeout ends the loop quietly. Every other failure of a model
+    call — a bad request, an auth error, a bug in a node — is raised as it
+    always was, so it cannot hide behind a deadline that was never reached."""
+    class BrokenModel(ScriptedModel):
+        def invoke(self, messages):
+            raise RuntimeError("provider said no")
+
+    with pytest.raises(RuntimeError, match="provider said no"):
+        run_on_a_fake_clock(BrokenModel(), FakeLibrary(lambda q: [MOBY]), "Who narrates Moby Dick?")

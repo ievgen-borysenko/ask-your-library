@@ -26,13 +26,22 @@ import tempfile
 # value sets it itself (monkeypatch, or a fresh interpreter through run_fresh).
 DEFAULTS = {
     "ASK_LANG": "en",
-    "LLM_BACKEND": "openrouter",
+    # The shipped default, pinned like every other knob — and a pin, not a
+    # hiding place: LLM_BACKEND is in SCRUBBED below, so a test that asks what
+    # the DEFAULT is goes through run_fresh, into a child that has the name
+    # unset and reads config.py's own answer. Nothing written here can make
+    # that child agree with this file by accident.
+    "LLM_BACKEND": "ollama",
     "EMBED_BACKEND": "ollama",
     "OLLAMA_URL": "http://localhost:11434",
     "OLLAMA_EMBED_MODEL": "bge-m3",
     "OLLAMA_LLM_MODEL": "qwen2.5:14b",
     "OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
     "OPENROUTER_EMBED_MODEL": "openai/text-embedding-3-small",
+    # Read by config only under LLM_BACKEND=openrouter, so with the default
+    # pinned above these three are inert — and they are pinned anyway, because
+    # CI runs this whole suite a second time with LLM_BACKEND=openrouter
+    # exported, and that leg must not read the developer's own model or rates.
     "ORCHESTRATOR_MODEL": "anthropic/claude-sonnet-4.6",
     "PRICE_IN_PER_MTOK": "3.0",
     "PRICE_OUT_PER_MTOK": "15.0",
@@ -45,7 +54,6 @@ DEFAULTS = {
     "MAX_EMPTY_STREAK": "2",
     "MAX_CLARIFY_CANDIDATES": "5",
     "LLM_MAX_RETRIES": "2",
-    "QUESTION_DEADLINE_S": "300",
     "AYL_STRICT_HIT_ID": "1",
     # No index: a test that needs one builds a LanceDB under tmp_path and points
     # the reader at it. A path that exists would let a developer's real library
@@ -79,10 +87,11 @@ def pin_environment() -> None:
     that test proves is what the whole suite runs under."""
     for name, value in DEFAULTS.items():
         os.environ.setdefault(name, value)
-    # The one default that depends on another knob (a local model is slower and
+    # The two defaults that depend on another knob (a local model is slower and
     # may load cold), kept in step with config.py rather than pinned to a number.
     local = os.environ["LLM_BACKEND"] == "ollama"
     os.environ.setdefault("LLM_TIMEOUT_S", "600" if local else "120")
+    os.environ.setdefault("QUESTION_DEADLINE_S", "1200" if local else "300")
     os.environ.update(TRACING_OFF)
     # Assignment, not pop: `config.load_dotenv()` runs at the first package
     # import and fills any name that is ABSENT from a .env in the working
@@ -133,7 +142,7 @@ def clean_run_state():
 # superset of DEFAULTS on purpose: a value pinned here must not reach a child
 # that is meant to see a default.
 SCRUBBED = frozenset(DEFAULTS) | frozenset(TRACING_OFF) | frozenset(BLANKED) | {
-    "LLM_TIMEOUT_S", "LANGCHAIN_TRACING", "LANGSMITH_TRACING", "LANGCHAIN_PROJECT",
+    "LLM_TIMEOUT_S", "QUESTION_DEADLINE_S", "LANGCHAIN_TRACING", "LANGSMITH_TRACING", "LANGCHAIN_PROJECT",
     # The tracing destination, under both prefixes. Nothing here sets it, but a
     # child that reports where traces would go must not name the developer's own
     # LangSmith region instead of the default the SDK falls back to.

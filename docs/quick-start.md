@@ -14,9 +14,11 @@ bash scripts/install-mac.sh              # mostly download time, + ~30 min for t
 [`scripts/install-mac.sh`](../scripts/install-mac.sh) installs `uv` and Ollama through Homebrew
 (whose own install command it prints and never runs for you), starts Ollama for this session
 only (`brew services run`, which registers no login item — the one-liner that makes it permanent
-is printed at the end), pulls the two models, syncs the locked environment, writes a fully local
+is printed at the end), pulls the two models, syncs the locked environment, writes the fully local
 `.env`, asks once before the demo corpus, and finishes on the preflight the CLI runs before
-every question. `--no-demo`, `--hosted`, `--yes` and `--help` are the rest of it. It never runs
+every question. When it is done, `uv run ask-library "..."` answers with no account and no key.
+`--no-demo`, `--hosted` (the OpenRouter answering model, which needs a key you set yourself),
+`--yes` and `--help` are the rest of it. It never runs
 `sudo`. What reaches the network is the package fetches through `brew`, `uv` and `ollama` and,
 if you say yes to the demo corpus, the checksum-pinned public-domain texts
 [`scripts/ingest_demo_corpus.py`](../scripts/ingest_demo_corpus.py) downloads from gutenberg.org —
@@ -30,16 +32,22 @@ names look like credentials shown as `<set, N chars>`.
 
 ## The manual steps, on any system
 
-Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), [Ollama](https://ollama.com) for
-local embeddings, an OpenRouter API key for the answering model (or none at all: see
-[Fully local, no account](configuration.md#fully-local-no-account)).
+Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/) and
+[Ollama](https://ollama.com), which runs both the embeddings and — in the default configuration —
+the answering model. No account and no API key: see
+[Fully local, no account](configuration.md#fully-local-no-account).
 
 ```bash
 uv sync                                  # install
 ollama pull bge-m3                       # local embedding model (1024 dims)
-cp .env.example .env                     # then set OPENROUTER_API_KEY in .env
+ollama pull qwen2.5:14b                  # local answering model (9.0 GB); the default
+cp .env.example .env                     # already the local configuration; nothing to fill in
 uv run scripts/ingest_demo_corpus.py     # build the demo corpus (~30 min first run)
 ```
+
+To answer on a hosted model instead, set `LLM_BACKEND=openrouter` in that `.env`, uncomment the
+three OpenRouter lines beside it, and put your key in `OPENROUTER_API_KEY`. That path costs money
+per question ([Cost](cost.md)); the local one does not.
 
 The ingest is staged and cached in `data/`, so it is safe to interrupt and re-run:
 `--stage prepare-text|prepare-audio|prepare-canaries|ingest|cards` runs one stage, `--book <substring>`
@@ -73,7 +81,7 @@ CHAINLIT_USERNAME=... CHAINLIT_PASSWORD=... uv run --extra ui chainlit run ui.py
 # evals
 uv run eval/run_retrieval_eval.py        # no LLM calls, free
 uv run eval/run_agent_eval.py            # full agentic loop over the golden set
-uv run eval/injection_canary.py          # one LLM call (the last stage)
+uv run eval/injection_canary.py          # one LLM call (the last stage; free on the local backend)
 uv run --extra ui eval/injection_canary.py --no-live  # all available stages, no LLM call, free
 uv run --group dev pytest -q             # unit tests, the compiled graph end to end with a scripted model, golden-set/manifest guard
 ```

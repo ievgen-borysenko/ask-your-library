@@ -1,5 +1,102 @@
 # Changelog
 
+## 0.3.0 (unreleased)
+
+A minor release, not a patch: the shipped default changed. A clone answers on a
+local model through Ollama, with no account and nothing to pay, where it used to
+need an OpenRouter key. The hosted path is unchanged and opt-in.
+
+- **The shipped default is fully local: no account, no key, no money to try it.** `LLM_BACKEND`
+  defaults to `ollama` instead of `openrouter`, so a clone that follows any path — the installer,
+  the manual quick start, or `uv run ask-library "..."` with no `.env` at all — answers on a model
+  Ollama serves on this machine, and its cost lines read $0.0000 because `OLLAMA_PRICE_*` are 0.
+  Nobody has to create a paid account to see whether the thing works. The hosted path is unchanged
+  and is now opt-in: `LLM_BACKEND=openrouter` behaves exactly as the default used to, key, prices
+  and endpoint included. Everything that hung off the old default followed. The key gates
+  (`OPENROUTER_NEEDS_KEY`, `preflight.check_api_key`, `ui.py`'s startup refusal) were already
+  conditional and simply stop firing; the UI's refusal now names the local configuration as a way
+  out rather than only the key. `.env.example` **is** the local configuration — including the
+  local time budgets, `LLM_TIMEOUT_S=600` and `QUESTION_DEADLINE_S=1200`, because a value in a
+  copied `.env` wins over `config.py`'s per-backend default — with `ORCHESTRATOR_MODEL` and the
+  two `PRICE_*` lines shipped commented out beside a note on what the hosted path costs and that
+  it needs an account. That inverts `scripts/install-mac.sh`: `--hosted` is now the mode that
+  transforms the example (backend, both time budgets, the three commented lines), and the local
+  mode writes it out as it stands. The dry run says so: its hosted plan read `would copy
+  .env.example to .env unchanged` — the one line of the plan describing something the script does
+  not do — and now reads `would write .env from .env.example with these values`, with every line
+  either writer rewrites listed under it, `ORCHESTRATOR_MODEL` and the two `PRICE_*` included. A
+  test pins the wording and the values. An invalid `LLM_BACKEND` still refuses to start rather than
+  falling back — to either backend now, since falling back to the local one would leave a run
+  meant for a hosted model asking Ollama for something nobody pulled.
+- **A first run with nothing configured ends in an instruction, not a stack trace — and in a
+  distinct exit code.** `preflight.check_environment()` records the KIND of each problem beside
+  its prose, and `preflight.exit_code()` turns those kinds into the status the CLI exits with:
+  `3` no index yet, `4` a hosted backend with no key, `5` Ollama unreachable, not answering as
+  Ollama, or missing a configured model, `1` anything else — the status it always was. It is a
+  precedence, not a subset test: a fresh clone usually has several problems at once, every one is
+  still printed, and the code names the one to fix first, so a wrapper script can act on it
+  without matching on translated prose. The unreachable-Ollama message now carries the whole
+  remedy, because on a machine where nothing is installed yet the missing step was the install:
+  `brew install ollama`, `ollama serve`, then one `ollama pull` per model **this** configuration
+  will open (read from `OLLAMA_LLM_MODEL` / `OLLAMA_EMBED_MODEL`, so a run on `nomic-embed-text`
+  is not sent to fetch `bge-m3`), or `bash scripts/install-mac.sh`, which does all of it. The
+  missing-index message names `ayl-add` beside the demo build. `install-mac.sh` closes on the
+  exact next command, in the order it works: the corpus build first when there is no index
+  (`ask-library` before it would exit 3 on that same message), the reader's own `ayl-add` instead
+  under `--no-demo`, then the first question with the sentence the mode exists for — no account,
+  no key, nothing to pay, the local model named.
+- **Every eval harness states the backend it ran with.** `run_fingerprint()` — and therefore
+  `run_ablation.py`, which imports it — prints `model <name> via <backend>`; the injection canary
+  opens with the answering model and backend it is about to test; `run_retrieval_eval.py`, which
+  calls no answering model, names the embedder instead. The backend used to go unsaid, and unsaid
+  meant the hosted default, which would now leave the reports in `docs/eval-results/`
+  indistinguishable from a free local run. **No measured number was touched.** The reports behind
+  the README's results table were produced on the hosted configuration, and that table,
+  `docs/evaluation.md` and `docs/cost.md` now say so where they present them, together with the
+  fact that the default configuration is local and free and is not what any of them measures. Not
+  every report in `docs/eval-results/` is hosted — `2026-09-10-local-models.md` and
+  `2026-09-10-first-question-local.md` are local runs — and the fingerprint carries the backend only
+  from this release onward, so for the reports committed before it the backend is read from the
+  provenance header (or from the `$0.0/M` rates on the cost line). `docs/evaluation.md` and
+  `.env.example` say that instead of claiming every report is hosted.
+- **The question deadline is per backend, like the per-call timeout — and a call that runs out of
+  time ends the loop, not the run.** `QUESTION_DEADLINE_S` used to be one flat `300`, which no
+  recommended path ever ran with: `.env.example` and `scripts/install-mac.sh` both write `1200`
+  for the local mode, and a value in a copied `.env` wins over `config.py`, so the only
+  configuration that got 300 s was the bare clone-and-ask path this release advertises as
+  equivalent — where the quick start's own first question, measured from a clean clone in
+  `docs/eval-results/2026-09-10-first-question-local.md`, takes 160.8 s of it, and where the per-call
+  read timeout was capped at what was left of the 300 s rather than the 600 s `LLM_TIMEOUT_S`
+  names. The default is now `1200` under `LLM_BACKEND=ollama` and `300` under `openrouter`, by the
+  same rule and in the same line shape as `LLM_TIMEOUT_S`. Separately: a loop call (plan, observe,
+  reflect) that hits its own timeout used to raise through the graph, and `run_question` has no
+  `except`, so `ask-library --deadline 20 "..."` printed `Run failed: ... Request timed out.` and
+  no answer at all — the opposite of what the deadline exists to produce. Such a timeout is now a
+  stop reason of its own: the loop ends, the evidence already distilled stands, and `synthesize`,
+  which the budget never caps, writes the answer from it. Only a timeout is caught; every other
+  failure of a model call is raised exactly as before, and a `synthesize` that fails is unchanged.
+- **The trade the default makes is stated where the choice is made, per kind of question.** The
+  README and `docs/cost.md` said the local default costs nothing and did not say it is slower. Both
+  now say it in one place, and each figure is computed from the rows of one kind of question rather
+  than from a set mean that mixes six catalogue items with four research controls: a local
+  `qwen2.5:14b` answers a catalogue question in 1-12 s and a research one in 61-217 s at $0, a
+  hosted `claude-sonnet-4.6` in 1-2 s and 8-61 s for about $0.002 and $0.05, and `cost.md` names the
+  run **and the rows** behind every figure. The first-question latency the quick start's reader
+  actually meets is measured for the first time and committed as a report of its own,
+  `docs/eval-results/2026-09-10-first-question-local.md`: 160.8 s cold and 62.7 s warm, from a clean
+  clone at this branch's head over the demo index. `docs/add-your-own-books.md`'s "only asking
+  questions costs money" is qualified with `LLM_BACKEND=openrouter` and its $0.03-0.04 aligned
+  with `cost.md`'s $0.04-0.05 (the older figure was the `v0.1.0` measurement, and says so).
+- **The "model not pulled" notice carries the same remedy as the unreachable-Ollama one.** An
+  interrupted install used to get less help than a machine with no Ollama at all: the exact
+  `ollama pull` and nothing else. It now says the download is several GB and has to finish, and
+  names `bash scripts/install-mac.sh` as the one command that pulls what this configuration opens.
+  No size in gigabytes per model: `ollama list` cannot be read for a model that is not there.
+- **`MAX_OUTPUT_TOKENS` and the non-negative knobs read blanks like everything else.** They used
+  `os.environ.get` where the rest of `config.py` uses `_env`, so a name left blank in a copied
+  `.env` raised instead of meaning the default. Unreachable today — `.env.example` ships values —
+  and now consistent.
+
 ## 0.2.1 (2026-09-10)
 
 - **The README is a front page, and the long text is in `docs/`.** What the project is, the
@@ -37,7 +134,7 @@
   `cache: 436 tokens read from cache`, so it is what a first ask costs on this machine rather than
   a warm-cache artefact. `docs/img/ask-library-ui.gif` (828 KB) is the web UI on a different
   question — what d'Artagnan said before fighting three men at once, and why — answered by the
-  hosted default model, `anthropic/claude-sonnet-4.6` through OpenRouter, with the embeddings still
+  hosted model `anthropic/claude-sonnet-4.6` through OpenRouter, with the embeddings still
   local. It ends on the green quote-provenance badge reading `evidence passages 5/5 traced to their
   source`, with the Chapter V passage opened under it and the quote sitting on the text it was
   checked against; the caption quotes the $0.0724 the UI's own metrics line reports. That question

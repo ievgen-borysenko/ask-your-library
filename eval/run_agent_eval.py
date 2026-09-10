@@ -86,8 +86,14 @@ def git_code_stamp() -> str:
 
 
 def run_fingerprint() -> str:
-    """What exactly produced this report: code SHA, golden checksum, model,
-    index stamps — a number without these is not attributable."""
+    """What exactly produced this report: code SHA, golden checksum, model AND
+    the backend that served it, index stamps — a number without these is not
+    attributable.
+
+    The backend used to be silent, and silence meant the hosted default. That
+    default is the local backend now, so an unnamed backend would leave the
+    reports in docs/eval-results/ — every one of them measured on the hosted
+    configuration — indistinguishable from a free local run. It is named."""
     sha = git_code_stamp()
     golden_sha = hashlib.sha256(GOLDEN_PATH.read_bytes()).hexdigest()[:12]
     repo = Path(__file__).resolve().parents[1]
@@ -101,7 +107,7 @@ def run_fingerprint() -> str:
     manifest = repo / "corpus" / "manifest.yaml"
     corpus_sha = digest_of([manifest]) if manifest.exists() else "?"
     toc_sha = digest_of((repo / "corpus" / "toc").glob("*.json")) if (repo / "corpus" / "toc").exists() else "?"
-    from ask_your_library.config import DB_PATH, ORCHESTRATOR_MODEL, TABLES
+    from ask_your_library.config import DB_PATH, LLM_BACKEND, ORCHESTRATOR_MODEL, TABLES
     stamps = []
     try:
         import lancedb
@@ -116,7 +122,8 @@ def run_fingerprint() -> str:
     except Exception as error:  # the report must not fail on fingerprinting
         stamps.append(f"index=unavailable ({type(error).__name__})")
     return (f"code {sha} | golden {GOLDEN_PATH.name}@{golden_sha} | manifest@{corpus_sha} | "
-            f"toc@{toc_sha} | model {ORCHESTRATOR_MODEL} | {' | '.join(stamps)} | "
+            f"toc@{toc_sha} | model {ORCHESTRATOR_MODEL} via {LLM_BACKEND} | "
+            f"{' | '.join(stamps)} | "
             f"strict_hit_id={'on' if HIT_ID_STRICT else 'off'} | clarify_pick={CLARIFY_PICK or 'default'} | "
             f"hit_chars={SEARCH_HIT_CHARS}/{CHAPTER_HIT_CHARS} | steps={MAX_STEPS}/{MAX_EMPTY_STREAK} | "
             f"candidates={MAX_CLARIFY_CANDIDATES} | "

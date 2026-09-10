@@ -22,7 +22,7 @@ from langchain_openai import ChatOpenAI
 # SDK's exception vocabulary. `openai` is what langchain-openai talks to and
 # cannot work without; langchain wraps these errors in classes of its own, but
 # every wrapper subclasses the openai one, so an isinstance check still sees them.
-from openai import APIConnectionError, APIStatusError
+from openai import APIConnectionError, APIStatusError, APITimeoutError
 
 from .config import (LLM_BACKEND, LLM_BASE_URL, LLM_MAX_RETRIES, LLM_NEEDS_KEY, LLM_TIMEOUT_S,
                      MAX_OUTPUT_TOKENS, ORCHESTRATOR_MODEL, PRICE_IN_PER_MTOK, PRICE_OUT_PER_MTOK,
@@ -157,9 +157,9 @@ def llm_invoke(system: str, user: str, role: str):
     `max_retries=0`). The SDK samples the timeout once, when the client is
     built, and every retry it makes reuses that number: a call the deadline
     capped at what was left of the question would spend that remainder
-    `1 + LLM_MAX_RETRIES` times over — with the local defaults, three 300 s
-    attempts plus backoff against a 300 s question — which is the opposite of
-    what the cap is for. Here a client is built per attempt, so the bound is
+    `1 + LLM_MAX_RETRIES` times over — three attempts at the whole remaining
+    budget, plus backoff, against a question that has that budget once — which
+    is the opposite of what the cap is for. Here a client is built per attempt, so the bound is
     recomputed against the budget that is actually left, and once that is down
     to MIN_CALL_TIMEOUT_S there is no next attempt at all.
 
@@ -217,6 +217,15 @@ def llm_invoke(system: str, user: str, role: str):
 
 CONNECT_TIMEOUT_S = 5.0   # the OpenAI SDK's default connect timeout, kept on purpose
 MIN_CALL_TIMEOUT_S = 5.0  # floor: a call started with seconds left still gets a real attempt
+
+# What a call that ran out of time raises, named here so the nodes can catch a
+# timeout without importing the SDK's vocabulary — and so that catching one
+# stays a catch of exactly this and nothing else. `APITimeoutError` is what the
+# client turns an httpx read/write timeout into; the bare httpx class is kept
+# beside it for a timeout raised before the SDK wraps it. A loop call that ends
+# this way ends the LOOP, not the run: `nodes` writes a stop reason and goes to
+# `synthesize`, which is uncapped and still has the evidence collected so far.
+CallTimeout = (APITimeoutError, httpx.TimeoutException)
 # Node roles the remaining budget never caps. `synthesize` writes the answer
 # out of the evidence already collected and is the last call of a run: it is
 # what the budget was spent FOR, not a way of spending more of it.
@@ -227,9 +236,10 @@ def deadline_caps(role: str = "") -> bool:
     """Does what is left of the question's deadline bound a call in this role?
 
     `deadline_passed` is only consulted between steps, so on its own it bounds
-    the loop and not a call: with LLM_TIMEOUT_S above QUESTION_DEADLINE_S — the
-    local default pair, 600 against 300 — one loop call could run past the
-    whole question's budget, and then retry. A reasoning model over Ollama does
+    the loop and not a call: with LLM_TIMEOUT_S near or above what is left of
+    QUESTION_DEADLINE_S — 600 s per call against a 1200 s local question is two
+    calls' worth of the whole budget — one loop call could run past the whole
+    question's budget, and then retry. A reasoning model over Ollama does
     exactly that, because its thinking tokens are not counted against
     max_tokens.
 

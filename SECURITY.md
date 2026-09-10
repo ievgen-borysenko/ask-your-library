@@ -12,12 +12,15 @@ machine, so `ui.py` also refuses every `Host` header other than `localhost` and 
 cookie module, `CHAINLIT_COOKIE_SAMESITE` being already read by the time `chainlit run` loads
 `ui.py`; see "Threat model" in `docs/privacy-and-threat-model.md`. Prompts, retrieved passages and
 answers leave the machine only as calls to the providers you configure: the answering model
-(`LLM_BACKEND`), the embedding model (`EMBED_BACKEND`, local Ollama by default) and, if a
-LangSmith key and tracing flag are in the environment (either the `LANGCHAIN_` or the `LANGSMITH_`
-prefix), tracing. With `LLM_BACKEND=ollama`, `EMBED_BACKEND=ollama`, an `OLLAMA_URL` on this
-machine, and `LANGSMITH_TRACING_V2=false` plus `LANGCHAIN_TRACING_V2=false` nothing leaves the
-machine; see "Privacy and data flow" and "Threat model" in `docs/privacy-and-threat-model.md` for
-what is protected and what is not.
+(`LLM_BACKEND`), the embedding model (`EMBED_BACKEND`) and, if a LangSmith key and tracing flag
+are in the environment (either the `LANGCHAIN_` or the `LANGSMITH_` prefix), tracing. **The
+shipped configuration configures none of them**: `LLM_BACKEND` and `EMBED_BACKEND` both default to
+a local Ollama on `OLLAMA_URL`, and no tracing key is set, so nothing leaves the machine unless
+you move one of the three. Moving the answering model to OpenRouter (`LLM_BACKEND=openrouter`)
+sends it the question and the retrieved passages; a shell that already exports a tracing flag or
+a LangSmith key is the third path, and `LANGSMITH_TRACING_V2=false` plus
+`LANGCHAIN_TRACING_V2=false` close it whatever was inherited. See "Privacy and data flow" and
+"Threat model" in `docs/privacy-and-threat-model.md` for what is protected and what is not.
 
 ## Reporting a vulnerability
 
