@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.2.1 (unreleased)
+
+- **The demo corpus builds again: five Gutenberg pins had drifted.** `uv run
+  scripts/ingest_demo_corpus.py`, the first command a reader runs after the install, stopped at the
+  third book with `checksum mismatch for treasure-island`. Project Gutenberg had regenerated five
+  of the 31 texts — Treasure Island, Pride and Prejudice, Moby Dick, A Study in Scarlet and Memoirs
+  of Napoleon Bonaparte — and the manifest still pinned the previous files. All five drifts are
+  cosmetic: every one carries a new "Most recently updated" header line, three also carry small
+  corrections in the text (`young-man` -> `young man`, `Mr,` -> `Mr.`, two missing quote marks,
+  `soil` -> `soul`), one had four blank lines inserted after the start marker, and one lost a
+  "Produced by ..." transcriber credit. The chapter split is unchanged: `corpus/toc/*.json`
+  regenerates byte-identical from the new sources, and the corpus still prepares 7,285 transcript
+  chunks and 165 card chunks. The five entries are re-pinned through the script's own
+  `--stage checksums`, each with the re-pin date and one line on what drifted. The reports in
+  `docs/eval-results/` keep `manifest@f093bb27dab1`, the manifest their numbers were produced from;
+  `eval/run_agent_eval.py` computes that fingerprint from the file at run time, so runs from now on
+  carry `manifest@35d116b157cd` instead.
+- **A weekly job now watches the pins.** `.github/workflows/corpus.yml` runs the download-and-verify
+  stages — no Ollama, no model, no embedding — every Monday and on every pull request that touches
+  `corpus/**` or the ingest script, and fails on a mismatch. It also diffs `corpus/toc/` afterwards:
+  a re-pin makes the checksums green by construction, and the chapter split is what still says
+  whether the upstream file is the same book. `corpus/README.md` documents what is pinned, what the
+  job checks and what to do when it goes red.
+- **A `.env` in the checkout no longer decides what a test measures.** The macOS installer writes
+  one, and the README sends contributors to `uv run --group dev pytest -q` right after it, at which
+  point `test_llm_factory_bounds_every_call_with_timeout_and_retries` failed: it dropped
+  `LLM_TIMEOUT_S`, `LLM_MAX_RETRIES` and `QUESTION_DEADLINE_S` from the child's environment in
+  order to read the defaults, but dropping a name FREES it, and `config.load_dotenv()` runs at the
+  first package import in the child's working directory — so the installer's `LLM_TIMEOUT_S=600`
+  and `QUESTION_DEADLINE_S=1200` came back as the "defaults". Every test that reads configuration
+  in a child now goes through `conftest.run_fresh`, which already starts one in an empty directory
+  with those inputs scrubbed, and a new test pins both directions of that isolation.
+
 ## 0.2.0 (2026-09-09)
 
 The first public release. Everything below was merged after the `0.2.0-rc1` candidate of 07.09

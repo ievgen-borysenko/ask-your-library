@@ -29,7 +29,9 @@ books:
     pg_id: 84
 
   - id: treasure-island
-    sha256: 20cfdba153743bca26a15028ebb470121cbb7173ddafd435de5c19a79e4bbf30
+    sha256: 5bc08275eacea8640b1aa185c645283bb8c564d7b23df6b03437d229b4fc6ebd
+    # re-pinned 2026-09-10: PG regenerated the file — the "Most recently updated"
+    # header line and four blank lines after the START marker; text unchanged
     title: "Treasure Island"
     author: "Robert Louis Stevenson"
     source: gutenberg
@@ -79,14 +81,18 @@ books:
     part_regex: "^SENECA (OF [A-Z ,]+)\\.$"
 
   - id: pride-and-prejudice
-    sha256: 74f2665d6e6925fc2c17dec644bec9e87df478a0f1836822125e8acbb3777806
+    sha256: 3f6bb9d6f78e0293b56acd4714dd68cb7d6d1d293402031ce9d5a216bcaf9d75
+    # re-pinned 2026-09-10: PG regenerated the file — updated-date header line
+    # plus two typo fixes in the text ("young-man" -> "young man", "Mr," -> "Mr.")
     title: "Pride and Prejudice"
     author: "Jane Austen"
     source: gutenberg
     pg_id: 1342
 
   - id: moby-dick
-    sha256: 9a6844ac0703853720010787c7b6c70b0020f1ab1862dcd74452fa46474d1215
+    sha256: 907420db6c4b68c70e2988cd2ad9c8cf79138667a01b63376d18dd17fef1a18b
+    # re-pinned 2026-09-10: PG regenerated the file — updated-date header line
+    # plus three fixes in the text (two missing quote marks, "soil" -> "soul")
     title: "Moby Dick"
     author: "Herman Melville"
     source: gutenberg
@@ -133,7 +139,9 @@ books:
     pg_id: 2852
 
   - id: study-in-scarlet
-    sha256: b1ce37ab30c24d470681c3c2bc746be7555d2a9b63d64eb7f477fe73e09d1a8f
+    sha256: 8bbec71f9fa9c2acc9afe9be70560ca5f65c1bc95ef5af8252e9097f8d012497
+    # re-pinned 2026-09-10: PG regenerated the file — the updated-date header line
+    # and nothing else; the header is stripped, so the ingested text is identical
     title: "A Study in Scarlet"
     author: "Arthur Conan Doyle"
     source: gutenberg
@@ -260,7 +268,9 @@ books:
     part_regex: "^\\*([^*]+)\\*$"
 
   - id: napoleon-memoirs
-    sha256: 8a7afe296d37cfa15f71c2058f6f66884d1f8073dbe321f364c95ab2cb0afe04
+    sha256: 2c09dfd8adfd7b63f0ffc31cabffd1555d44f575f3b4d1a9ea2a30e00451c24b
+    # re-pinned 2026-09-10: PG regenerated the file — updated-date header line, and
+    # the "Produced by ..." transcriber credit dropped from the top of the text
     title: "Memoirs of Napoleon Bonaparte"
     author: "Louis Antoine Fauvelet de Bourrienne"
     source: gutenberg

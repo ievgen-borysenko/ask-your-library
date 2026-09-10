@@ -8,6 +8,24 @@ not pinned and not committed), and the two canaries carry no checksum because th
 committed as is. `scripts/ingest_demo_corpus.py` builds the library from it; the Gutenberg texts
 are not committed, they are fetched at build time.
 
+**Pins drift, and a weekly job is meant to notice before a reader does.** A Gutenberg pin is the
+SHA-256 of the file as downloaded, and Project Gutenberg regenerates that file whenever the book's
+source is corrected: a new "Most recently updated" line in the header, a typo fixed in the text, a
+transcriber credit dropped. The pin then stops matching and `scripts/ingest_demo_corpus.py` exits 1
+on that book, which is the intended behaviour — the numbers in `docs/eval-results/` were measured
+on the pinned files, and their fingerprint names the manifest they came from.
+`.github/workflows/corpus.yml` runs the download-and-verify stages every Monday, and on any pull
+request that touches `corpus/**` or the ingest script, so a drifted pin turns up as a red job here
+rather than as a failed first build somewhere else. When it goes red: fetch the file
+(`--stage prepare-text --no-verify` prepares the corpus without checking), read the diff against
+the copy you have, and satisfy yourself that it is the same edition — the job diffs `corpus/toc/`
+for exactly that, because a re-pin makes the checksums green by construction and only the chapter
+split still says whether the book changed. Then re-pin with
+`uv run scripts/ingest_demo_corpus.py --stage checksums` and note in `manifest.yaml`, next to the
+new checksum, the date and what drifted. A drift that moves chapters is not a re-pin: it is a
+different edition, and the book cards, the tables of contents and the golden questions have to be
+re-checked against it.
+
 **Texts: 31 books from Project Gutenberg.** Project Gutenberg distributes them as public domain
 **in the United States** and says so on its own terms: it does not guarantee the same status in
 other countries, and for a translated work (this corpus has English translations of at least Cervantes,
