@@ -30,12 +30,15 @@ flowchart TB
     classDef human fill:#bbf7d0,stroke:#15803d,color:#000
 ```
 
-![The CLI answering a question about Don Quixote over the demo corpus with a local model](docs/img/ask-library-demo.gif)
+![The CLI naming Robinson Crusoe from a half-remembered description, over the demo corpus with a local model](docs/img/ask-library-demo.gif)
 
-*"Why does Don Quixote attack the windmills even after Sancho tells him what they are, and how
-does he explain what happened after they knock him down?" — a local model (qwen2.5:14b) on the
-demo corpus, no API key. 64.9 s by the CLI's own metrics line in the last frame, on the warm
-prompt cache that same line reports (`cache: 9274 tokens read from cache`).*
+*"I remember a book in which a man happened to end up on an island and came across cannibals.
+What is the name of the book, and why did that happen?" — a local model (qwen2.5:14b) on the demo
+corpus, no API key. 124.6 s by the CLI's own metrics line in the last frame.*
+
+![The same question in the web UI: the answer, the quote-provenance badge, and one evidence passage opened under it](docs/img/ask-library-ui.gif)
+
+*The same question in the web UI: the verified-quotes badge, and the evidence passage under it.*
 
 ## Quick start on a Mac
 
@@ -71,17 +74,17 @@ routing conditions are drawn node by node, with the decision records behind them
 
 ## Measured
 
-| Measurement | Core v0.1.0 (12 questions, window 1,200) | Core v0.2.0-rc1 (11 questions, 2,500 + gate) | Extended v0.1.0 | Extended v0.2.0-rc1 |
-|---|---|---|---|---|
-| Retriever window, single-book presence | 9/9 | 8/8 | 12/12 | 12/12 |
-| Retriever window, multi-book full coverage | 2/2 | 2/2 | 3/5 | 3/5 |
-| Agent eval, questions completed | 12/12 | 11/11 | 21/21 | 21/21 |
-| Behavioural compliance (heuristic scorer: titles, refusal, clarify, drill-down) | 12/12 | 11/11 | 17/21 | 18/21 |
-| Answer quality, correct / incorrect / incomplete ([how each run was graded](docs/evaluation.md)) | 9 / 1 / 2 | 10 / 0 / 1 | not scored | not scored |
-| Quote provenance, validator v0.1: confirmed / unattributed / broken | 46 / 0 / 0 | 47 / 0 / 0 | 53 / 0 / 0 | 73 / 0 / 0 |
-| Clarify where the golden requires it | 1/1 | 1/1 | 0/2 | 1/2 |
-| Chapter drill-down where expected | not in set | not in set | 0/1 | 0/1 |
-| Cost per question, mean (Sonnet 4.6 via OpenRouter, configured rates) | $0.035 | $0.049 | $0.027 | $0.043 |
+| Measurement | Core v0.2.0-rc1 (11 questions, 2,500 + gate) | Extended v0.1.0 | Extended v0.2.0-rc1 |
+|---|---|---|---|
+| Retriever window, single-book presence | 8/8 | 12/12 | 12/12 |
+| Retriever window, multi-book full coverage | 2/2 | 3/5 | 3/5 |
+| Agent eval, questions completed | 11/11 | 21/21 | 21/21 |
+| Behavioural compliance (heuristic scorer: titles, refusal, clarify, drill-down) | 11/11 | 17/21 | 18/21 |
+| Answer quality, correct / incorrect / incomplete ([how each run was graded](docs/evaluation.md)) | 10 / 0 / 1 | not scored | not scored |
+| Quote provenance, validator v0.1: confirmed / unattributed / broken | 47 / 0 / 0 | 53 / 0 / 0 | 73 / 0 / 0 |
+| Clarify where the golden requires it | 1/1 | 0/2 | 1/2 |
+| Chapter drill-down where expected | not in set | 0/1 | 0/1 |
+| Cost per question, mean (Sonnet 4.6 via OpenRouter, configured rates) | $0.049 | $0.027 | $0.043 |
 
 Quote provenance is not faithfulness, and not correctness: a green row says every quote is
 verbatim in the passage it cites, not that the answer reasons well from it. Single runs on tagged
