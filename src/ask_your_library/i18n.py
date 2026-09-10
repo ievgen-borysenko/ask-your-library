@@ -62,6 +62,11 @@ _T = {
         "ua": " ({n} цитат знайдено в іншому уривку, ніж той, на який вони посилаються — не зараховано)",
         "en": " ({n} quotes found in a retrieved passage other than the one cited — not counted as confirmed)",
     },
+    # ---- stop reasons: the value of state["stop_reason"], and nothing more.
+    # Every line that shows one already says that the run stopped — the CLI's
+    # `[reflect] stopped: {r}` and `  stop: {r}`, the web UI's `stopped: {r}` —
+    # so a reason that opens with the same word prints it twice. A new reason
+    # starts at the cause; test_cli.py pins that for both languages.
     "stop_crag": {
         "ua": "CRAG-gate: {n} сухі кроки поспіль",
         "en": "CRAG gate: {n} dry steps in a row",
@@ -71,8 +76,8 @@ _T = {
         "en": "fallback: reflect failed to produce valid JSON twice",
     },
     "stop_chapter_again": {
-        "ua": "зупинка: запитаний розділ уже пробували читати (повторне читання не дасть більше тексту)",
-        "en": "stopped: requested chapter was already attempted (re-reading cannot show more text)",
+        "ua": "запитаний розділ уже пробували читати (повторне читання не дасть більше тексту)",
+        "en": "requested chapter was already attempted (re-reading cannot show more text)",
     },
     "stop_limit": {
         "ua": "ліміт кроків ({n}) — хотів шукати далі",

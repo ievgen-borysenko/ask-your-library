@@ -3,3 +3,26 @@ Copyright 2026 Ievgen Borysenko
 
 This product includes software developed by Ievgen Borysenko
 (https://github.com/ievgen-borysenko/ask-your-library).
+
+--------------------------------------------------------------------------------
+
+This product includes one file from Chainlit
+(https://github.com/Chainlit/chainlit), licensed under the Apache License,
+Version 2.0:
+
+    .chainlit/translations/en-US.json
+
+That file is Chainlit 2.12.0's own en-US.json, copied byte for byte and then
+MODIFIED on 2026-09-10: the value of the key
+
+    navigation.newChat.dialog.description
+
+was reworded, because the stock wording warns that starting a new chat clears
+the chat history, and this application persists every chat. No other value,
+key or line differs from the upstream copy.
+
+No copyright line is quoted here because the installed chainlit 2.12.0
+distribution carries none: it ships neither a LICENSE nor a NOTICE file, and
+its package metadata declares only "License: Apache-2.0" and "Author: Willy
+Douhard, Dan Andre Constantini". The same provenance is recorded beside the
+file, in .chainlit/translations/README.md.

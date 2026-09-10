@@ -594,6 +594,13 @@ ollama_url="$(setting OLLAMA_URL)"
 while [ "${ollama_url%/}" != "$ollama_url" ]; do ollama_url="${ollama_url%/}"; done
 embed_model="$(setting OLLAMA_EMBED_MODEL)"
 llm_model="$(setting OLLAMA_LLM_MODEL)"
+# The download sizes step 8 prints were measured on the two defaults and on
+# nothing else, so it has to know whether the model it is about to name IS the
+# default. An override gets its name printed with no number beside it: this
+# script cannot know what an arbitrary tag weighs, and `ollama pull` says so a
+# moment later anyway.
+default_embed_model="$(config_default OLLAMA_EMBED_MODEL)"
+default_llm_model="$(config_default OLLAMA_LLM_MODEL)"
 if [ -z "$ollama_url" ] || [ -z "$embed_model" ] || [ -z "$llm_model" ]; then
     fail "could not read the Ollama defaults from src/ask_your_library/config.py."
     fail "export OLLAMA_URL, OLLAMA_EMBED_MODEL and OLLAMA_LLM_MODEL, then re-run."
@@ -1201,12 +1208,27 @@ pull_model() {
 # and step 12 use.
 step "Models: pull what Ollama does not have yet (the sizes below are approximate)"
 if [ "$loaded_embed_backend" = "ollama" ]; then
-    note "$embed_model — embeddings, approximately 1.2 GB"
+    # 1.2 GB was measured on bge-m3 and holds for bge-m3. A different
+    # OLLAMA_EMBED_MODEL is a different download, and printing 1.2 GB beside it
+    # would be a number this script invented.
+    if [ "$embed_model" = "$default_embed_model" ]; then
+        note "$embed_model — embeddings, approximately 1.2 GB"
+    else
+        note "$embed_model — embeddings, size depends on the model"
+    fi
 else
     note "no embedding model is pulled: EMBED_BACKEND=$loaded_embed_backend embeds elsewhere"
 fi
 if [ "$loaded_backend" = "ollama" ]; then
-    note "$llm_model — answers, a chat model: approximately 3-8 GB depending on the tag"
+    # Same rule, and the reason it was written: 9 GB is qwen2.5:14b, the default
+    # this script reads out of config.py, and the line used to print it beside
+    # whatever name it had resolved — so a 4.7 GB qwen2.5:7b in .env was
+    # announced as a 9 GB download.
+    if [ "$llm_model" = "$default_llm_model" ]; then
+        note "$llm_model — answers, a chat model: approximately 9 GB"
+    else
+        note "$llm_model — answers, a chat model: size depends on the model"
+    fi
 else
     note "no answering model is pulled: the answering model stays on OpenRouter"
     if [ -n "$env_backend" ] && [ "$requested_backend" = "ollama" ]; then
