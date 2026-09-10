@@ -48,7 +48,10 @@ if LLM_BACKEND not in ("openrouter", "ollama"):
     # a key present that would send the question and passages outside while
     # the user believes the run is local.
     raise ValueError(f"LLM_BACKEND must be 'openrouter' or 'ollama', got {LLM_BACKEND!r}")
-OLLAMA_LLM_MODEL = _env("OLLAMA_LLM_MODEL", "qwen3.6")
+# qwen2.5:14b (9.0 GB) over qwen2.5:7b (4.7 GB): the local mini-eval in
+# docs/eval-results/2026-09-10-local-models.md is where the two were compared,
+# and 14b answers a multi-part question whole where 7b answers one half of it.
+OLLAMA_LLM_MODEL = _env("OLLAMA_LLM_MODEL", "qwen2.5:14b")
 # OPENROUTER_BASE_URL stays the OpenRouter endpoint in both modes: the
 # embeddings backend (EMBED_BACKEND=openrouter) uses it independently of where
 # the answering model runs. The answering model's endpoint is LLM_BASE_URL.

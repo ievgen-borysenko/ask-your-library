@@ -2,6 +2,44 @@
 
 ## 0.2.1 (unreleased)
 
+- **The default local answering model is `qwen2.5:14b`.** `OLLAMA_LLM_MODEL` defaulted to `qwen3.6`:
+  23 GB, a thinking model, and the one of the three candidates that has never been run over an eval set
+  end to end — the report carries a two-question probe of it and says as much. A default should be a
+  model the eval actually measured, and of the two that were, `qwen2.5:14b` (9.0 GB) is the one a
+  question with several parts comes back from whole, where `qwen2.5:7b` (4.7 GB) answers one part and
+  stops. The mini-eval does not decide this and is not claimed to: 7b scores 19/20 there against 14b's
+  18/20, and `c10`, the two-book aggregation, fails on both. What the numbers do show is how much
+  harder 14b grounds an answer — 61 quotes checked against 39, 95.1 % confirmed against 92.3 %. The
+  costs are named rather than hidden: 9.0 GB to pull instead of 4.7, and roughly twice the wall time
+  per question (`docs/eval-results/2026-09-10-local-models.md`, Runs 1-8). `OLLAMA_LLM_MODEL=qwen2.5:7b`
+  in `.env` is one line for a machine that would rather have the speed, and the warning that a small
+  local model is less reliable than the hosted default stands unchanged. `scripts/install-mac.sh` reads
+  the name out of `config.py` and pulls whatever it finds there, so only the printed download size
+  needed editing — and it was wrong anyway: "approximately 3-8 GB depending on the tag" for a model
+  that is 9 GB, beside a correct 1.2 GB for `bge-m3`.
+- **A stop reason is printed once, not twice.** `stop_chapter_again` opened with `stopped: ` while
+  every line that shows a stop reason already says that word itself, so a chapter the model asked for
+  a second time reached the terminal as `[reflect] stopped: stopped: requested chapter was already
+  attempted` and the web UI's reflect step as `stopped: stopped: ...`. The prefix is gone from the
+  reason in both languages, and the three templates that add it — `ev_reflect_stopped`, `m_stop`,
+  `ui_stopped` — are untouched. A test walks every `stop_*` reason in the table in `en` and `ua` and
+  asserts that none of them opens with the word its own line carries and that each rendered line holds
+  it exactly once, so the next reason written with the prefix baked in fails instead of shipping. The
+  eval reports keep the doubled form: they record what was printed when they were made.
+- **The New Chat dialog no longer says it will clear the chat.** Chainlit's stock wording — "This will
+  clear your current chat history. Are you sure you want to continue?" — describes an app without a
+  data layer. This one has: every chat goes to `.chainlit/chat.db` and stays in the sidebar, which is
+  what the confirmation is warning about destroying. `.chainlit/translations/en-US.json` is tracked
+  from now on — the 2.12.0 file byte for byte, with that one string replaced by "This starts a new
+  chat. The current chat stays in your history." Two behaviours of `chainlit/config.py` make that safe
+  and are written out next to the `language` setting in `.chainlit/config.toml`: `init_config()` seeds
+  the directory with every language the package ships on each start (and on `chainlit init`) but skips
+  a file that already exists, so the tracked one is never overwritten; and `load_translation()` serves
+  the file for the effective language WHOLE, out of that directory alone, with no per-key merge against
+  the package copy — which is why ours has to be a full copy rather than a one-key override. Tests pin
+  all three: the key set against the installed package's file, so a Chainlit bump that renames a key
+  fails the suite instead of blanking a label; the single string that differs; and the seeding step
+  leaving our file alone. `.gitignore` goes on ignoring the other 22 languages.
 - **Every evidence line carries the citation to use, and the rules name no book at all.**
   `Every claim must cite its source as [book, chapter]` named the format without ever showing one
   filled in, and `qwen2.5:7b` ended 11 of the 20 answers of the local mini-eval with the literal

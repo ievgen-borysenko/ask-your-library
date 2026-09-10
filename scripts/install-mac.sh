@@ -1206,7 +1206,10 @@ else
     note "no embedding model is pulled: EMBED_BACKEND=$loaded_embed_backend embeds elsewhere"
 fi
 if [ "$loaded_backend" = "ollama" ]; then
-    note "$llm_model — answers, a chat model: approximately 3-8 GB depending on the tag"
+    # 9 GB is qwen2.5:14b, the default this script reads out of config.py; the
+    # name is not repeated here, so another OLLAMA_LLM_MODEL prints its own name
+    # with the caveat that its size is a different one.
+    note "$llm_model — answers, a chat model: approximately 9 GB at the default, other models differ"
 else
     note "no answering model is pulled: the answering model stays on OpenRouter"
     if [ -n "$env_backend" ] && [ "$requested_backend" = "ollama" ]; then

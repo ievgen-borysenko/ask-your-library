@@ -19,7 +19,13 @@ __pycache__/
 .chainlit/chat.db
 .chainlit/chat.db-*
 .chainlit/auth-secret
-.chainlit/translations/
+# Chainlit seeds this directory with a copy of every language it ships, and
+# never overwrites a file that is already there — so en-US.json is ours and is
+# tracked (it rewords the New Chat dialog), while the other 22 copies are not.
+# The directory itself must stay unignored, or git would not descend into it to
+# see the exception.
+.chainlit/translations/*
+!.chainlit/translations/en-US.json
 .files/
 
 # SQLite sidecars wherever they land: AYL_CHAINLIT_DIR moves the chat db out of

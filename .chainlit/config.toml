@@ -121,6 +121,25 @@ name = "Ask Your Library"
 # Force a specific language for all users (e.g., "en-US", "he-IL", "fr-FR")
 # If not set, the browser's language will be used
 # language = "en-US"
+#
+# Left unset on purpose, and .chainlit/translations/en-US.json is tracked with it.
+# How the two meet (chainlit 2.12.0, config.py):
+#   - init_config() runs on every import of chainlit.config and copies each
+#     language the package ships into .chainlit/translations/, but only where no
+#     file exists yet. So the tracked en-US.json is never overwritten by a start,
+#     by `chainlit init` or by `chainlit lint-translations`, and the other 22
+#     copies land there unversioned (.gitignore keeps only ours).
+#   - load_translation() then serves the file for the effective language WHOLE,
+#     out of that directory alone. There is no per-key merge with the package's
+#     copy, which is why our file is a full copy of upstream's with one string
+#     changed, and why tests/test_ui.py compares the key sets: a Chainlit bump
+#     that adds a key has to fail the suite, not blank a label in the UI.
+#   - the effective language is this setting when it is set, otherwise the
+#     browser's. Unset, a browser asking for another language gets Chainlit's own
+#     copy of it — including the "This will clear your current chat history"
+#     wording our en-US.json replaces, which is wrong here because the data layer
+#     persists every chat and the sidebar keeps it. Setting language = "en-US"
+#     would put our wording in front of everyone, in English only.
 
 # layout = "wide"
 

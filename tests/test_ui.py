@@ -56,6 +56,11 @@ def test_reflect_step_shows_the_real_stop_reason(ui, monkeypatch):
     assert "enough" in shown[-1][1]                     # legacy fallback when no reason is given
     ui.render_event("reflect", {"current_query": "more whales"})
     assert "more whales" in shown[-1][1]
+    # The web UI's line adds "stopped: " the same way the CLI's does, so a reason
+    # that carried the word itself was printed twice here too.
+    from ask_your_library.i18n import t
+    ui.render_event("reflect", {"current_query": "", "stop_reason": t("stop_chapter_again")})
+    assert shown[-1][1].count("stopped:") == 1
 
 
 def test_badge_is_green_only_when_nothing_is_broken_or_unattributed(ui):
@@ -605,6 +610,75 @@ def test_config_pins_allow_origins_to_the_serving_port_only():
     cookie; nothing but this test stops the pair coming back."""
     project = tomllib.loads(CHAINLIT_CONFIG.read_text(encoding="utf-8"))["project"]
     assert project["allow_origins"] == ["http://localhost:8000", "http://127.0.0.1:8000"]
+
+
+# --- the New Chat dialog: one reworded string, over Chainlit's own file ---------
+
+PROJECT_TRANSLATION = REPO / ".chainlit" / "translations" / "en-US.json"
+NEW_CHAT_DESCRIPTION = "navigation.newChat.dialog.description"
+OUR_WORDING = "This starts a new chat. The current chat stays in your history."
+
+
+def _leaves(node, path=""):
+    """Every string of a translation file, by its dotted path."""
+    if not isinstance(node, dict):
+        return {path: node}
+    found = {}
+    for key, value in node.items():
+        found.update(_leaves(value, f"{path}.{key}" if path else key))
+    return found
+
+
+def _shipped_translation() -> dict:
+    """Chainlit's own en-US.json, from the installed package."""
+    from chainlit.config import TRANSLATIONS_DIR
+    return json.loads((Path(TRANSLATIONS_DIR) / "en-US.json").read_text(encoding="utf-8"))
+
+
+def test_the_project_translation_carries_the_whole_key_set_of_the_installed_one():
+    """chainlit.config.ChainlitConfig.load_translation returns the file for the
+    effective language WHOLE, out of .chainlit/translations/ alone: there is no
+    per-key merge with the package's copy, so a key missing from our file is a
+    label missing from the page, not a fallback. The installed en-US.json is the
+    ground truth, and the day a Chainlit bump adds or renames a key this fails
+    loudly instead of blanking a button."""
+    ours = _leaves(json.loads(PROJECT_TRANSLATION.read_text(encoding="utf-8")))
+    theirs = _leaves(_shipped_translation())
+    assert set(ours) == set(theirs), (
+        f"missing: {sorted(set(theirs) - set(ours))}; extra: {sorted(set(ours) - set(theirs))}")
+
+
+def test_only_the_new_chat_description_is_reworded():
+    """Chats are persisted by the data layer and stay in the sidebar, so
+    Chainlit's "This will clear your current chat history" describes an app this
+    is not. That one string is ours; the rest has to stay upstream's, or the file
+    is a fork nobody re-reads on a bump."""
+    ours = _leaves(json.loads(PROJECT_TRANSLATION.read_text(encoding="utf-8")))
+    theirs = _leaves(_shipped_translation())
+    assert {path for path, text in ours.items() if theirs[path] != text} == {NEW_CHAT_DESCRIPTION}
+    assert ours[NEW_CHAT_DESCRIPTION] == OUR_WORDING
+    assert "clear" not in ours[NEW_CHAT_DESCRIPTION].lower()
+
+
+def test_startup_seeds_the_other_languages_and_leaves_ours_alone(tmp_path, monkeypatch):
+    """chainlit.config.init_config runs on every import of chainlit.config and
+    copies each language the package ships into .chainlit/translations/ — but
+    only where no file exists yet. That `if not os.path.exists(dst)` is the whole
+    reason a tracked en-US.json survives a start; without it the repo's file
+    would be replaced by upstream's on the first `chainlit run`."""
+    import shutil
+    from chainlit import config as chainlit_config
+    project = tmp_path / ".chainlit"
+    (project / "translations").mkdir(parents=True)
+    shutil.copy(PROJECT_TRANSLATION, project / "translations" / "en-US.json")
+    monkeypatch.setattr(chainlit_config, "config_dir", str(project))
+    monkeypatch.setattr(chainlit_config, "config_file", str(project / "config.toml"))
+    monkeypatch.setattr(chainlit_config, "config_translation_dir", str(project / "translations"))
+    chainlit_config.init_config()
+    seeded = sorted(path.name for path in (project / "translations").iterdir())
+    assert len(seeded) > 1 and "fr-FR.json" in seeded            # the copy step really ran
+    after = json.loads((project / "translations" / "en-US.json").read_text(encoding="utf-8"))
+    assert after["navigation"]["newChat"]["dialog"]["description"] == OUR_WORDING
 
 
 # --- the login cookie, in the process shape `chainlit run` really produces ------

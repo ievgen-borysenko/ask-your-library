@@ -195,6 +195,43 @@ def test_every_catalogue_fallback_has_a_line_in_both_interfaces_and_languages(re
         i18n.set_lang(before)
 
 
+# Every line that shows a stop reason already says that the run stopped, and the
+# three of them are these: cli.print_event's `[reflect] stopped: {r}` and its
+# metrics `  stop: {r}`, and ui.render_event's `stopped: {r}`. Each is paired
+# here with the word it carries, because English uses two of them.
+STOP_LINES = {
+    "en": (("ev_reflect_stopped", "stopped:"), ("ui_stopped", "stopped:"), ("m_stop", "stop:")),
+    "ua": (("ev_reflect_stopped", "зупинка:"), ("ui_stopped", "зупинка:"), ("m_stop", "зупинка:")),
+}
+
+
+@pytest.mark.parametrize("lang", ["en", "ua"])
+def test_a_stop_reason_never_repeats_the_word_its_own_line_carries(lang):
+    """`stop_chapter_again` opened with "stopped: " while all three renderers
+    add that word themselves, so a chapter asked for twice printed
+    `[reflect] stopped: stopped: requested chapter was already attempted`.
+    The reasons are read out of the table rather than listed here: the next one
+    someone writes with the prefix baked in has to fail this, not just the one
+    that had it."""
+    from ask_your_library import i18n
+    from ask_your_library.i18n import t
+    before = i18n.get_lang()
+    try:
+        i18n.set_lang(lang)
+        reasons = sorted(key for key in i18n._T if key.startswith("stop_"))
+        assert "stop_chapter_again" in reasons                  # the table is being read, not an empty set
+        for key in reasons:
+            # Placeholder values for the reasons that take one; format ignores
+            # the arguments a reason does not name.
+            reason = t(key, n=2, s=30)
+            for word in {word for _, word in STOP_LINES[lang]}:
+                assert not reason.startswith(word), f"{key} ({lang}) opens with {word!r}"
+            for line, word in STOP_LINES[lang]:
+                assert t(line, r=reason).count(word) == 1, f"{line} doubles {word!r} on {key}"
+    finally:
+        i18n.set_lang(before)
+
+
 def test_verbose_prints_every_evidence_item_on_the_passage_it_was_checked_against(capsys, monkeypatch):
     from ask_your_library.i18n import t
     monkeypatch.setitem(cli.RUN, "verbose", True)
