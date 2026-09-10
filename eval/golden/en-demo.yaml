@@ -123,7 +123,7 @@ questions:
     of the chivalric romances; the code exists only in the hero''s head. Both books must be
     retrieved and named; the Odyssey or The Three Musketeers as a substitute is a fail.'
 
-# Kept from the v3 set with its original id: docs/examples/ and the README refer to it (as they do to c06 above).
+# Kept from the v3 set with its original id: docs/evaluation.md and docs/examples/ refer to it (as they do to c06 above).
 - id: h06-kobzar-mother-servant
   question: In a Ukrainian poem, a mother left her baby with some older couple and then came
     to work for them as a servant. What was the poem, and why did she do it?

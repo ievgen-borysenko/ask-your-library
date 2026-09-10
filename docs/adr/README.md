@@ -23,7 +23,8 @@ runs under its own thread id, deleted when the run ends. The alternatives were a
 over the model SDK, which has no interrupt or resume without custom state plumbing, and a role
 framework of the CrewAI or AutoGen kind, which hides the control flow this project exists to show.
 
-The graph is therefore the architecture diagram — the one the README draws — the eval harness
+The graph is therefore the architecture diagram — the one [`architecture.md`](../architecture.md)
+draws — the eval harness
 drives the same graph, and clarify is one node rather than a mode. The price is state discipline:
 every node returns only its deltas, and the reducer on `hits_log` became necessary the moment the
 passages themselves moved into state. A persistent checkpointer is worth adding only if resuming a
@@ -82,7 +83,8 @@ non-deterministic, priced per call, and it grades prose rather than provenance.
 The badge now means what it says, and so do the eval totals: 46 confirmed / 0 unattributed / 0
 broken on the v0.1.0 core run ([`2026-09-05-v0.1.0-core.md`][v010-core]) and 47/0/0 on `v0.2.0-rc1`
 ([`2026-09-07-v0.2.0-rc1-core.md`][rc1-core]), with no evidence lost to strict hit-id mode. The
-guarantee is narrow, and the README states it as such: this is the provenance of the evidence, not
+guarantee is narrow, and [`architecture.md`](../architecture.md) states it as such: this is the
+provenance of the evidence, not
 the correctness of the answer.
 
 ## ADR-005: `observe` sees a fixed budget of each hit; the rest of the loop sees only evidence
@@ -150,7 +152,7 @@ every untrusted `<` neutralized; `sanitize_context` redacts a small English/Ukra
 instruction patterns and counts the redactions as telemetry; the agent holds no mutating tool; the
 web UI escapes HTML and removes image references; a canary reports BLOCKED, CONTAINED or FAILED.
 The option not taken was to present the delimiters as a security boundary — nothing enforces them,
-and the README says so in as many words.
+and [`privacy-and-threat-model.md`](../privacy-and-threat-model.md) says so in as many words.
 
 An injection can steer evidence selection, the reflect decision, the clarify question and the
 answer; what it cannot do is forge a source, because provenance is checked against the stored
@@ -202,8 +204,9 @@ The development repository stays the source of truth, and the public tree is pro
 explicit file allowlist by an export tool that refuses to run on anything it does not recognise: an
 output directory without its own marker, a symlinked output or one inside a repository or a home
 directory, an allowlisted path that is missing, a missing secret scanner. That tool is private and
-is not part of this repository; the README's "Where the measured code lives" says what it does and
-how this tree relates to the measured one. The alternative, publishing the development repository
+is not part of this repository; "Where the measured code lives" in
+[`evaluation.md`](../evaluation.md) says what it does and how this tree relates to the measured
+one. The alternative, publishing the development repository
 with its history rewritten, would have left every intermediate artifact and every private note one
 `git log` away.
 

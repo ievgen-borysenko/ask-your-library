@@ -55,7 +55,8 @@ A separate, deterministic path for questions about what the library holds:
 - The list never reaches the model: the answer is a template, and the conversation memory that
   the next turn's planner sees keeps only the operation, the counts and the name asked about.
   A tracing exporter, when enabled, is a different channel: it receives the graph state, the
-  list included, as it does for every run; the README's privacy section says so.
+  list included, as it does for every run; [`privacy-and-threat-model.md`](../privacy-and-threat-model.md)
+  says so.
 
 ## Options considered
 

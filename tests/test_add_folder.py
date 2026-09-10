@@ -399,11 +399,11 @@ def test_two_files_resolving_to_the_same_book_are_refused(tmp_path):
 
 
 def test_hidden_files_are_skipped_and_reported(tmp_path, caplog):
-    """Skipping them silently made the docstring and the README ("Skipped, and
-    reported on stderr: hidden files and directories") describe something the
-    code did not do: a book under a hidden directory simply never appeared.
-    One summary line, not one per file: a hidden directory can hold hundreds,
-    and they would bury the per-file warnings."""
+    """Skipping them silently made the docstring and docs/add-your-own-books.md
+    ("Skipped, and reported on stderr: hidden files and directories") describe
+    something the code did not do: a book under a hidden directory simply never
+    appeared. One summary line, not one per file: a hidden directory can hold
+    hundreds, and they would bury the per-file warnings."""
     folder = tmp_path / "books"
     write(folder, "Real.txt", PARA)
     write(folder, ".Draft.md", PARA)

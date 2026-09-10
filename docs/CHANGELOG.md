@@ -2,6 +2,52 @@
 
 ## 0.2.1 (unreleased)
 
+- **The README is a front page, and the long text is in `docs/`.** What the project is, the
+  architecture and the quote check, the manual quick start, the settings table, the evaluation
+  narrative, privacy and the threat model, the injection layers, cost and the known limits moved
+  out of the README into nine pages under `docs/` — `overview.md`, `architecture.md`,
+  `quick-start.md`, `configuration.md`, `add-your-own-books.md`, `evaluation.md`,
+  `privacy-and-threat-model.md`, `cost.md` and `known-limits.md` — sentence for sentence. Three
+  classes of edit were made to that text and nothing else: relative links rewritten to resolve
+  from `docs/`, headings renamed or moved a level (`## License` is `## Status and licence` on the
+  front page), and three sentences added where a page needed a qualification the README's own
+  context used to carry — `--print-env-resolution` in `quick-start.md`, the hosted-path scope of
+  the cache-read counter in `cost.md`, and which README "this README" points at in
+  `configuration.md`. Every one of them is a separate added sentence, not a rewrite of the moved
+  text; a line-by-line check of the base README against the new tree leaves no prose residual.
+  The README keeps the macOS install, the first question, the measured-results table and a
+  five-line privacy-and-cost summary, and gains one Mermaid diagram: the flow in plain terms. The
+  architecture as an offline and an online subgraph opens `docs/architecture.md` instead, above the
+  control-flow diagram that page already carried, which now wears the same CODE / AI / HUMAN legend
+  with its nodes and edge labels untouched; both diagrams are reconciled against `graph.py`
+  and `nodes.py` — the catalogue node and `validate` are in them, `synthesize` runs before
+  `validate` and `validate` only reports, and both the CRAG gate and the deterministic coverage
+  gate sit on the `reflect` edge, where the code puts them. The course-demo
+  Excalidraw originals are kept as editable sources in `docs/diagrams/`. Every reference that
+  pointed into the README — `SECURITY.md`, the ADRs, the backlog, an example trace, four test
+  files and the message `install-mac.sh` prints on a non-macOS system — now names the page
+  that holds the text. The README also carries two recorded runs, one per way of asking.
+  `docs/img/ask-library-demo.gif` (87 KB) is the CLI on a half-remembered question — a man who ends
+  up on an island and comes across cannibals, no title given, which is the `identify` path —
+  answered by `qwen2.5:14b`, the default local model `scripts/install-mac.sh` pulls, over the demo
+  corpus with no API key: the plan, both search steps, the chapter read, the answer naming Robinson
+  Crusoe and saying why, and the quote check reporting all three quotes found verbatim — the whole
+  run stands in the frame the GIF holds for eight seconds. The caption quotes the figure the CLI
+  itself prints there, 147.7 s, and that one is a cold-cache number: the same block reports
+  `cache: 436 tokens read from cache`, so it is what a first ask costs on this machine rather than
+  a warm-cache artefact. `docs/img/ask-library-ui.gif` (828 KB) is the web UI on a different
+  question — what d'Artagnan said before fighting three men at once, and why — answered by the
+  hosted default model, `anthropic/claude-sonnet-4.6` through OpenRouter, with the embeddings still
+  local. It ends on the green quote-provenance badge reading `evidence passages 5/5 traced to their
+  source`, with the Chapter V passage opened under it and the quote sitting on the text it was
+  checked against; the caption quotes the $0.0724 the UI's own metrics line reports. That question
+  is on the hosted model because the local one cannot carry it: asked the same thing,
+  `qwen2.5:14b` found the right book and then invented one of its two quotes — a sentence that
+  appears nowhere in the text — which the validator flagged as `WARNING: 1 of 2 quotes NOT found
+  verbatim`. The check did its job either way, and the two GIFs now show both halves of the trade
+  the docs describe: what the free local default answers well, and the question that needs the
+  hosted model before every quote comes back confirmed.
+  `docs/quick-start.md` lists `--print-env-resolution` with the other installer flags.
 - **The stripped control-character class is assembled, not written as a range.** CodeQL's
   `py/overly-large-range` flagged `[\x00-\x08\x0e-\x1f…]` in `sanitize.py`, and the reason a checker
   can say that is the reason the rule exists: a range is read by its two endpoints, so how far it
@@ -366,6 +412,11 @@
   and `QUESTION_DEADLINE_S=1200` came back as the "defaults". Every test that reads configuration
   in a child now goes through `conftest.run_fresh`, which already starts one in an empty directory
   with those inputs scrubbed, and a new test pins both directions of that isolation.
+- **The catalogue set re-measured on the released code.** One run of `eval/golden/en-demo-catalog.yaml`
+  on `466fc82` with the hosted planner and the 04.09 index: behaviour 10/10, quote provenance
+  21 / 0 / 0 on the four research items, $0.1762 for the set and $0.0136 for the six catalogue items —
+  the same verdicts and the same routing as the 09.09 run on `50b9347`, with the citations now carrying
+  the full index key the evidence label supplies (`docs/eval-results/2026-09-10-catalogue-set.md`).
 
 ## 0.2.0 (2026-09-09)
 

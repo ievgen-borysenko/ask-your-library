@@ -146,7 +146,7 @@ os_name="$(uname -s)"
 step "macOS: uname reports $os_name $(uname -m)"
 if [ "$os_name" != "Darwin" ]; then
     fail "this installer is for macOS only; uname -s reports $os_name."
-    fail "on other systems follow the manual Quick start in README.md."
+    fail "on other systems follow the manual Quick start in docs/quick-start.md."
     exit 1
 fi
 
@@ -179,8 +179,8 @@ local_env() {
     # modes, and 300 s is the whole wall clock of a question, checked before each
     # next decision. A local model that loads cold can spend that in the plan
     # node alone, so local mode gets twenty minutes — room for four steps of it.
-    # The two tracing lines are uncommented for the same reason the README gives
-    # them: this mode is the one where nothing leaves the machine, and the SDK
+    # The two tracing lines are uncommented for the same reason docs/configuration.md
+    # gives them: this mode is the one where nothing leaves the machine, and the SDK
     # reads a LANGSMITH_/LANGCHAIN_ flag another project's shell exported.
     sed -e 's/^LLM_BACKEND=.*/LLM_BACKEND=ollama/' \
         -e 's/^LLM_TIMEOUT_S=.*/LLM_TIMEOUT_S=600/' \

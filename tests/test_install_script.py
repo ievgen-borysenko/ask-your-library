@@ -643,7 +643,7 @@ def test_refuses_to_run_anywhere_but_macos(tmp_path):
                             capture_output=True, text=True)
     assert result.returncode == 1
     assert "macOS only" in result.stderr
-    assert "README.md" in result.stderr
+    assert "docs/quick-start.md" in result.stderr
 
 
 # --- the preflight snippet, on its own ---------------------------------------
