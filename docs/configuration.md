@@ -67,7 +67,7 @@ than Ollama is on that port, and the message names the status it got. The reply 
 anything runs on Ollama, embeddings included, so the default hosted-model setup gets the same early
 failure. Everything else is
 unchanged: the same graph, the same provenance check, the same eval harness (every report names
-the local model in its fingerprint). What is not the same is quality: every number in this README
+the local model in its fingerprint). What is not the same is quality: every number in the README
 was measured with the OpenRouter default (`anthropic/claude-sonnet-4.6`), and the agent nodes
 expect strict JSON, which small local models return less reliably. A malformed reply is retried
 once with the parse error shown to the model; if it fails again, `observe` keeps no evidence from

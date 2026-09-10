@@ -16,7 +16,12 @@
   Excalidraw originals are kept as editable sources in `docs/diagrams/`. Every reference that
   pointed into the README — `SECURITY.md`, the ADRs, the backlog, an example trace, four test
   files and the message `install-mac.sh` prints on a non-macOS system — now names the page
-  that holds the text.
+  that holds the text. The README also carries a recorded run: `docs/img/ask-library-demo.gif`
+  (100 KB), the windmills question of the demo corpus answered by a local `qwen2.5:14b` — not
+  the model `install-mac.sh` pulls — with the quote check reporting all five quotes found
+  verbatim. Its 79 s is a warm-cache run, which the metrics line in the frame says outright
+  (`cache: 9274 tokens read from cache`); the same question on a cold cache took 128 s.
+  `docs/quick-start.md` lists `--print-env-resolution` with the other installer flags.
 - **`--print-env-resolution` no longer prints the keys it read.** The flag dumped every value of
   the `.env` verbatim, and a `.env` is where the credentials live: a run of it reproduced
   `OPENROUTER_API_KEY`, `LANGCHAIN_API_KEY` and `CHAINLIT_PASSWORD` on stdout, from the one flag

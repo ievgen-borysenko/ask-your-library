@@ -29,7 +29,11 @@ flowchart TB
     classDef human fill:#bbf7d0,stroke:#15803d,color:#000
 ```
 
-<!-- demo GIF: docs/img/ask-library-demo.gif, added when recorded -->
+![The CLI answering a question about Don Quixote over the demo corpus with a local model](docs/img/ask-library-demo.gif)
+
+*"Why does Don Quixote attack the windmills even after Sancho tells him what they are, and how
+does he explain what happened after they knock him down?" — a local model (qwen2.5:14b) on the
+demo corpus, no API key, 79 s wall time with a warm cache.*
 
 ## Quick start on a Mac
 
