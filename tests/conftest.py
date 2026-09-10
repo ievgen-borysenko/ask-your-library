@@ -30,7 +30,7 @@ DEFAULTS = {
     "EMBED_BACKEND": "ollama",
     "OLLAMA_URL": "http://localhost:11434",
     "OLLAMA_EMBED_MODEL": "bge-m3",
-    "OLLAMA_LLM_MODEL": "qwen3.6",
+    "OLLAMA_LLM_MODEL": "qwen2.5:14b",
     "OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
     "OPENROUTER_EMBED_MODEL": "openai/text-embedding-3-small",
     "ORCHESTRATOR_MODEL": "anthropic/claude-sonnet-4.6",
