@@ -26,23 +26,27 @@
   Excalidraw originals are kept as editable sources in `docs/diagrams/`. Every reference that
   pointed into the README — `SECURITY.md`, the ADRs, the backlog, an example trace, four test
   files and the message `install-mac.sh` prints on a non-macOS system — now names the page
-  that holds the text. The README also carries two recorded runs, both of the same half-remembered
-  question — a man who ends up on an island and comes across cannibals, no title given, which is
-  the `identify` path — answered by `qwen2.5:14b`, the default local model `scripts/install-mac.sh`
-  pulls, over the demo corpus with no API key. `docs/img/ask-library-demo.gif` (87 KB) is the CLI:
-  the plan, both search steps, the chapter read, the answer naming Robinson Crusoe and saying why,
-  and the quote check reporting all three quotes found verbatim — the whole run stands in the frame
-  the GIF holds for eight seconds. The caption quotes the figure the CLI itself prints there,
-  147.7 s, and that one is a cold-cache number: the same block reports `cache: 436 tokens read from
-  cache`, so it is what a first ask costs on this machine rather than a warm-cache artefact.
-  `docs/img/ask-library-ui.gif` (908 KB) is the same question in the web UI, ending on the green
-  quote-provenance badge with one evidence passage opened under it, the quote sitting on the text
-  it was checked against. A different question was recorded for the UI first and dropped: asked
-  what d'Artagnan said before fighting three men at once, `qwen2.5:14b` found the right book and
-  then invented one of its two quotes — a sentence that appears nowhere in the text — which the
-  validator flagged as `WARNING: 1 of 2 quotes NOT found verbatim`. The check did its job, but a
-  fabricated quote is not what the front page is advertising, so both GIFs carry the question this
-  model answers with every quote confirmed.
+  that holds the text. The README also carries two recorded runs, one per way of asking.
+  `docs/img/ask-library-demo.gif` (87 KB) is the CLI on a half-remembered question — a man who ends
+  up on an island and comes across cannibals, no title given, which is the `identify` path —
+  answered by `qwen2.5:14b`, the default local model `scripts/install-mac.sh` pulls, over the demo
+  corpus with no API key: the plan, both search steps, the chapter read, the answer naming Robinson
+  Crusoe and saying why, and the quote check reporting all three quotes found verbatim — the whole
+  run stands in the frame the GIF holds for eight seconds. The caption quotes the figure the CLI
+  itself prints there, 147.7 s, and that one is a cold-cache number: the same block reports
+  `cache: 436 tokens read from cache`, so it is what a first ask costs on this machine rather than
+  a warm-cache artefact. `docs/img/ask-library-ui.gif` (828 KB) is the web UI on a different
+  question — what d'Artagnan said before fighting three men at once, and why — answered by the
+  hosted default model, `anthropic/claude-sonnet-4.6` through OpenRouter, with the embeddings still
+  local. It ends on the green quote-provenance badge reading `evidence passages 5/5 traced to their
+  source`, with the Chapter V passage opened under it and the quote sitting on the text it was
+  checked against; the caption quotes the $0.0724 the UI's own metrics line reports. That question
+  is on the hosted model because the local one cannot carry it: asked the same thing,
+  `qwen2.5:14b` found the right book and then invented one of its two quotes — a sentence that
+  appears nowhere in the text — which the validator flagged as `WARNING: 1 of 2 quotes NOT found
+  verbatim`. The check did its job either way, and the two GIFs now show both halves of the trade
+  the docs describe: what the free local default answers well, and the question that needs the
+  hosted model before every quote comes back confirmed.
   `docs/quick-start.md` lists `--print-env-resolution` with the other installer flags.
 - **The default local answering model is `qwen2.5:14b`.** `OLLAMA_LLM_MODEL` defaulted to `qwen3.6`:
   23 GB, a thinking model, and the one of the three candidates that has never been run over an eval set

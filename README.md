@@ -36,9 +36,12 @@ flowchart TB
 What is the name of the book, and why did that happen?" — the default local model (qwen2.5:14b) on
 the demo corpus, no API key. 147.7 s by the CLI's own metrics line in the last frame.*
 
-![The same question in the web UI: the answer, the quote-provenance badge, and one evidence passage opened under it](docs/img/ask-library-ui.gif)
+![The web UI answering what d'Artagnan said before fighting three men at once: the answer, the quote-provenance badge, and one evidence passage opened under it](docs/img/ask-library-ui.gif)
 
-*The same question in the web UI: the verified-quotes badge, and the evidence passage under it.*
+*"What exactly did Dartangnan say before the fight with not 1 but 3 people? And why?" — the same
+library in the web UI, this run on the hosted default model (the answering model you configure;
+here the OpenRouter default): the verified-quotes badge, and the evidence passage under it.
+$0.0724 by the metrics line the UI prints under the answer.*
 
 ## Quick start on a Mac
 
