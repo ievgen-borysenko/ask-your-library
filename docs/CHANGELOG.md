@@ -48,6 +48,22 @@
   the docs describe: what the free local default answers well, and the question that needs the
   hosted model before every quote comes back confirmed.
   `docs/quick-start.md` lists `--print-env-resolution` with the other installer flags.
+- **The stripped control-character class is assembled, not written as a range.** CodeQL's
+  `py/overly-large-range` flagged `[\x00-\x08\x0e-\x1f…]` in `sanitize.py`, and the reason a checker
+  can say that is the reason the rule exists: a range is read by its two endpoints, so how far it
+  reaches from there is what the reader takes on trust — a class widened by one character reads the
+  same as this one. The set itself is deliberate and is not narrowed here: the C0 controls minus tab
+  and every line break, DEL, the zero-width and bidi formatting characters, the BOM. What changed is
+  how it is spelled. `_codepoints` expands explicit inclusive blocks — `(0x00, 0x08)`, `(0x0e, 0x1f)`
+  — and the single code points into the characters themselves, and `re.escape` writes them into the
+  class, so the compiled pattern holds 43 spelled-out characters and no `first-last` span for a regex
+  parser to read. No suppression comment was added, and the block-by-block comments that document the
+  set stay beside the blocks. The set is provably the same one: every code point in `range(0x110000)`
+  matches the new expression exactly when it matched the old, 43 either way with an empty symmetric
+  difference, and `LINE_BREAK_RE` and `strip_control_chars` are untouched. The Unicode-wide test that
+  pins the set code point by code point still passes, and a second test now pins the form — the class
+  body carries no unescaped `-` and spells each character out once — so a future edit cannot bring a
+  range back quietly.
 - **The default local answering model is `qwen2.5:14b`.** `OLLAMA_LLM_MODEL` defaulted to `qwen3.6`:
   23 GB, a thinking model, and the one of the three candidates that has never been run over an eval set
   end to end — the report carries a two-question probe of it and says as much. A default should be a

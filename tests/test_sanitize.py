@@ -7,12 +7,14 @@ space in a block header or a normalized quote, an LF on the way to a terminal, a
 form feed, and where they composed the delete won, so a break became nothing at
 all and the words around it were joined.
 """
+import re
+
 from ask_your_library import nodes
 from ask_your_library.cli import terminal_safe
 from ask_your_library.ingest.add_folder import terminal_safe as ingest_terminal_safe
 from ask_your_library.llm import data_block
 from ask_your_library.provenance import _normalize
-from ask_your_library.sanitize import strip_control_chars
+from ask_your_library.sanitize import CONTROL_CHARS_RE, strip_control_chars
 
 BREAKS = ("\r", "\r\n", "\n", "\x0b", "\x0c", "\x85", " ", " ")
 OSC = "\x1b]0;pwned\x07"
@@ -43,6 +45,23 @@ def test_the_stripped_set_is_exactly_the_characters_the_comment_names():
              | {0x2066, 0x2067, 0x2068, 0x2069}                 # bidi isolates and their pop
              | {0xfeff})                                        # BOM
     assert {cp for cp in range(0x110000) if strip_control_chars(chr(cp)) == ""} == named
+
+
+def test_the_class_spells_out_every_character_and_holds_no_range():
+    """The set above is pinned; this pins the form the class is written in. A
+    literal `first-last` span is read by its two endpoints — CodeQL's
+    py/overly-large-range flagged the old spelling for it, and a span widened by
+    one character is invisible in review either way. The class is built from
+    explicit blocks and escaped, so every character it matches is written in it
+    once: a `-` between two of them could only come from a hand-written range."""
+    pattern = CONTROL_CHARS_RE.pattern
+    assert pattern.startswith("[") and pattern.endswith("]")
+    body = pattern[1:-1]
+    assert re.search(r"(?<!\\)-", body) is None
+    spelled = re.sub(r"\\(.)", r"\1", body)     # undo whatever re.escape escaped
+    assert len(spelled) == len(set(spelled))    # each character once, none of them a span
+    for char in spelled:
+        assert strip_control_chars(char) == ""
 
 
 def test_a_break_inside_a_quote_normalizes_to_a_space():
