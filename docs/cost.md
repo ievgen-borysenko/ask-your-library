@@ -10,8 +10,9 @@ and nothing below applies to it except the paragraph on cache reads at the end.
 tens of seconds for cents — and it also answers research questions less reliably: 8/10 with
 41 / 1 / 2 quotes confirmed / unattributed / broken for the default `qwen2.5:14b` on the local run
 of 2026-09-10, whose own verdict is that neither local candidate "is good enough to advertise as a
-strong default" ([`eval-results/2026-09-10-local-models.md`](eval-results/2026-09-10-local-models.md),
-and [Known limits](known-limits.md) for the full entry). This page prices and times that trade; it
+strong default" ([`eval-results/2026-09-10-local-models.md`](eval-results/2026-09-10-local-models.md)).
+No hosted figure is paired with that one — [Known limits](known-limits.md) carries the entry in
+full, with the nearest hosted runs and how near they are. This page prices and times the trade; it
 does not measure the accuracy half.
 
 Per question, on one Mac, from single measured runs. Every cell covers one kind of question: a

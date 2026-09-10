@@ -3,8 +3,8 @@
 From `backlog.md`, confirmed by the runs of 2026-09-05, 06 and 07 (`v0.2.0-rc1`), and — for the
 local default that ships since 0.3.0 — by the local run of 2026-09-10:
 
-- **The default local answering model is measurably less reliable than the hosted one.** Measured
-  on the local backend on 2026-09-10
+- **The default local answering model is not good enough to advertise as a strong default, and
+  this project's own measurement of it says so.** Measured on the local backend on 2026-09-10
   ([`eval-results/2026-09-10-local-models.md`](eval-results/2026-09-10-local-models.md)): the
   default `qwen2.5:14b` scores 10/10 on the catalogue set with 17 / 0 / 0 quotes confirmed /
   unattributed / broken, and 8/10 on the research set with 41 / 1 / 2 — 18/20 and 58 / 1 / 2 over
@@ -12,14 +12,26 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   (36/39). That report's own verdict: "Neither model is good enough to advertise as a strong
   default: 19/20 and 18/20 with genuine unattributed and broken quotes in both." `c10`
   (aggregation) fails on both models, and `c09` (identify) fails on `qwen2.5:14b`. The quote check
-  is a report, not a gate: it names an unattributed or a broken quote, it does not stop the answer
-  from carrying one. Scope of those numbers: the harness's automatic score, no human graded the
-  answers (the manual-correctness checkboxes in the report are unticked), single runs, and only
-  `qwen2.5:7b`'s research subset was re-measured after the last prompt change, so `qwen2.5:14b`'s
-  numbers describe the prompt as it stood in Runs 1-6. The hosted figures in the
-  [README](../README.md#measured) table come from other sets and are not a like-for-like
-  comparison; `LLM_BACKEND=openrouter` ([Configuration](configuration.md)) is the hosted path, and
-  [Cost](cost.md) is what it costs. Measure your own model before trusting it:
+  is a report, not a gate: it names an unattributed quote (real corpus text, but not in the passage
+  the answer cites) and a broken one (in no retrieved passage at all), and it does not stop the
+  answer from carrying either.
+  What the hosted configuration does on the nearest sets, and how near they are. The catalogue set
+  is the same golden file at the same checksum (`en-demo-catalog.yaml@14b001e26f5e`): hosted
+  Sonnet 4.6 scored 10/10 with 21 / 0 / 0 on 2026-09-10
+  ([`eval-results/2026-09-10-catalogue-set.md`](eval-results/2026-09-10-catalogue-set.md)) — that
+  set is clean on both, and on both runs every checked quote comes from its four research controls
+  (`k07`-`k10`), the six catalogue questions being answered from the index tables with no quotes to
+  check. The research questions are the ten `c*` items of `en-demo.yaml`; the nearest hosted run of
+  that file is the core set of 2026-09-07 (`v0.2.0-rc1`), those ten plus the Ukrainian `h06`, at
+  11/11 with 47 / 0 / 0 — passing both `c09` and `c10`. Neither hosted run is a paired
+  measurement: different code, a different index build, and for the research one a different golden
+  checksum. Read them as the shape of the gap. `LLM_BACKEND=openrouter`
+  ([Configuration](configuration.md)) is the hosted path and [Cost](cost.md) is what it costs.
+  Scope of the local numbers: the harness's automatic score, no human graded the answers (the
+  manual-correctness checkboxes in the report are unticked), single runs, and the last prompt
+  change was followed by one re-measurement only — `qwen2.5:7b`'s research subset — so
+  `qwen2.5:14b` throughout and the catalogue half of both combined rows describe the prompt as it
+  stood in Runs 1-6. Measure your own model before trusting it:
   `LLM_BACKEND=ollama uv run eval/run_agent_eval.py`.
 - **Identify mode can still stop at one book.** The coverage gate (ADR-013, since 0.2.0-rc1) spends the
   planner's next queued query before `reflect` may say "enough" with a single book, which is

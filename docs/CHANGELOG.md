@@ -7,18 +7,26 @@
   It did not: the README rewrite had already removed it, and after the default flip the front page
   presented the local configuration as pure upside — no key, no cost, nothing leaves the machine —
   with nothing about answer quality, and none of the thirteen entries in
-  [`known-limits.md`](known-limits.md) covered it either. So the only place a new reader met the
-  measurement was the report nobody opens first. The README's "Privacy and cost" FAQ now carries
-  the numbers next to "Do you need an API key? No.", `known-limits.md` has the entry in full, and
-  the report's verdict is quoted rather than paraphrased: "Neither model is good enough to
-  advertise as a strong default: 19/20 and 18/20 with genuine unattributed and broken quotes in
-  both." The numbers are the ones already in
+  [`known-limits.md`](known-limits.md) covered it either. So the only place outside this changelog
+  where a new reader met the measurement was the report nobody opens first. The README's "Privacy
+  and cost" FAQ now carries the numbers next to "Do you need an API key? No.", `known-limits.md`
+  has the entry in full, and the report's verdict is quoted rather than paraphrased: "Neither model
+  is good enough to advertise as a strong default: 19/20 and 18/20 with genuine unattributed and
+  broken quotes in both." The numbers are the ones already in
   [`eval-results/2026-09-10-local-models.md`](eval-results/2026-09-10-local-models.md) — the
   default `qwen2.5:14b` at 10/10 with 17 / 0 / 0 on the catalogue set and 8/10 with 41 / 1 / 2 on
   the research set, `qwen2.5:7b` at 19/20 and 36 / 2 / 1 — with that report's own scope carried
-  along: the harness's automatic score, single runs, nobody graded the answers by hand, and only
-  7b's research subset was re-measured after the last prompt change. Nothing was re-run and no new
-  figure was produced. Two pages that framed the trade as speed alone were corrected the same way:
+  along: the harness's automatic score, single runs, nobody graded the answers by hand, and one
+  re-measurement after the last prompt change (7b's research subset), so `qwen2.5:14b` throughout
+  and the catalogue half of both combined rows describe the earlier prompt. Nothing was re-run and
+  no new figure was produced. What the hosted side scored is given where it can be given honestly
+  rather than waved at as "another set": the catalogue set has a hosted run at the same golden
+  checksum (10/10, 21 / 0 / 0,
+  [`eval-results/2026-09-10-catalogue-set.md`](eval-results/2026-09-10-catalogue-set.md)) and is
+  clean on both; the research questions are ten of the eleven the core run of 07.09 answered 11/11
+  with 47 / 0 / 0, passing the two — `c09` and `c10` — that `qwen2.5:14b` fails; and neither is a
+  paired measurement, the code, the index and (for the research one) the golden checksum all
+  differing. Two pages that framed the trade as speed alone were corrected the same way:
   [`cost.md`](cost.md) opened on "It is slower, and that is the whole trade", and
   [`quick-start.md`](quick-start.md) told a reader only that the hosted path costs money and the
   local one does not. `configuration.md`'s fully-local section, which had the quality paragraph but
