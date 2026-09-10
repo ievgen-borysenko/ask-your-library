@@ -16,8 +16,9 @@ import httpx
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
-from .config import (LLM_BASE_URL, LLM_MAX_RETRIES, LLM_NEEDS_KEY, LLM_TIMEOUT_S, MAX_OUTPUT_TOKENS,
-                     ORCHESTRATOR_MODEL, PRICE_IN_PER_MTOK, PRICE_OUT_PER_MTOK, QUESTION_DEADLINE_S)
+from .config import (LLM_BACKEND, LLM_BASE_URL, LLM_MAX_RETRIES, LLM_NEEDS_KEY, LLM_TIMEOUT_S,
+                     MAX_OUTPUT_TOKENS, ORCHESTRATOR_MODEL, PRICE_IN_PER_MTOK, PRICE_OUT_PER_MTOK,
+                     QUESTION_DEADLINE_S)
 from .embeddings import openrouter_api_key
 from .sanitize import LINE_BREAK_RE, strip_control_chars
 
@@ -78,6 +79,15 @@ def deadline_passed() -> bool:
     written from what was found. False when the deadline is 0 (off)."""
     u = _usage()
     return u.deadline_s > 0 and (time.monotonic() - u.started - u.paused) >= u.deadline_s
+
+
+def deadline_remaining_s() -> float | None:
+    """Seconds left of this run's time budget, never negative; None when there
+    is no deadline (QUESTION_DEADLINE_S=0)."""
+    u = _usage()
+    if u.deadline_s <= 0:
+        return None
+    return max(0.0, u.deadline_s - (time.monotonic() - u.started - u.paused))
 
 
 def _cost(input_tokens: int, output_tokens: int) -> float:
@@ -159,11 +169,41 @@ def llm_invoke(system: str, user: str, role: str):
 
 
 CONNECT_TIMEOUT_S = 5.0   # the OpenAI SDK's default connect timeout, kept on purpose
+MIN_CALL_TIMEOUT_S = 5.0  # floor: a call started with seconds left still gets a real attempt
+
+
+def call_timeout_s() -> float:
+    """Read/write timeout for the NEXT call: the configured per-attempt bound,
+    but never more than what is left of the question's deadline.
+
+    `deadline_passed` is only consulted between steps, so on its own it bounds
+    the loop and not a call: with LLM_TIMEOUT_S above QUESTION_DEADLINE_S — the
+    local default pair, 600 against 300 — one call could run past the whole
+    question's budget, and then retry. A reasoning model over Ollama does
+    exactly that, because its thinking tokens are not counted against
+    max_tokens. Floored at MIN_CALL_TIMEOUT_S so a call the loop did start
+    inside the budget fails on the provider rather than instantly on a timeout
+    of zero; that floor is the only way past the deadline, and it is seconds."""
+    left = deadline_remaining_s()
+    if left is None:
+        return float(LLM_TIMEOUT_S)
+    return max(MIN_CALL_TIMEOUT_S, min(float(LLM_TIMEOUT_S), left))
 
 
 def llm() -> ChatOpenAI:
     # Ollama's OpenAI-compatible endpoint ignores the key but the client
     # requires one; a fixed placeholder keeps the local mode key-free.
+    #
+    # Ollama does not count a thinking model's reasoning tokens against
+    # max_tokens, so with LLM_BACKEND=ollama a model that reasons (qwen3.6) can
+    # think past LLM_TIMEOUT_S and never start the answer at all. Measured
+    # against Ollama 0.33.3 on that endpoint, `reasoning_effort: "none"` is the
+    # one form it honours — `think`, `chat_template_kwargs.enable_thinking` and
+    # an `options` block are accepted and ignored — and it is inert for models
+    # without the thinking capability (qwen2.5 answers the same), so it goes on
+    # every local call. It is never sent to the hosted backend, where "none" is
+    # not a value every model's API takes.
+    local_only = {"reasoning_effort": "none"} if LLM_BACKEND == "ollama" else {}
     return ChatOpenAI(
         model=ORCHESTRATOR_MODEL,
         api_key=openrouter_api_key() if LLM_NEEDS_KEY else "ollama",
@@ -177,8 +217,9 @@ def llm() -> ChatOpenAI:
         # (httpx read timeouts are per read, so a server dripping bytes is the
         # one shape this does not bound; the question deadline catches it
         # between steps.)
-        timeout=httpx.Timeout(LLM_TIMEOUT_S, connect=CONNECT_TIMEOUT_S),
+        timeout=httpx.Timeout(call_timeout_s(), connect=CONNECT_TIMEOUT_S),
         max_retries=LLM_MAX_RETRIES,
+        **local_only,
     )
 
 

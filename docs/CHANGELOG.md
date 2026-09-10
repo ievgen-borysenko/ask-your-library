@@ -2,6 +2,46 @@
 
 ## 0.2.1 (unreleased)
 
+- **The synthesize rules show a filled citation, so a small model stops printing the template.**
+  `Every claim must cite its source as [book, chapter]` named the format without ever showing one
+  filled in, and `qwen2.5:7b` ended 11 of the 20 answers of the local mini-eval with the literal
+  string `[book, chapter]` — including every answer that was otherwise good enough to put in front of
+  a reader, while `qwen2.5:14b` substituted it in all 20. The rule now carries one worked example from
+  the demo corpus, `[Don Quixote — Miguel de Cervantes, CHAPTER VIII.]`, whose book and section are
+  written exactly as the evidence line the model is reading writes them, and says in one clause that
+  "book" and "chapter" are placeholders. Two lines longer, the documented format unchanged; the golden
+  files are untouched, so only the code SHA of an eval fingerprint moves. Measured after the change:
+  0 of 20 for 7b, 0 of 20 for 14b (`docs/eval-results/2026-09-10-local-models.md`).
+- **Project Gutenberg's italics markup no longer breaks a correctly copied quote.** `_normalize` maps
+  punctuation to whitespace through `[^\w\s...]`, and `\w` keeps the underscore, so the `_go_` of
+  "All right, then, I'll _go_ to hell" survived as its own token: a quote copied character for
+  character out of Huckleberry Finn, Chapter XXXI did not match the passage it came from and was
+  reported as a possible hallucination — the outcome the golden file's own note on `c02` says must not
+  happen. The underscore is punctuation now, dropped on both sides of the comparison, the quote and the
+  passage alike, and before the rules that keep meaning inside numbers, so a signed number in italics
+  reads like a bare one. It stays a separator rather than a deletion: `_go_to_hell_` is three words.
+- **A refusal phrased as "the evidence does not contain it" is scored as a refusal.** The agent eval's
+  `REFUSAL_MARKERS` held no member of that family, so `c08` — where the library really does not hold
+  The Adventures of Tom Sawyer — scored FAIL for both local models although neither narrated the fence
+  scene from memory and both said in plain words that the evidence does not hold it. The list gains
+  three verbs whose subject can only be the evidence or the library — contain, include, cover — in both
+  voices and both numbers, so that which one a model reaches for is not what decides the score, plus
+  `не містить`. Deliberately not "does not mention", which an answer that answers may say about one
+  chapter. The metric keeps its meaning: an evidence-free answer told from model memory is still a
+  failure, and the manual-correctness checkbox in the report is still where that is caught.
+- **A local thinking model is told not to think, and no single call outlives the question deadline.**
+  Ollama does not count reasoning tokens against `max_tokens`, so `qwen3.6` over its OpenAI-compatible
+  endpoint reasoned past `LLM_TIMEOUT_S` without beginning an answer, timed out, retried twice, and the
+  question deadline — which the loop consults only between steps — never got the chance to stop it:
+  that model finished no question at all. With `LLM_BACKEND=ollama` the client now sends
+  `reasoning_effort: "none"`, which is the one form Ollama 0.33.3 honours there (`think`,
+  `chat_template_kwargs.enable_thinking` and an `options` block are all accepted and ignored — measured
+  on this machine, not assumed) and which is inert for a model without the thinking capability, so it
+  goes on every local call and never on a hosted one. Separately, the per-attempt timeout is now the
+  smaller of `LLM_TIMEOUT_S` and what is left of `QUESTION_DEADLINE_S`: 600 against 300 is the local
+  default pair, so one call could outlive the whole question's budget and then retry. It is floored at
+  five seconds, so a call the loop did start inside the budget fails on the provider rather than
+  instantly on a timeout of zero.
 - **`--print-env-resolution` no longer prints the keys it read.** The flag dumped every value of
   the `.env` verbatim, and a `.env` is where the credentials live: a run of it reproduced
   `OPENROUTER_API_KEY`, `LANGCHAIN_API_KEY` and `CHAINLIT_PASSWORD` on stdout, from the one flag

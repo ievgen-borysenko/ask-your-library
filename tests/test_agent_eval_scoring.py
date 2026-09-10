@@ -64,6 +64,36 @@ def test_refusal_may_cite_evidence_when_it_says_so():
     assert harness.score(item, honest)["behavior_ok"]
 
 
+def test_refusal_markers_cover_the_evidence_does_not_contain_it_phrasing():
+    """c08 is declined by both local models as "the evidence provided does not
+    contain information about ..." or "... does not cover how ...", which is a
+    refusal by any reading and used to score FAIL for want of a marker. The
+    family added is the one whose subject can only be the evidence or the
+    library, in both voices: which verb a model reaches for, and whether it
+    writes it actively, must not be what decides the score."""
+    item = {"type": "refusal", "expected_books": []}
+    for answer in ("The evidence provided does not contain information about Tom Sawyer making "
+                   "the other boys pay him for the chance to paint the fence.",
+                   "The retrieved passages do not contain that episode.",
+                   "That episode is not contained in the evidence.",
+                   "The evidence does not include the whitewashing scene.",
+                   "The provided evidence does not cover how Tom Sawyer made the boys pay him.",
+                   "The passages here do not cover the fence at all.",
+                   "That episode is not covered by the books here.",
+                   "Бібліотека не містить цієї книжки."):
+        assert harness.score(item, run(answer, checked=1))["behavior_ok"], answer
+    # the metric's meaning is unchanged: told from model memory, with no such
+    # phrase anywhere, it is still a FAIL
+    told_from_memory = ("Tom Sawyer persuaded the other boys that whitewashing the fence was a "
+                        "privilege, and they paid him with an apple and a dead rat for a turn.")
+    assert not harness.score(item, run(told_from_memory, checked=0))["behavior_ok"]
+    # and an answer that answers may say a chapter does not MENTION a detail
+    # without that turning it into a refusal — the phrase is deliberately absent
+    assert not harness.score(item, run(
+        "Chapter II does not mention the rat, but Tom traded the whitewashing for marbles.",
+        checked=2))["behavior_ok"]
+
+
 def test_drilldown_ignores_empty_reads_but_counts_partial_ones():
     item = {"type": "answer", "expected_books": ["Moby Dick"], "expects_chapter_read": True}
     empty = harness.score(item, run("Moby Dick", chapters=["Moby Dick — Herman Melville|Chapter 59|empty"]))

@@ -5,7 +5,7 @@ from ask_your_library.i18n import t
 from ask_your_library.ingest import pack_sentences, split_sentences
 from ask_your_library.ingest.chunking import TRANSCRIPT_TARGET_CHARS
 from ask_your_library.library import rrf_fuse
-from ask_your_library.provenance import _normalize
+from ask_your_library.provenance import _contains_tokens, _normalize
 from ask_your_library.sanitize import sanitize_context
 
 
@@ -28,6 +28,21 @@ def test_normalize_tolerates_typography_but_not_paraphrase():
     raw = _normalize("**Plot** — “It was the best of times,” he said.")
     assert _normalize("Plot: \"It was the best of times,\" he said.") in raw
     assert _normalize("It was the worst of times") not in raw
+
+
+def test_normalize_treats_gutenberg_italics_markup_as_punctuation():
+    """`\\w` keeps the underscore, so Project Gutenberg's italics markup used to
+    survive normalisation as part of the word: the quote a model copied
+    correctly out of Huckleberry Finn, Chapter XXXI did not match the passage it
+    came from and was reported as a possible hallucination."""
+    passage = _normalize("and I knowed it. All right, then, I'll _go_ to hell — and tore it up.")
+    assert _contains_tokens(passage, _normalize("All right, then, I'll go to hell"))
+    # the markup is punctuation on BOTH sides, so a quote that carries it matches too
+    assert _contains_tokens(passage, _normalize("I'll _go_ to hell"))
+    # and it stays a separator, not a deletion: _go_to_hell is three words, not one
+    assert _contains_tokens(_normalize("_go_to_hell_"), _normalize("go to hell"))
+    # a paraphrase still fails
+    assert not _contains_tokens(passage, _normalize("All right, then, I will go to hell"))
 
 
 def test_rrf_fuse_prefers_chunks_present_in_both_lists():
@@ -1306,10 +1321,14 @@ def test_llm_factory_bounds_every_call_with_timeout_and_retries(monkeypatch):
     monkeypatch.setattr(llm, "ChatOpenAI", Fake)
     monkeypatch.setattr(llm, "openrouter_api_key", lambda: "sk-test")
     llm.llm()
-    # read/write per attempt from config; connect stays the SDK's 5 s (a scalar
-    # would raise it too and an unreachable provider would take minutes to fail)
+    # read/write per attempt from config, capped by what is left of the question
+    # deadline — on a run that has just started, all of it; connect stays the
+    # SDK's 5 s (a scalar would raise it too and an unreachable provider would
+    # take minutes to fail)
     timeout = captured["timeout"]
-    assert timeout.read == timeout.write == config.LLM_TIMEOUT_S and timeout.connect == llm.CONNECT_TIMEOUT_S == 5.0
+    assert timeout.read == timeout.write == pytest.approx(min(config.LLM_TIMEOUT_S,
+                                                              config.QUESTION_DEADLINE_S), abs=1)
+    assert timeout.connect == llm.CONNECT_TIMEOUT_S == 5.0
     assert captured["max_retries"] == config.LLM_MAX_RETRIES
     code = "from ask_your_library import config; print(config.LLM_TIMEOUT_S, config.LLM_MAX_RETRIES, config.QUESTION_DEADLINE_S)"
     # The defaults are read in a child that has none of the three names AND no
@@ -1348,6 +1367,35 @@ def test_a_dotenv_in_the_checkout_cannot_decide_what_a_fresh_child_reads(tmp_pat
     (tmp_path / ".env").write_text("LLM_TIMEOUT_S=601\nQUESTION_DEADLINE_S=1201\n", encoding="utf-8")
     assert fresh_output(code, cwd=str(tmp_path)) == "601 1201"
     assert fresh_output(code) == "120 300"
+
+
+def test_one_call_cannot_outlive_the_question_deadline(monkeypatch):
+    """`deadline_passed` is consulted between steps only, so the per-attempt
+    timeout has to carry the deadline as well: with LLM_TIMEOUT_S above
+    QUESTION_DEADLINE_S — 600 against 300, the local defaults — one call could
+    otherwise run past the whole question's budget, and then retry twice."""
+    clock = [1_000.0]
+    monkeypatch.setattr(llm.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(llm, "LLM_TIMEOUT_S", 600)   # imported by name, so patched here
+    llm.reset_usage(deadline_s=300)
+    llm._usage().started = clock[0]     # the dataclass default read the real clock
+    assert llm.call_timeout_s() == 300.0            # fresh run: the deadline is the cap
+    clock[0] += 250
+    assert llm.call_timeout_s() == 50.0             # 300 - 250 spent
+    llm.pause_deadline(40)                          # the reader's time is not the agent's
+    assert llm.call_timeout_s() == 90.0
+    clock[0] += 200                                 # budget spent
+    assert llm.deadline_passed() and llm.deadline_remaining_s() == 0.0
+    assert llm.call_timeout_s() == llm.MIN_CALL_TIMEOUT_S == 5.0   # a floor, not zero
+    # a per-attempt bound below the remaining budget still decides
+    monkeypatch.setattr(llm, "LLM_TIMEOUT_S", 120)
+    llm.reset_usage(deadline_s=300)
+    llm._usage().started = clock[0]
+    assert llm.call_timeout_s() == 120.0
+    # no deadline at all: the configured bound, whatever the clock says
+    llm.reset_usage(deadline_s=0)
+    clock[0] += 10_000
+    assert llm.deadline_remaining_s() is None and llm.call_timeout_s() == 120.0
 
 
 def test_deadline_is_per_run_off_at_zero_and_excludes_the_clarify_pause(monkeypatch):

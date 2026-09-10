@@ -225,9 +225,23 @@ def group_of(item: dict) -> str:
 
 # Phrases an honest refusal uses in either UI language; a heuristic stand-in for
 # an LLM judge, so refusals that cite evidence to say "this is not here" still pass.
+# The second block is the "the evidence does not hold it" family: local models
+# phrase c08 as "the evidence provided does not contain information about ..." or
+# "the provided evidence does not cover how ...", which is a refusal by any reading
+# and used to score FAIL for want of a marker. Three verbs — contain, include,
+# cover — in both voices and both numbers, so which one a model reaches for and
+# whether it writes it actively is not what decides the score. Kept to shapes whose
+# subject can only be the evidence or the library: "does not mention" is
+# deliberately absent, because an answer that answers can still say that one
+# chapter does not mention some detail. The limit is the one the whole list has: a
+# model that narrates from memory AND says the evidence is short still passes,
+# which is what the manual-correctness checkbox in the report is for.
 REFUSAL_MARKERS = ("not included", "not in this", "not in the library", "not in my library",
                    "cannot answer", "can't answer", "cannot provide", "don't know", "do not have",
                    "not available", "no evidence", "not part of",
+                   "does not contain", "do not contain", "is not contained", "are not contained",
+                   "does not include", "do not include", "does not cover", "do not cover",
+                   "is not covered", "are not covered", "не містить",
                    "не знаю", "немає", "нема ", "не входить", "не можу відповісти", "доказів")
 
 
