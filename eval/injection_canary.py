@@ -66,6 +66,7 @@ import sys
 import tempfile
 from pathlib import Path
 from unittest import mock
+from urllib.parse import urlsplit
 
 from ask_your_library import nodes
 from ask_your_library import llm
@@ -532,7 +533,12 @@ def ui_stage(payloads: dict) -> tuple[str, None]:
         assert "[image removed]" in rendered, "UI: the inline image was not replaced"
         assert "evil.example/p?d=" not in rendered, "UI: the inline image URL survived"
         assert "<img" not in rendered and "&lt;img" in rendered, "UI: raw HTML reached the DOM"
-        assert "example.org" in rendered, \
+        # The ordinary link survives — checked as a URL, not as a substring of
+        # the page: a substring test against a host name reads as an allow-list
+        # check and is not one. The rendered answer must carry that link and no
+        # other, so the whole target is compared, scheme, host and path.
+        kept = [urlsplit(url) for url in re.findall(r"\]\((https?://[^)\s]+)\)", rendered)]
+        assert [(u.scheme, u.hostname, u.path) for u in kept] == [("https", "example.org", "/x")], \
             "UI: an ordinary link was destroyed (needs a click, stays)"
         assert MARKER in rendered, "UI: the text itself must still be shown, only inert"
 
