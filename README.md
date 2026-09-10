@@ -22,8 +22,9 @@ flowchart TB
     SE -->|"still ambiguous after<br/>a pass: which book do you mean?"| CQ["it asks back: is it X or Y?"]:::human
     CQ --> AG
     SE --> EV["it keeps verbatim quotes<br/>from those books, nothing else"]:::ai
-    EV --> CK["code re-checks every quote against<br/>the passage it was copied from"]:::code
-    CK --> A(["an answer with book, chapter citations<br/>or an honest 'your books do not cover this'"]):::ai
+    EV --> A["it writes the answer from those quotes:<br/>book, chapter citations, or an honest<br/>'your books do not cover this'"]:::ai
+    A --> CK["then code re-checks every quote against<br/>the passage it was copied from"]:::code
+    CK --> OUT(["the answer as written, plus a badge:<br/>every quote found, or which one was not"]):::code
     classDef code fill:#dbeafe,stroke:#1d4ed8,color:#000
     classDef ai fill:#fed7aa,stroke:#c2410c,color:#000
     classDef human fill:#bbf7d0,stroke:#15803d,color:#000
@@ -33,7 +34,8 @@ flowchart TB
 
 *"Why does Don Quixote attack the windmills even after Sancho tells him what they are, and how
 does he explain what happened after they knock him down?" — a local model (qwen2.5:14b) on the
-demo corpus, no API key, 79 s wall time with a warm cache.*
+demo corpus, no API key. 64.9 s by the CLI's own metrics line in the last frame, on the warm
+prompt cache that same line reports (`cache: 9274 tokens read from cache`).*
 
 ## Quick start on a Mac
 
@@ -74,9 +76,12 @@ flowchart TB
         ACT --> OBS["observe: evidence distillate<br/>book, chapter, verbatim quote, hit id"]:::ai
         OBS --> REF{"reflect:<br/>enough<br/>evidence?"}:::ai
         REF -->|"next query, or a<br/>chapter not read yet"| ACT
-        REF -->|"ambiguous,<br/>once per run"| CLR["clarify: the run suspends,<br/>candidates go to the reader"]:::human
+        REF -->|"step limit, deadline,<br/>CRAG gate after 2 dry steps,<br/>no usable decision"| SYN["synthesize: answer with<br/>book, chapter citations"]:::ai
+        REF -->|"model says<br/>enough or clarify"| COV{"coverage gate: plain code,<br/>no model (ADR-013)"}:::code
+        COV -->|"once per run, before the exit:<br/>a book the question names is in the window<br/>but not in the evidence (identify mode:<br/>one book covered, a queued query left)"| ACT
+        COV -->|"ambiguous,<br/>once per run"| CLR["clarify: the run suspends,<br/>candidates go to the reader"]:::human
         CLR --> PLAN
-        REF -->|"enough, step limit, deadline,<br/>CRAG gate after 2 dry steps,<br/>no usable decision"| SYN["synthesize: answer with<br/>book, chapter citations"]:::ai
+        COV -->|"enough — gate already spent,<br/>after a clarify, or nothing<br/>left uncovered"| SYN
         SYN --> VAL["validate: plain code, no model —<br/>is each quote in the passage it cites?"]:::code
         CAT --> VAL
         VAL --> OUT(["answer with citations and a provenance badge,<br/>or an honest 'not found'"]):::ai
@@ -98,6 +103,9 @@ flowchart TB
 - `validate` is plain code: a quote must be a contiguous whole-token run of the passage it names.
 - Catalogue questions skip retrieval; the count is the length of the list read from the tables (ADR-016).
 - A 4-step budget, a CRAG-style stop after 2 dry steps, drill-down, one clarify interrupt per run.
+- `validate` reports; it never gates or edits the answer, which `synthesize` has already written.
+- The coverage gate is code inside `reflect`: before the model's "enough" or "clarify" is acted on,
+  one forced search at a book the question names and the evidence never touched (ADR-013).
 - Per-node calls, tokens and USD after every question, with selectivity and redaction counts.
 - Node by node, with the decision records behind it: [`docs/architecture.md`](docs/architecture.md).
 

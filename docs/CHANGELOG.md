@@ -7,20 +7,29 @@
   narrative, privacy and the threat model, the injection layers, cost and the known limits moved
   out of the README into nine pages under `docs/` — `overview.md`, `architecture.md`,
   `quick-start.md`, `configuration.md`, `add-your-own-books.md`, `evaluation.md`,
-  `privacy-and-threat-model.md`, `cost.md` and `known-limits.md` — sentence for sentence, with
-  only the relative links rewritten. The README keeps the macOS install, the first question, the
-  measured-results table and a five-line privacy-and-cost summary, and gains two Mermaid
-  diagrams: the flow in plain terms and the architecture as an offline and an online subgraph,
-  both reconciled against `graph.py` and `nodes.py` (the catalogue node and `validate` are in
-  them; the CRAG gate sits on the `reflect` edge, where the code puts it). The course-demo
+  `privacy-and-threat-model.md`, `cost.md` and `known-limits.md` — sentence for sentence. Three
+  classes of edit were made to that text and nothing else: relative links rewritten to resolve
+  from `docs/`, headings renamed or moved a level (`## License` is `## Status and licence` on the
+  front page), and three sentences added where a page needed a qualification the README's own
+  context used to carry — `--print-env-resolution` in `quick-start.md`, the hosted-path scope of
+  the cache-read counter in `cost.md`, and which README "this README" points at in
+  `configuration.md`. Every one of them is a separate added sentence, not a rewrite of the moved
+  text; a line-by-line check of the base README against the new tree leaves no prose residual.
+  The README keeps the macOS install, the first question, the measured-results table and a
+  five-line privacy-and-cost summary, and gains two Mermaid diagrams: the flow in plain terms
+  and the architecture as an offline and an online subgraph, both reconciled against `graph.py`
+  and `nodes.py` — the catalogue node and `validate` are in them, `synthesize` runs before
+  `validate` and `validate` only reports, and both the CRAG gate and the deterministic coverage
+  gate sit on the `reflect` edge, where the code puts them. The course-demo
   Excalidraw originals are kept as editable sources in `docs/diagrams/`. Every reference that
   pointed into the README — `SECURITY.md`, the ADRs, the backlog, an example trace, four test
   files and the message `install-mac.sh` prints on a non-macOS system — now names the page
   that holds the text. The README also carries a recorded run: `docs/img/ask-library-demo.gif`
   (100 KB), the windmills question of the demo corpus answered by a local `qwen2.5:14b` — not
   the model `install-mac.sh` pulls — with the quote check reporting all five quotes found
-  verbatim. Its 79 s is a warm-cache run, which the metrics line in the frame says outright
-  (`cache: 9274 tokens read from cache`); the same question on a cold cache took 128 s.
+  verbatim. The caption quotes the figure the CLI itself prints in the last frame — 64.9 s — and
+  names the warm prompt cache the same line reports (`cache: 9274 tokens read from cache`); a
+  cold-cache run of the same question, measured separately, took 128 s.
   `docs/quick-start.md` lists `--print-env-resolution` with the other installer flags.
 - **`--print-env-resolution` no longer prints the keys it read.** The flag dumped every value of
   the `.env` verbatim, and a `.env` is where the credentials live: a run of it reproduced

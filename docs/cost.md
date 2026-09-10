@@ -11,9 +11,14 @@ pre-authorizes the model maximum on every call. Prices come from `PRICE_IN_PER_M
 `PRICE_OUT_PER_MTOK`. The CLI prints a per-node breakdown after each question (calls, tokens,
 USD per role), plus the stop reason, retrieval selectivity and redaction counts.
 
-The metrics also carry a cache-read counter, and on the hosted path it stays at zero by
-construction: the client never marks a prompt prefix for caching (no `cache_control` is sent),
-and even if it did, the system prompts are below the provider's minimum cacheable prefix and
-the large user message — question, results, evidence — changes at every step, so no prompt
-caching happens and there is nothing to discount. "Cache reads not discounted" in the eval
-reports' cost line is a statement about the configured rates, not a discount those runs missed.
+The metrics also carry a cache-read counter, and it stays at zero by construction: the client
+never marks a prompt prefix for caching (no `cache_control` is sent), and even if it did, the
+system prompts are below the provider's minimum cacheable prefix and the large user message —
+question, results, evidence — changes at every step, so no prompt caching happens and there is
+nothing to discount. "Cache reads not discounted" in the eval reports' cost line is a statement
+about the configured rates, not a discount those runs missed.
+
+That paragraph describes the hosted path, which every measured number on this page was run on.
+On `LLM_BACKEND=ollama` the counter is not zero: Ollama serves a repeated prefix from its own
+prompt cache and reports what it served, so the CLI prints a `cache: N tokens read from cache`
+line — 9,274 tokens in the recorded run on the [README](../README.md) front page.

@@ -16,15 +16,17 @@ bash scripts/install-mac.sh              # mostly download time, + ~30 min for t
 only (`brew services run`, which registers no login item — the one-liner that makes it permanent
 is printed at the end), pulls the two models, syncs the locked environment, writes a fully local
 `.env`, asks once before the demo corpus, and finishes on the preflight the CLI runs before
-every question. `--no-demo`, `--hosted`, `--yes` and `--help` are the rest of it, along with
-`--print-env-resolution`, which prints how the installer resolved every setting that decides where
-your data goes, values whose names look like credentials as `<set, N chars>`. It never runs
+every question. `--no-demo`, `--hosted`, `--yes` and `--help` are the rest of it. It never runs
 `sudo`. What reaches the network is the package fetches through `brew`, `uv` and `ollama` and,
 if you say yes to the demo corpus, the checksum-pinned public-domain texts
 [`scripts/ingest_demo_corpus.py`](../scripts/ingest_demo_corpus.py) downloads from gutenberg.org —
 the two LibriVox books are not fetched, their transcripts being committed. The manual steps
 below are the same thing by hand: the path on every other system, and on a Mac when you would
 rather run each step yourself.
+
+One more flag has been added since that paragraph was written: `--print-env-resolution` prints
+how the installer resolved every setting that decides where your data goes, with values whose
+names look like credentials shown as `<set, N chars>`.
 
 ## The manual steps, on any system
 

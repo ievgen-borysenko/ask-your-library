@@ -47,6 +47,10 @@ the preflight, so they work in a fresh clone with no key and no index.
 
 ## Fully local, no account
 
+This section is the README's own text, moved here unchanged. Where it says "this README" it
+means the project [README](../README.md), and the numbers it means are the ones in that page's
+[Measured](../README.md#measured) table.
+
 Indexing your own books needs no account by default: `ayl-add` chunks locally and embeds with Ollama's
 `bge-m3` by default. Only the answering model needs OpenRouter. To run everything on this machine:
 
@@ -67,7 +71,7 @@ than Ollama is on that port, and the message names the status it got. The reply 
 anything runs on Ollama, embeddings included, so the default hosted-model setup gets the same early
 failure. Everything else is
 unchanged: the same graph, the same provenance check, the same eval harness (every report names
-the local model in its fingerprint). What is not the same is quality: every number in the README
+the local model in its fingerprint). What is not the same is quality: every number in this README
 was measured with the OpenRouter default (`anthropic/claude-sonnet-4.6`), and the agent nodes
 expect strict JSON, which small local models return less reliably. A malformed reply is retried
 once with the parse error shown to the model; if it fails again, `observe` keeps no evidence from
