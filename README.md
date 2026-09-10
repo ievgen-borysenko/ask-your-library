@@ -16,19 +16,29 @@ used against the passage it was copied from.
 
 ```mermaid
 flowchart TB
-    R(["you: a half-remembered idea,<br/>asked in your own words"]):::human
-    R --> AG["the agent reads the question"]:::ai
-    AG --> SE["it searches the books you own,<br/>in several passes"]:::code
-    SE -->|"still ambiguous after<br/>a pass: which book do you mean?"| CQ["it asks back: is it X or Y?"]:::human
-    CQ --> AG
-    SE --> EV["it keeps verbatim quotes<br/>from those books, nothing else"]:::ai
-    EV --> A["it writes the answer from those quotes:<br/>book, chapter citations, or an honest<br/>'your books do not cover this'"]:::ai
-    A --> CK["then code re-checks every quote against<br/>the passage it was copied from"]:::code
-    CK --> OUT(["the answer as written, plus a badge:<br/>every quote found, or which one was not"]):::code
+    Q(["I remember a book about a man alone on an island…"]):::human
+    Q --> P["plan: ask for 2–4 English queries"]:::ai
+    P --> A["hybrid search over the books you own<br/>vectors + BM25, fused"]:::code
+    A --> O["observe: distill candidate quotes,<br/>each pinned to the passage it came from"]:::ai
+    O --> R{"enough?"}:::ai
+    R -->|"no, steps left"| A
+    R -->|"fits several books"| C["ask back: Robinson Crusoe or Gulliver's Travels?"]:::human
+    C --> P
+    R -->|"yes, or the budget is spent"| S["answer with [book, chapter] citations,<br/>or 'your books do not cover this'"]:::ai
+    S --> V["validate: plain code, no model<br/>confirmed / unattributed / broken"]:::code
+    V --> OUT(["answer + provenance badge"]):::code
     classDef code fill:#dbeafe,stroke:#1d4ed8,color:#000
     classDef ai fill:#fed7aa,stroke:#c2410c,color:#000
     classDef human fill:#bbf7d0,stroke:#15803d,color:#000
 ```
+
+Blue = no answering-model call · orange = a call to the answering model you configure · green =
+human in the loop. Search is blue because the search step itself calls no answering model: it is
+plain code apart from embedding your query, which the default runs on your own machine. The
+passages it finds do reach the answering model, one step later, at `observe`. Nothing is verbatim
+until `validate` says so — that is what `validate` is for. The rest of the control flow, including
+the catalogue path and the deterministic gate behind the ask-back, is in
+[`docs/architecture.md`](docs/architecture.md).
 
 ![The CLI naming Robinson Crusoe from a half-remembered description, over the demo corpus with a local model](docs/img/ask-library-demo.gif)
 
@@ -180,4 +190,5 @@ United States by their sources' own statements; what that means for a given edit
 in your country, and what exactly is committed here (machine transcripts, book cards, tables of
 contents, two synthetic canaries), is in [`corpus/README.md`](corpus/README.md).
 
-If this project helps your work, please credit Ievgen Borysenko and link to this repository.
+If this project helps your work, please credit
+[Ievgen Borysenko](https://www.linkedin.com/in/ievgen-borysenko) and link to this repository.

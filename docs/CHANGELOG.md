@@ -40,6 +40,54 @@
   [`quick-start.md`](quick-start.md) told a reader only that the hosted path costs money and the
   local one does not. `configuration.md`'s fully-local section, which had the quality paragraph but
   only its JSON half, now points at the entry too.
+- **The front-page diagram names the mechanism instead of describing the GIF under it.** "See it
+  work" spent eight boxes paraphrasing the flow in the words the two GIFs directly beneath it show
+  with real content ("the agent reads the question", "it searches the books you own, in several
+  passes"). It now names what actually happens, in much the same footprint (619×1161 against
+  560×1168 at mermaid 11.17.0; at 10.9.1, which lays labels out differently, it is the larger —
+  741×799 against 549×717): the 2-4 English queries `plan` asks for, a hybrid search that is
+  vectors + BM25 fused, `observe` distilling candidate quotes pinned to the passage they came
+  from, the loop back into search, the ask-back that returns to `plan`, the budget that ends the
+  loop whether or not the model is satisfied, and a validator that is plain code with three
+  outcomes. Every claim in it was checked against the code, not against the diagram it replaces,
+  and two claims the README and `docs/architecture.md` between them overstated are now stated as
+  they are: the planner is **asked** for 2-4 English queries and degrades to the raw question when
+  it returns no usable JSON twice, and `observe` does not establish that a quote is verbatim —
+  `_valid_evidence` pins an item to its hit and drops the rest, and `validate` is the step that
+  checks the words. Both corrections were carried into the two diagrams of `docs/architecture.md`,
+  the prose summary under them and `docs/overview.md`, which said the same two things and would
+  otherwise have contradicted the README. A line under the block says what the three colours mean
+  — the front page was the only diagram in the repo colouring nodes without saying why — and blue
+  is defined as **no answering-model call** rather than "deterministic code", because `act` is
+  blue while the search embeds its query with the embedding model, which
+  `EMBED_BACKEND=openrouter` sends off the machine. The block draws one path: the catalogue route
+  and the deterministic gate behind the ask-back are in `docs/architecture.md`, which the line
+  points at.
+- **The step-by-step diagram in `docs/architecture.md` is written the way the ones that render
+  are.** It rendered on GitHub with no colour coding and no legend at all. Its labels are now
+  quoted and its classes attached inline with `:::` like the other diagrams in the tree, and the
+  legend is a line of prose under the block instead of a `subgraph` wired with `~~~`, so the part
+  that went missing no longer depends on a construction that can go missing. **The cause is not
+  established:** mermaid 10.9.1 and 11.17.0 both render the old source with all three classes
+  applied and the legend present, in dark theme and with html labels off, so this is a convergence
+  on a form known to work rather than a diagnosed fix. Neither suspect construction was removed
+  elsewhere: `docs/privacy-and-threat-model.md` still attaches its class with a trailing statement
+  and the whole-system diagram above still wires its legend with `~~~`, so if either is what
+  fails, those two fail the same way. One defect in the same diagram **is** diagnosed and fixed: a
+  label read "hit ids sh", because GitHub un-escapes a mermaid block before the renderer sees it,
+  so the escaped `s<step>h<n>` arrives as markup and the browser swallows both tags. It carries a
+  real id now, `s2h4`. No escaped angle bracket is left in any mermaid block in the tree. Both
+  edges into `synthesize`, re-quoted here, also gained the two stop reasons each was missing,
+  against a paragraph that promises every edge is a branch the graph really takes (the lists are
+  still not exhaustive — a repeated clarify request and an off-schema decision are among what is
+  not on them): the question deadline and a timed-out `observe`/`reflect` call on the one out of
+  `reflect`, and the planner's own timed-out call and the deadline (not only the step budget) on
+  the one out of `plan`. A call that runs out of time became a stop reason of its own in 0.3.0,
+  below.
+- **The author credit links to a profile.** The README's "please credit Ievgen Borysenko" is the
+  one line addressed to a reader who arrived from a link and liked what they found, and it pointed
+  nowhere. NOTICE names him too, with the repository URL rather than a profile, and needs no
+  equivalent line.
 
 ## 0.3.0 (unreleased)
 
