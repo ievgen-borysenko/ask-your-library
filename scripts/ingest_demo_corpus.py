@@ -21,7 +21,10 @@ Stages (all cached in data/, safe to re-run):
 
 Rebuilds go through a staging table (old index stays queryable until the new
 one is complete); --book re-ingests replace that book's rows instead of
-appending. Sources are checksum-pinned in the manifest (--no-verify to skip).
+appending. Sources are checksum-pinned in the manifest (--no-verify to skip;
+an entry with no pin at all is a failure, not a skip). A cached download is
+reused, so investigating a drifted pin needs --refetch, which downloads again
+and keeps the old copy as pg<id>.txt.prev to diff against.
 
 The LanceDB lives in data/lancedb by default (LIBRARY_DB_PATH overrides, the
 same variable the agent reads). Table names: cards_<backend> / transcripts_<backend>.
@@ -88,10 +91,22 @@ VERIFY_CHECKSUMS = True
 
 def verify_checksum(entry: dict, path: Path, key: str = "sha256") -> None:
     """Sources are fetched from mirrors that do re-release files; the manifest
-    pins what the eval numbers were produced from."""
-    expected = entry.get(key)
-    if not expected or not VERIFY_CHECKSUMS:
+    pins what the eval numbers were produced from.
+
+    A MISSING pin is a failure, not a pass. This used to return early on one,
+    which made a removed `sha256:` line the quietest possible change: the
+    download went ahead, the file was whatever the mirror served that day, and
+    every stage stayed green while that book was no longer verified at all.
+    Two ways out, both explicit: `--no-verify` for a deliberately unpinned run
+    (a book just added), then `--stage checksums` to pin what arrived."""
+    if not VERIFY_CHECKSUMS:
         return
+    expected = entry.get(key)
+    if not expected:
+        sys.exit(f"no {key} pinned for {entry['id']} in corpus/manifest.yaml — an unpinned "
+                 f"source is not verified against anything, so the file just fetched could "
+                 f"be any edition. Pin it with --stage checksums (after a --no-verify run), "
+                 f"or pass --no-verify to accept this one unverified.")
     actual = sha256_of(path)
     if actual != expected:
         sys.exit(f"checksum mismatch for {entry['id']} ({path.name}): manifest {expected[:12]}..., "
@@ -126,6 +141,49 @@ def write_checksums() -> None:
 
 def all_entries(manifest: dict) -> list[dict]:
     return manifest["books"] + manifest["canaries"]
+
+
+# --- fetching ---------------------------------------------------------------
+# A full prepare-text is 31 sequential requests to Project Gutenberg, and from
+# CI they all leave one shared runner IP. PG rate-limits and asks clients to
+# identify themselves, so this names the project and where to complain about
+# it, retries the answers that mean "later", and pauses between books.
+USER_AGENT = ("ask-your-library-corpus-ingest/1.0 "
+              "(+https://github.com/ievgen-borysenko/ask-your-library)")
+HEADERS = {"User-Agent": USER_AGENT}
+DOWNLOAD_ATTEMPTS = 3
+DOWNLOAD_BACKOFF_S = 5   # then doubled: 5s, 10s
+DOWNLOAD_PAUSE_S = 1     # between two books, so a full run is not a burst
+
+
+def fetch_text(url: str, attempts: int = DOWNLOAD_ATTEMPTS) -> str:
+    """GET `url` as text, retrying only what is worth retrying.
+
+    429 and 5xx are the host saying "later", and a connection error or read
+    timeout is usually the same answer seen from this end. Everything else —
+    a 404 on a wrong pg_id — is a fact about the request and fails on the
+    first attempt rather than three times slowly.
+
+    Retrying changes whether a file arrives, never which one: the caller
+    checksums whatever this returns, exactly as before."""
+    delay = DOWNLOAD_BACKOFF_S
+    for attempt in range(1, attempts + 1):
+        try:
+            response = requests.get(url, timeout=120, headers=HEADERS)
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            problem = f"{type(exc).__name__}: {exc}"
+        else:
+            if response.status_code < 400:
+                return response.text
+            if response.status_code != 429 and response.status_code < 500:
+                response.raise_for_status()   # ours to fix, not the host's
+            problem = f"HTTP {response.status_code}"
+        if attempt == attempts:
+            sys.exit(f"giving up on {url} after {attempts} attempts — {problem}")
+        print(f"    {problem}; retrying in {delay}s ({attempt}/{attempts - 1})", flush=True)
+        time.sleep(delay)
+        delay *= 2
+    raise AssertionError("unreachable")   # pragma: no cover
 
 
 # --- text preparation -------------------------------------------------------
@@ -175,18 +233,29 @@ def save_prepared(entry: dict, chapters: list[tuple[str, str]], provenance: str)
     print(f"  {entry['id']}: {len(chapters)} chapters, {total:,} chars")
 
 
-def prepare_text(entries: list[dict]) -> None:
+def prepare_text(entries: list[dict], refetch: bool = False) -> None:
+    """Prepare the Gutenberg books; download the ones not already in data/raw.
+
+    `refetch` is what makes the drift recipe in corpus/README.md work. Without
+    it a cached copy short-circuits the download, so investigating a drifted
+    pin re-prepared the STALE text, regenerated corpus/toc/ from it, and the
+    toc diff that is supposed to say "still the same book" came back clean
+    about the old edition. The previous copy is moved aside, never removed:
+    reading the diff between the two is the point of the exercise."""
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     for entry in entries:
         if entry["source"] != "gutenberg":
             continue
         raw_file = RAW_DIR / f"pg{entry['pg_id']}.txt"
+        if refetch and raw_file.exists():
+            previous = raw_file.with_name(raw_file.name + ".prev")
+            raw_file.replace(previous)
+            print(f"  {entry['id']}: previous copy kept as {previous.name}")
         if not raw_file.exists():
             url = f"https://www.gutenberg.org/cache/epub/{entry['pg_id']}/pg{entry['pg_id']}.txt"
-            print(f"  downloading {entry['id']} ...")
-            response = requests.get(url, timeout=120)
-            response.raise_for_status()
-            raw_file.write_text(response.text, encoding="utf-8")
+            print(f"  downloading {entry['id']} ...", flush=True)
+            raw_file.write_text(fetch_text(url), encoding="utf-8")
+            time.sleep(DOWNLOAD_PAUSE_S)
         verify_checksum(entry, raw_file)
         text = strip_boilerplate(raw_file.read_text(encoding="utf-8"))
         chapters = split_chapters(text, entry.get("chapter_regex", DEFAULT_CHAPTER_RE),
@@ -208,7 +277,8 @@ def prepare_canaries(entries: list[dict]) -> None:
 def chapter_mp3s(ia_item: str) -> list[tuple[int, str]]:
     """[(chapter_number, filename)] — one file per chapter; when an item has
     several takes of the same chapter (different readers), the first wins."""
-    response = requests.get(f"https://archive.org/metadata/{ia_item}/files", timeout=60)
+    response = requests.get(f"https://archive.org/metadata/{ia_item}/files",
+                            timeout=60, headers=HEADERS)
     response.raise_for_status()
     by_number: dict[int, str] = {}
     for f in response.json()["result"]:
@@ -268,7 +338,7 @@ def prepare_audio(entries: list[dict], retranscribe: bool = False) -> None:
                     # The remote name is printed, never joined onto a path.
                     print(f"  downloading {strip_control_chars(name)} ...")
                     url = f"https://archive.org/download/{entry['ia_item']}/{name}"
-                    with requests.get(url, timeout=600, stream=True) as r:
+                    with requests.get(url, timeout=600, stream=True, headers=HEADERS) as r:
                         r.raise_for_status()
                         with open(mp3, "wb") as fh:
                             for block in r.iter_content(1 << 20):
@@ -428,9 +498,13 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--stage", choices=("all",) + STAGES, default="all")
     ap.add_argument("--backend", default=EMBED_BACKEND, choices=("ollama", "openrouter"))
-    ap.add_argument("--book", help="substring filter (ingest stage only)")
+    ap.add_argument("--book", help="substring filter: of the title for the prepare stages, "
+                                   "of the book key for --stage ingest")
     ap.add_argument("--no-verify", action="store_true",
                     help="skip manifest checksum verification of sources")
+    ap.add_argument("--refetch", action="store_true",
+                    help="re-download the Gutenberg texts even when a copy is cached "
+                         "(the old copy is kept next to it as pg<id>.txt.prev)")
     ap.add_argument("--retranscribe", action="store_true",
                     help="ignore shipped audio transcripts and run Whisper (macOS)")
     args = ap.parse_args()
@@ -444,7 +518,7 @@ def main() -> None:
 
     if args.stage in ("all", "prepare-text"):
         print("== prepare-text ==")
-        prepare_text(entries)
+        prepare_text(entries, refetch=args.refetch)
     if args.stage in ("all", "prepare-canaries"):
         print("== prepare-canaries ==")
         prepare_canaries(entries)

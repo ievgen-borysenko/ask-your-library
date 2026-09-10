@@ -7,6 +7,12 @@ on:
     paths:
       - "corpus/**"
       - "scripts/ingest_demo_corpus.py"
+      # The toc files this job diffs are written by split_chapters, which lives
+      # in the package, not in the script — a change there moves chapter
+      # boundaries with nothing under corpus/ or scripts/ touched. Only this
+      # module: the rest of src/ decides what happens after the split, and the
+      # download of 31 books is not worth spending on every source edit.
+      - "src/ask_your_library/ingest/chapters.py"
       - ".github/workflows/corpus.yml"
   schedule:
     # The pins answer to Project Gutenberg, not to this repository: PG
@@ -24,6 +30,10 @@ permissions:
 jobs:
   pins:
     runs-on: ubuntu-latest
+    # 31 downloads plus a chapter split; a run that has not finished in twenty
+    # minutes is a hung request, not a slow one, and holds a runner until the
+    # six-hour default gives up on it.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -47,9 +57,23 @@ jobs:
         run: |
           uv run scripts/ingest_demo_corpus.py --stage prepare-text
           uv run scripts/ingest_demo_corpus.py --stage prepare-audio
+      - name: Re-split the canaries too (no network)
+        # corpus/canaries/** is in the path filter above, and their text is
+        # committed — so an edit to a canary changes its toc with nothing
+        # downloaded. Without this stage the two canary toc files were the only
+        # ones the diff below could never have anything to say about.
+        run: uv run scripts/ingest_demo_corpus.py --stage prepare-canaries
       - name: The chapter split still matches the committed tables of contents
         # The stages above rewrite corpus/toc/*.json from the sources they just
         # read. A re-pin makes the checksums green by construction; this is what
         # says the new upstream file is still the same book — same chapters, same
         # titles. Red here means a re-pin changed the corpus, not just its bytes.
-        run: git diff --exit-code -- corpus/toc
+        #
+        # Staged, not `git diff` alone: a book added to the manifest without its
+        # toc file, or an id renamed, writes a NEW file, and an untracked file is
+        # invisible to a plain diff — the one shape of drift that would have
+        # passed here silently. `git add -A` stages the additions and the
+        # deletions too, and the cached diff then prints what changed.
+        run: |
+          git add -A -- corpus/toc
+          git diff --cached --exit-code -- corpus/toc

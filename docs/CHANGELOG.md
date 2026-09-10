@@ -9,20 +9,46 @@
   of Napoleon Bonaparte — and the manifest still pinned the previous files. All five drifts are
   cosmetic: every one carries a new "Most recently updated" header line, three also carry small
   corrections in the text (`young-man` -> `young man`, `Mr,` -> `Mr.`, two missing quote marks,
-  `soil` -> `soul`), one had four blank lines inserted after the start marker, and one lost a
-  "Produced by ..." transcriber credit. The chapter split is unchanged: `corpus/toc/*.json`
-  regenerates byte-identical from the new sources, and the corpus still prepares 7,285 transcript
-  chunks and 165 card chunks. The five entries are re-pinned through the script's own
+  `soil` -> `soul`), one had four blank lines inserted after the start marker, and one lost both a
+  "Produced by ..." transcriber credit and two blank lines before the end marker. The chapter split
+  is unchanged: `corpus/toc/*.json` regenerates byte-identical from the new sources, and the corpus
+  still prepares 7,285 transcript chunks and 165 card chunks. The five entries are re-pinned
+  through the script's own
   `--stage checksums`, each with the re-pin date and one line on what drifted. The reports in
   `docs/eval-results/` keep `manifest@f093bb27dab1`, the manifest their numbers were produced from;
   `eval/run_agent_eval.py` computes that fingerprint from the file at run time, so runs from now on
   carry `manifest@35d116b157cd` instead.
 - **A weekly job now watches the pins.** `.github/workflows/corpus.yml` runs the download-and-verify
   stages — no Ollama, no model, no embedding — every Monday and on every pull request that touches
-  `corpus/**` or the ingest script, and fails on a mismatch. It also diffs `corpus/toc/` afterwards:
-  a re-pin makes the checksums green by construction, and the chapter split is what still says
-  whether the upstream file is the same book. `corpus/README.md` documents what is pinned, what the
-  job checks and what to do when it goes red.
+  `corpus/**`, the ingest script or `ingest/chapters.py`, where the chapter splitter that writes
+  those tables of contents actually lives; a change there moves chapter boundaries with nothing
+  under `corpus/` edited. The canaries are re-split too: their text is committed rather than
+  downloaded, so their two toc files were the only ones the job could never have anything to say
+  about, although an edit to a canary matches its path filter. It fails on a mismatch, and then
+  diffs `corpus/toc/`: a re-pin makes the checksums green by construction, and the chapter split is
+  what still says whether the upstream file is the same book. That diff is taken over the index
+  (`git add -A -- corpus/toc` first), because a book added without its toc file writes an
+  **untracked** one, which a plain `git diff` cannot see. `corpus/README.md` documents what is
+  pinned, what the job checks and what to do when it goes red.
+- **The drift recipe now actually re-fetches, and an unpinned book is a failure.** Two holes in the
+  paragraph above, found in review before anyone had to hit them. The documented investigation
+  (`--stage prepare-text --no-verify`) reused the cached `data/raw/pg<id>.txt` — the script only
+  downloads a file it does not have — so it re-prepared the **stale** text, regenerated
+  `corpus/toc/` from it, and the toc diff you were told to trust came back clean about the old
+  edition. `--refetch` downloads regardless and moves the copy you had to `pg<id>.txt.prev` (kept,
+  not deleted: the diff between the two is the point), and the README recipe is now four numbered
+  commands. Separately, `verify_checksum` returned early when an entry had no `sha256` at all, so
+  deleting a pin removed a book from verification without failing anything; a missing pin now exits
+  with the two explicit ways out, and `tests/test_corpus_pins.py` refuses a `books` entry without a
+  64-hex digest — and a canary with one — on every pull request, without a network round trip.
+- **The corpus job asks Project Gutenberg politely.** 31 sequential downloads left a shared CI
+  runner IP as a bare `requests.get` with no identification and no retry, against a host that rate
+  limits: one 429 or one dropped connection failed the whole job, and a rerun made the same burst.
+  The requests now carry a User-Agent naming the project and its repository, retry three times with
+  a doubling backoff on 429, 5xx and connection errors — and only those, so a 404 on a wrong
+  `pg_id` still fails on the first attempt — and pause a second between books. Checksum semantics
+  are untouched: a retry changes whether a file arrives, never which one. The job also carries a
+  20-minute `timeout-minutes`, so a hung request is not a runner held for six hours.
 - **A `.env` in the checkout no longer decides what a test measures.** The macOS installer writes
   one, and the README sends contributors to `uv run --group dev pytest -q` right after it, at which
   point `test_llm_factory_bounds_every_call_with_timeout_and_retries` failed: it dropped

@@ -269,8 +269,9 @@ books:
 
   - id: napoleon-memoirs
     sha256: 2c09dfd8adfd7b63f0ffc31cabffd1555d44f575f3b4d1a9ea2a30e00451c24b
-    # re-pinned 2026-09-10: PG regenerated the file — updated-date header line, and
-    # the "Produced by ..." transcriber credit dropped from the top of the text
+    # re-pinned 2026-09-10: PG regenerated the file — updated-date header line, the
+    # "Produced by ..." transcriber credit dropped from the top of the text, and two
+    # of the six blank lines before the END marker (those are stripped either way)
     title: "Memoirs of Napoleon Bonaparte"
     author: "Louis Antoine Fauvelet de Bourrienne"
     source: gutenberg
