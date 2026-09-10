@@ -1,9 +1,9 @@
 > **Provenance of this artifact.** Five runs on 2026-09-10 against the local backend only
 > (`LLM_BACKEND=ollama`, `EMBED_BACKEND=ollama`), plus one two-question probe of the thinking model,
-> plus **Run 7**, added in review round 1 at the default time budgets and stamped separately — it is
-> the one run made from a clean tree (`--require-clean`, code `37f71e2`) and its own section carries
-> its settings and its fingerprints, which differ from the six below in the deadline and in the
-> corpus manifest. Runs 1-6 carry the stamp that follows.
+> plus **Run 7** (review round 1) and **Run 8** (review round 2), both at the default time budgets and
+> stamped separately — they are the two runs made from a clean tree (`--require-clean`, code `37f71e2`
+> and `b643056`), and each carries its settings and its fingerprints in its own section, which differ
+> from the six below in the deadline and in the corpus manifest. Runs 1-6 carry the stamp that follows.
 > Code `5b19f2d+dirty(4e721d730cb1)`: `5b19f2d` was `origin/main` when the runs were made, and the
 > dirty checksum covers this branch's whole code change and nothing else — this report file did not
 > exist yet, and the harness hashes `git diff HEAD` together with the un-ignored untracked files, so
@@ -28,7 +28,11 @@
 > pair the mini-eval used, so the loop is bounded the same way. **`$0.0000` on every run**, reported by
 > the harness itself: no hosted key was present and nothing left the machine.
 >
-> **Coverage caveat.** Two sets only: the whole catalogue set (10 items) and the ten `c*` items of
+> **Coverage caveat.** Round 2 changed the synthesize rules again, and only ONE run was made after it
+> (Run 8): the research subset, `qwen2.5:7b`, default budgets. The catalogue set, `qwen2.5:14b` and the
+> `qwen3.6` probe were NOT re-measured, so every number for them below describes a prompt this branch
+> has since changed; the same is true of the placeholder counts in the combined rows. Sets and scope:
+> two sets only, the whole catalogue set (10 items) and the ten `c*` items of
 > `en-demo.yaml` (`h06` is Ukrainian and out of scope; the harness takes ids positionally, so the
 > subset ran exactly). Behaviour is the harness's automatic score; the manual-correctness checkboxes
 > in the pasted output are **unticked** — no human has read these answers against the golden notes.
@@ -46,9 +50,12 @@ Four defects found by the local mini-eval of 2026-09-10 were fixed on `fix/local
 same two sets were re-run for both `qwen2.5` candidates, plus the research subset a second time for
 `qwen2.5:7b` to see run-to-run variance. Review round 1 added a third `qwen2.5:7b` research run at the
 default time budgets (Run 7), because runs 1-6 used a 1,200 s deadline under which the new per-call cap
-never binds.
+never binds. Review round 2 replaced the worked citation example with a filled citation label on every
+evidence line, and moved the retry loop out of the SDK; Run 8 is that code, on the same subset and the
+same budgets as Run 7, which is therefore its like-for-like "before".
 
-- the synthesize rules now carry one filled citation example and forbid the literal placeholder
+- the synthesize rules now point at a filled citation label the evidence carries and forbid the literal
+  placeholder (round 2; runs 1-7 measured the earlier form, a worked example inside the rules)
 - `provenance._normalize` treats `_` as punctuation, so Gutenberg italics no longer break a correct quote
 - the eval's `REFUSAL_MARKERS` cover the "the evidence does not contain / cover / include it" family
 - `LLM_BACKEND=ollama` sends `reasoning_effort: "none"`, and no search-loop call outlives the question
@@ -71,6 +78,7 @@ over the ten questions of the set, the mini-eval's own definition.
 | `qwen2.5:7b` **after** | research | **9/10** | 28 / 2 / **1** | **0/10** | 673 s | 67.3 |
 | `qwen2.5:7b` **after** | research, 2nd run | **9/10** | 28 / 2 / **1** | **0/10** | 300 s | 30.0 |
 | `qwen2.5:7b` **after** | research, default budgets (Run 7) | **9/10** | 28 / 2 / **1** | **0/10** | 708 s | 70.8 |
+| `qwen2.5:7b` **after** | research, default budgets + labels (Run 8) | 8/10 | 28 / 2 / **1** | **0/10** | 682 s | 68.2 |
 | `qwen2.5:7b` before | **combined** | 16/20 | 35 / 2 / 2 | 12/20 | 865 s | 43.3 |
 | `qwen2.5:7b` **after** | **combined** | **19/20** | **36 / 2 / 1** | **0/20** | 851 s | 42.6 |
 | `qwen2.5:14b` before | catalogue | 10/10 | 17 / 0 / 0 | 1/10 | 396 s | 39.6 |
@@ -107,7 +115,10 @@ quoting was never the problem). 14b still grounds more heavily: 61 quotes checke
 `qwen2.5:14b`, which had three half-filled ones (`[book, Themes]`), has none either. Both models now
 write the filled form the rules show them — `[Adventures of Huckleberry Finn — Mark Twain, CHAPTER XXXI.]`
 in 7b's `c02`, `[Don Quixote — Miguel de Cervantes, CHAPTER VIII.]` where the evidence is Don Quixote.
-7b can therefore produce a demo frame that meets the brief, which it could not before.
+7b can therefore produce a demo frame that meets the brief, which it could not before. (Runs 1-7. Round
+2 took the worked example back out of the rules — a real title in the system message of every question
+is a title a model can copy into an unrelated answer — and put a filled label on each evidence line
+instead. Run 8 measures that, and the placeholder count is still 0.)
 
 **Three of the seven behaviour points came from the two harness defects, not from the models.** `c08`
 flipped for both models because a correct refusal in the phrasing they actually use is now scored as
@@ -185,12 +196,22 @@ LLM_BACKEND=ollama OLLAMA_LLM_MODEL=qwen2.5:7b EMBED_BACKEND=ollama OLLAMA_EMBED
     c04-crusoe-cannibals c05-quixote-windmills c06-fogg-missing-day \
     c07-alice-trial c08-refusal-tom-sawyer c09-shipwreck-first-person \
     c10-chivalry-two-books
+
+# Run 8 (review round 2): the same command as Run 7, on the round-2 code
+LLM_BACKEND=ollama OLLAMA_LLM_MODEL=qwen2.5:7b EMBED_BACKEND=ollama OLLAMA_EMBED_MODEL=bge-m3 \
+  LIBRARY_DB_PATH=<demo index> \
+  GOLDEN_PATH=eval/golden/en-demo.yaml EVAL_RESULTS_DIR=<scratch>/7b-labels \
+  uv run python eval/run_agent_eval.py --require-clean \
+    c01-ivanhoe-disguised-knight c02-huck-go-to-hell c03-musketeers-women \
+    c04-crusoe-cannibals c05-quixote-windmills c06-fogg-missing-day \
+    c07-alice-trial c08-refusal-tom-sawyer c09-shipwreck-first-person \
+    c10-chivalry-two-books
 ```
 
-The harness output of all seven runs follows, copied verbatim from the report files it wrote; nothing
+The harness output of all eight runs follows, copied verbatim from the report files it wrote; nothing
 was recomputed. Two are given as headlines, totals and a complete `diff` against the run they are
 otherwise identical to, line for line: the second 7b research run against the first, and Run 7 against
-the second.
+the second. Run 8 is given in full, because its answers are not identical to Run 7's.
 
 ---
 
@@ -1061,3 +1082,220 @@ manual correctness: not scored — tick the checkboxes above
 < 
 < ---
 ```
+
+---
+
+## Run 8 — `qwen2.5:7b`, research subset with the citation labels (wall 682 s)
+
+Added in review round 2, from a clean tree (`--require-clean`, code `b643056`), with the same command,
+the same default budgets and the same index as Run 7 — so **Run 7 is the like-for-like "before"** and
+the only difference is round 2's change: the worked citation example is out of the system rules and
+each evidence line now opens with its own filled label, plus the retry loop moved out of the SDK
+(inert here: 0 errors, no timeout, every call answered on its first attempt).
+
+**What is unchanged.** Quotes: 28 / 2 / 1 out of 31, the same three numbers Runs 2, 3 and 7 produced.
+Expected titles: 9/11, as in Run 7. Steps, stop reasons, clarify interrupts and evidence items: all
+identical. Placeholder answers: **0 of 10** — no answer contains the literal `[book,` — so removing the
+worked example did not bring the template back. Cost `$0.0000`, 81 LLM calls, and no question came
+near the 300 s deadline.
+
+**Behaviour is 8/10 against Run 7's 9/10, and the item that moved is `c08`.** It is still a correct
+refusal: it says the evidence does not hold the fence-painting episode, says what the evidence holds
+instead, and narrates nothing from model memory. What changed is that it is longer and that it ends by
+naming the two chapters it read. Round 1's rule is "an explicit marker, and at most
+`REFUSAL_TAIL_WORDS` = 40 words after it". Round 2 stops counting citation labels against that budget —
+a bracketed label is not a retold episode, and the two here are 13 of the 55 tail tokens — but the prose
+alone is **42 words**, two over a budget read off three samples whose longest was 37. So the FAIL is a
+threshold effect on an answer that got more accountable, not a regression in what the model does; the
+same rule would have failed this prose before labels existed. `REFUSAL_TAIL_WORDS` is deliberately NOT
+moved here: raising a scoring budget to make an item pass is the wrong way round, and the number is the
+reviewer's to set.
+
+**What else the labels changed, good and bad.** The model mirrors the evidence line and now often OPENS
+an answer with the label rather than closing with it (`c01`, `c03`, `c04`, `c06`, `c07`, `c09`, `c10`),
+and it copies the section exactly as the evidence writes it, so `c04` cites
+`[Robinson Crusoe — Daniel Defoe, CHAPTER V. BUILDS A HOUSE—THE JOURNAL]` where Run 7 wrote the short
+`CHAPTER V.` — the mechanism doing what it was built to do. Two things to watch, both visible below.
+`c02` puts an ordinary parenthetical in square brackets (`[This excerpt does not directly quote Huck's
+statement, but it provides context …]`), which is not a label and which no rule forbids. And `c10` —
+which fails in every run of this report — now names a book the library does not hold ("The Knight's
+Move" by P. G. Wodehouse) in prose, while correctly declining to cite it, because it has no label for
+it. That is the boundary of the rule stated plainly: it binds CITATIONS, so a citation is always one
+the evidence supplied, and provenance still checks the quotes; neither binds a claim made in prose,
+which is what the manual-correctness checkbox is for.
+
+**Not re-measured after round 2:** the catalogue set, `qwen2.5:14b`, the `qwen3.6` probe and the hosted
+model. The synthesize rules are shared by all of them, so their numbers above describe the round-1
+prompt.
+# Agent eval — 2026-09-10 08:05 — en-demo.yaml
+
+```
+run: code b643056 | golden en-demo.yaml@f041a0290000 | manifest@ed94677aa3a3 | toc@ef7a347ace1d | model qwen2.5:7b | cards_ollama=bge-m3/1024d rows=165 v2 built=2026-09-10T00:18:39 | transcripts_ollama=bge-m3/1024d rows=7285 v2 built=2026-09-10T00:18:30 | strict_hit_id=on | clarify_pick=default | hit_chars=2500/12000 | steps=4/2 | candidates=5 | deadline=300s | single run
+```
+
+## c01-ivanhoe-disguised-knight (identify, 2 steps, 40s, $0.0000, 6 calls, 6277 in / 478 out tokens) — PASS: titles 1/1, named book not in the catalogue: The Once and Future King, stop: stopped: requested chapter was already attempted (re-reading cannot show more text)
+
+- [ ] manual correctness (facts match the golden notes?)
+
+**Question:** What was that novel where a knight returns to England in disguise, his father has rejected him, and there is all this conflict between Saxons and Normans while King Richard is returning?
+
+- reflect -> __chapter__|Ivanhoe — Walter Scott|Plot
+- reflect -> stop: stopped: requested chapter was already attempted (re-reading cannot show more text)
+
+(No book titled "The Once and Future King" is in the library catalogue; the whole library was searched instead.)
+
+[Ivanhoe — Walter Scott, Plot] "Wilfred of Ivanhoe, a Saxon knight disinherited by his father Cedric for supporting the Norman King Richard and loving the Saxon ward Rowena, returns secretly from the Crusades disguised as a pilgrim." This novel fits the description you provided, including the conflict between Saxons and Normans. However, the part about his father rejecting him upon return is not explicitly mentioned in this plot summary.
+
+> quote provenance: OK: all 1 quotes found verbatim in the passages they cite
+
+## c02-huck-go-to-hell (answer, 2 steps, 49s, $0.0000, 6 calls, 9757 in / 594 out tokens) — PASS: titles 1/1, named book -> retrieval filter Adventures of Huckleberry Finn — Mark Twain, stop: stopped: requested chapter was already attempted (re-reading cannot show more text)
+
+- [ ] manual correctness (facts match the golden notes?)
+
+**Question:** Why does Huck say, "All right, then, I'll go to hell"? What has he decided to do?
+
+- reflect -> __chapter__|Adventures of Huckleberry Finn — Mark Twain|CHAPTER XXXI.
+- reflect -> stop: stopped: requested chapter was already attempted (re-reading cannot show more text)
+
+[Adventures of Huckleberry Finn — Mark Twain, CHAPTER XXXI.] Huck says, "All right, then, I'll go to hell" after he decides to help Jim escape from slavery, despite the risk of going against his society's norms and facing severe consequences. Huck has decided to prioritize his conscience and his friendship with Jim over societal expectations and potential punishment. [This excerpt does not directly quote Huck's statement, but it provides context for his decision.]
+
+> quote provenance: OK: all 2 quotes found verbatim in the passages they cite
+
+## c03-musketeers-women (answer, 4 steps, 93s, $0.0000, 10 calls, 20111 in / 834 out tokens) — PASS: titles 1/1, named book -> retrieval filter The Three Musketeers — Alexandre Dumas, stop: step limit (4) — wanted to keep searching
+
+- [ ] manual correctness (facts match the golden notes?)
+
+**Question:** I remember that Constance Bonacieux was d'Artagnan's love and that Milady had been Athos's wife. But who were the women connected with Porthos and Aramis?
+
+- reflect -> Porthos's love interests in The Three Musketeers
+- reflect -> women connected with Porthos in The Three Musketeers
+- reflect -> women connected with Porthos in The Three Musketeers
+- reflect -> stop: step limit (4) — wanted to keep searching
+
+- [The Three Musketeers — Alexandre Dumas, Chapter XXIX.] The evidence provided does not explicitly mention any specific women connected with Porthos and Aramis beyond a general interaction with a woman at a church. More detailed information about their personal relationships or romantic involvements is not available in the given excerpts.
+
+> quote provenance: WARNING: 1 of 4 quotes NOT found verbatim in any retrieved passage (possible hallucination):
+  - The Three Musketeers — Alexandre Dumas: "Aramis, though having the air of having nothing secret about him, was a young fe..."
+
+## c04-crusoe-cannibals (answer, 4 steps, 85s, $0.0000, 10 calls, 18856 in / 746 out tokens) — PASS: titles 1/1, named book -> retrieval filter Robinson Crusoe — Daniel Defoe, stop: step limit (4) — wanted to keep searching
+
+- [ ] manual correctness (facts match the golden notes?)
+
+**Question:** What did Crusoe do when he first discovered that cannibals were visiting the island? Did he attack them immediately?
+
+- reflect -> Robinson Crusoe first encounter with cannibals
+- reflect -> Robinson Crusoe's first encounter with cannibals
+- reflect -> Robinson Crusoe's first encounter with cannibals
+- reflect -> stop: step limit (4) — wanted to keep searching
+
+[Robinson Crusoe — Daniel Defoe, CHAPTER V. BUILDS A HOUSE—THE JOURNAL] The evidence provided does not mention Crusoe encountering cannibals or any specific actions he took upon discovering their visits. Therefore, the information needed to answer the question is missing.
+
+> quote provenance: PARTIAL: 2 of 4 quotes confirmed in the passages they cite (2 quotes found in a retrieved passage other than the one cited — not counted as confirmed)
+
+## c05-quixote-windmills (answer, 2 steps, 51s, $0.0000, 6 calls, 9398 in / 662 out tokens) — PASS: titles 1/1, named book -> retrieval filter Don Quixote — Miguel de Cervantes, stop: stopped: requested chapter was already attempted (re-reading cannot show more text)
+
+- [ ] manual correctness (facts match the golden notes?)
+
+**Question:** Why does Don Quixote attack the windmills even after Sancho tells him what they are, and how does he explain what happened after they knock him down?
+
+- reflect -> __chapter__|Don Quixote — Miguel de Cervantes|CHAPTER VIII.
+- reflect -> stop: stopped: requested chapter was already attempted (re-reading cannot show more text)
+
+Don Quixote attacks the windmills even after Sancho tells him what they are because he is so convinced they are giants that he neither hears Sancho's warnings nor perceives the true nature of the windmills. [Don Quixote — Miguel de Cervantes, CHAPTER VIII.]
+
+After being knocked down by the windmills, Don Quixote explains that the giants are stronger than he anticipated, saying, "Though ye flourish more arms than the giant Briareus, ye have to reckon with me." [Don Quixote — Miguel de Cervantes, CHAPTER VIII.] However, the evidence does not provide his full explanation for why he was defeated.
+
+> quote provenance: OK: all 3 quotes found verbatim in the passages they cite
+
+## c06-fogg-missing-day (answer, 3 steps, 69s, $0.0000, 8 calls, 12215 in / 917 out tokens) — PASS: titles 1/1, named book -> retrieval filter Around the World in Eighty Days — Jules Verne, stop: enough evidence
+
+- [ ] manual correctness (facts match the golden notes?)
+
+**Question:** Why did Phileas Fogg think he had lost the wager after reaching London, and how did he discover that he had actually won?
+
+- reflect -> how Phileas Fogg realized he had won the wager at the end of Around the World in
+- reflect -> __chapter__|Around the World in Eighty Days — Jules Verne|CHAPTER XXXVII.
+- reflect -> stop: enough evidence
+
+[Around the World in Eighty Days — Jules Verne, Plot] Phileas Fogg thought he had lost the wager after reaching London because he arrived just as the clock at the Reform Club struck nine o'clock, which was the deadline. However, he discovered that he had actually won the wager due to the gain of a full day from traveling eastward around the globe, arriving with time to spare. [Around the World in Eighty Days — Jules Verne, CHAPTER XXXVII.]
+
+> quote provenance: OK: all 5 quotes found verbatim in the passages they cite
+
+## c07-alice-trial (answer, 2 steps, 46s, $0.0000, 6 calls, 8783 in / 568 out tokens) — PASS: titles 1/1, named book -> retrieval filter Alice's Adventures in Wonderland — Lewis Carroll, stop: stopped: requested chapter was already attempted (re-reading cannot show more text)
+
+- [ ] manual correctness (facts match the golden notes?)
+
+**Question:** Why does Alice stop being afraid during the trial and finally challenge the Queen and the whole court?
+
+- reflect -> __chapter__|Alice's Adventures in Wonderland — Lewis Carroll|Chapter 12
+- reflect -> stop: stopped: requested chapter was already attempted (re-reading cannot show more text)
+
+[Alice's Adventures in Wonderland — Lewis Carroll, Chapter 12] Alice stops being afraid during the trial and finally challenges the Queen and the whole court after she has grown to her full size. This growth allows her to assert herself, as evidenced by her bold statements: "Stuff and nonsense, said Alice loudly The idea of having the sentence first Hold your tongue, said the Queen, turning purple I won't, said Alice Off with her head, the Queen shouted at the top of her voice Nobody moved Who cares for you, said Alice She had grown to her full size by this time You're nothing but a pack of cards" [Alice's Adventures in Wonderland — Lewis Carroll, Chapter 12]. However, the evidence does not explain the exact psychological or emotional journey that leads to her newfound courage.
+
+> quote provenance: OK: all 2 quotes found verbatim in the passages they cite
+
+## c08-refusal-tom-sawyer (refusal, 3 steps, 68s, $0.0000, 8 calls, 15023 in / 580 out tokens) — FAIL: titles 0/0, named book not in the catalogue: The Adventures of Tom Sawyer, stop: enough evidence
+
+- [ ] manual correctness (facts match the golden notes?)
+
+**Question:** How did Tom Sawyer make the other boys pay him for the chance to paint the fence?
+
+- reflect -> how did tom sawyer make his friends pay him to paint the fence in the adventures
+- reflect -> how did tom sawyer make his friends pay him to paint the fence in Adventures of 
+- reflect -> stop: enough evidence
+
+(No book titled "The Adventures of Tom Sawyer" is in the library catalogue; the whole library was searched instead.)
+
+The evidence provided does not contain information about Tom Sawyer making the other boys pay him for the chance to paint the fence. The evidence instead discusses Tom Sawyer helping Jim escape and setting him free. Therefore, the specific information requested is not available in the given evidence. [Adventures of Huckleberry Finn — Mark Twain, CHAPTER XXXIV.] [Adventures of Huckleberry Finn — Mark Twain, CHAPTER XLII.]
+
+> quote provenance: OK: all 3 quotes found verbatim in the passages they cite
+
+## c09-shipwreck-first-person (identify, 3 steps, 87s, $0.0000, 10 calls, 19092 in / 1160 out tokens, clarify) — PASS: titles 1/2, clarify reply unresolved, named book -> retrieval filter Robinson Crusoe — Daniel Defoe, stop: repeated clarify not allowed — finishing with what we have
+
+- [ ] manual correctness (facts match the golden notes?)
+
+**Question:** There was a book told entirely in the first person by a man who is shipwrecked and washes up somewhere completely unfamiliar. I can't remember whether it was mainly about surviving on his own or about getting along in a strange society. Which one was it? I might be mixing two of them up.
+
+- reflect -> first person narrative shipwrecked man social interaction
+- reflect -> __clarify__
+- clarify: Could you confirm if the book you're thinking of is 'Robinson Crusoe' by Daniel Defoe, which seems to cover both surviving on his own and getting along in a strange society, or if you're considering another book?
+Candidates in the library (answer with a number or a title):
+1) Robinson Crusoe — Daniel Defoe
+2) Moby Dick — Herman Melville
+3) Seneca's Morals — Lucius Annaeus Seneca
+4) Adventures of Huckleberry Finn — Mark Twain
+- reflect -> stop: repeated clarify not allowed — finishing with what we have
+
+[Robinson Crusoe — Daniel Defoe, Summary] The book primarily focuses on the protagonist's survival on a deserted island. While there are elements of his interactions with a native man named Friday, the narrative is mainly about his solitary struggle to survive and his spiritual journey. Therefore, it seems more likely that the book you are thinking of is "Robinson Crusoe," as it centers on the protagonist's solo survival rather than his interactions in a strange society. [Robinson Crusoe — Daniel Defoe, Summary]
+
+> quote provenance: OK: all 3 quotes found verbatim in the passages they cite
+
+## c10-chivalry-two-books (aggregation, 4 steps, 94s, $0.0000, 11 calls, 18760 in / 1066 out tokens, clarify) — FAIL: titles 1/2, clarify reply unresolved, stop: repeated clarify not allowed — finishing with what we have
+
+- [ ] manual correctness (facts match the golden notes?)
+
+**Question:** There are two books in my library about knights and chivalry. One seems to take the whole code of honour seriously and the other makes fun of it. Which is which, and how does each one treat the idea of being a knight?
+
+- reflect -> serious and satirical portrayals of knighthood in literature
+- reflect -> serious and satirical portrayals of knighthood in literature
+- reflect -> __clarify__
+- clarify: Are you asking about 'Don Quixote' by Miguel de Cervantes, which seems to make fun of the code of honour, or is there another book in your library that you haven't mentioned yet?
+Candidates in the library (answer with a number or a title):
+1) Don Quixote — Miguel de Cervantes
+2) Ivanhoe — Walter Scott
+3) Gulliver's Travels — Jonathan Swift
+4) Memoirs of Napoleon Bonaparte — Louis Antoine Fauvelet de Bourrienne
+5) Twenty Thousand Leagues Under the Sea — Jules Verne
+- reflect -> stop: repeated clarify not allowed — finishing with what we have
+
+[Don Quixote — Miguel de Cervantes, CHAPTER LII] The book "Don Quixote" by Miguel de Cervantes takes a more serious and philosophical approach to the idea of being a knight. It explores the concept of chivalry and honour through the character of Don Quixote, who is deeply committed to the ideals of knighthood despite the absurdity of his adventures. The adventures and misadventures of Don Quixote and his squire Sancho Panza serve as a commentary on the code of honour and the realities of chivalry.
+
+The other book in your library, which makes fun of the code of honour, is likely "The Knight's Move" by P. G. Wodehouse. However, this book is not included in the provided evidence, so we cannot cite it directly. The evidence provided focuses on "Don Quixote," which treats the idea of being a knight seriously and philosophically.
+
+> quote provenance: OK: all 4 quotes found verbatim in the passages they cite
+
+---
+10 completed, 0 errors, 2 clarify interrupts; quotes verified 28/31 (confirmed / unattributed / broken = 28 / 2 / 1); evidence items 31
+behavior PASS 8/10 (aggregation 0/1, answer 6/6, identify 2/2, refusal 0/1); expected titles mentioned 9/11
+cost $0.0000 total, $0.0000 mean per attempted question (81 LLM calls, 138272 in / 7605 out tokens; configured rates $0.0/M in, $0.0/M out, cache reads not discounted)
+manual correctness: not scored — tick the checkboxes above
