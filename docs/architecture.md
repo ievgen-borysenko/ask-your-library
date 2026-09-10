@@ -1,12 +1,12 @@
 # Architecture
 
-The graph, the retrieval, the catalogue path and the quote check in full; the README draws
-the flow in plain terms and links here.
+The graph, the retrieval, the catalogue path and the quote check in full; the README front page
+draws one path through the loop and links here.
 
 ## The whole system: offline and online
 
 Everything the project runs, in one picture: the offline index build and the online loop for a
-single question, with every node marked as deterministic code, a model call, or the reader.
+single question, with every node marked as code, a model call, or the reader.
 
 ```mermaid
 flowchart TB
@@ -21,11 +21,11 @@ flowchart TB
     end
     subgraph online["ONLINE — LangGraph loop, one question"]
         direction TB
-        Q(["question: CLI or web chat"]):::human --> PLAN["plan: mode plus 2-4 English queries"]:::ai
+        Q(["question: CLI or web chat"]):::human --> PLAN["plan: decides mode,<br/>asks for 2-4 English queries"]:::ai
         PLAN -->|"catalogue<br/>question"| CAT["catalog: list_books over the index tables,<br/>count = length of that list, no search"]:::code
         PLAN -->|"steps left"| ACT["act: search_both, hybrid + RRF,<br/>or read_chapter; sanitized, stable hit ids"]:::code
         PLAN -->|"no query left"| SYN
-        ACT --> OBS["observe: evidence distillate<br/>book, chapter, verbatim quote, hit id"]:::ai
+        ACT --> OBS["observe: evidence distillate<br/>book, chapter, candidate quote, hit id"]:::ai
         OBS --> REF{"reflect:<br/>enough<br/>evidence?"}:::ai
         REF -->|"next query, or a<br/>chapter not read yet"| ACT
         REF -->|"step limit, deadline,<br/>CRAG gate after 2 dry steps,<br/>no usable decision"| SYN["synthesize: answer with<br/>book, chapter citations"]:::ai
@@ -36,9 +36,9 @@ flowchart TB
         COV -->|"enough — gate already spent,<br/>after a clarify, or nothing<br/>left uncovered"| SYN
         SYN --> VAL["validate: plain code, no model —<br/>is each quote in the passage it cites?"]:::code
         CAT --> VAL
-        VAL --> OUT(["answer with citations and a provenance badge,<br/>or an honest 'not found'"]):::ai
+        VAL --> OUT(["answer with citations and a provenance badge,<br/>or an honest 'not found'"]):::code
     end
-    subgraph legend["CODE = deterministic code · AI = a model call: the answering model you configure, and the embedding model · HUMAN = human in the loop"]
+    subgraph legend["CODE = no model call, with one exception: act embeds its query · AI = a model call: the answering model you configure, and offline the embedding model and the card distiller · HUMAN = human in the loop"]
         direction LR
         L1["CODE"]:::code ~~~ L2["AI"]:::ai ~~~ L3["HUMAN"]:::human
     end
@@ -56,36 +56,36 @@ the graph really takes, labelled with the condition that takes it.
 
 ```mermaid
 flowchart TD
-    Q([question]) --> P[plan: mode + 2-4 English queries]
-    P -->|steps left| A[act: hybrid search, or read a chapter<br/>hit ids s&lt;step&gt;h&lt;n&gt;, raw text to the scratchpad]
-    P -->|step budget used up after a clarify| S
-    P -->|catalogue question: count, titles, a title or an author| K[catalog: the book list read from the index tables,<br/>count = length of that list; no search, no second model call]
+    Q(["question"]):::human --> P["plan: decides mode,<br/>asks for 2-4 English queries"]:::ai
+    P -->|"steps left"| A["act: hybrid search, or read a chapter<br/>hit ids like s2h4, sanitized text to the scratchpad"]:::code
+    P -->|"step budget or question deadline<br/>used up after a clarify /<br/>the planner's own call timed out"| S
+    P -->|"catalogue question: count, titles, a title or an author"| K["catalog: the book list read from the index tables,<br/>count = length of that list; no search, no second model call"]:::code
     K --> V
-    A --> O[observe: distill verbatim quotes, each pinned to a hit id]
-    O --> R{reflect}
-    R -->|search: next query, steps left| A
-    R -->|read_chapter: not attempted yet| A
-    R -->|ambiguous, once per run| C[clarify: interrupt with a candidate list]
+    A --> O["observe: distill candidate quotes, each pinned to a hit id"]:::ai
+    O --> R{"reflect"}:::ai
+    R -->|"search: next query, steps left"| A
+    R -->|"read_chapter: not attempted yet"| A
+    R -->|"ambiguous, once per run"| C["clarify: interrupt with a candidate list"]:::human
     C --> P
-    R -->|enough / step limit / CRAG gate after 2 dry steps /<br/>chapter already attempted / reflect JSON failed twice| S[synthesize: answer with book, chapter citations]
-    S --> V[validate: plain code, confirmed / unattributed / broken]
-    V --> E([END])
+    R -->|"enough / step limit / CRAG gate after 2 dry steps /<br/>question deadline / observe's or reflect's own call timed out /<br/>chapter already attempted / reflect JSON failed twice"| S["synthesize: answer with book, chapter citations"]:::ai
+    S --> V["validate: plain code, confirmed / unattributed / broken"]:::code
+    V --> E(["END"]):::code
     classDef code fill:#dbeafe,stroke:#1d4ed8,color:#000
     classDef ai fill:#fed7aa,stroke:#c2410c,color:#000
     classDef human fill:#bbf7d0,stroke:#15803d,color:#000
-    class P,O,R,S ai
-    class A,K,V code
-    class C human
-    subgraph legend["CODE = deterministic code · AI = a model call to the answering model you configure · HUMAN = human in the loop"]
-        direction LR
-        L1["CODE"]:::code ~~~ L2["AI"]:::ai ~~~ L3["HUMAN"]:::human
-    end
 ```
 
+Blue = no answering-model call · orange = a model call to the answering model you configure ·
+green = human in the loop. `act` is blue on that reading: `act` itself makes no answering-model
+call, and the passages it fetches reach the answering model one step later, at `observe`. It is not
+free of models altogether — the search embeds its query with the embedding model, on your machine
+unless `EMBED_BACKEND=openrouter` sends it out.
+
 ```
-question -> planner queries (2-4, English) -> LanceDB hybrid search (vectors + BM25, RRF)
-         -> observe distills verbatim quotes -> synthesize answers with citations
-         -> validate re-checks every collected evidence quote against the passage it was copied from
+question -> the 2-4 English queries the planner is asked for
+         -> LanceDB hybrid search (vectors + BM25, RRF)
+         -> observe distills candidate quotes -> synthesize answers with citations
+         -> validate checks every collected evidence quote against the passage it was copied from
 ```
 
 The decisions behind this shape, and the alternative each one replaced, are recorded as ADRs

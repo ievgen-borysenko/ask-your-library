@@ -2,10 +2,10 @@
 
 The long-form description this project's front page used to open with.
 
-Agentic RAG over a personal book library: a LangGraph agent plans English search queries, runs
-hybrid retrieval (bge-m3 vectors + BM25, fused with RRF) over a LanceDB index, distills verbatim
-evidence, reflects on whether it has enough, optionally asks a clarifying question or reads a
-whole chapter, and answers with `[book, chapter]` citations. Every evidence quote the agent collected is then checked
+Agentic RAG over a personal book library: a LangGraph agent asks the model, in its planner role, for
+English search queries, runs hybrid retrieval (bge-m3 vectors + BM25, fused with RRF) over a LanceDB index,
+distills candidate evidence, reflects on whether it has enough, optionally asks you a clarifying
+question or reads a whole chapter, and answers with `[book, chapter]` citations. Every evidence quote the agent collected is then checked
 in code against the exact passage it was copied from (the answer's own sentences are not checked claim by claim), per-node token cost is reported per
 question, and the demo corpus (33 public-domain books plus 2 synthetic canaries), the golden
 sets and every eval run are fingerprinted. A reference implementation with an honest eval
