@@ -17,15 +17,23 @@
   [`eval-results/2026-09-10-local-models.md`](eval-results/2026-09-10-local-models.md) — the
   default `qwen2.5:14b` at 10/10 with 17 / 0 / 0 on the catalogue set and 8/10 with 41 / 1 / 2 on
   the research set, `qwen2.5:7b` at 19/20 and 36 / 2 / 1 — with that report's own scope carried
-  along: the harness's automatic score, single runs, nobody graded the answers by hand, and one
-  re-measurement after the last prompt change (7b's research subset), so `qwen2.5:14b` throughout
-  and the catalogue half of both combined rows describe the earlier prompt. Nothing was re-run and
-  no new figure was produced. What the hosted side scored is given where it can be given honestly
+  along: single runs, nobody graded the answers by hand, and one re-measurement after the last
+  prompt change (7b's research subset), so `qwen2.5:14b` throughout and the catalogue half of both
+  combined rows describe the earlier prompt. Nothing was re-run and no new figure was produced.
+  The two kinds of number are also kept apart wherever they are quoted, because they are not the
+  same evidence: the `n/20` is behavioural compliance, the harness's own heuristic, while the quote
+  triple is checked by plain code — so the hardest thing that can be said about the default is the
+  provenance one, 1 unattributed and 2 broken quotes among the 61 it was checked on, and it is what
+  the README and the two short pages now lead with. Neither is answer correctness, which nobody
+  graded on any local run. What the hosted side scored is given where it can be given honestly
   rather than waved at as "another set": the catalogue set has a hosted run at the same golden
   checksum (10/10, 21 / 0 / 0,
   [`eval-results/2026-09-10-catalogue-set.md`](eval-results/2026-09-10-catalogue-set.md)) and is
-  clean on both; the research questions are ten of the eleven the core run of 07.09 answered 11/11
-  with 47 / 0 / 0, passing the two — `c09` and `c10` — that `qwen2.5:14b` fails; and neither is a
+  clean on both, and that run says of itself "not reader-graded"; the research questions are ten of
+  the eleven the core run of 07.09 answered 11/11 with 47 / 0 / 0, passing the two — `c09` and
+  `c10` — that `qwen2.5:14b` fails, and that one WAS read against the golden notes, ten `correct`
+  and one `incomplete`, the only reader grading in the comparison and on the hosted side, which
+  `known-limits.md` states rather than letting 11/11 stand in for it. Neither hosted run is a
   paired measurement, the code, the index and (for the research one) the golden checksum all
   differing. Two pages that framed the trade as speed alone were corrected the same way:
   [`cost.md`](cost.md) opened on "It is slower, and that is the whole trade", and

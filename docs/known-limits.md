@@ -5,7 +5,11 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
 
 - **The default local answering model is not good enough to advertise as a strong default, and
   this project's own measurement of it says so.** Measured on the local backend on 2026-09-10
-  ([`eval-results/2026-09-10-local-models.md`](eval-results/2026-09-10-local-models.md)): the
+  ([`eval-results/2026-09-10-local-models.md`](eval-results/2026-09-10-local-models.md)). Two
+  measurements, and they are not the same kind of thing: the scores below are **behavioural
+  compliance**, the harness's own heuristic (titles by substring, refusals by phrase marker,
+  clarify, drill-down), and the quote triples are **provenance**, checked by plain code against the
+  stored passage. Neither is answer correctness, which nobody graded on any local run. The
   default `qwen2.5:14b` scores 10/10 on the catalogue set with 17 / 0 / 0 quotes confirmed /
   unattributed / broken, and 8/10 on the research set with 41 / 1 / 2 — 18/20 and 58 / 1 / 2 over
   both, a 95.1 % (58/61) quote-confirmation rate. `qwen2.5:7b` scores 19/20 with 36 / 2 / 1, 92.3 %
@@ -22,12 +26,16 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   ([`eval-results/2026-09-10-catalogue-set.md`](eval-results/2026-09-10-catalogue-set.md)) — that
   set is clean on both, and on both runs every checked quote comes from its four research items
   (`k07`-`k10`, three negative controls and the hybrid), the six catalogue questions being answered
-  from the index tables with no quotes to check. The research questions are the ten `c*` items of
-  `en-demo.yaml`; the nearest hosted run of that file is the core set of 2026-09-07
-  (`v0.2.0-rc1`), those ten plus the Ukrainian `h06`, at
-  11/11 with 47 / 0 / 0 — passing both `c09` and `c10`. Neither hosted run is a paired
-  measurement: different code, a different index build, and for the research one a different golden
-  checksum. Read them as the shape of the gap. `LLM_BACKEND=openrouter`
+  from the index tables with no quotes to check. That hosted run says of itself: "Single run,
+  hosted planner, not reader-graded". The research questions are the ten `c*` items of
+  `en-demo.yaml`; the nearest hosted run of that file is the core set of 2026-09-07 (`v0.2.0-rc1`),
+  those ten plus the Ukrainian `h06`, at 11/11 with 47 / 0 / 0 — passing both `c09` and `c10`.
+  That one **was** read against the golden
+  notes, and the reader's verdicts are ten `correct` and one `incomplete` (`c06`), so 11/11 there
+  is behavioural compliance and 10 / 0 / 1 is what a reader made of the same eleven answers — the
+  only reader grading anywhere in this comparison, and it is on the hosted side. Neither hosted run
+  is a paired measurement: different code, a different index build, and for the research one a
+  different golden checksum. Read them as the shape of the gap. `LLM_BACKEND=openrouter`
   ([Configuration](configuration.md)) is the hosted path and [Cost](cost.md) is what it costs.
   Scope of the local numbers: the harness's automatic score, no human graded the answers (the
   manual-correctness checkboxes in the report are unticked), single runs, and the last prompt

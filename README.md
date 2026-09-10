@@ -63,8 +63,8 @@ No account, no API key, nothing to pay: the answering model and the embeddings b
 own machine through Ollama, and the cost line under the answer reads $0.0000. A hosted model is
 available (`bash scripts/install-mac.sh --hosted`) and is the only thing here that needs a key.
 
-**Local is slower and less accurate, and that is the trade** — the accuracy half is under
-[Privacy and cost](#privacy-and-cost) below and in
+**Local is slower, and it quotes less reliably: both halves are the trade.** The quoting half is
+under [Privacy and cost](#privacy-and-cost) below and in
 [`docs/known-limits.md`](docs/known-limits.md). On a Mac the default `qwen2.5:14b` answers a catalogue
 question ("how many books do I have?") in 1 to 12 s and a research one in 61 to 217 s, at $0; the
 hosted `claude-sonnet-4.6` takes 1 to 2 s and 8 to 61 s — a mean of 27 to 28 s over the eleven
@@ -123,20 +123,19 @@ themselves are in [`docs/eval-results/`](docs/eval-results/).
   A hosted answering model (`LLM_BACKEND=openrouter`) is an option, not a requirement; choose it
   and it needs a key and costs what [`docs/cost.md`](docs/cost.md) works out —
   [`docs/configuration.md`](docs/configuration.md).
-- **Is that default as accurate as the hosted model?** No, and the run that measured it says as
-  much. On 2026-09-10 the default `qwen2.5:14b` scored 8/10 on the research set with 41 / 1 / 2
-  quotes confirmed / unattributed / broken, and 10/10 on the catalogue set with 17 / 0 / 0 — 18/20
-  and 58 / 1 / 2 together. `qwen2.5:7b` scored 19/20 with 36 / 2 / 1; it is not the default because
-  14b grounds more heavily, 61 quotes checked against 39 and 95.1 % confirmed against 92.3 %. The
-  report's verdict is quoted rather than softened: "Neither model is good enough to advertise as a
-  strong default: 19/20 and 18/20 with genuine unattributed and broken quotes in both." Hosted, on
-  the catalogue set at the same golden checksum, ties at 10/10 and is clean too (21 / 0 / 0); on the
-  research side the nearest hosted number is the core run of 07.09 — the same golden file, those ten
-  questions plus one — at 11/11 with 47 / 0 / 0, but on a different tree and a different index, so
-  read it as the shape of the gap and not as a paired measurement: `c09` (identify) and `c10`
-  (aggregation) pass there and fail on `qwen2.5:14b`. A local model still fabricates, and `validate`
-  reports a broken quote rather than preventing one. The runs, and the caveat that only part of them
-  was re-measured after the last prompt change:
+- **Is that default as accurate as the hosted model?** No — with the caveat that nobody has read
+  the local answers against the golden notes, so this is what the project measures rather than a
+  verdict on correctness. Two different things, and the harder one first. **Quote provenance is
+  plain code**: on 2026-09-10 the default `qwen2.5:14b` left 1 unattributed and 2 broken quotes
+  among the 61 it was checked on, where the tagged hosted runs in the table above left none of
+  either. **Behavioural compliance is the harness's own heuristic** (titles, refusal, clarify):
+  10/10 on the catalogue set, 8/10 on the research set, 18/20 together — against 19/20 for the
+  smaller `qwen2.5:7b`, which is not the default because 14b grounds more heavily, 61 quotes
+  checked against 39. The report's verdict is quoted rather than softened: "Neither model is good
+  enough to advertise as a strong default: 19/20 and 18/20 with genuine unattributed and broken
+  quotes in both." Single runs, nobody graded the answers, and 14b's numbers describe the prompt as
+  it stood before the last change to it. No hosted run is paired with these; the nearest ones, and
+  what separates them, are in [`docs/known-limits.md`](docs/known-limits.md). The report itself:
   [`docs/eval-results/2026-09-10-local-models.md`](docs/eval-results/2026-09-10-local-models.md);
   the hosted path is `LLM_BACKEND=openrouter` ([`docs/configuration.md`](docs/configuration.md)).
 - Run this on your own machine, over books you legally own.
