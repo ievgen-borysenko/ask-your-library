@@ -21,4 +21,4 @@ about the configured rates, not a discount those runs missed.
 That paragraph describes the hosted path, which every measured number on this page was run on.
 On `LLM_BACKEND=ollama` the counter is not zero: Ollama serves a repeated prefix from its own
 prompt cache and reports what it served, so the CLI prints a `cache: N tokens read from cache`
-line — 436 tokens in the recorded run on the [README](../README.md) front page.
+line — 436 tokens in the recorded CLI run on the [README](../README.md) front page.
