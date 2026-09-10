@@ -252,31 +252,38 @@ REFUSAL_MARKERS = ("not included", "not in this", "not in the library", "not in 
 # models emit constantly ("the evidence does not include the exact wording,
 # but ..."), so the two changes belong together.
 #
-# The budget comes from the real c08 answers of both local models
-# (docs/eval-results/2026-09-10-local-models.md): 37 words after "does not
-# contain" (qwen2.5:7b), 36 after "does not cover" (14b), 11 after "no evidence"
-# (the 14b probe) — in each case a marker sentence that restates the question
-# plus one more sentence about the evidence. 40 leaves those a margin and has no
-# room for a retold episode. Deliberately NOT part of the rule: the provenance
-# count. An honest refusal quotes the card that says the thing is not in this
-# edition, and c08 confirmed 3 quotes on 7b and 4 on 14b while declining, so
-# "no confirmed quote" would fail the very answers this must keep passing.
-# The heuristic's remaining limit, stated: a model that declines and then
-# narrates in a dozen words still passes, which is what the manual-correctness
-# checkbox in the report is for.
-REFUSAL_TAIL_WORDS = 40
+# The budget separates two measured populations, not one sample from a guess.
+# Every real refusal in docs/eval-results/2026-09-10-local-models.md, counted as
+# prose after the first marker (labels stripped, see below): 11 words after "no
+# evidence" in the qwen3.6 probe, 36 after "does not cover" (qwen2.5:14b), 37
+# after "does not contain" (7b), and 42 in Run 8, where the same 7b refusal also
+# says what the evidence holds instead — in each case a marker sentence that
+# restates the question plus one or two more about the evidence. The control is
+# the failure shape this half of the rule exists to catch: the same refusal that
+# then retells the fence scene from model memory runs 82 words after its marker.
+# 60 lies between the two with margin on both sides — 18 words above the longest
+# honest refusal, 22 below the narration — so a refusal is not failed for being
+# thorough and a retold episode still does not fit. Deliberately NOT part of the
+# rule: the provenance count. An honest refusal quotes the card that says the
+# thing is not in this edition, and c08 confirmed 3 quotes on 7b and 4 on 14b
+# while declining, so "no confirmed quote" would fail the very answers this must
+# keep passing. The heuristic's remaining limit, stated: a model that declines
+# and then narrates in a dozen words still passes, which is what the
+# manual-correctness checkbox in the report is for.
+REFUSAL_TAIL_WORDS = 60
 
 # Citations do not count against that budget. The rule forbids NARRATION after
 # the marker, and a bracketed citation is the opposite of narration: it says
 # which passages the refusal looked at, which the marker list above was widened
 # to keep passing. Since the evidence block began carrying a filled label per
-# line, a refusal that ends by naming what it read pays six or seven whitespace
-# tokens per label — the two labels that end the measured c08 answer are 13 of
-# its 55 tail tokens, a third of the budget spent on being MORE accountable. So
-# labels are stripped before the words are counted and the budget stays a budget
-# for prose. (A markdown link's text would be stripped too; prose does not live
-# in brackets.) This does not rescue that particular answer, whose prose alone
-# is 42 words — the report says so, and the budget is the reviewer's to move.
+# line, a refusal that ends by naming what it read pays seven to nine whitespace
+# tokens per label — the two that end Run 8's c08 are 18 of its 60 raw tail
+# tokens, spent on being MORE accountable, and a refusal naming all four
+# chapters it read would pay 36. So labels are stripped before the words are
+# counted and the budget stays a budget for prose. (A markdown link's text would
+# be stripped too; prose does not live in brackets.) Stripping alone did not
+# rescue that answer: its prose is 42 words, which is the measurement the budget
+# above was then read off.
 CITATION_RE = re.compile(r"\[[^\[\]]*\]")
 
 

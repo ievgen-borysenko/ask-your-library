@@ -113,6 +113,10 @@ def test_a_refusal_that_goes_on_to_narrate_from_memory_is_not_a_refusal():
                 "traded a kite, twelve marbles, a piece of blue bottle glass and a dead rat on a "
                 "string for the chance to paint.")
     assert not harness.score(item, run(narrated, checked=0))["behavior_ok"]
+    # this is the control the budget is set against: 82 words after the marker,
+    # where the longest honest refusal measured is 42
+    marker = "does not contain"
+    assert len(narrated[narrated.find(marker) + len(marker):].split()) == 82
     # (c) an ANSWER item that mentions the phrase about a sub-point is untouched:
     # the tail rule lives on the refusal branch only, and this is scored on titles
     answer_item = {"type": "answer", "expected_books": ["Moby Dick"]}
@@ -124,12 +128,12 @@ def test_a_refusal_that_goes_on_to_narrate_from_memory_is_not_a_refusal():
 
 
 def test_the_tail_budget_still_passes_the_c08_answers_that_were_measured():
-    """The three c08 refusals in docs/eval-results/2026-09-10-local-models.md,
-    verbatim: the budget was chosen from them (37 / 36 / 11 words after the
-    first marker) and must not re-score the report's own runs."""
+    """Every c08 refusal in docs/eval-results/2026-09-10-local-models.md,
+    verbatim: the budget is set from them (11 / 36 / 37 / 42 words of prose
+    after the first marker) and must not re-score the report's own runs."""
     item = {"type": "refusal", "expected_books": []}
     measured = [
-        # qwen2.5:7b, both research runs
+        # qwen2.5:7b, both round-1 research runs
         'The evidence provided does not contain information about Tom Sawyer making the other '
         'boys pay him for the chance to paint the fence. This information is from "Adventures of '
         'Huckleberry Finn" by Mark Twain, but it does not address the specific question asked.',
@@ -140,6 +144,16 @@ def test_the_tail_budget_still_passes_the_c08_answers_that_were_measured():
         # qwen3.6 probe (the code's own refusal text)
         "I searched both the book cards and the transcripts, but found no evidence for this "
         "question in the library. Honest answer: I don't know.",
+        # qwen2.5:7b, Run 8: the same refusal, longer because it also says what
+        # the evidence holds instead and names the chapters it read. Its 42
+        # words are the longest honest refusal measured, and the FAIL it scored
+        # under the round-1 budget of 40 is why that budget is now 60.
+        "The evidence provided does not contain information about Tom Sawyer making the other "
+        "boys pay him for the chance to paint the fence. The evidence instead discusses Tom "
+        "Sawyer helping Jim escape and setting him free. Therefore, the specific information "
+        "requested is not available in the given evidence. "
+        "[Adventures of Huckleberry Finn — Mark Twain, CHAPTER XXXIV.] "
+        "[Adventures of Huckleberry Finn — Mark Twain, CHAPTER XLII.]",
     ]
     for answer in measured:
         assert harness.score(item, run(answer, checked=3))["behavior_ok"], answer
@@ -148,23 +162,31 @@ def test_the_tail_budget_still_passes_the_c08_answers_that_were_measured():
 def test_a_refusal_may_end_by_naming_the_passages_it_read():
     """The tail budget is for prose, not for citations. Once every evidence line
     carried a filled label, a refusal that ends by naming the chapters it read
-    pays six or seven whitespace tokens per label, and the measured c08 answer
-    of `qwen2.5:7b` spends 13 of its 55 tail tokens that way. So labels are
-    stripped before the words are counted: the answer below is the c08 refusal
-    the budget was READ OFF (37 words, docs/eval-results/2026-09-10-local-models.md)
-    with two labels appended, and appending them must not fail it."""
+    pays seven to nine whitespace tokens per label. Below is the measured Run 8
+    c08 refusal of `qwen2.5:7b` (docs/eval-results/2026-09-10-local-models.md):
+    42 words of prose, and 18 more tokens spent on the two labels. A refusal
+    that names all four chapters such a run reads pays 36, which is past the
+    budget on labels alone — so they are stripped before the words are counted
+    and the same prose scores the same either way."""
     item = {"type": "refusal", "expected_books": []}
-    cited = ('The evidence provided does not contain information about Tom Sawyer making the '
-             'other boys pay him for the chance to paint the fence. This information is from '
-             '"Adventures of Huckleberry Finn" by Mark Twain, but it does not address the '
-             'specific question asked. '
-             "[Adventures of Huckleberry Finn — Mark Twain, CHAPTER XXXIV.] "
-             "[Adventures of Huckleberry Finn — Mark Twain, CHAPTER XLII.]")
+    prose = ("The evidence provided does not contain information about Tom Sawyer making the "
+             "other boys pay him for the chance to paint the fence. The evidence instead "
+             "discusses Tom Sawyer helping Jim escape and setting him free. Therefore, the "
+             "specific information requested is not available in the given evidence. ")
+    labels = ["[Adventures of Huckleberry Finn — Mark Twain, CHAPTER XXXIV.]",
+              "[Adventures of Huckleberry Finn — Mark Twain, CHAPTER XLII.]",
+              "[Adventures of Huckleberry Finn — Mark Twain, CHAPTER XXXI.]",
+              "[Adventures of Huckleberry Finn — Mark Twain, CHAPTER II.]"]
     marker = "does not contain"
-    tail = cited[cited.find(marker) + len(marker):]
-    assert len(tail.split()) > harness.REFUSAL_TAIL_WORDS     # raw, the labels blow the budget
-    assert len(harness.CITATION_RE.sub(" ", tail).split()) == 37   # the prose is the measured one
-    assert harness.score(item, run(cited, checked=3))["behavior_ok"]
+    for count in (2, 4):
+        cited = prose + " ".join(labels[:count])
+        tail = cited[cited.find(marker) + len(marker):]
+        assert len(tail.split()) == 42 + 9 * count                     # raw: nine tokens a label
+        assert len(harness.CITATION_RE.sub(" ", tail).split()) == 42   # the prose is the measured one
+        assert harness.score(item, run(cited, checked=3))["behavior_ok"], count
+    # four labels: raw, the citations alone put the answer past the budget
+    all_cited = prose + " ".join(labels)
+    assert len(all_cited[all_cited.find(marker) + len(marker):].split()) > harness.REFUSAL_TAIL_WORDS
     # and the rule keeps its teeth: brackets buy no room for a retold episode
     narrated_with_a_citation = (
         "The library does not contain The Adventures of Tom Sawyer. "

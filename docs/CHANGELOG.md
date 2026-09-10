@@ -40,18 +40,21 @@
   `не містить` / `не містять`. Deliberately not "does not mention", which an answer that answers may
   say about one chapter. Because that family also covers hedges a model emits constantly ("the
   evidence does not include the exact wording, but ..."), the scorer no longer accepts a marker on its
-  own: a refusal is a marker with the answer ENDING there, at most 40 words after it. Otherwise
+  own: a refusal is a marker with the answer ENDING there, at most 60 words after it. Otherwise
   "The library does not contain this, but in the novel the captain ..." would score PASS while telling
-  the story from model memory, which is the exact failure the item measures. The budget is read off
-  the measured `c08` answers — 37 words after the marker on `qwen2.5:7b`, 36 on `14b`, 11 on the
-  `qwen3.6` probe — and the provenance count is deliberately not part of the rule, because an honest
+  the story from model memory, which is the exact failure the item measures. The budget separates two
+  measured populations rather than clearing one: the honest `c08` refusals run 11 words after the
+  marker on the `qwen3.6` probe, 36 on `qwen2.5:14b`, 37 on `7b`, and 42 in the run where 7b also
+  says what the evidence holds instead, while the same refusal that then retells the fence scene from
+  memory runs 82 — so 60 leaves 18 words of margin above the longest honest one and 22 below the
+  narration. The provenance count is deliberately not part of the rule, because an honest
   refusal quotes the card that says the thing is not in this edition. The metric keeps its meaning:
   an evidence-free answer told from model memory is still a failure, and the manual-correctness
   checkbox in the report is still where a mixed answer is caught. The tail is counted over prose
   only: a bracketed citation is not narration, and now that every evidence line carries a filled
-  label, a refusal that ends by naming the chapters it read pays six or seven whitespace tokens per
-  label — 13 of the 55 tail tokens of the measured `c08` answer, a third of the budget spent on
-  being more accountable rather than less.
+  label, a refusal that ends by naming the chapters it read pays seven to nine whitespace tokens per
+  label — 18 of the 60 raw tail tokens of the measured `c08` answer, spent on being more accountable
+  rather than less.
 - **A local thinking model is told not to think, and no single call outlives the question deadline.**
   Ollama does not count reasoning tokens against `max_tokens`, so `qwen3.6` over its OpenAI-compatible
   endpoint reasoned past `LLM_TIMEOUT_S` without beginning an answer, timed out, retried twice, and the
@@ -87,7 +90,10 @@
   408/409/429 and 5xx, never a `Retry-After` longer than two minutes) and the backoff (0.5 s doubling
   to 8 s with jitter, or the server's own `Retry-After`). Usage accounting is untouched — it is read
   off the reply that came back, so `llm_calls` counts what it counted before and every number in a run
-  report keeps its meaning.
+  report keeps its meaning. Because that loop speaks the SDK's exception vocabulary and builds each
+  attempt's client with an `httpx.Timeout`, `llm.py` imports `openai` and `httpx` at module import
+  time: both are declared as the direct dependencies they now are, at the versions the lockfile
+  already resolved, so the lock gains the two edges and moves no version.
 - **`--print-env-resolution` no longer prints the keys it read.** The flag dumped every value of
   the `.env` verbatim, and a `.env` is where the credentials live: a run of it reproduced
   `OPENROUTER_API_KEY`, `LANGCHAIN_API_KEY` and `CHAINLIT_PASSWORD` on stdout, from the one flag

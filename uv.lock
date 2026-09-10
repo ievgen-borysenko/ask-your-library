@@ -204,9 +204,11 @@ name = "ask-your-library"
 version = "0.2.0"
 source = { editable = "." }
 dependencies = [
+    { name = "httpx" },
     { name = "lancedb" },
     { name = "langchain-openai" },
     { name = "langgraph" },
+    { name = "openai" },
     { name = "pyarrow" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
@@ -231,9 +233,11 @@ requires-dist = [
     { name = "aiosqlite", marker = "extra == 'ui'", specifier = ">=0.20" },
     { name = "chainlit", marker = "extra == 'ui'", specifier = ">=2.12" },
     { name = "greenlet", marker = "extra == 'ui'", specifier = ">=3.0" },
+    { name = "httpx", specifier = ">=0.28" },
     { name = "lancedb", specifier = ">=0.34" },
     { name = "langchain-openai", specifier = ">=0.3" },
     { name = "langgraph", specifier = ">=0.4" },
+    { name = "openai", specifier = ">=3.1" },
     { name = "pyarrow", specifier = ">=25.0" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "pyyaml", specifier = ">=6.0" },
