@@ -8,8 +8,10 @@ Scored per question (no LLM judge; heuristics, not proof):
                     against them, and the catalogue's own total, are the verdict)
                     (accent-folded substring) - NOT a citation check
   behavior  refusal -> the answer carries an explicit refusal marker
-            ("not in the library", "cannot answer", "не знаю", ...); an answer
-            without evidence that still tells a story from model knowledge FAILS;
+            ("not in the library", "cannot answer", "не знаю", ...) AND ends
+            there, at most REFUSAL_TAIL_WORDS words after it; an answer
+            without evidence that still tells a story from model knowledge FAILS,
+            and so does one that declines and then narrates anyway;
             expected_behavior "clarify" -> a clarify interrupt happened;
             "clarify_or_answer" -> clarify OR all titles mentioned;
             otherwise -> all titles mentioned

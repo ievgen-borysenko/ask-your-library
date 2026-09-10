@@ -1,5 +1,9 @@
 > **Provenance of this artifact.** Five runs on 2026-09-10 against the local backend only
-> (`LLM_BACKEND=ollama`, `EMBED_BACKEND=ollama`), plus one two-question probe of the thinking model.
+> (`LLM_BACKEND=ollama`, `EMBED_BACKEND=ollama`), plus one two-question probe of the thinking model,
+> plus **Run 7**, added in review round 1 at the default time budgets and stamped separately — it is
+> the one run made from a clean tree (`--require-clean`, code `37f71e2`) and its own section carries
+> its settings and its fingerprints, which differ from the six below in the deadline and in the
+> corpus manifest. Runs 1-6 carry the stamp that follows.
 > Code `5b19f2d+dirty(4e721d730cb1)`: `5b19f2d` was `origin/main` when the runs were made, and the
 > dirty checksum covers this branch's whole code change and nothing else — this report file did not
 > exist yet, and the harness hashes `git diff HEAD` together with the un-ignored untracked files, so
@@ -40,12 +44,15 @@
 
 Four defects found by the local mini-eval of 2026-09-10 were fixed on `fix/local-model-path`, and the
 same two sets were re-run for both `qwen2.5` candidates, plus the research subset a second time for
-`qwen2.5:7b` to see run-to-run variance.
+`qwen2.5:7b` to see run-to-run variance. Review round 1 added a third `qwen2.5:7b` research run at the
+default time budgets (Run 7), because runs 1-6 used a 1,200 s deadline under which the new per-call cap
+never binds.
 
 - the synthesize rules now carry one filled citation example and forbid the literal placeholder
 - `provenance._normalize` treats `_` as punctuation, so Gutenberg italics no longer break a correct quote
 - the eval's `REFUSAL_MARKERS` cover the "the evidence does not contain / cover / include it" family
-- `LLM_BACKEND=ollama` sends `reasoning_effort: "none"`, and one call can no longer outlive the question deadline
+- `LLM_BACKEND=ollama` sends `reasoning_effort: "none"`, and no search-loop call outlives the question
+  deadline — while the final synthesize, and anything issued after the deadline, keep the full timeout
 
 ## Before and after
 
@@ -63,6 +70,7 @@ over the ten questions of the set, the mini-eval's own definition.
 | `qwen2.5:7b` before | research | 6/10 | 27 / 2 / **2** | 9/10 | 685 s | 68.5 |
 | `qwen2.5:7b` **after** | research | **9/10** | 28 / 2 / **1** | **0/10** | 673 s | 67.3 |
 | `qwen2.5:7b` **after** | research, 2nd run | **9/10** | 28 / 2 / **1** | **0/10** | 300 s | 30.0 |
+| `qwen2.5:7b` **after** | research, default budgets (Run 7) | **9/10** | 28 / 2 / **1** | **0/10** | 708 s | 70.8 |
 | `qwen2.5:7b` before | **combined** | 16/20 | 35 / 2 / 2 | 12/20 | 865 s | 43.3 |
 | `qwen2.5:7b` **after** | **combined** | **19/20** | **36 / 2 / 1** | **0/20** | 851 s | 42.6 |
 | `qwen2.5:14b` before | catalogue | 10/10 | 17 / 0 / 0 | 1/10 | 396 s | 39.6 |
@@ -166,12 +174,23 @@ LLM_BACKEND=ollama OLLAMA_LLM_MODEL=<tag> EMBED_BACKEND=ollama OLLAMA_EMBED_MODE
     c04-crusoe-cannibals c05-quixote-windmills c06-fogg-missing-day \
     c07-alice-trial c08-refusal-tom-sawyer c09-shipwreck-first-person \
     c10-chivalry-two-books
+
+# Run 7 (review round 1): the same research subset with the two time variables UNSET, so the
+# config defaults decide — LLM_TIMEOUT_S=600 (the ollama default) against QUESTION_DEADLINE_S=300
+LLM_BACKEND=ollama OLLAMA_LLM_MODEL=qwen2.5:7b EMBED_BACKEND=ollama OLLAMA_EMBED_MODEL=bge-m3 \
+  LIBRARY_DB_PATH=<demo index> \
+  GOLDEN_PATH=eval/golden/en-demo.yaml EVAL_RESULTS_DIR=<scratch>/7b-defaults \
+  uv run python eval/run_agent_eval.py --require-clean \
+    c01-ivanhoe-disguised-knight c02-huck-go-to-hell c03-musketeers-women \
+    c04-crusoe-cannibals c05-quixote-windmills c06-fogg-missing-day \
+    c07-alice-trial c08-refusal-tom-sawyer c09-shipwreck-first-person \
+    c10-chivalry-two-books
 ```
 
-The harness output of all six runs follows, copied verbatim from the report files it wrote; nothing was
-recomputed. The one exception is the second 7b research run: its ten question headlines and its totals
-block are pasted verbatim and the rest is given as the complete `diff` against the first run, because
-the two files are otherwise identical line for line.
+The harness output of all seven runs follows, copied verbatim from the report files it wrote; nothing
+was recomputed. Two are given as headlines, totals and a complete `diff` against the run they are
+otherwise identical to, line for line: the second 7b research run against the first, and Run 7 against
+the second.
 
 ---
 
@@ -977,3 +996,68 @@ I searched both the book cards and the transcripts, but found no evidence for th
 behavior PASS 2/2 (answer 1/1, refusal 1/1); expected titles mentioned 1/1
 cost $0.0000 total, $0.0000 mean per attempted question (8 LLM calls, 15078 in / 812 out tokens; configured rates $0.0/M in, $0.0/M out, cache reads not discounted)
 manual correctness: not scored — tick the checkboxes above
+
+---
+
+## Run 7 — `qwen2.5:7b`, research subset at the DEFAULT time budgets (wall 708 s)
+
+Added in review round 1, from a clean tree (`--require-clean`, code `37f71e2`), to measure the timeout path the other runs never touched: `LLM_TIMEOUT_S` and `QUESTION_DEADLINE_S` unset, so the config defaults apply — 600 s a call against a 300 s question, the pair the cap was written for, instead of the 1200 s deadline runs 1-6 used. **What bound:** the cap was in force on every one of the 71 search-loop calls (each was given what was left of the 300 s question budget, from 300 s down to about 190 s at the worst point, rather than the configured 600 s) and on none of the 10 final synthesize calls, which kept the full 600 s. Nothing fired: no question reached the deadline (the longest, `c03`, took 110 s of 300 s, so 0 of 10 stop reasons are the deadline), no call hit the 5 s floor, and the harness reports 0 errors — i.e. tightening the effective per-call bound from 600 s to at most 300 s cost nothing. The run reproduces Run 2 exactly: same 9/10 behaviour, same 28 / 2 / 1 quotes, the same answer text and the same per-question token counts for all ten questions; the complete `diff` against Run 2 is five wall-clock numbers, given in full below.
+
+One fingerprint does move, and it is not the index: `manifest@ed94677aa3a3` against Run 2's `manifest@f093bb27dab1`. The manifest hash describes the corpus files **in the working tree**, and this run was made at the rebased head, where `#17` re-pinned six of them. The index is the same one runs 1-6 used, built before that re-pin and reused as built (`rows=165` / `rows=7285`, both `built=2026-09-10T00:18:39` / `...T00:18:30`, identical to every other run's line), so the manifest here names the tree's corpus rather than the corpus the index was built from.
+
+```
+run: code 37f71e2 | golden en-demo.yaml@f041a0290000 | manifest@ed94677aa3a3 | toc@ef7a347ace1d | model qwen2.5:7b | cards_ollama=bge-m3/1024d rows=165 v2 built=2026-09-10T00:18:39 | transcripts_ollama=bge-m3/1024d rows=7285 v2 built=2026-09-10T00:18:30 | strict_hit_id=on | clarify_pick=default | hit_chars=2500/12000 | steps=4/2 | candidates=5 | deadline=300s | single run
+```
+
+## c01-ivanhoe-disguised-knight (identify, 2 steps, 44s, $0.0000, 6 calls, 6261 in / 474 out tokens) — PASS: titles 1/1, named book not in the catalogue: The Once and Future King, stop: stopped: requested chapter was already attempted (re-reading cannot show more text)
+## c02-huck-go-to-hell (answer, 2 steps, 49s, $0.0000, 6 calls, 9737 in / 577 out tokens) — PASS: titles 1/1, named book -> retrieval filter Adventures of Huckleberry Finn — Mark Twain, stop: stopped: requested chapter was already attempted (re-reading cannot show more text)
+## c03-musketeers-women (answer, 4 steps, 110s, $0.0000, 10 calls, 20093 in / 897 out tokens) — PASS: titles 1/1, named book -> retrieval filter The Three Musketeers — Alexandre Dumas, stop: step limit (4) — wanted to keep searching
+## c04-crusoe-cannibals (answer, 4 steps, 96s, $0.0000, 10 calls, 18834 in / 755 out tokens) — PASS: titles 1/1, named book -> retrieval filter Robinson Crusoe — Daniel Defoe, stop: step limit (4) — wanted to keep searching
+## c05-quixote-windmills (answer, 2 steps, 51s, $0.0000, 6 calls, 9381 in / 644 out tokens) — PASS: titles 1/1, named book -> retrieval filter Don Quixote — Miguel de Cervantes, stop: stopped: requested chapter was already attempted (re-reading cannot show more text)
+## c06-fogg-missing-day (answer, 3 steps, 69s, $0.0000, 8 calls, 12196 in / 915 out tokens) — PASS: titles 1/1, named book -> retrieval filter Around the World in Eighty Days — Jules Verne, stop: enough evidence
+## c07-alice-trial (answer, 2 steps, 44s, $0.0000, 6 calls, 8767 in / 511 out tokens) — PASS: titles 1/1, named book -> retrieval filter Alice's Adventures in Wonderland — Lewis Carroll, stop: stopped: requested chapter was already attempted (re-reading cannot show more text)
+## c08-refusal-tom-sawyer (refusal, 3 steps, 66s, $0.0000, 8 calls, 15000 in / 545 out tokens) — PASS: titles 0/0, named book not in the catalogue: The Adventures of Tom Sawyer, stop: enough evidence
+## c09-shipwreck-first-person (identify, 3 steps, 87s, $0.0000, 10 calls, 19072 in / 1171 out tokens, clarify) — PASS: titles 1/2, clarify reply unresolved, named book -> retrieval filter Robinson Crusoe — Daniel Defoe, stop: repeated clarify not allowed — finishing with what we have
+## c10-chivalry-two-books (aggregation, 4 steps, 92s, $0.0000, 11 calls, 18742 in / 988 out tokens, clarify) — FAIL: titles 1/2, clarify reply unresolved, stop: repeated clarify not allowed — finishing with what we have
+
+---
+10 completed, 0 errors, 2 clarify interrupts; quotes verified 28/31 (confirmed / unattributed / broken = 28 / 2 / 1); evidence items 31
+behavior PASS 9/10 (aggregation 0/1, answer 6/6, identify 2/2, refusal 1/1); expected titles mentioned 9/11
+cost $0.0000 total, $0.0000 mean per attempted question (81 LLM calls, 138083 in / 7477 out tokens; configured rates $0.0/M in, $0.0/M out, cache reads not discounted)
+manual correctness: not scored — tick the checkboxes above
+
+`diff` against Run 2 — every difference, in full:
+
+```diff
+1c1
+< # Agent eval — 2026-09-10 04:28 — en-demo.yaml
+---
+> # Agent eval — 2026-09-10 06:17 — en-demo.yaml
+3c3
+< run: code 5b19f2d+dirty(4e721d730cb1) | golden en-demo.yaml@f041a0290000 | manifest@f093bb27dab1 | toc@ef7a347ace1d | model qwen2.5:7b | cards_ollama=bge-m3/1024d rows=165 v2 built=2026-09-10T00:18:39 | transcripts_ollama=bge-m3/1024d rows=7285 v2 built=2026-09-10T00:18:30 | strict_hit_id=on | clarify_pick=default | hit_chars=2500/12000 | steps=4/2 | candidates=5 | deadline=1200s | single run
+---
+> run: code 37f71e2 | golden en-demo.yaml@f041a0290000 | manifest@ed94677aa3a3 | toc@ef7a347ace1d | model qwen2.5:7b | cards_ollama=bge-m3/1024d rows=165 v2 built=2026-09-10T00:18:39 | transcripts_ollama=bge-m3/1024d rows=7285 v2 built=2026-09-10T00:18:30 | strict_hit_id=on | clarify_pick=default | hit_chars=2500/12000 | steps=4/2 | candidates=5 | deadline=300s | single run
+5c5
+< ## c01-ivanhoe-disguised-knight (identify, 2 steps, 34s, $0.0000, 6 calls, 6261 in / 474 out tokens) — PASS: titles 1/1, named book not in the catalogue: The Once and Future King, stop: stopped: requested chapter was already attempted (re-reading cannot show more text)
+---
+> ## c01-ivanhoe-disguised-knight (identify, 2 steps, 44s, $0.0000, 6 calls, 6261 in / 474 out tokens) — PASS: titles 1/1, named book not in the catalogue: The Once and Future King, stop: stopped: requested chapter was already attempted (re-reading cannot show more text)
+33c33
+< ## c03-musketeers-women (answer, 4 steps, 95s, $0.0000, 10 calls, 20093 in / 897 out tokens) — PASS: titles 1/1, named book -> retrieval filter The Three Musketeers — Alexandre Dumas, stop: step limit (4) — wanted to keep searching
+---
+> ## c03-musketeers-women (answer, 4 steps, 110s, $0.0000, 10 calls, 20093 in / 897 out tokens) — PASS: titles 1/1, named book -> retrieval filter The Three Musketeers — Alexandre Dumas, stop: step limit (4) — wanted to keep searching
+49c49
+< ## c04-crusoe-cannibals (answer, 4 steps, 86s, $0.0000, 10 calls, 18834 in / 755 out tokens) — PASS: titles 1/1, named book -> retrieval filter Robinson Crusoe — Daniel Defoe, stop: step limit (4) — wanted to keep searching
+---
+> ## c04-crusoe-cannibals (answer, 4 steps, 96s, $0.0000, 10 calls, 18834 in / 755 out tokens) — PASS: titles 1/1, named book -> retrieval filter Robinson Crusoe — Daniel Defoe, stop: step limit (4) — wanted to keep searching
+64c64
+< ## c05-quixote-windmills (answer, 2 steps, 50s, $0.0000, 6 calls, 9381 in / 644 out tokens) — PASS: titles 1/1, named book -> retrieval filter Don Quixote — Miguel de Cervantes, stop: stopped: requested chapter was already attempted (re-reading cannot show more text)
+---
+> ## c05-quixote-windmills (answer, 2 steps, 51s, $0.0000, 6 calls, 9381 in / 644 out tokens) — PASS: titles 1/1, named book -> retrieval filter Don Quixote — Miguel de Cervantes, stop: stopped: requested chapter was already attempted (re-reading cannot show more text)
+140c140
+< ## c10-chivalry-two-books (aggregation, 4 steps, 91s, $0.0000, 11 calls, 18742 in / 988 out tokens, clarify) — FAIL: titles 1/2, clarify reply unresolved, stop: repeated clarify not allowed — finishing with what we have
+---
+> ## c10-chivalry-two-books (aggregation, 4 steps, 92s, $0.0000, 11 calls, 18742 in / 988 out tokens, clarify) — FAIL: titles 1/2, clarify reply unresolved, stop: repeated clarify not allowed — finishing with what we have
+167,168d166
+< 
+< ---
+```
