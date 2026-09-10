@@ -34,7 +34,9 @@ flowchart TB
 
 *"I remember a book in which a man happened to end up on an island and came across cannibals.
 What is the name of the book, and why did that happen?" — the default local model (qwen2.5:14b) on
-the demo corpus, no API key. 147.7 s by the CLI's own metrics line in the last frame.*
+the demo corpus, no API key. 147.7 s by the CLI's own metrics line in the last frame — a cold first
+ask, the same band as the 160.8 s a different first question takes from a clean clone
+([`docs/eval-results/2026-09-10-first-question-local.md`](docs/eval-results/2026-09-10-first-question-local.md)).*
 
 ![The web UI answering what d'Artagnan said before fighting three men at once: the answer, the quote-provenance badge, and one evidence passage opened under it](docs/img/ask-library-ui.gif)
 
@@ -61,11 +63,12 @@ No account, no API key, nothing to pay: the answering model and the embeddings b
 own machine through Ollama, and the cost line under the answer reads $0.0000. A hosted model is
 available (`bash scripts/install-mac.sh --hosted`) and is the only thing here that needs a key.
 
-**Local is slower, and that is the trade.** On a Mac the default `qwen2.5:14b` takes roughly 40 s
-for a catalogue question and 130 to 160 s for a research one, at $0; the hosted
-`claude-sonnet-4.6` answers in tens of seconds — a per-question mean of 27 to 28 s on the core
-eval set — for roughly $0.02 to $0.05 a question. Free costs time. Every figure here is a
-measured single run, and [`docs/cost.md`](docs/cost.md) names which run each one comes from.
+**Local is slower, and that is the trade.** On a Mac the default `qwen2.5:14b` answers a catalogue
+question ("how many books do I have?") in 1 to 12 s and a research one in 61 to 217 s, at $0; the
+hosted `claude-sonnet-4.6` takes 1 to 2 s and 8 to 61 s — a mean of 27 to 28 s over the eleven
+research questions of the core eval set — for about $0.002 and $0.05 respectively. Free costs time.
+Every figure here is a measured single run, over the rows of that one kind of question, and
+[`docs/cost.md`](docs/cost.md) names which run and which rows each one comes from.
 
 Every other system, the manual steps, your own books, the web UI and the eval commands:
 [`docs/quick-start.md`](docs/quick-start.md).

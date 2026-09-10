@@ -21,7 +21,11 @@ need an OpenRouter key. The hosted path is unchanged and opt-in.
   two `PRICE_*` lines shipped commented out beside a note on what the hosted path costs and that
   it needs an account. That inverts `scripts/install-mac.sh`: `--hosted` is now the mode that
   transforms the example (backend, both time budgets, the three commented lines), and the local
-  mode writes it out as it stands. An invalid `LLM_BACKEND` still refuses to start rather than
+  mode writes it out as it stands. The dry run says so: its hosted plan read `would copy
+  .env.example to .env unchanged` — the one line of the plan describing something the script does
+  not do — and now reads `would write .env from .env.example with these values`, with every line
+  either writer rewrites listed under it, `ORCHESTRATOR_MODEL` and the two `PRICE_*` included. A
+  test pins the wording and the values. An invalid `LLM_BACKEND` still refuses to start rather than
   falling back — to either backend now, since falling back to the local one would leave a run
   meant for a hosted model asking Ollama for something nobody pulled.
 - **A first run with nothing configured ends in an instruction, not a stack trace — and in a
@@ -46,16 +50,22 @@ need an OpenRouter key. The hosted path is unchanged and opt-in.
   opens with the answering model and backend it is about to test; `run_retrieval_eval.py`, which
   calls no answering model, names the embedder instead. The backend used to go unsaid, and unsaid
   meant the hosted default, which would now leave the reports in `docs/eval-results/`
-  indistinguishable from a free local run. **No measured number was touched.** Those reports were
-  produced on the hosted configuration, and the README's results table, `docs/evaluation.md` and
-  `docs/cost.md` now say so where they present them, together with the fact that the default
-  configuration is local and free and is not what any of them measures.
+  indistinguishable from a free local run. **No measured number was touched.** The reports behind
+  the README's results table were produced on the hosted configuration, and that table,
+  `docs/evaluation.md` and `docs/cost.md` now say so where they present them, together with the
+  fact that the default configuration is local and free and is not what any of them measures. Not
+  every report in `docs/eval-results/` is hosted — `2026-09-10-local-models.md` and
+  `2026-09-10-first-question-local.md` are local runs — and the fingerprint carries the backend only
+  from this release onward, so for the reports committed before it the backend is read from the
+  provenance header (or from the `$0.0/M` rates on the cost line). `docs/evaluation.md` and
+  `.env.example` say that instead of claiming every report is hosted.
 - **The question deadline is per backend, like the per-call timeout — and a call that runs out of
   time ends the loop, not the run.** `QUESTION_DEADLINE_S` used to be one flat `300`, which no
   recommended path ever ran with: `.env.example` and `scripts/install-mac.sh` both write `1200`
   for the local mode, and a value in a copied `.env` wins over `config.py`, so the only
   configuration that got 300 s was the bare clone-and-ask path this release advertises as
-  equivalent — where a single measured local answer took 159.5 s of it, and where the per-call
+  equivalent — where the quick start's own first question, measured from a clean clone in
+  `docs/eval-results/2026-09-10-first-question-local.md`, takes 160.8 s of it, and where the per-call
   read timeout was capped at what was left of the 300 s rather than the 600 s `LLM_TIMEOUT_S`
   names. The default is now `1200` under `LLM_BACKEND=ollama` and `300` under `openrouter`, by the
   same rule and in the same line shape as `LLM_TIMEOUT_S`. Separately: a loop call (plan, observe,
@@ -65,11 +75,16 @@ need an OpenRouter key. The hosted path is unchanged and opt-in.
   stop reason of its own: the loop ends, the evidence already distilled stands, and `synthesize`,
   which the budget never caps, writes the answer from it. Only a timeout is caught; every other
   failure of a model call is raised exactly as before, and a `synthesize` that fails is unchanged.
-- **The trade the default makes is stated where the choice is made.** The README and `docs/cost.md`
-  said the local default costs nothing and did not say it is slower. Both now say it in one place:
-  a local `qwen2.5:14b` takes roughly 40 s for a catalogue question and 130-160 s for a research
-  one at $0, a hosted `claude-sonnet-4.6` answers in tens of seconds for roughly $0.02-0.05, and
-  `cost.md` names the single run behind every figure. `docs/add-your-own-books.md`'s "only asking
+- **The trade the default makes is stated where the choice is made, per kind of question.** The
+  README and `docs/cost.md` said the local default costs nothing and did not say it is slower. Both
+  now say it in one place, and each figure is computed from the rows of one kind of question rather
+  than from a set mean that mixes six catalogue items with four research controls: a local
+  `qwen2.5:14b` answers a catalogue question in 1-12 s and a research one in 61-217 s at $0, a
+  hosted `claude-sonnet-4.6` in 1-2 s and 8-61 s for about $0.002 and $0.05, and `cost.md` names the
+  run **and the rows** behind every figure. The first-question latency the quick start's reader
+  actually meets is measured for the first time and committed as a report of its own,
+  `docs/eval-results/2026-09-10-first-question-local.md`: 160.8 s cold and 62.7 s warm, from a clean
+  clone at this branch's head over the demo index. `docs/add-your-own-books.md`'s "only asking
   questions costs money" is qualified with `LLM_BACKEND=openrouter` and its $0.03-0.04 aligned
   with `cost.md`'s $0.04-0.05 (the older figure was the `v0.1.0` measurement, and says so).
 - **The "model not pulled" notice carries the same remedy as the unreachable-Ollama one.** An

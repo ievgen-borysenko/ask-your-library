@@ -3,11 +3,19 @@
 The harnesses, the golden sets and the runs behind the results table; the README carries the
 same table without this text around it.
 
-Every measured run on this page and in [`eval-results/`](eval-results/) was produced on the
-**hosted** configuration (`LLM_BACKEND=openrouter`, `anthropic/claude-sonnet-4.6`), which is not
-the shipped default: the default is local and free, a different answering model and therefore a
-different system, and no number here describes it. Each report's fingerprint names the model and
-the backend it ran with, so a local run of your own is told apart from these by its own header.
+Every run reported **on this page** was produced on the **hosted** configuration
+(`LLM_BACKEND=openrouter`, `anthropic/claude-sonnet-4.6`), which is not the shipped default: the
+default is local and free, a different answering model and therefore a different system, and no
+number on this page describes it. [`eval-results/`](eval-results/) is not hosted-only, and the two
+local reports there say so in their own provenance headers:
+[`2026-09-10-local-models.md`](eval-results/2026-09-10-local-models.md), two `qwen2.5` sizes on
+`LLM_BACKEND=ollama`, and
+[`2026-09-10-first-question-local.md`](eval-results/2026-09-10-first-question-local.md), one local
+CLI run. Neither feeds the table below. The rule that separates the two kinds at a glance is the
+cost line: a hosted run carries the configured rates `$3.0/M in, $15.0/M out`, a local one `$0.0/M
+in, $0.0/M out`. From this release the harness fingerprint also names the backend outright — `model
+<name> via <backend>` — but every report committed before it prints `model <name>` alone, so for
+those the backend is read from the report's provenance header, not from the fingerprint.
 
 **`eval/run_retrieval_eval.py` - component baseline, no LLM calls.** Feeds the *raw* golden
 question to the retriever and asks whether the resulting window (top-4 card chunks + top-4

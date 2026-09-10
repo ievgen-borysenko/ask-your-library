@@ -1299,6 +1299,10 @@ write_env() {
 SUMMARY_KEYS='LIBRARY_DB_PATH|EMBED_BACKEND|OLLAMA_URL|OLLAMA_EMBED_MODEL'
 SUMMARY_KEYS="$SUMMARY_KEYS|LLM_BACKEND|OLLAMA_LLM_MODEL|LLM_TIMEOUT_S|QUESTION_DEADLINE_S"
 SUMMARY_KEYS="$SUMMARY_KEYS|LANGSMITH_TRACING_V2|LANGCHAIN_TRACING_V2"
+# The three lines only `hosted_env` uncomments. They are in the summary so that
+# every line either writer rewrites is a line the reader sees: without them the
+# hosted plan named values it did not show.
+SUMMARY_KEYS="$SUMMARY_KEYS|ORCHESTRATOR_MODEL|PRICE_IN_PER_MTOK|PRICE_OUT_PER_MTOK"
 
 env_summary() {
     # `|| true`: no match is an empty summary, not a failed script under `set -e`.
@@ -1319,7 +1323,7 @@ if [ -f .env ]; then
     fi
 elif [ "$hosted" -eq 1 ]; then
     if [ "$dry_run" -eq 1 ]; then
-        plan "copy .env.example to .env unchanged"
+        plan "write .env from .env.example with these values"
         hosted_env | env_summary
     else
         write_env hosted_env

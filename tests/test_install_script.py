@@ -269,6 +269,34 @@ def test_hosted_mode_keeps_the_hosted_model_and_never_asks_for_a_key(sandbox):
 
 
 @mac_only
+def test_hosted_dry_run_says_it_transforms_the_example_and_shows_every_line(sandbox):
+    """The hosted plan used to read `would copy .env.example to .env unchanged`
+    while `hosted_env` rewrites six of its lines — the one sentence in the dry
+    run a reader has no way to check without reading the script. The plan now
+    describes a transformed write, and every line the writer touches is in the
+    summary under it, with the value it will carry.
+
+    The expected values are read out of `.env.example` rather than written here:
+    what this pins is the transformation, not today's model or price."""
+    example = (REPO / ".env.example").read_text().splitlines()
+    commented = {line.split("=", 1)[0].removeprefix("# "): line.split("=", 1)[1]
+                 for line in example if line.startswith("# ") and "=" in line}
+    out = dry_run(sandbox, "--hosted")
+    assert "would write .env from .env.example with these values" in out
+    assert "unchanged" not in out
+    # The three lines the sed rewrites, in the hosted direction.
+    assert "LLM_BACKEND=openrouter" in out
+    assert "LLM_TIMEOUT_S=120" in out
+    assert "QUESTION_DEADLINE_S=300" in out
+    # And the three the example ships commented out, uncommented with their values.
+    for key in ("ORCHESTRATOR_MODEL", "PRICE_IN_PER_MTOK", "PRICE_OUT_PER_MTOK"):
+        assert f"{key}={commented[key]}" in out
+        assert f"# {key}=" not in out
+    # Still never the key line.
+    assert "OPENROUTER_API_KEY=" not in out
+
+
+@mac_only
 def test_demo_build_is_confirmed_once_and_says_how_long_it_takes(sandbox):
     out = dry_run(sandbox)
     assert "about 30 minutes" in out
