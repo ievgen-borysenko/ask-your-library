@@ -12,6 +12,16 @@ eye rather than to the model.
 """
 import re
 
+
+def _codepoints(*blocks: int | tuple[int, int]) -> str:
+    """The characters named by single code points and inclusive (first, last) spans."""
+    chars = []
+    for block in blocks:
+        first, last = block if isinstance(block, tuple) else (block, block)
+        chars.extend(chr(cp) for cp in range(first, last + 1))
+    return "".join(chars)
+
+
 # C0 controls except the whitespace ones, DEL, then the invisible formatting
 # characters: zero-width space/joiners and the LTR/RTL marks, the bidirectional
 # overrides, the isolates, and the byte-order mark.
@@ -19,22 +29,28 @@ import re
 # real text, and the two expressions compose (a strip, then a mapping to a space
 # or a <br>). Deleting a break here instead would silently join the words around
 # it, so an honest quote across a CR would read as broken.
-# One block per line, and the formatting characters written out one by one
-# rather than as spans: a range between two \u escapes is read by a regular
-# expression checker as the range between the last character of the first
-# escape and the first character of the second, so \u2066-\u2069 reads as
-# 6 to u — every digit, every capital and half the lower case. The set is the
-# same one either way, and test_sanitize.py pins it code point by code point.
-CONTROL_CHARS_RE = re.compile(
-    "["
-    "\x00-\x08\x0e-\x1f"                 # C0 controls, minus tab and the line breaks
-    "\x7f"                               # DEL
-    "\u200b\u200c\u200d"                 # zero-width space, non-joiner, joiner
-    "\u200e\u200f"                       # the LTR and RTL marks
-    "\u202a\u202b\u202c\u202d\u202e"     # bidi embeddings, the pop, the overrides
-    "\u2066\u2067\u2068\u2069"           # bidi isolates and the pop that ends them
-    "\ufeff"                             # BOM, i.e. the zero-width no-break space
-    "]")
+# One block per line with its comment, the intervals inclusive, and the class
+# assembled rather than written as a literal: a range inside a literal class is
+# read by its two endpoints, and how far it reaches from there is what a reader —
+# or a checker — takes on trust. CodeQL's py/overly-large-range said as much
+# about the old spelling, and the same reading is why the formatting characters
+# were already listed one by one: a span between two \u escapes reaches further
+# than it reads, \u2066-\u2069 running from 6 to u, every digit, every capital and
+# half the lower case. `_codepoints` expands each block into the characters
+# themselves, so the compiled pattern carries no first-last range at all. The
+# set is the same one either way: test_sanitize.py pins it code point by code
+# point across the whole of Unicode, and pins the shape of the pattern as well.
+CONTROL_CHARS = _codepoints(
+    (0x00, 0x08), (0x0e, 0x1f),              # C0 controls, minus tab and the line breaks
+    0x7f,                                    # DEL
+    0x200b, 0x200c, 0x200d,                  # zero-width space, non-joiner, joiner
+    0x200e, 0x200f,                          # the LTR and RTL marks
+    0x202a, 0x202b, 0x202c, 0x202d, 0x202e,  # bidi embeddings, the pop, the overrides
+    0x2066, 0x2067, 0x2068, 0x2069,          # bidi isolates and the pop that ends them
+    0xfeff,                                  # BOM, i.e. the zero-width no-break space
+)
+
+CONTROL_CHARS_RE = re.compile("[" + re.escape(CONTROL_CHARS) + "]")
 
 
 # Every character CommonMark (and a terminal) treats as the end of a line, not
