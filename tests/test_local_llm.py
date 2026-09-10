@@ -33,6 +33,24 @@ def test_ollama_backend_needs_no_key_in_preflight_and_in_the_llm_factory():
     assert kw["api_key"] == "ollama" and kw["base_url"].endswith("/v1") and kw["model"] == "qwen2.5:3b"
 
 
+def test_the_local_backend_asks_the_model_not_to_think_and_the_hosted_one_does_not():
+    """Ollama does not count a reasoning model's thinking tokens against
+    max_tokens, so a thinking model can reason past LLM_TIMEOUT_S and never
+    begin its answer. Measured against Ollama 0.33.3, `reasoning_effort: "none"`
+    is the one form its OpenAI-compatible endpoint honours; it is inert for a
+    model without the thinking capability, so it goes on every local call — and
+    it is not sent to the hosted backend, where "none" is not a value every
+    model's API takes."""
+    code = ("import json; from ask_your_library import llm; "
+            "captured = {}\n"
+            "class Fake:\n"
+            "    def __init__(self, **kw): captured.update(kw)\n"
+            "llm.ChatOpenAI = Fake; llm.llm(); print(json.dumps(captured.get('reasoning_effort')))")
+    assert json.loads(_out(code, LLM_BACKEND="ollama", OLLAMA_LLM_MODEL="qwen3.6")) == "none"
+    assert json.loads(_out(code, LLM_BACKEND="ollama", OLLAMA_LLM_MODEL="qwen2.5:7b")) == "none"
+    assert json.loads(_out(code, LLM_BACKEND="openrouter", OPENROUTER_API_KEY="sk-test")) is None
+
+
 def test_openrouter_backend_still_refuses_without_a_key():
     code = "from ask_your_library import preflight; print(preflight.check_api_key() is not None)"
     assert _out(code, LLM_BACKEND="openrouter") == "True"

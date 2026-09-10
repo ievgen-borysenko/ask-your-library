@@ -78,8 +78,11 @@ def _normalize(text: str) -> str:
     hallucinations. Punctuation that carries meaning inside numbers survives:
     a decimal or thousands separator between digits, a range dash between
     digits and a sign directly before a digit, so "-5" is not "5" and "1-2"
-    is not "1.2". A fabricated or paraphrased sentence still fails the
-    word-by-word check regardless."""
+    is not "1.2". The underscore is punctuation here too, although `\\w` counts
+    it as a letter: it is Project Gutenberg's italics markup, never a word. That
+    is a separator everywhere, not only around italics, so "snake_case_name"
+    reads as three words and "1_000" as two. A fabricated or paraphrased
+    sentence still fails the word-by-word check regardless."""
     # Control and invisible formatting characters are never text: DROPPED, the
     # same class and the same way as where the passage becomes prompt text
     # (`act`, `llm.data_block`). Mapping them to a space instead would split a
@@ -91,6 +94,20 @@ def _normalize(text: str) -> str:
     # form of break, not only LF: a passage split by a bare CR is two words.
     text = strip_control_chars(unicodedata.normalize("NFKC", text).lower())
     text = LINE_BREAK_RE.sub(" ", text).replace("\t", " ")
+    # The underscore is punctuation, not a letter. `\w` — which the class below
+    # is built from — keeps it, and Project Gutenberg writes italics as _go_, so
+    # the markup used to survive as part of the token: a quote copied verbatim
+    # out of such a passage ("I'll go to hell") did not match the passage it
+    # came from ("I'll _go_ to hell") and was reported as broken. Both the quote
+    # and the passage pass through here, so dropping it drops it on both sides.
+    # Before the number rules below, so a signed number in italics ("_-5_") is
+    # read the same way as a bare one. It is a separator everywhere, not only in
+    # italics markup, so the loosening is wider than the bug: "snake_case_name"
+    # is now three words and "1_000" is two, and a quote and its passage that
+    # disagree only there ("snake_case" against "snake case") now match. Both
+    # are strings a book prints rarely and an agreeing pair of them is not the
+    # shape a hallucination takes, which is why the wider rule is acceptable.
+    text = text.replace("_", " ")
     text = re.sub(r"(?<=\d)[.,](?=\d)", "\x00", text)
     text = re.sub(r"(?<=\d)[-–−](?=\d)", "\x01", text)
     text = re.sub(r"(?:(?<=\W)|^)[-–−](?=\d)", "\x02", text)   # sign after any non-word char: "(-5)"

@@ -426,7 +426,7 @@ win). See `.env.example`.
 | `MAX_EMPTY_STREAK` | `2` | CRAG gate: the loop stops after this many dry steps in a row |
 | `MAX_CLARIFY_CANDIDATES` | `5` | Longest list of books a clarify question offers; at most 5, the ordinals the reply resolver understands |
 | `LLM_TIMEOUT_S` | `120` (`600` with `LLM_BACKEND=ollama`) | Per-attempt read/write timeout of one model call (the SDK's default was 600 s; connect stays 5 s) |
-| `LLM_MAX_RETRIES` | `2` | Extra attempts the client makes on a timeout or a transient provider error (the SDK's default, now explicit); on those failures a call takes up to timeout x (1 + retries) plus the SDK's backoff (see Known limits: a slowly streaming response is not bounded) |
+| `LLM_MAX_RETRIES` | `2` | Extra attempts on a timeout or a transient provider error, made by `llm_invoke`'s own loop with the SDK's retries switched off, so every attempt is re-bounded by what is left of the question; an uncapped call then takes up to timeout x (1 + retries) plus backoff, a capped one stops when the budget does (see Known limits: a slowly streaming response is not bounded) |
 | `QUESTION_DEADLINE_S` | `300` | Time budget per question, checked before each next decision: the loop stops searching and answers from what it found, stop reason shown; clarify waiting time excluded; `0` = none; `ask-library --deadline` overrides it for a run |
 | `PRICE_IN_PER_MTOK` / `PRICE_OUT_PER_MTOK` | `3.0` / `15.0` | USD per 1M tokens, for the cost estimate |
 | `ASK_LANG` | `en` | UI language: `en` or `ua` |
@@ -751,13 +751,26 @@ From `docs/backlog.md`, confirmed by the runs of 2026-09-05, 06 and 07 (`v0.2.0-
   is a budget for continuing the search: it is checked before each next decision, never
   mid-call, so the step in flight and the synthesis still complete. `LLM_TIMEOUT_S` is httpx's
   read timeout, which bounds the wait for the next chunk of a response, not the whole request:
-  a provider that keeps sending slowly is not cut off. For the usual failure shapes (no answer,
-  a transient error) one call takes up to `LLM_TIMEOUT_S` x (1 + `LLM_MAX_RETRIES`) plus the
-  SDK's backoff (up to two minutes per retry when a 429 carries `Retry-After`), and a node that
-  asks for JSON may call twice, so a step in flight is around 720 s hosted / 3,600 s on a cold
-  local model in those shapes; that is an estimate for them, not a guaranteed upper bound on a
-  question. When the deadline is spent the answer is written from the evidence so far and the
-  stop reason says so. The web UI additionally waits at most 300 s for a clarify reply.
+  a provider that keeps sending slowly is not cut off. A search-loop call (plan, observe,
+  reflect) is bounded per attempt by the smaller of `LLM_TIMEOUT_S` and what is left of the
+  question's budget, never below 5 s. The retries are the client's own loop, not the SDK's
+  (which samples one timeout when it builds a client and reuses that number for every retry it
+  makes): each attempt is given the budget that is left when it starts, and once a failure and
+  its backoff would leave 5 s or less the call gives up instead of retrying. So a capped call,
+  attempts and backoff included, stays inside the seconds the question had left when it began,
+  and with the local pair — 600 s a call against 300 s a question — no single loop call
+  outlives the whole question and then retries. Two calls keep the full `LLM_TIMEOUT_S` per
+  attempt, and the full retry count: the final synthesis, and anything the loop issues once the
+  budget is already spent. Bounding those by the seconds left would end a deadline-stopped run
+  in a timeout instead of the degraded answer the deadline exists to produce. For the usual
+  failure shapes (no answer, a transient error) such an uncapped call takes up to
+  `LLM_TIMEOUT_S` x (1 + `LLM_MAX_RETRIES`) plus the backoff between attempts (0.5 s doubling
+  to a cap of 8 s, or the server's own `Retry-After` when it sends one, up to two minutes), and
+  a node that asks for JSON may call twice, so an uncapped call in flight is around 720 s
+  hosted / 3,600 s on a cold local model in those shapes; that is an estimate for them, not a
+  guaranteed upper bound on a question. When the deadline is spent the
+  answer is written from the evidence so far and the stop reason says so. The web UI
+  additionally waits at most 300 s for a clarify reply.
 - **Chapter reads are capped at 12,000 characters** and the cut is marked in-band within that
   budget; an empty read (chapter not in the index) yields no hit at all and is logged in the
   scratchpad, so nothing synthetic can be quoted as evidence.

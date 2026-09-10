@@ -28,7 +28,7 @@ from ask_your_library import llm  # noqa: E402
 def no_network(monkeypatch):
     """Nothing in this file may reach a model: the stages patch llm.llm
     themselves, and anything they miss hits this."""
-    def forbidden():
+    def forbidden(role="", capped=None):
         raise AssertionError("the test tried to build a real LLM client")
 
     monkeypatch.setattr(llm, "llm", forbidden)
@@ -300,7 +300,7 @@ def test_without_the_flag_the_live_stage_runs_last_and_is_the_only_paid_call(mon
                  "quote": "He picked up the letter from the table and began to read it aloud.",
                  "why": "what the hero did"}]}), "usage_metadata": {}, "response_metadata": {}})()
 
-    monkeypatch.setattr(llm, "llm", lambda: FakeLLM())
+    monkeypatch.setattr(llm, "llm", lambda role="", capped=None: FakeLLM())
     # --allow-skipped keeps the exit code stable in both CI jobs; the report line
     # below still distinguishes a complete run from an incomplete one.
     assert canary.main(["--allow-skipped"]) == 0

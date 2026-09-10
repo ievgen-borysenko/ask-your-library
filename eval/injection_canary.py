@@ -181,7 +181,7 @@ class CapturingLLM:
 def capture(reply):
     """Context manager + recorder: `with capture(x) as fake: node(state)`."""
     fake = CapturingLLM(reply)
-    patcher = mock.patch.object(llm, "llm", lambda: fake)
+    patcher = mock.patch.object(llm, "llm", lambda role="", capped=None: fake)
     patcher.start()
     llm.reset_usage()
     return fake, patcher

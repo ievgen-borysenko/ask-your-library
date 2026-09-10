@@ -111,11 +111,13 @@ MAX_CLARIFY_CANDIDATES = _positive_int("MAX_CLARIFY_CANDIDATES", "5", unit="book
 # MAX_STEPS is a step budget, not a time budget. One model call is bounded by the
 # client: LLM_TIMEOUT_S per attempt (read/write; the connect timeout stays the
 # SDK's 5 s), LLM_MAX_RETRIES more attempts on a timeout or a transient provider
-# error, plus the SDK's backoff between attempts (up to 2 min per retry when a 429
-# carries Retry-After). The SDK's own defaults were 600 s and 2 retries; this
-# tightens the per-attempt time and makes the retry count explicit. A node that
-# asks for JSON may call twice (one retry on malformed JSON), so a step in flight
-# can take about twice one call's bound.
+# error, plus a backoff between attempts (0.5 s doubling to 8 s, or the server's
+# own Retry-After up to 2 min). The SDK's own defaults were 600 s and 2 retries;
+# this tightens the per-attempt time and makes the retry count explicit. The
+# retries are llm.llm_invoke's loop, not the SDK's, so a call the deadline caps
+# is re-bounded before each attempt instead of reusing the first one's number
+# (see llm.call_timeout_s). A node that asks for JSON may call twice (one retry
+# on malformed JSON), so a step in flight can take about twice one call's bound.
 # The question is bounded by QUESTION_DEADLINE_S, checked by the loop before each
 # next decision (a step in flight finishes; the answer is then written from what
 # was found, with an honest stop reason). 0 = no deadline. Time spent waiting for
