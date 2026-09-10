@@ -26,6 +26,9 @@ __pycache__/
 # see the exception.
 .chainlit/translations/*
 !.chainlit/translations/en-US.json
+# Where that copy came from and what was changed in it, next to the file itself;
+# NOTICE in the repository root carries the same record.
+!.chainlit/translations/README.md
 .files/
 
 # SQLite sidecars wherever they land: AYL_CHAINLIT_DIR moves the chat db out of

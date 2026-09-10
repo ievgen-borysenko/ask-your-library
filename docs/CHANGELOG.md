@@ -5,18 +5,34 @@
 - **The default local answering model is `qwen2.5:14b`.** `OLLAMA_LLM_MODEL` defaulted to `qwen3.6`:
   23 GB, a thinking model, and the one of the three candidates that has never been run over an eval set
   end to end — the report carries a two-question probe of it and says as much. A default should be a
-  model the eval actually measured, and of the two that were, `qwen2.5:14b` (9.0 GB) is the one a
-  question with several parts comes back from whole, where `qwen2.5:7b` (4.7 GB) answers one part and
-  stops. The mini-eval does not decide this and is not claimed to: 7b scores 19/20 there against 14b's
-  18/20, and `c10`, the two-book aggregation, fails on both. What the numbers do show is how much
-  harder 14b grounds an answer — 61 quotes checked against 39, 95.1 % confirmed against 92.3 %. The
-  costs are named rather than hidden: 9.0 GB to pull instead of 4.7, and roughly twice the wall time
-  per question (`docs/eval-results/2026-09-10-local-models.md`, Runs 1-8). `OLLAMA_LLM_MODEL=qwen2.5:7b`
-  in `.env` is one line for a machine that would rather have the speed, and the warning that a small
-  local model is less reliable than the hosted default stands unchanged. `scripts/install-mac.sh` reads
-  the name out of `config.py` and pulls whatever it finds there, so only the printed download size
-  needed editing — and it was wrong anyway: "approximately 3-8 GB depending on the tag" for a model
-  that is 9 GB, beside a correct 1.2 GB for `bge-m3`.
+  model the eval actually measured, and `docs/eval-results/2026-09-10-local-models.md` (Runs 1-8)
+  measured two. It does not make a clean case for either, and this entry is not going to read as if it
+  did. On the harness's automatic score `qwen2.5:7b` (4.7 GB) is **ahead**: 19/20 against 14b's 18/20.
+  `c09` (identify) passes on 7b and fails on 14b. Broken quotes — a quote the passage it cites does not
+  contain — came down to one for 7b and stayed at two for 14b. The report's own verdict is quoted
+  rather than filtered: "Neither model is good enough to advertise as a strong default: 19/20 and 18/20
+  with genuine unattributed and broken quotes in both." What the choice rests on is the other half.
+  14b grounds far more heavily — 61 quotes checked against 39, 95.1 % of them confirmed against
+  92.3 % — and it keeps the parts of a question apart. `c10` asks which of two books takes chivalry
+  seriously and which mocks it; it FAILS on both models, but 7b fails by collapsing the two into one
+  sentence that is simply wrong ("Don Quixote … is the book that takes the whole code of honour
+  seriously and makes fun of it"), while 14b answers the half the evidence carries, names Don Quixote
+  for it, and then says the serious one "is not directly mentioned in the evidence provided". A wrong
+  answer and a partial one that declines what it cannot ground are not the same failure, and the second
+  is the behaviour this project asks for everywhere else. That is the owner's call, made for grounding
+  and for complete answers, and the costs are named rather than hidden: 9.0 GB to pull instead of 4.7,
+  and roughly twice the wall time per question (86.8 s against 42.6 s, mean over the twenty questions
+  of both sets). One caveat from the report travels with the comparison: round 2 changed the synthesize
+  rules and only 7b's research subset was re-run afterwards, so 14b's numbers describe the prompt as it
+  stood in Runs 1-6. `OLLAMA_LLM_MODEL=qwen2.5:7b` in `.env` is one line for a machine that would
+  rather have the speed, and the warning that a small local model is less reliable than the hosted
+  default stands unchanged — the report says in as many words that it should not be softened.
+  `scripts/install-mac.sh` reads the name out of `config.py` and pulls whatever it finds there, so only
+  the printed download size needed editing. It was wrong twice over: "approximately 3-8 GB depending on
+  the tag" for a model that is 9 GB, and that number went beside whatever name had been resolved, so an
+  `OLLAMA_LLM_MODEL` override was announced at the default's size. Each size line now prints its number
+  only when the model IS the default it was measured on — 9 GB for `qwen2.5:14b`, 1.2 GB for `bge-m3` —
+  and says "size depends on the model" otherwise.
 - **A stop reason is printed once, not twice.** `stop_chapter_again` opened with `stopped: ` while
   every line that shows a stop reason already says that word itself, so a chapter the model asked for
   a second time reached the terminal as `[reflect] stopped: stopped: requested chapter was already
@@ -36,10 +52,25 @@
   the directory with every language the package ships on each start (and on `chainlit init`) but skips
   a file that already exists, so the tracked one is never overwritten; and `load_translation()` serves
   the file for the effective language WHOLE, out of that directory alone, with no per-key merge against
-  the package copy — which is why ours has to be a full copy rather than a one-key override. Tests pin
-  all three: the key set against the installed package's file, so a Chainlit bump that renames a key
-  fails the suite instead of blanking a label; the single string that differs; and the seeding step
-  leaving our file alone. `.gitignore` goes on ignoring the other 22 languages.
+  the package copy — which is why ours has to be a full copy rather than a one-key override. The same
+  comment names the third: `config.py` resolves `.chainlit/` from `CHAINLIT_APP_ROOT`, defaulting to
+  the CURRENT WORKING DIRECTORY, so the tracked file wins for a server started in the clone root, which
+  is what every documented command does, and a run started elsewhere seeds a fresh directory there and
+  gets upstream's wording back. Tests pin all three behaviours: the key set against the installed
+  package's file, so a Chainlit bump that renames a key fails the suite instead of blanking a label;
+  the single string that differs; and the seeding step leaving our file alone. `.gitignore` goes on
+  ignoring the other 22 languages.
+- **That copy is attributed, because it is somebody else's file.** `.chainlit/translations/en-US.json`
+  is Chainlit 2.12.0's own, under Apache-2.0, and §4(b) of that licence asks a modified third-party
+  file to carry a notice saying it was changed — nothing in the tree said so, and `NOTICE` credited
+  only this project's author. `NOTICE` now names the file, the upstream version, the one changed key
+  and the date, and records that the installed distribution ships neither a LICENSE nor a NOTICE of its
+  own to quote a copyright line from: its metadata declares only the licence and the authors, and
+  inventing a copyright line to fill the gap would be worse than saying there is none. The JSON keeps
+  no headers — Apache asks for the notice, not for a comment in every file, and this one has no syntax
+  for it. `.chainlit/translations/README.md` carries the same provenance beside the file, and a test
+  holds the two ends together: dropping the copy without the paragraph, or the paragraph without the
+  copy, fails the suite.
 - **Every evidence line carries the citation to use, and the rules name no book at all.**
   `Every claim must cite its source as [book, chapter]` named the format without ever showing one
   filled in, and `qwen2.5:7b` ended 11 of the 20 answers of the local mini-eval with the literal

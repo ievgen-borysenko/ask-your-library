@@ -205,6 +205,37 @@ def test_dry_run_pulls_the_models_the_code_asks_for(sandbox):
 
 
 @mac_only
+def test_the_download_sizes_are_printed_for_the_defaults_they_were_measured_on(sandbox):
+    """1.2 GB is bge-m3 and 9 GB is qwen2.5:14b — two measurements, not a rule
+    about Ollama models. With nothing exported the script is looking at exactly
+    those two and says so."""
+    embed_model, llm_model = config_models()
+    out = dry_run(sandbox)
+    assert f"{embed_model} — embeddings, approximately 1.2 GB" in out
+    assert f"{llm_model} — answers, a chat model: approximately 9 GB" in out
+    assert "size depends on the model" not in out
+
+
+@mac_only
+def test_an_overridden_model_is_printed_without_a_size_it_was_never_measured_at(sandbox):
+    """The line took whatever name it had resolved and printed the default's
+    size beside it, so `OLLAMA_LLM_MODEL=qwen2.5:7b` in a .env — 4.7 GB — was
+    announced as a 9 GB download, and any embedder as 1.2 GB. An override now
+    gets its own name and no number."""
+    result = real_run(sandbox, "--dry-run",
+                      OLLAMA_EMBED_MODEL="nomic-embed-text",
+                      OLLAMA_LLM_MODEL="qwen2.5:7b")
+    assert result.returncode == 0, result.stderr
+    out = result.stdout
+    assert "nomic-embed-text — embeddings, size depends on the model" in out
+    assert "qwen2.5:7b — answers, a chat model: size depends on the model" in out
+    assert "1.2 GB" not in out and "9 GB" not in out
+    # And the pull still follows the name, not the default.
+    assert "ollama pull qwen2.5:7b" in out
+    assert "ollama pull nomic-embed-text" in out
+
+
+@mac_only
 def test_local_mode_configures_both_backends_on_ollama(sandbox):
     out = dry_run(sandbox)
     assert "LLM_BACKEND=ollama" in out

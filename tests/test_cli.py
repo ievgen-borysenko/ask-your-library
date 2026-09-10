@@ -1,5 +1,8 @@
 """The CLI's argument handling: `--help` and `--version` are documentation, not
 a run, so they must work in a fresh clone with no API key and no index."""
+import re
+from pathlib import Path
+
 import pytest
 
 from ask_your_library import cli
@@ -204,6 +207,19 @@ STOP_LINES = {
     "ua": (("ev_reflect_stopped", "зупинка:"), ("ui_stopped", "зупинка:"), ("m_stop", "зупинка:")),
 }
 
+# eval/run_agent_eval.py is a fourth renderer of the same reasons — nodes.py puts
+# `t("stop_*")` into state["stop_reason"] and the report prints it — but it has
+# no i18n table behind it: its prefixes are English literals in two f-strings,
+# the step log's `reflect -> stop: ` and the header's `, stop: `. They are read
+# out of the file instead of copied here, so a rename, a removal or a third site
+# fails this test rather than drifting away from it silently.
+EVAL_SCRIPT = Path(__file__).resolve().parents[1] / "eval" / "run_agent_eval.py"
+
+
+def eval_stop_prefixes():
+    source = EVAL_SCRIPT.read_text(encoding="utf-8")
+    return re.findall(r'f"([^"]*?)\{[^"}]*stop_reason[^"}]*\}"', source)
+
 
 @pytest.mark.parametrize("lang", ["en", "ua"])
 def test_a_stop_reason_never_repeats_the_word_its_own_line_carries(lang):
@@ -212,9 +228,12 @@ def test_a_stop_reason_never_repeats_the_word_its_own_line_carries(lang):
     `[reflect] stopped: stopped: requested chapter was already attempted`.
     The reasons are read out of the table rather than listed here: the next one
     someone writes with the prefix baked in has to fail this, not just the one
-    that had it."""
+    that had it. The eval report renders the same reasons and is checked with
+    them, its prefixes being English in both languages."""
     from ask_your_library import i18n
     from ask_your_library.i18n import t
+    prefixes = eval_stop_prefixes()
+    assert len(prefixes) == 2, f"eval/run_agent_eval.py renders {len(prefixes)} stop lines"
     before = i18n.get_lang()
     try:
         i18n.set_lang(lang)
@@ -228,6 +247,10 @@ def test_a_stop_reason_never_repeats_the_word_its_own_line_carries(lang):
                 assert not reason.startswith(word), f"{key} ({lang}) opens with {word!r}"
             for line, word in STOP_LINES[lang]:
                 assert t(line, r=reason).count(word) == 1, f"{line} doubles {word!r} on {key}"
+            for prefix in prefixes:
+                assert "stop:" in prefix, f"eval prefix {prefix!r} no longer says it stopped"
+                assert f"{prefix}{reason}".count("stop:") == 1, \
+                    f"eval's {prefix!r} doubles 'stop:' on {key} ({lang})"
     finally:
         i18n.set_lang(before)
 

@@ -140,6 +140,17 @@ name = "Ask Your Library"
 #     wording our en-US.json replaces, which is wrong here because the data layer
 #     persists every chat and the sidebar keeps it. Setting language = "en-US"
 #     would put our wording in front of everyone, in English only.
+#   - which .chainlit/ all of that reads is decided by the CURRENT WORKING
+#     DIRECTORY, not by where ui.py sits: config.py takes
+#     APP_ROOT = os.getenv("CHAINLIT_APP_ROOT", os.getcwd()) and joins ".chainlit"
+#     onto it. So the tracked file wins only for a server started in the
+#     repository root — which is what every documented command does
+#     (`uv run --extra ui chainlit run ui.py -w --host 127.0.0.1`, from the clone
+#     root, in the README and at the end of scripts/install-mac.sh). Started
+#     elsewhere, Chainlit seeds a fresh .chainlit/ there and the dialog reverts to
+#     upstream's wording; this file, being under the same root, would be missed
+#     with it. AYL_CHAINLIT_DIR is unrelated and does not move any of this: it
+#     only tells ui.py where to put the chat db and the auth secret.
 
 # layout = "wide"
 

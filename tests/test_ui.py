@@ -681,6 +681,27 @@ def test_startup_seeds_the_other_languages_and_leaves_ours_alone(tmp_path, monke
     assert after["navigation"]["newChat"]["dialog"]["description"] == OUR_WORDING
 
 
+def test_the_notice_attributes_the_vendored_chainlit_file():
+    """Apache-2.0 §4(b) asks a modified third-party file to carry a notice that
+    it was changed, and a file that is upstream's byte for byte except one value
+    is exactly that. The file and the paragraph are one contract, so this test
+    fails if either side goes: no NOTICE paragraph with a tracked copy, and no
+    stale paragraph after the copy is dropped. The version is asserted too —
+    a chainlit bump has to be a decision about this copy, not a silent drift
+    between what NOTICE names and what the tree holds."""
+    from importlib.metadata import version
+    notice = (REPO / "NOTICE").read_text(encoding="utf-8")
+    if PROJECT_TRANSLATION.exists():
+        assert ".chainlit/translations/en-US.json" in notice
+        assert f"Chainlit {version('chainlit')}" in notice
+        assert "Apache License" in notice
+        assert NEW_CHAT_DESCRIPTION in notice      # the one value that differs, named
+        readme = (PROJECT_TRANSLATION.parent / "README.md").read_text(encoding="utf-8")
+        assert "Apache" in readme and NEW_CHAT_DESCRIPTION in readme
+    else:
+        assert ".chainlit/translations/en-US.json" not in notice
+
+
 # --- the login cookie, in the process shape `chainlit run` really produces ------
 
 def test_the_login_cookie_is_really_strict_under_chainlit_run(tmp_path):
