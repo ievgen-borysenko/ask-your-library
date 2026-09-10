@@ -1,6 +1,10 @@
 # Changelog
 
-## 0.2.1 (2026-09-10)
+## 0.3.0 (unreleased)
+
+A minor release, not a patch: the shipped default changed. A clone answers on a
+local model through Ollama, with no account and nothing to pay, where it used to
+need an OpenRouter key. The hosted path is unchanged and opt-in.
 
 - **The shipped default is fully local: no account, no key, no money to try it.** `LLM_BACKEND`
   defaults to `ollama` instead of `openrouter`, so a clone that follows any path — the installer,
@@ -46,6 +50,40 @@
   produced on the hosted configuration, and the README's results table, `docs/evaluation.md` and
   `docs/cost.md` now say so where they present them, together with the fact that the default
   configuration is local and free and is not what any of them measures.
+- **The question deadline is per backend, like the per-call timeout — and a call that runs out of
+  time ends the loop, not the run.** `QUESTION_DEADLINE_S` used to be one flat `300`, which no
+  recommended path ever ran with: `.env.example` and `scripts/install-mac.sh` both write `1200`
+  for the local mode, and a value in a copied `.env` wins over `config.py`, so the only
+  configuration that got 300 s was the bare clone-and-ask path this release advertises as
+  equivalent — where a single measured local answer took 159.5 s of it, and where the per-call
+  read timeout was capped at what was left of the 300 s rather than the 600 s `LLM_TIMEOUT_S`
+  names. The default is now `1200` under `LLM_BACKEND=ollama` and `300` under `openrouter`, by the
+  same rule and in the same line shape as `LLM_TIMEOUT_S`. Separately: a loop call (plan, observe,
+  reflect) that hits its own timeout used to raise through the graph, and `run_question` has no
+  `except`, so `ask-library --deadline 20 "..."` printed `Run failed: ... Request timed out.` and
+  no answer at all — the opposite of what the deadline exists to produce. Such a timeout is now a
+  stop reason of its own: the loop ends, the evidence already distilled stands, and `synthesize`,
+  which the budget never caps, writes the answer from it. Only a timeout is caught; every other
+  failure of a model call is raised exactly as before, and a `synthesize` that fails is unchanged.
+- **The trade the default makes is stated where the choice is made.** The README and `docs/cost.md`
+  said the local default costs nothing and did not say it is slower. Both now say it in one place:
+  a local `qwen2.5:14b` takes roughly 40 s for a catalogue question and 130-160 s for a research
+  one at $0, a hosted `claude-sonnet-4.6` answers in tens of seconds for roughly $0.02-0.05, and
+  `cost.md` names the single run behind every figure. `docs/add-your-own-books.md`'s "only asking
+  questions costs money" is qualified with `LLM_BACKEND=openrouter` and its $0.03-0.04 aligned
+  with `cost.md`'s $0.04-0.05 (the older figure was the `v0.1.0` measurement, and says so).
+- **The "model not pulled" notice carries the same remedy as the unreachable-Ollama one.** An
+  interrupted install used to get less help than a machine with no Ollama at all: the exact
+  `ollama pull` and nothing else. It now says the download is several GB and has to finish, and
+  names `bash scripts/install-mac.sh` as the one command that pulls what this configuration opens.
+  No size in gigabytes per model: `ollama list` cannot be read for a model that is not there.
+- **`MAX_OUTPUT_TOKENS` and the non-negative knobs read blanks like everything else.** They used
+  `os.environ.get` where the rest of `config.py` uses `_env`, so a name left blank in a copied
+  `.env` raised instead of meaning the default. Unreachable today — `.env.example` ships values —
+  and now consistent.
+
+## 0.2.1 (2026-09-10)
+
 - **The README is a front page, and the long text is in `docs/`.** What the project is, the
   architecture and the quote check, the manual quick start, the settings table, the evaluation
   narrative, privacy and the threat model, the injection layers, cost and the known limits moved

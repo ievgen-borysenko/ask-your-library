@@ -1386,10 +1386,16 @@ def test_llm_factory_bounds_every_call_with_timeout_and_retries(monkeypatch):
     # enough — `config.load_dotenv()` reads the working directory at the first
     # package import, so the .env the macOS installer writes into the checkout
     # (LLM_TIMEOUT_S=600, QUESTION_DEADLINE_S=1200) became the "default" here.
+    # Both time budgets are per backend, and for the same reason: a hosted
+    # question's whole wall clock is what a cold local model can spend inside
+    # its first step. The deadline used to be one flat 300 s that no
+    # recommended path ran with — .env.example and the installer both write
+    # 1200 for the local mode — so the bare clone-and-ask path was the only
+    # configuration it applied to.
     hosted = fresh_output(code, LLM_BACKEND="openrouter").split()
     assert hosted == ["120", "2", "300"]
     local = fresh_output(code, LLM_BACKEND="ollama").split()
-    assert local == ["600", "2", "300"]
+    assert local == ["600", "2", "1200"]
     tuned = fresh_output(code, LLM_BACKEND="openrouter", LLM_TIMEOUT_S="30", LLM_MAX_RETRIES="0",
                          QUESTION_DEADLINE_S="0").split()
     assert tuned == ["30", "0", "0"]
@@ -1415,12 +1421,12 @@ def test_a_dotenv_in_the_checkout_cannot_decide_what_a_fresh_child_reads(tmp_pat
     code = "from ask_your_library import config; print(config.LLM_TIMEOUT_S, config.QUESTION_DEADLINE_S)"
     (tmp_path / ".env").write_text("LLM_TIMEOUT_S=601\nQUESTION_DEADLINE_S=1201\n", encoding="utf-8")
     assert fresh_output(code, cwd=str(tmp_path)) == "601 1201"
-    # No .env in reach: config.py's own defaults. LLM_TIMEOUT_S has a
-    # per-backend one, and the shipped backend is the local model — slower, and
-    # it may load cold — so 600 s, not the hosted 120 s. The deadline has no
-    # per-backend default and stays 300 s; the installer and .env.example raise
-    # it for local runs, and this child sees neither of them.
-    assert fresh_output(code) == "600 300"
+    # No .env in reach: config.py's own defaults. Both are per backend, and the
+    # shipped backend is the local model — slower, and it may load cold — so
+    # 600 s a call inside a 1200 s question, not the hosted 120 s inside 300 s.
+    # This child sees neither the installer's .env nor .env.example, which is
+    # exactly the path that used to get the flat 300 s.
+    assert fresh_output(code) == "600 1200"
     assert fresh_output(code, LLM_BACKEND="openrouter") == "120 300"
 
 

@@ -47,4 +47,7 @@ class AgentState(TypedDict):
     answer: str            # the final answer
     verification: str      # quote-provenance report on quotes (text, for humans)
     provenance: dict       # the same report as numbers: checked/confirmed/broken/unused/broken_items
-    stop_reason: str       # why the loop stopped (enough / CRAG gate / step limit / fallback)
+    call_timed_out: bool   # a loop call (plan / observe / reflect) hit its own timeout: the loop
+                           # is over, the evidence collected stands, synthesize writes the answer
+    stop_reason: str       # why the loop stopped (enough / CRAG gate / step limit / fallback /
+                           # a loop call out of time)

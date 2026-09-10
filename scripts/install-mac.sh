@@ -181,10 +181,10 @@ local_env() {
     #   LLM_TIMEOUT_S: config.py defaults it to 600 s under LLM_BACKEND=ollama,
     #     but a value in .env is an environment value and wins over that
     #     default — which would leave a local model on the hosted 120 s budget.
-    #   QUESTION_DEADLINE_S has no per-backend default at all: 300 s is the whole
-    #     wall clock of a question, checked before each next decision, and a local
-    #     model that loads cold can spend it in the plan node alone. Twenty
-    #     minutes is room for four steps of it.
+    #   QUESTION_DEADLINE_S: per backend by the same rule, and written out for the
+    #     same reason. 300 s is the whole wall clock of a question, checked before
+    #     each next decision, and a local model that loads cold can spend it in
+    #     the plan node alone. Twenty minutes is room for four steps of it.
     # The two tracing lines are uncommented for the reason docs/configuration.md
     # gives: this mode is the one where nothing leaves the machine, and the SDK
     # reads a LANGSMITH_/LANGCHAIN_ flag another project's shell exported.

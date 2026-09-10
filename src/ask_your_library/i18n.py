@@ -103,6 +103,19 @@ _T = {
         "ua": "дедлайн питання ({s} с): відповідаю з того, що вже знайдено",
         "en": "question deadline ({s} s) reached: answering from what was found",
     },
+    # A model call the loop needed ran out of time. It ends the LOOP, never the
+    # run: the evidence already collected still goes to synthesize, which the
+    # deadline does not cap. With a budget set, the cap that expired IS what was
+    # left of it, so the reason names the budget; with QUESTION_DEADLINE_S=0
+    # there is none to name and the per-call timeout is what ran out.
+    "stop_deadline_call": {
+        "ua": "дедлайн питання ({s} с) вичерпано під час виклику моделі: відповідаю з того, що вже знайдено",
+        "en": "question deadline ({s} s) ran out during a model call: answering from what was found",
+    },
+    "stop_call_timeout": {
+        "ua": "виклик моделі не вклався в LLM_TIMEOUT_S ({s} с): відповідаю з того, що вже знайдено",
+        "en": "a model call exceeded LLM_TIMEOUT_S ({s} s): answering from what was found",
+    },
     "stop_catalog": {
         "ua": "каталог: відповідь з таблиць індексу, без пошуку",
         "en": "catalog: answered from the index tables, no search",
@@ -233,15 +246,29 @@ _T = {
         "en": "The environment is not ready:",
     },
     # ---- preflight: non-fatal notices (it works, but in a degraded shape)
+    # An interrupted install lands here, so these carry the same remedy as
+    # pf_no_ollama above: the pull is a download of gigabytes that has to
+    # finish, and the installer is the one command that finishes it. The size
+    # is deliberately not a number: `ollama list` cannot be read for a model
+    # that is not there, and a figure hard-coded per model would go stale the
+    # first time OLLAMA_LLM_MODEL points elsewhere.
     "pf_no_local_model": {
-        "ua": "LLM_BACKEND=ollama, але модель {model} не завантажена: `ollama pull {model}` або OLLAMA_LLM_MODEL=<інша>",
-        "en": "LLM_BACKEND=ollama, but the model {model} is not pulled: `ollama pull {model}` or set OLLAMA_LLM_MODEL",
+        "ua": "LLM_BACKEND=ollama, але модель {model} не завантажена: `ollama pull {model}` "
+              "(кілька гігабайтів — завантаження має завершитися), або OLLAMA_LLM_MODEL=<менша>. "
+              "`bash scripts/install-mac.sh` завантажує моделі саме цієї конфігурації.",
+        "en": "LLM_BACKEND=ollama, but the model {model} is not pulled: `ollama pull {model}` "
+              "(several GB — the download has to finish), or set OLLAMA_LLM_MODEL to a smaller "
+              "one. `bash scripts/install-mac.sh` pulls the models this configuration opens.",
     },
     "pf_no_embed_model": {
         "ua": "EMBED_BACKEND=ollama, але embedding-модель {model} не завантажена: "
-              "`ollama pull {model}` або OLLAMA_EMBED_MODEL=<інша>",
+              "`ollama pull {model}` (кілька гігабайтів — завантаження має завершитися), "
+              "або OLLAMA_EMBED_MODEL=<інша>. "
+              "`bash scripts/install-mac.sh` завантажує моделі саме цієї конфігурації.",
         "en": "EMBED_BACKEND=ollama, but the embedding model {model} is not pulled: "
-              "`ollama pull {model}` or set OLLAMA_EMBED_MODEL",
+              "`ollama pull {model}` (several GB — the download has to finish), or set "
+              "OLLAMA_EMBED_MODEL. `bash scripts/install-mac.sh` pulls the models this "
+              "configuration opens.",
     },
     "pf_no_cards": {
         "ua": "Таблиці карток {table} нема: відповіді спираються лише на повний текст "

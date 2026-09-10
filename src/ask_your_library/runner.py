@@ -24,7 +24,8 @@ Event contract (node_name -> keys present in update):
              (provenance carries `catalog` {op, count, total} next to the zero quote counts)
   act        steps_taken, hits (list[dict], each with hit_id), hits_log (THIS step's
              passages only; the graph state append-reduces them across steps)
-  observe    evidence (accumulated), empty_streak
+  observe    evidence (accumulated), empty_streak; a distillation call that timed out sends
+             call_timed_out=True and stop_reason instead, and the loop ends at reflect
   reflect    current_query ("" = synthesize; "__clarify__" + clarify_candidates; "__chapter__|book|section";
              "__book__|book|query" = coverage probe, one search inside one candidate) + coverage_probed
   clarify    clarification (the user's reply)
@@ -70,6 +71,7 @@ def initial_state(question: str, history: list[str], scratchpad: Path) -> dict:
         "read_chapters": [],
         "catalog_request": {}, "catalog": {}, "book_filter": "", "book_unresolved": "",
         "scratchpad_path": str(scratchpad),
+        "call_timed_out": False,
         "answer": "", "verification": "", "provenance": {}, "stop_reason": "",
     }
 

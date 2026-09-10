@@ -22,7 +22,8 @@ from . import llm
 from .catalog import (mixed_intent, parse_catalog_request, render_catalog, resolve_title,
                       run_catalog)
 from .clarify import _chosen_book, _clarify_candidates, _evidence_after_clarify
-from .config import CHAPTER_HIT_CHARS, MAX_CLARIFY_CANDIDATES, MAX_EMPTY_STREAK, MAX_STEPS, SEARCH_HIT_CHARS
+from .config import (CHAPTER_HIT_CHARS, LLM_TIMEOUT_S, MAX_CLARIFY_CANDIDATES, MAX_EMPTY_STREAK,
+                     MAX_STEPS, SEARCH_HIT_CHARS)
 from .coverage import coverage_probe
 from .i18n import t
 from .library import (TITLE_SEPARATOR, BookEntry, chapter_is_cut, list_books, read_chapter,
@@ -68,6 +69,25 @@ def _after_clarify(state: AgentState) -> bool:
 
 def _deadline_reason() -> str:
     return t("stop_deadline", s=int(llm.deadline_seconds()))
+
+
+def _call_timeout_reason() -> str:
+    """Why the loop stopped when one of ITS model calls ran out of time.
+
+    `deadline_passed` is read between steps, so it never sees a call that used
+    the budget up from the inside. Such a call raises, and nothing above the
+    graph catches it: the run used to die with `Run failed: ... Request timed
+    out.` and no answer, which is the opposite of what the deadline is for and
+    of what the README promises. So a timeout on a loop call (plan, observe,
+    reflect) is a stop reason of its own: the evidence already collected stands
+    and `synthesize`, which the budget never caps, writes the answer from it.
+
+    With a budget set, the cap that expired IS what was left of it, so the
+    reason names the budget. With QUESTION_DEADLINE_S=0 there is no budget to
+    name and LLM_TIMEOUT_S is what ran out."""
+    deadline = int(llm.deadline_seconds())
+    return (t("stop_deadline_call", s=deadline) if deadline > 0
+            else t("stop_call_timeout", s=int(LLM_TIMEOUT_S)))
 
 
 def _catalogue() -> tuple[list[BookEntry], bool]:
@@ -124,6 +144,18 @@ def plan(state: AgentState) -> dict:
 
     try:
         decision = llm.ask_json(PLAN_RULES, "\n".join(data), role="plan")
+    except llm.CallTimeout:
+        # The planner's own call ran out of time. There is no query to run and
+        # no budget to run it with; route_after_plan reads the empty
+        # current_query and goes straight to synthesize, which answers from
+        # whatever a clarify already carried (nothing, on a first plan — then
+        # synthesize returns the honest refusal, still an answer and not a
+        # crash).
+        return {"mode": state.get("mode") or "answer", "queries": [], "current_query": "",
+                "book_filter": "", "book_unresolved": "", "evidence": evidence,
+                "clarify_unresolved": unresolved, "clarify_chosen": chosen,
+                "steps_taken": state.get("steps_taken", 0), "empty_streak": 0,
+                "stop_reason": _call_timeout_reason()}
     except ValueError:
         # No JSON twice (small local models do this): the run goes on with the
         # raw question as its one query, like reflect and observe degrade, and
@@ -408,6 +440,17 @@ def observe(state: AgentState) -> dict:
                       "Return ONLY the JSON described in the rules."])
     try:
         distilled = llm.ask_json(OBSERVE_RULES, user, role="observe")
+    except llm.CallTimeout:
+        # This step's passages are lost, but every earlier step's evidence
+        # stands. `observe` has no exit of its own — the edge to `reflect` is
+        # unconditional — so the flag is what stops the loop there, before
+        # reflect spends another call on a budget that is gone. The two keys of
+        # observe's event contract are answered as on any other dry step: the
+        # CLI and the web UI read both by name, and an update that omitted them
+        # ended the run in a KeyError instead of an answer, which is the very
+        # failure this branch exists to prevent.
+        return {"evidence": state["evidence"], "empty_streak": state["empty_streak"] + 1,
+                "call_timed_out": True, "stop_reason": _call_timeout_reason()}
     except ValueError:
         # Distillation failed: count the step as dry and let the loop decide
         distilled = {"evidence": []}
@@ -429,6 +472,15 @@ def observe(state: AgentState) -> dict:
 
 # ---------------------------------------------------------------- reflect
 def reflect(state: AgentState) -> dict:
+    # A loop call already ran out of time (observe's, the step just now): the
+    # stop reason is written and the loop is over. Deciding anything here would
+    # cost one more call against a budget that is spent.
+    if state.get("call_timed_out"):
+        # The reason travels with the update, not only in the channel: the CLI
+        # and the web UI read reflect's own event, and without it the line read
+        # "enough, synthesizing" — a decision this node never made.
+        return {"current_query": "", "queries": [],
+                "stop_reason": state.get("stop_reason") or _call_timeout_reason()}
     # CRAG gate: consecutive dry steps mean the library has nothing on this;
     # stop without another LLM call
     if state["empty_streak"] >= MAX_EMPTY_STREAK:
@@ -452,6 +504,12 @@ def reflect(state: AgentState) -> dict:
     try:
         decision = llm.ask_json(REFLECT_RULES.format(clarify_lang=t("clarify_lang_instruction")),
                             user, role="reflect")
+    except llm.CallTimeout:
+        # Same rule as plan and observe: the time ran out inside the call that
+        # was to decide the next step, so this is the last step. What was found
+        # goes to synthesize with the reason named.
+        return {"current_query": "", "queries": [], "call_timed_out": True,
+                "stop_reason": _call_timeout_reason()}
     except ValueError:
         # No usable decision: finish with the evidence collected so far
         return {"current_query": "", "stop_reason": t("stop_json")}

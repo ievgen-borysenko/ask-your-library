@@ -85,7 +85,7 @@ OPENROUTER_ENV_FILE = Path(_env_file).expanduser() if _env_file else None
 # short answer; without a cap the provider pre-authorizes its model maximum
 # (65k tokens for the default model), which is an unbounded cost ceiling and
 # fails with 402 on a low balance.
-MAX_OUTPUT_TOKENS = int(os.environ.get("MAX_OUTPUT_TOKENS", "2048"))
+MAX_OUTPUT_TOKENS = int(_env("MAX_OUTPUT_TOKENS", "2048"))
 
 # What observe sees of each retrieved passage (ADR-012). SEARCH_HIT_CHARS caps a
 # search hit (several per step); CHAPTER_HIT_CHARS caps a chapter read (one
@@ -132,7 +132,7 @@ MAX_CLARIFY_CANDIDATES = _positive_int("MAX_CLARIFY_CANDIDATES", "5", unit="book
 # the reader's clarify reply does not count. A local model is slower and may load
 # cold, hence the longer per-call timeout in LLM_BACKEND=ollama.
 def _non_negative_int(name: str, default: str) -> int:
-    value = int(os.environ.get(name, default))
+    value = int(_env(name, default))      # a blank line in a copied .env means the default
     if value < 0:
         raise ValueError(f"{name} must be 0 or a positive number of seconds, got {value}")
     return value
@@ -140,7 +140,15 @@ def _non_negative_int(name: str, default: str) -> int:
 
 LLM_TIMEOUT_S = _positive_int("LLM_TIMEOUT_S", "600" if LLM_BACKEND == "ollama" else "120", unit="seconds")
 LLM_MAX_RETRIES = _non_negative_int("LLM_MAX_RETRIES", "2")
-QUESTION_DEADLINE_S = _non_negative_int("QUESTION_DEADLINE_S", "300")
+# Per backend, like LLM_TIMEOUT_S and for the same reason: 300 s is a hosted
+# model's whole wall clock for four steps, and a local model that loads cold can
+# spend it inside the first one. It used to be one flat 300 s, which no
+# recommended path ever ran with — .env.example and scripts/install-mac.sh both
+# write 1200 for the local mode, and a value in a copied .env wins over this
+# default — so the only configuration that got 300 was the bare clone-and-ask
+# path this project advertises as equivalent. A flat 300 also capped the local
+# read timeout at what was left of it and never the 600 s LLM_TIMEOUT_S names.
+QUESTION_DEADLINE_S = _non_negative_int("QUESTION_DEADLINE_S", "1200" if LLM_BACKEND == "ollama" else "300")
 
 # Prices in USD per 1M tokens for the cost estimate; override when changing the model.
 # A local model costs nothing per token, so the default configuration's cost

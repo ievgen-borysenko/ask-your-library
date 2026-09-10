@@ -61,6 +61,12 @@ No account, no API key, nothing to pay: the answering model and the embeddings b
 own machine through Ollama, and the cost line under the answer reads $0.0000. A hosted model is
 available (`bash scripts/install-mac.sh --hosted`) and is the only thing here that needs a key.
 
+**Local is slower, and that is the trade.** On a Mac the default `qwen2.5:14b` takes roughly 40 s
+for a catalogue question and 130 to 160 s for a research one, at $0; the hosted
+`claude-sonnet-4.6` answers in tens of seconds — a per-question mean of 27 to 28 s on the core
+eval set — for roughly $0.02 to $0.05 a question. Free costs time. Every figure here is a
+measured single run, and [`docs/cost.md`](docs/cost.md) names which run each one comes from.
+
 Every other system, the manual steps, your own books, the web UI and the eval commands:
 [`docs/quick-start.md`](docs/quick-start.md).
 
@@ -137,8 +143,10 @@ diagram sources, the backlog and the changelog.
 
 ## Status and licence
 
-`v0.2.1`, a patch release over `v0.2.0`, the first public one; the release history is in
-[`docs/CHANGELOG.md`](docs/CHANGELOG.md) and the open gaps in
+`v0.3.0`, a minor release over `v0.2.1` because the shipped default changed: a clone now answers
+on a local model through Ollama, with no account and nothing to pay, where it used to need an
+OpenRouter key. The hosted path is unchanged and opt-in (`LLM_BACKEND=openrouter`). The release
+history is in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) and the open gaps in
 [`docs/backlog.md`](docs/backlog.md).
 
 The code and the project's own files are under Apache-2.0 (`LICENSE`, attribution in
