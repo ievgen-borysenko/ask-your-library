@@ -1,5 +1,7 @@
 # Ask Your Library
 
+[![ci](https://github.com/ievgen-borysenko/ask-your-library/actions/workflows/ci.yml/badge.svg)](https://github.com/ievgen-borysenko/ask-your-library/actions/workflows/ci.yml) [![security](https://github.com/ievgen-borysenko/ask-your-library/actions/workflows/security.yml/badge.svg)](https://github.com/ievgen-borysenko/ask-your-library/actions/workflows/security.yml) [![licence: Apache-2.0](https://img.shields.io/badge/licence-Apache--2.0-blue.svg)](LICENSE)
+
 Agentic RAG over a personal book library: you ask in your own words, a LangGraph agent answers
 from the books you own with `[book, chapter]` citations, and plain code re-checks every quote it
 used against the passage it was copied from.

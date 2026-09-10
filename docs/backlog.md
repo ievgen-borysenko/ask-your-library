@@ -11,10 +11,10 @@ open ones often refer to them.
 - Measured and documented: tag `v0.2.0-rc1` (07.09) with the core and extended reports, retrieval
   and canary outputs, the reader's verdicts on the eleven core answers, and the v0.1.0 baseline
   (`docs/eval-results/`, `docs/evaluation.md`).
-- Before the repository is made public, one item is open: a short live check of the web UI on a
-  clean environment — the passage under an evidence item readable in the browser (not merely sent), a
-  clarify including the no-reply case, chat restore after a reload, and a first start by the
-  README.
+- Released and public since 2026-09-09 (tag `v0.2.0`), after the short live check of the web UI
+  on a clean environment — the passage under an evidence item readable in the browser (not merely
+  sent), a clarify including the no-reply case, chat restore after a reload, and a first start by
+  the README.
 - Done since: security CI (`.github/workflows/security.yml`: gitleaks over the complete range of
   each event, OSV-Scanner over `uv.lock`, weekly; Dependabot; every action pinned to a commit SHA)
   and Chainlit 2.12.0, the release that closes the two MCP advisories, with the config cleaned and
@@ -26,9 +26,13 @@ open ones often refer to them.
   where corpus text becomes index metadata, prompt text or a printed line, evidence passages
   readable again after 2.12 rendered them as code snippets, an honest quote out of a poisoned
   passage confirmed again, and a `conftest.py` that stops the suite inheriting the shell.
-- At the visibility switch: branch protection on `main` (required checks `test`, `test-ui`,
-  `secrets`, `dependencies`; no force-push, no deletion), private vulnerability reporting, push
-  protection; then CodeQL and a workflow linter, which are free on a public repository.
+- Done at the visibility switch (2026-09-09): a ruleset on `main` requires the seven checks
+  `test (openrouter)`, `test (ollama)`, `test-ui (openrouter)`, `test-ui (ollama)`,
+  `install-script`, `secrets` and `dependencies`, keeps branches up to date, and allows no
+  force-push, no deletion and no bypass; a code scanning rule blocks on CodeQL security alerts of
+  high or higher and on other alerts at error level; Dependabot alerts, secret scanning with push
+  protection, and private vulnerability reporting are on. Still open from that list: a workflow
+  linter, free on a public repository.
 
 ## Agent behaviour
 
