@@ -137,7 +137,7 @@ diagram sources, the backlog and the changelog.
 
 ## Status and licence
 
-`v0.2.0`, the first public release; the release history is in
+`v0.2.1`, a patch release over `v0.2.0`, the first public one; the release history is in
 [`docs/CHANGELOG.md`](docs/CHANGELOG.md) and the open gaps in
 [`docs/backlog.md`](docs/backlog.md).
 
