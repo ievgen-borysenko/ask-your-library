@@ -55,6 +55,32 @@ key, and the diagram's yellow describes what the hosted alternative would send.
 All local storage is persistent, plaintext and unencrypted. There is no retention policy and no
 cleanup command.
 
+**The "nothing leaves the machine" claim is tested, and the test says exactly how far it
+reaches.** `tests/test_egress_local.py` instruments the Python process with an egress guard
+(`tests/egress_guard.py`) that records every outbound connection attempt at three layers — the
+socket, the DNS lookup, and the httpx transport the model client goes through — and refuses
+anything that is not loopback. It then runs the real thing in the shipped configuration
+(`LLM_BACKEND=ollama`, `EMBED_BACKEND=ollama`, tracing off, no credentials) with Ollama *not*
+running: the real preflight, the real embedder, and the real compiled graph through
+`runner.run_question`. Every attempt recorded — 16 of them on the reference run, from preflight's
+`/api/tags`, the embedder's `/api/embed` and the planner's call with its retries — targets
+loopback on the configured Ollama port and nothing else. No OpenRouter, no LangSmith, and no name
+lookup for either: a DNS query is itself a packet leaving the machine, so a blocked host is
+refused before the resolver is asked about it. The run then fails on the unreachable local runtime
+(preflight exits 5, the question ends in a connection error to that endpoint) rather than falling
+back to a hosted call. Two control tests keep that silence meaningful: the guard catching a
+deliberate outbound request, and the same graph with `LLM_BACKEND=openrouter`, where the guard
+records the attempt to `openrouter.ai:443` and refuses it — proof that it sees what it claims to
+see. Both CI legs (`test (ollama)` and `test (openrouter)`) run it, with no network and no Ollama.
+
+**Its scope is one process.** It covers the interpreter that runs the CLI, the eval and the
+Chainlit server's Python half, and nothing else. Ollama is a separate process: what it does with a
+prompt once it has it — a model pulled on demand, a telemetry ping, a remote inference backend
+someone configured — is outside the test. So are the browser's own requests and anything
+Chainlit's JavaScript bundle does, and so is any process this one starts. Read the result as "the
+application's own Python process opens no connection to anything but the local Ollama endpoint it
+is configured with", which is the part of the claim this repository can own.
+
 ## Threat model
 
 Designed for **localhost, single user**. Not designed for internet exposure:

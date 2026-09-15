@@ -158,6 +158,18 @@ open ones often refer to them.
   h12 removed from the core set by the reader on 06.09 (never reader-verified; a character's lie
   taken as fact was its failure), the core set is eleven questions from `v0.2.0-rc1`; the
   canonical failure trace is c06 (`docs/examples/c06-fogg-missing-day.md`).
+- **Nothing in the suite could see a connection attempt**, so the local configuration's central
+  privacy claim was proved by construction (a faked model, an in-memory library, blanked
+  credentials) rather than asserted. Closed by `tests/test_egress_local.py` and
+  `tests/egress_guard.py`: an egress guard records every outbound attempt at the socket, DNS and
+  httpx layers and refuses anything that is not loopback, and the real preflight, embedder and
+  compiled graph run under it in the shipped local configuration with Ollama not running — every
+  attempt to loopback on the configured Ollama port, no hosted provider or tracing endpoint
+  contacted or looked up, and a clean failure on the unreachable local runtime instead of a hosted
+  fallback. Controls: the guard catching a deliberate outbound request, and the same graph under
+  `LLM_BACKEND=openrouter` where the attempt to `openrouter.ai:443` is recorded and refused.
+  Scope, stated in the test and in `docs/privacy-and-threat-model.md`: one Python process, not
+  Ollama's, not the browser's, not a subprocess's.
 - **Eval reports record single runs.** Closed by `--repeat N` and a JSON sidecar per run
   (`eval/run_agent_eval.py`, ADR-010 amended 15.09): each item runs N times, scoring stays per
   attempt, and both files carry the spread — the boolean rows as how many attempts of N passed,
