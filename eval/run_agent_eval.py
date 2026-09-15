@@ -37,10 +37,17 @@ non-deterministic system is not a number anyone can publish.
   uv run eval/run_agent_eval.py [id ...]     # no ids = every question
   GOLDEN_PATH=... LIBRARY_DB_PATH=... uv run eval/run_agent_eval.py [ids...]
       [--min-pass N] [--clarify-pick second] [--require-clean]
-      [--repeat N] [--no-json]
+      [--repeat N] [--no-json] [--record-plans]
+
+--record-plans keeps every planner request/response of the run in
+eval/recordings/, so a later change to the deterministic half of plan() can be
+replayed for free by eval/run_plan_eval.py. It costs nothing extra: the calls
+are made either way.
 """
 import argparse
+import contextlib
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -228,6 +235,23 @@ def run_fingerprint(repeat: int = 1) -> str:
     """The one-line fingerprint, read off the facts (eval/run_ablation.py calls
     this; nothing else needs the two steps apart)."""
     return render_fingerprint(run_facts(repeat))
+
+
+def load_plan_recording():
+    """eval/plan_recording.py as a module.
+
+    `eval/` is a directory of scripts and not a package: running this file puts
+    its own directory on sys.path, but eval/run_ablation.py and the tests load
+    it BY PATH and then it is not there. So the sibling is loaded by path too —
+    the same way run_ablation.py loads this harness — and only when
+    --record-plans asks for it, so a run that records nothing imports nothing."""
+    spec = importlib.util.spec_from_file_location(
+        "plan_recording", Path(__file__).resolve().parent / "plan_recording.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 RESULTS_DIR = Path(os.environ.get("EVAL_RESULTS_DIR", Path(__file__).parent / "results"))
 
 
@@ -924,6 +948,13 @@ def write_sidecar(path: Path, report_path: Path, facts: dict, fingerprint: str, 
     scratch.replace(path)
 
 
+def recording_item(recorder, item_id: str, attempt: int):
+    """The recorder's per-item block, or nothing at all when this run is not
+    recording. One line at the call site, so the run loop reads the same with
+    --record-plans and without it."""
+    return recorder.item(item_id, attempt) if recorder is not None else contextlib.nullcontext()
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     """The flags this harness has always had, now declared rather than sliced
     out of sys.argv by hand: every one of them keeps its exact behaviour, and
@@ -948,6 +979,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                              "and min/median/max of cost, seconds and tokens")
     parser.add_argument("--json", action=argparse.BooleanOptionalAction, default=True,
                         help="write the JSON sidecar answers-<ts>.json beside the report (default: on)")
+    parser.add_argument("--record-plans", action="store_true",
+                        help="record every planner request/response of this run into "
+                             "eval/recordings/<golden>.<sha>.<model>.jsonl, so that a later change "
+                             "to plan()'s deterministic half can be replayed for free by "
+                             "eval/run_plan_eval.py. Costs nothing extra: it rides on the run "
+                             "that is happening anyway")
     # parse_intermixed_args, not parse_args: the hand-rolled slicing this
     # replaced cut the flags out wherever they stood and kept everything else as
     # ids, so `c01 --min-pass 11 c02` meant two ids. Plain argparse stops
@@ -1007,11 +1044,27 @@ def main(argv: list[str] | None = None) -> None:
     attempt_groups = [{} for _ in range(repeat)]    # group -> [pass, total]
     records = []                                    # the sidecar's per-question rows
     started = time.time()
-    with open(out_path, "w", encoding="utf-8") as out:
+    recording_path = None
+    with open(out_path, "w", encoding="utf-8") as out, contextlib.ExitStack() as recording:
         facts_of_run = run_facts(repeat)
         fingerprint = render_fingerprint(facts_of_run)
         out.write(f"# Agent eval — {time.strftime('%Y-%m-%d %H:%M')} — {GOLDEN_PATH.name}\n\n"
                   f"run: {fingerprint}\n")
+        recorder = None
+        if args.record_plans:
+            # Rides on the run that is happening anyway: the planner's calls are
+            # made either way, and this only keeps what came back, so that the
+            # deterministic half of plan() can be re-measured for free later
+            # (eval/run_plan_eval.py).
+            plan_recording = load_plan_recording()
+            recording_path = plan_recording.RECORDINGS_DIR / plan_recording.recording_name(
+                facts_of_run["golden_name"], facts_of_run["golden_sha256_12"],
+                facts_of_run["model"])
+            recorder = recording.enter_context(plan_recording.PlanRecorder(
+                recording_path, facts_of_run, redact=redact_paths,
+                knobs=plan_recording.model_knobs()))
+            out.write(f"planner calls recorded into: {recording_path.name}\n")
+            print(f"recording planner calls into {recording_path}", flush=True)
         for item in items:
             record = {"id": item["id"], "type": item["type"], "group": group_of(item),
                       "question": item["question"], "attempts": []}
@@ -1024,7 +1077,8 @@ def main(argv: list[str] | None = None) -> None:
                 marker = "" if repeat == 1 else f", attempt {attempt}/{repeat}"
                 print(f"=== {item['id']}{marker} ...", flush=True)
                 try:
-                    r = run_one(graph, item, attempt)
+                    with recording_item(recorder, item["id"], attempt):
+                        r = run_one(graph, item, attempt)
                 except Exception as error:
                     # The calls made before the failure were billed all the same:
                     # they count in the totals, and the mean is per attempted question.
@@ -1154,6 +1208,8 @@ def main(argv: list[str] | None = None) -> None:
     print(f"Report: {out_path}")
     if sidecar_written:
         print(f"Sidecar: {json_path}")
+    if recording_path is not None:
+        print(f"Plan recording: {recording_path}")
     # Under --repeat the threshold is a floor on every attempt, not on their sum:
     # a set that passes 11/11 twice and 7/11 once has not met a --min-pass of 11.
     weakest = min(t["behavior_ok"] for t in attempt_totals)
