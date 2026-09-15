@@ -77,6 +77,51 @@ jobs:
           AYL_ALLOW_START_WITHOUT_KEY: "1"
         run: uv run eval/injection_canary.py --no-live
 
+  ui-smoke:
+    # The release walkthrough of the web UI, in a browser: a real
+    # `chainlit run ui.py --headless` with a scripted backend instead of a model
+    # and an index (tests/ui). Until now this path was walked by hand before
+    # every release.
+    #
+    # Its own job, not a step of `test-ui`: it needs a browser binary, which is
+    # not a Python package and is not in the lockfile, and it is minutes rather
+    # than seconds. Everything under tests/ui skips itself where that binary is
+    # missing, so this is the one place those tests actually run — and `-rs`
+    # prints the reason if they ever skip here, because a run of nothing but
+    # skips is green.
+    #
+    # No backend matrix: the scripted backend answers instead of a provider, so
+    # LLM_BACKEND decides nothing here (the server is started with the local
+    # one pinned, which is also the configuration with no key gate).
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.10"
+      - name: Install (locked, with the ui extra)
+        run: uv sync --locked --group dev --extra ui
+      - name: Install the browser the smoke test drives
+        # --with-deps: the shared libraries a headless chromium needs on a bare
+        # ubuntu image. Chromium only — no other engine is driven here.
+        run: uv run playwright install --with-deps chromium
+      - name: The UI smoke run (desktop and phone viewports)
+        # --basetemp so the screenshots the failure hook writes land somewhere
+        # the upload step below can name.
+        run: uv run pytest -q tests/ui -rs --basetemp=ui-smoke-artifacts
+      - name: Screenshots of the failing pages
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ui-smoke-screenshots
+          path: ui-smoke-artifacts/**/*.png
+          if-no-files-found: ignore
+          retention-days: 7
+
   install-script:
     # scripts/install-mac.sh refuses to run anywhere but macOS, so most of its
     # tests skip themselves on the two Linux jobs above: this is the one place
