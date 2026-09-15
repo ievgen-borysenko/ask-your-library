@@ -37,7 +37,19 @@
   instead of writing an empty report with a green exit code, and `--help` finally listing them.
   A sidecar that cannot be serialised writes its error into the report tail and leaves the run's
   own exit code alone, and the file is written to a neighbour and renamed, so an interrupted run
-  leaves no half record.
+  leaves no half record. Nothing in the sidecar is summed across attempts either, at any N:
+  `totals.per_attempt.<aggregate>` is `{values, min, median, max}`, `totals.expected_per_attempt`
+  holds the denominators read off the golden items, `per_group.<type>` is
+  `{of, behavior_ok_per_attempt}`, and only `totals.spent_total` is a sum — money, calls and
+  tokens, spent once each. Denominators come from the golden file rather than from the results
+  throughout, in both files: counted up from what completed, an item that errored drops out of its
+  group and out of the facts and drill-down rows, and an item that errored on every attempt takes
+  its rows with it. Error text is stored with any path under the home directory or the repository
+  root replaced by `~` or `<repo>` — a `FileNotFoundError` names a file, and under a home
+  directory that name is the reader's login, and `summarize_report.py` copies the report's ERROR
+  lines into the committed summary. The byte-compatible single run is pinned against a committed
+  fixture rendered by the pre-sidecar harness from the same fake results, whole report against
+  whole report.
   `eval/run_ablation.py` imports the same harness and keeps running at one attempt per condition.
   `tests/test_agent_eval_sidecar.py` covers the sidecar schema and its round trip, the repeat
   aggregation, the byte-compatible single run and the flags (ADR-010, amended). No run was made

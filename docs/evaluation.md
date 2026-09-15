@@ -48,7 +48,9 @@ string - derived from that item's own `notes` and, where the notes were vague, f
 in `corpus/cards/`. The harness reports `facts_found/facts_expected` on the question's report line
 and `facts_ok` when every one of them occurs in the answer text: folded and whitespace-normalised
 substring presence, no stemming, no synonyms, no edit distance, so a red row means exactly "this
-string is not in the answer". Both counts are summed in the totals block, and
+string is not in the answer". Both counts are summed in the totals block **of a `--repeat 1`
+run** - a repeated run reports them per attempt instead, as a range (see the sidecar section
+below) - and
 `eval/summarize_report.py` carries them into the committed summary together with every behaviour
 PASS whose answer is missing a fact. It is a **fourth deterministic row, not a fourth term in the
 behaviour verdict** (ADR-010: rows that cannot be confused, no composite score). Ten of the 42
@@ -86,6 +88,20 @@ and catalogue fallbacks, cost, calls, tokens, seconds, and the `score()` dict co
 attempt. The line in the report and the fields in the sidecar are rendered from the same dict, so
 they cannot say different things about one run. Written with `ensure_ascii=False` and indent 2 in
 a fixed key order, so two runs diff line by line; `--no-json` turns it off.
+**The sidecar's shape does not change with N**, so a consumer written against one run reads a
+repeated one, and nothing in it is summed across attempts: `totals.per_attempt.<aggregate>` is
+`{values: [one per attempt], min, median, max}` (at `--repeat 1` a list of one),
+`totals.expected_per_attempt` holds the denominators read off the golden items themselves
+(`items`, `titles`, `facts`, `facts_items`, `drill_items`, `groups`) rather than counted up from
+the results, `per_group.<type>` is `{of, behavior_ok_per_attempt: [...]}`, and the only summed
+figures live under `totals.spent_total` - money, calls and tokens, each spent once. Denominators
+come from the golden file for a reason: counted from the results, an item that errored drops out
+of the row it belongs to, and an item that errored on every attempt takes its whole row with it.
+The same rule governs the per-question `spread` block: which rows exist (`facts_ok`,
+`drilldown_ok`) follows the golden item, so an item that never completed reports 0 of N instead of
+disappearing. Error text is stored with any path under the home directory or the repository root
+replaced by `~` or `<repo>`, in the report as well as here: a `FileNotFoundError` names a file,
+and under a home directory that name is the reader's login.
 `--repeat N` runs each golden item N times (default 1). Scoring stays per attempt - the scorer
 never sees more than one run - and the aggregation is reported beside it: each boolean row
 (`behavior_ok`, `facts_ok`, drill-down) as **how many attempts of N passed**, never as an average
@@ -97,9 +113,11 @@ six-question set nobody ran. Every line there is per attempt -
 aggregate, with the per-group ranges beside the headline - and the single figure that *is* summed,
 the money the run actually spent, says so in words. `--min-pass` becomes a floor on the *weakest*
 attempt rather than on the average. At
-`--repeat 1` the Markdown report and its `---` tail are byte for byte what the harness has always
-written, which is pinned by a test: every artifact under [`eval-results/`](eval-results/) and
-`eval/summarize_report.py` read the same format they always did. (At N > 1
+`--repeat 1` the Markdown report is byte for byte what the harness has always written, pinned by a
+test that compares the *whole* report against one rendered by the pre-sidecar harness (`a6c4ccd`)
+from the same fake results and committed as a fixture: every artifact under
+[`eval-results/`](eval-results/) and `eval/summarize_report.py` read the same format they always
+did. (At N > 1
 `summarize_report.py` lists a failing id once per failing attempt; it reads the Markdown only, and
 teaching it to read the sidecar is a separate change.)
 

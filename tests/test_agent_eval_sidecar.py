@@ -11,6 +11,7 @@ flags survived the move from hand-sliced sys.argv to argparse.
 """
 import importlib.util
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -30,7 +31,12 @@ GOLDEN = ("questions:\n"
 
 def fake_result(item: dict, answer: str = "Moby Dick aboard the Pequod",
                 behavior_ok: bool = True, **over) -> dict:
-    """What run_one returns, in its own key order, with the score attached."""
+    """What run_one returns, in its own key order, with the score attached.
+
+    The facts half of the score follows the item, as score() does: q02-drac
+    carries no expected_facts and scores 0/0, so the totals the harness derives
+    from the golden file and the totals it adds up from the results agree."""
+    facts = len(item.get("expected_facts") or [])
     result = {"id": item["id"], "type": item["type"], "question": item["question"],
               "answer": answer, "verification": "2/2 confirmed",
               "provenance": {"checked": 2, "confirmed": 2, "unattributed": 0, "broken": 0},
@@ -40,20 +46,20 @@ def fake_result(item: dict, answer: str = "Moby Dick aboard the Pequod",
               "catalog": {}, "book_filter": "", "book_unresolved": "", "catalog_fallback": "",
               "seconds": 4, "steps_log": ["reflect -> whale"],
               "cost_usd": 0.01, "llm_calls": 3, "tokens_in": 1000, "tokens_out": 100,
-              "score": {"titles_mentioned": 1, "titles_expected": 1, "facts_found": 1,
-                        "facts_expected": 1, "facts_ok": True, "behavior_ok": behavior_ok}}
+              "score": {"titles_mentioned": 1, "titles_expected": 1, "facts_found": facts,
+                        "facts_expected": facts, "facts_ok": True, "behavior_ok": behavior_ok}}
     result.update(over)
     return result
 
 
-def prepared(monkeypatch, tmp_path, argv, results):
+def prepared(monkeypatch, tmp_path, argv, results, golden=GOLDEN):
     """main() with the graph, the fingerprint and run_one replaced.
 
     `results` is called with (item, attempt) and returns the fake result for
     that attempt, so a test can make one attempt of one item fail."""
     tmp_path.mkdir(parents=True, exist_ok=True)
-    golden = tmp_path / "golden.yaml"
-    golden.write_text(GOLDEN, encoding="utf-8")
+    golden_text, golden = golden, tmp_path / "golden.yaml"
+    golden.write_text(golden_text, encoding="utf-8")
     monkeypatch.setattr(harness, "GOLDEN_PATH", golden)
     monkeypatch.setattr(harness, "RESULTS_DIR", tmp_path)
     monkeypatch.setattr(harness, "build_graph", lambda: object())
@@ -66,6 +72,15 @@ def prepared(monkeypatch, tmp_path, argv, results):
     except SystemExit as exit_code:      # --min-pass and errors exit 1; not what these test
         assert exit_code.code in (0, 1), exit_code.code
     return tmp_path
+
+
+FIXTURE = Path(__file__).resolve().parent / "fixtures" / "agent-eval-report-pre-sidecar.md"
+
+
+def normalised(report: str) -> str:
+    """The report with the only thing that moves between two runs of the same
+    fake results — the clock minute in the header — replaced."""
+    return re.sub(r"^# Agent eval — .*? — ", "# Agent eval — <when> — ", report, count=1)
 
 
 def only(tmp_path: Path, suffix: str) -> Path:
@@ -89,9 +104,6 @@ def test_the_sidecar_carries_the_run_and_every_attempt(monkeypatch, tmp_path):
     assert sidecar["run"] == {"code": "abc1234", "repeat": 1}
     assert sidecar["repeat"] == 1 and sidecar["items"] == 2
     assert sidecar["requested_ids"] == []
-    assert sidecar["totals"]["run"] == 2 and sidecar["totals"]["behavior_ok"] == 2
-    assert sidecar["per_group"] == {"answer": {"behavior_ok": 1, "of": 1},
-                                    "identify": {"behavior_ok": 1, "of": 1}}
     assert len(sidecar["attempt_totals"]) == 1               # one attempt index at --repeat 1
 
     question = sidecar["questions"][0]
@@ -108,6 +120,32 @@ def test_the_sidecar_carries_the_run_and_every_attempt(monkeypatch, tmp_path):
     assert attempt["answer"] == "Moby Dick aboard the Pequod"
     assert attempt["score"]["behavior_ok"] is True
     assert attempt["provenance"] == {"checked": 2, "confirmed": 2, "unattributed": 0, "broken": 0}
+
+
+def test_the_sidecar_totals_are_per_attempt_at_every_n(monkeypatch, tmp_path):
+    """The record refuses what the report refuses: no figure summed across
+    attempts except the money, which is labelled. The shape does not change
+    with N, so a consumer written against one run reads a repeated one."""
+    def results(item, attempt):
+        return fake_result(item, behavior_ok=not (item["id"] == "q01-moby" and attempt == 2))
+
+    for repeat in (1, 3):
+        out = prepared(monkeypatch, tmp_path / f"n{repeat}",
+                       ["--repeat", str(repeat)] if repeat > 1 else [], results)
+        totals = json.loads(only(out, ".json").read_text(encoding="utf-8"))["totals"]
+        assert set(totals) == {"per_attempt", "expected_per_attempt", "spent_total"}
+        assert set(totals["per_attempt"]["behavior_ok"]) == {"values", "min", "median", "max"}
+        assert len(totals["per_attempt"]["behavior_ok"]["values"]) == repeat
+        # denominators read off the golden file, never counted up from results
+        assert totals["expected_per_attempt"] == {"items": 2, "titles": 2, "facts": 1,
+                                                  "facts_items": 1, "drill_items": 0,
+                                                  "groups": {"answer": 1, "identify": 1}}
+        # the only sums, and they are spend: 2 questions x 3 calls x N attempts
+        assert totals["spent_total"] == {"cost_usd": round(0.02 * repeat, 4),
+                                         "llm_calls": 6 * repeat,
+                                         "tokens_in": 2000 * repeat, "tokens_out": 200 * repeat}
+    passes = totals["per_attempt"]["behavior_ok"]
+    assert passes["values"] == [2, 1, 2] and passes["min"] == 1 and passes["max"] == 2
 
 
 def test_the_sidecar_round_trips_and_keeps_its_text_as_text(monkeypatch, tmp_path):
@@ -160,21 +198,49 @@ def test_the_sidecar_names_no_machine_and_no_person(monkeypatch, tmp_path):
     assert harness.golden_location(repo) == "private-set.yaml"
 
 
+def test_an_error_message_does_not_carry_a_home_path_into_either_file(monkeypatch, tmp_path):
+    """A FileNotFoundError names the file it could not open, and under a home
+    directory that name is the reader's login. The message goes into the
+    sidecar AND into the report, whose ERROR lines summarize_report.py copies
+    into the committed summary, so it is redacted in both — whole message, only
+    the machine-specific prefix replaced."""
+    repo = Path(__file__).resolve().parents[1]
+    secret = Path.home() / "Documents" / "private-library" / "chapter.txt"
+
+    def results(item, attempt):
+        if item["id"] == "q01-moby":
+            raise FileNotFoundError(f"[Errno 2] No such file or directory: '{secret}'")
+        raise RuntimeError(f"index missing under {repo / 'data'}")
+
+    out = prepared(monkeypatch, tmp_path, [], results)
+    written = "".join(path.read_text(encoding="utf-8")
+                      for path in (only(out, ".md"), only(out, ".json")))
+    assert str(Path.home()) not in written and str(repo) not in written
+    assert "~/Documents/private-library/chapter.txt" in written
+    assert "<repo>/data" in written
+    # the message is kept whole, and the sidecar still names the exception type
+    attempts = json.loads(only(out, ".json").read_text(encoding="utf-8"))["questions"][0]["attempts"]
+    assert attempts[0]["error"] == ("FileNotFoundError: [Errno 2] No such file or directory: "
+                                    "'~/Documents/private-library/chapter.txt'")
+
+
 def test_the_sidecar_keeps_the_per_attempt_group_tables(monkeypatch, tmp_path):
-    """A summed per_group cannot reproduce the report's per-group range, so the
-    tables are stored per attempt as well."""
+    """A summed per_group cannot reproduce the report's per-group range, and a
+    denominator counted up from the attempts that completed loses a group whose
+    every attempt errored. Both are read per attempt against the golden size."""
     def results(item, attempt):
         return fake_result(item, behavior_ok=not (item["id"] == "q01-moby" and attempt == 2))
 
     out = prepared(monkeypatch, tmp_path, ["--repeat", "3"], results)
     sidecar = json.loads(only(out, ".json").read_text(encoding="utf-8"))
-    assert sidecar["per_group"] == {"answer": {"behavior_ok": 2, "of": 3},
-                                    "identify": {"behavior_ok": 3, "of": 3}}
+    assert sidecar["per_group"] == {
+        "answer": {"of": 1, "behavior_ok_per_attempt": [1, 0, 1]},
+        "identify": {"of": 1, "behavior_ok_per_attempt": [1, 1, 1]}}
     assert len(sidecar["attempt_groups"]) == 3
     assert [g["answer"]["behavior_ok"] for g in sidecar["attempt_groups"]] == [1, 0, 1]
-    # the report's own line is derivable from them, which the summed table is not
-    passes = [g["answer"]["behavior_ok"] for g in sidecar["attempt_groups"]]
-    of = max(g["answer"]["of"] for g in sidecar["attempt_groups"])
+    # the report's own line is derivable from them, which a summed table is not
+    passes = sidecar["per_group"]["answer"]["behavior_ok_per_attempt"]
+    of = sidecar["per_group"]["answer"]["of"]
     assert f"answer {min(passes)}–{max(passes)}/{of}" in only(out, ".md").read_text(encoding="utf-8")
 
 
@@ -276,13 +342,13 @@ def test_no_figure_in_the_tail_is_a_sum_across_attempts(monkeypatch, tmp_path):
                  "- completed 2–2/2 over 3 attempts (mean 2.00 per attempt)",
                  "- errors 0–0 over 3 attempts (mean 0.00 per attempt)",
                  "- clarify interrupts 0–0 over 3 attempts (mean 0.00 per attempt)",
-                 "- quotes confirmed 4–4/4 over 3 attempts (mean 4.00 per attempt)",
+                 "- quotes confirmed / checked, per attempt: 4/4, 4/4, 4/4",
                  "- quotes unattributed 0–0 over 3 attempts (mean 0.00 per attempt)",
                  "- quotes broken 0–0 over 3 attempts (mean 0.00 per attempt)",
                  "- evidence items 6–6 over 3 attempts (mean 6.00 per attempt)",
                  "- expected titles mentioned 2–2/2 over 3 attempts (mean 2.00 per attempt)",
-                 "- expected facts found 2–2/2 over 3 attempts (mean 2.00 per attempt)",
-                 "- answers carrying every expected fact 2–2/2 over 3 attempts (mean 2.00 per "
+                 "- expected facts found 1–1/1 over 3 attempts (mean 1.00 per attempt)",
+                 "- answers carrying every expected fact 1–1/1 over 3 attempts (mean 1.00 per "
                  "attempt) (substring presence, not correctness; not part of behaviour PASS)",
                  "- cost $0.0200–$0.0200 over 3 attempts (mean $0.0200 per attempt)",
                  "- llm calls 6–6 over 3 attempts (mean 6.00 per attempt)",
@@ -318,6 +384,108 @@ def test_an_errored_attempt_does_not_shrink_the_denominator(monkeypatch, tmp_pat
     assert "## q01-moby — ERROR\nprovider timeout\n(attempt 3/3, spent before the error:" in report
 
 
+def test_an_errored_attempt_keeps_its_place_in_every_denominator(monkeypatch, tmp_path):
+    """Which rows an item owes is read from the GOLDEN ITEM, not from the
+    attempts that completed, and so is every denominator in the tail. Derived
+    from the results instead, an item that errored would drop out of its group
+    and out of the facts and drill-down rows — and an item that errored every
+    time would take its rows with it, leaving "8 of 8" on a set of eleven."""
+    golden = ("questions:\n"
+              "- id: q01-moby\n  type: answer\n  question: Which whale?\n"
+              "  expected_books: [Moby Dick]\n  expected_facts: [Pequod]\n"
+              "  expects_chapter_read: true\n"
+              "- id: q02-drac\n  type: identify\n  question: Which castle?\n"
+              "  expected_books: [Dracula]\n  expected_facts: [Borgo]\n")
+
+    def drilled(item, attempt):
+        r = fake_result(item)
+        if item.get("expects_chapter_read"):
+            r["score"] = {**r["score"], "drilldown_ok": True}
+        return r
+
+    def partial(item, attempt):
+        # q01 errors on the second of three attempts, q02 on every one of them
+        if item["id"] == "q01-moby" and attempt == 2:
+            raise RuntimeError("provider timeout")
+        if item["id"] == "q02-drac":
+            raise RuntimeError("provider timeout")
+        return drilled(item, attempt)
+
+    out = prepared(monkeypatch, tmp_path, ["--repeat", "3"], partial, golden=golden)
+    sidecar = json.loads(only(out, ".json").read_text(encoding="utf-8"))
+
+    # the item that errored twice of three keeps 3 as its denominator on every row
+    flaky = sidecar["questions"][0]["spread"]
+    assert flaky == {"attempts": 3, "completed": 2, "errors": 1, "behavior_ok": 2,
+                     "facts_ok": 2, "drilldown_ok": 2,
+                     "cost_usd": {"min": 0.01, "median": 0.01, "max": 0.01},
+                     "seconds": {"min": 4, "median": 4, "max": 4},
+                     "llm_calls": {"min": 3, "median": 3, "max": 3},
+                     "tokens_in": {"min": 1000, "median": 1000, "max": 1000},
+                     "tokens_out": {"min": 100, "median": 100, "max": 100}}
+    # the item that errored EVERY time still owes its rows, as 0 of 3
+    dead = sidecar["questions"][1]["spread"]
+    assert dead["attempts"] == 3 and dead["completed"] == 0 and dead["errors"] == 3
+    assert dead["behavior_ok"] == 0 and dead["facts_ok"] == 0
+    assert "drilldown_ok" not in dead                     # that item expects no chapter read
+    assert "cost_usd" not in dead                         # nothing completed, nothing to range
+
+    # its group is still in the record and in the report, with the golden size
+    assert sidecar["per_group"] == {
+        "answer": {"of": 1, "behavior_ok_per_attempt": [1, 0, 1]},
+        "identify": {"of": 1, "behavior_ok_per_attempt": [0, 0, 0]}}
+    assert sidecar["totals"]["expected_per_attempt"] == {
+        "items": 2, "titles": 2, "facts": 2, "facts_items": 2, "drill_items": 1,
+        "groups": {"answer": 1, "identify": 1}}
+
+    tail = only(out, ".md").read_text(encoding="utf-8")
+    tail = tail[tail.rindex("\n---\n"):]
+    assert "[answer 0–1/1, identify 0–0/1]" in tail        # the dead group is named, not dropped
+    assert "- chapter drill-down 0–1/1 over 3 attempts" in tail
+    assert "- expected facts found 0–1/2 over 3 attempts" in tail
+    assert "- answers carrying every expected fact 0–1/2 over 3 attempts" in tail
+    assert "### q02-drac — spread over 3 attempts (3 errored)" in only(out, ".md").read_text(
+        encoding="utf-8")
+
+
+def test_the_confirmed_quote_line_never_prints_a_ratio_no_attempt_produced(monkeypatch, tmp_path):
+    """min(confirmed)–max(confirmed) over max(checked) invents the best-looking
+    ratio available: attempts of 3/3 and 4/10 would read "3–4/10". The pairs
+    are printed as they were measured."""
+    def results(item, attempt):
+        checked = {1: 3, 2: 10}[attempt]
+        confirmed = {1: 3, 2: 4}[attempt]
+        return fake_result(item, provenance={"checked": checked, "confirmed": confirmed,
+                                             "unattributed": checked - confirmed, "broken": 0})
+
+    out = prepared(monkeypatch, tmp_path, ["--repeat", "2"], results)
+    report = only(out, ".md").read_text(encoding="utf-8")
+    tail = report[report.rindex("\n---\n"):]
+    assert "- quotes confirmed / checked, per attempt: 6/6, 8/20" in tail
+    assert "3–4/10" not in tail and "6–8/20" not in tail
+    # unattributed and broken are plain ranges: no denominator to borrow
+    assert "- quotes unattributed 0–12 over 2 attempts (mean 6.00 per attempt)" in tail
+    assert "- quotes broken 0–0 over 2 attempts (mean 0.00 per attempt)" in tail
+
+
+def test_an_even_number_of_attempts_takes_the_median_of_the_middle_two(monkeypatch, tmp_path):
+    """Four attempts have no middle one: the median is the mean of the two in
+    the middle, and a cost median is rounded like every other cost here."""
+    def results(item, attempt):
+        if item["id"] != "q01-moby":
+            return fake_result(item)
+        return fake_result(item, cost_usd=[0.01, 0.02, 0.05, 0.08][attempt - 1],
+                           seconds=[3, 4, 9, 10][attempt - 1])
+
+    out = prepared(monkeypatch, tmp_path, ["--repeat", "4"], results)
+    spread = json.loads(only(out, ".json").read_text(encoding="utf-8"))["questions"][0]["spread"]
+    assert spread["cost_usd"] == {"min": 0.01, "median": 0.035, "max": 0.08}
+    assert spread["seconds"] == {"min": 3, "median": 6.5, "max": 10}
+    report = only(out, ".md").read_text(encoding="utf-8")
+    assert "- cost min / median / max: $0.0100 / $0.0350 / $0.0800" in report
+    assert "- seconds min / median / max: 3 / 6.5 / 10" in report
+
+
 def test_repeat_runs_every_item_n_times_and_keeps_the_attempts_apart(monkeypatch, tmp_path):
     seen = []
 
@@ -339,31 +507,23 @@ def test_repeat_zero_is_refused(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------- byte-compat
-def test_a_single_run_writes_the_markdown_it_always_wrote(monkeypatch, tmp_path):
-    """The report and its `\\n---\\n` tail are a contract with
-    eval/summarize_report.py and with every committed artifact under
-    docs/eval-results/. At --repeat 1 nothing about them moves: no attempt
-    marker, no per-item spread block, no extra totals line."""
+def test_a_single_run_writes_the_markdown_the_pre_sidecar_harness_wrote(monkeypatch, tmp_path):
+    """The WHOLE report, against one the harness at `a6c4ccd` produced from the
+    same fake results.
+
+    The fixture beside this file was rendered once by that harness (the last
+    commit before the sidecar branch) and committed; only the header's clock
+    minute is normalised away. A spot check of one heading and a hand-written
+    tail would pass while a line in the middle moved — and this format is a
+    contract with `eval/summarize_report.py` and with every artifact under
+    `docs/eval-results/`. Regenerating the fixture is a deliberate act:
+    `git show a6c4ccd:eval/run_agent_eval.py` renders it."""
     out = prepared(monkeypatch, tmp_path, [], lambda item, attempt: fake_result(item))
     report = only(out, ".md").read_text(encoding="utf-8")
-
-    # no attempt marker in a heading, no per-item spread block, no spread lines
-    # ("mean per attempted question" is the cost line this report has always had)
+    assert normalised(report) == FIXTURE.read_text(encoding="utf-8")
+    # and the things --repeat adds are absent from it ("mean per attempted
+    # question" is the cost line this report has always had)
     assert ", attempt " not in report and "### " not in report and "spread" not in report
-    assert ("## q01-moby (answer, 2 steps, 4s, $0.0100, 3 calls, 1000 in / 100 out tokens) — "
-            "PASS: titles 1/1, facts 1/1, stop: enough evidence\n") in report
-    tail = report[report.rindex("\n---\n"):]
-    assert tail == (
-        "\n---\n2 completed, 0 errors, 0 clarify interrupts; quotes verified 4/4 "
-        "(confirmed / unattributed / broken = 4 / 0 / 0); evidence items 6\n"
-        "behavior PASS 2/2 (answer 1/1, identify 1/1); expected titles mentioned 2/2\n"
-        "expected facts found 2/2; answers carrying every expected fact 2/2 "
-        "(substring presence, not correctness; not part of behaviour PASS)\n"
-        "cost $0.0200 total, $0.0100 mean per attempted question (6 LLM calls, 2000 in / "
-        "200 out tokens; configured rates "
-        f"${harness.PRICE_IN_PER_MTOK}/M in, ${harness.PRICE_OUT_PER_MTOK}/M out, "
-        "cache reads not discounted)\n"
-        "manual correctness: not scored — tick the checkboxes above\n")
 
 
 def test_the_same_fake_results_render_the_same_report_with_and_without_the_sidecar(

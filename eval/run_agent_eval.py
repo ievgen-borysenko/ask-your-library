@@ -102,6 +102,24 @@ def git_code_stamp() -> str:
         return "unknown"
 
 
+def redact_paths(text: str) -> str:
+    """The same text with any absolute path replaced by `<repo>` or `~`.
+
+    An exception message is written into the report AND into the sidecar, and
+    `summarize_report.py` copies the report's ERROR lines into the committed
+    summary. A FileNotFoundError names the file it could not open, and under a
+    home directory that file name is the reader's login. The message stays
+    whole; only the part that identifies a machine is dropped."""
+    repo = str(Path(__file__).resolve().parents[1])
+    home = str(Path.home())
+    # the repo first: it usually LIVES under the home directory, and the longer
+    # prefix is the informative one
+    for prefix, stand_in in ((repo, "<repo>"), (home, "~")):
+        if prefix and prefix != "/":
+            text = text.replace(prefix, stand_in)
+    return text
+
+
 def golden_location(repo: Path) -> str:
     """Where the golden file is, said without naming the machine it is on.
 
@@ -650,19 +668,43 @@ def spread_of(values: list, digits: int | None = None) -> dict | None:
     return measured if digits is None else {k: round(v, digits) for k, v in measured.items()}
 
 
-def item_spread(attempts: list[dict], repeat: int) -> dict:
+def expected_of(items: list[dict]) -> dict:
+    """What ONE attempt over this set is expected to produce, read off the
+    golden items themselves.
+
+    Denominators must not be counted up from the results: a row is only added
+    when an attempt completed, so an item that errored disappears from the
+    denominator it belongs to and an item that errored every time takes its
+    whole row with it — a set of eleven where three failed would report
+    "8 of 8". These numbers are the same for every attempt by construction, so
+    reading them from the file is both simpler and impossible to lose."""
+    groups = {}
+    for item in items:
+        groups[group_of(item)] = groups.get(group_of(item), 0) + 1
+    return {"items": len(items),
+            "titles": sum(len(i.get("expected_books") or []) for i in items),
+            "facts": sum(len(i.get("expected_facts") or []) for i in items),
+            "facts_items": sum(1 for i in items if i.get("expected_facts")),
+            "drill_items": sum(1 for i in items if i.get("expects_chapter_read")),
+            "groups": dict(sorted(groups.items()))}
+
+
+def item_spread(item: dict, attempts: list[dict], repeat: int) -> dict:
     """The per-item block both files carry under --repeat.
 
     Every boolean count is out of the attempts ASKED for, not out of the ones
     that completed: an attempt that errored did not pass, and shrinking the
-    denominator to hide it is how a flaky item comes to look green. The numeric
-    columns are over the attempts that produced a number."""
+    denominator to hide it is how a flaky item comes to look green. Which rows
+    exist is read from the GOLDEN ITEM, not from the results — an item whose
+    every attempt errored still owes a facts row and a drill-down row, as 0 of
+    N, where deriving them from the completed attempts would silently omit
+    them. The numeric columns are over the attempts that produced a number."""
     done = [a for a in attempts if not a.get("error")]
     out = {"attempts": repeat, "completed": len(done), "errors": len(attempts) - len(done),
            "behavior_ok": sum(int(a["score"]["behavior_ok"]) for a in done)}
-    if any(a["score"].get("facts_expected") for a in done):
-        out["facts_ok"] = sum(int(a["score"]["facts_ok"]) for a in done)
-    if any("drilldown_ok" in a["score"] for a in done):
+    if item.get("expected_facts"):
+        out["facts_ok"] = sum(int(a["score"].get("facts_ok", False)) for a in done)
+    if item.get("expects_chapter_read"):
         out["drilldown_ok"] = sum(int(a["score"].get("drilldown_ok", False)) for a in done)
     for key, _label, _fmt in NUMBER_ROWS:
         measured = spread_of([a[key] for a in done if key in a],
@@ -712,8 +754,8 @@ def empty_totals() -> dict:
             "tokens_in": 0, "tokens_out": 0}
 
 
-def render_summary(totals: dict, per_group: dict, repeat: int,
-                   attempt_totals: list[dict], attempt_groups: list[dict]) -> str:
+def render_summary(totals: dict, per_group: dict, repeat: int, attempt_totals: list[dict],
+                   attempt_groups: list[dict], expected: dict) -> str:
     """The `\\n---\\n` tail.
 
     At --repeat 1 this is byte for byte the block the harness has always
@@ -755,36 +797,41 @@ def render_summary(totals: dict, per_group: dict, repeat: int,
     def column(key: str) -> list:
         return [t[key] for t in attempt_totals]
 
-    # every attempt runs the same items, so one attempt's item count is the
-    # denominator of them all (max over the attempts, not a sum of maxima)
-    per_pass = max(t["run"] + t["errors"] for t in attempt_totals)
+    # Denominators come from the golden items, never from the results: a row is
+    # only added to a totals dict when an attempt completed, so an item that
+    # errored would drop out of the denominator it belongs to.
+    per_pass = expected["items"]
 
-    def group_range(g: str) -> str:
-        rows = [a.get(g, [0, 0]) for a in attempt_groups]
-        return f"{g} {min(r[0] for r in rows)}–{max(r[0] for r in rows)}/{max(r[1] for r in rows)}"
+    def group_range(g: str, of: int) -> str:
+        passes = [a.get(g, [0, 0])[0] for a in attempt_groups]
+        return f"{g} {min(passes)}–{max(passes)}/{of}"
 
     lines = [f"\n---\nrun of {repeat} attempts per item, {per_pass} items; every figure below is "
              f"PER ATTEMPT (min–max over the {repeat} attempts, with the mean), never a sum "
              f"across them",
              spread_line("behavior PASS", column("behavior_ok"), of=per_pass)
-             + " [" + ", ".join(group_range(g) for g in sorted(per_group)) + "]",
+             + " [" + ", ".join(group_range(g, of) for g, of in expected["groups"].items()) + "]",
              spread_line("completed", column("run"), of=per_pass),
              spread_line("errors", column("errors")),
              spread_line("clarify interrupts", column("clarify")),
-             spread_line("quotes confirmed", column("confirmed"), of=max(column("checked"))),
+             # Paired per attempt, never min(confirmed)–max(confirmed) over
+             # max(checked): attempts of 3/3 and 4/10 would print "3–4/10", a
+             # ratio no attempt produced and the best-looking one available.
+             "- quotes confirmed / checked, per attempt: "
+             + ", ".join(f"{t['confirmed']}/{t['checked']}" for t in attempt_totals),
              spread_line("quotes unattributed", column("unattributed")),
              spread_line("quotes broken", column("broken")),
              spread_line("evidence items", column("evidence")),
              spread_line("expected titles mentioned", column("titles_mentioned"),
-                         of=max(column("titles_expected")))]
-    if totals["drill_expected"]:
+                         of=expected["titles"])]
+    if expected["drill_items"]:
         lines.append(spread_line("chapter drill-down", column("drill_ok"),
-                                 of=max(column("drill_expected"))))
-    if totals["facts_expected"]:
+                                 of=expected["drill_items"]))
+    if expected["facts"]:
         lines.append(spread_line("expected facts found", column("facts_found"),
-                                 of=max(column("facts_expected"))))
+                                 of=expected["facts"]))
         lines.append(spread_line("answers carrying every expected fact", column("facts_items_ok"),
-                                 of=max(column("facts_items")))
+                                 of=expected["facts_items"])
                      + " (substring presence, not correctness; not part of behaviour PASS)")
     lines.append(spread_line("cost", column("cost_usd"), fmt="${:.4f}"))
     lines.append(spread_line("llm calls", column("llm_calls")))
@@ -802,7 +849,7 @@ def render_summary(totals: dict, per_group: dict, repeat: int,
 
 def write_sidecar(path: Path, report_path: Path, facts: dict, fingerprint: str, repeat: int,
                   requested_ids: list[str], started: float, ended: float, totals: dict,
-                  per_group: dict, attempt_totals: list[dict], attempt_groups: list[dict],
+                  attempt_totals: list[dict], attempt_groups: list[dict], expected: dict,
                   records: list[dict]) -> None:
     """The same run as data, beside the Markdown a reader reads.
 
@@ -814,10 +861,24 @@ def write_sidecar(path: Path, report_path: Path, facts: dict, fingerprint: str, 
     and the score dict computed from it — the answer included on purpose, so the
     sidecar is complete on its own rather than a pointer into the Markdown.
 
+    NOTHING HERE IS SUMMED ACROSS ATTEMPTS either, at any N: `totals.per_attempt`
+    carries each aggregate as the list of its per-attempt values with min /
+    median / max beside them, `totals.expected_per_attempt` the denominators
+    read off the golden items, and the only summed figures are under
+    `totals.spent_total`, which is money and calls that really were spent once
+    each. The shape does not change with N — at --repeat 1 every list holds one
+    value — so a consumer written against one run reads a repeated one.
+
     Keys are written in a fixed order and text is left as text
     (ensure_ascii=False), so two runs of the same set diff line by line."""
     def clock(when: float) -> str:
         return time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(when))
+
+    def per_attempt(key: str) -> dict:
+        values = [t[key] for t in attempt_totals]
+        digits = 4 if key == "cost_usd" else None
+        return {"values": [round(v, 4) if digits else v for v in values],
+                **spread_of(values, digits=digits)}
 
     sidecar = {
         "schema": "ask-your-library/agent-eval-run",
@@ -831,15 +892,27 @@ def write_sidecar(path: Path, report_path: Path, facts: dict, fingerprint: str, 
         "repeat": repeat,
         "requested_ids": list(requested_ids),
         "items": len(records),
-        "totals": totals,
-        "per_group": {group: {"behavior_ok": passed, "of": of}
-                      for group, (passed, of) in sorted(per_group.items())},
+        "totals": {
+            "per_attempt": {key: per_attempt(key) for key in sorted(empty_totals())},
+            # denominators from the golden items, so an item that errored every
+            # time still counts against the row it belongs to
+            "expected_per_attempt": expected,
+            # the one honest sum: spent once each, whatever N was
+            "spent_total": {"cost_usd": round(totals["cost_usd"], 4),
+                            "llm_calls": totals["llm_calls"],
+                            "tokens_in": totals["tokens_in"],
+                            "tokens_out": totals["tokens_out"]},
+        },
+        # per group, the passes of each attempt against the group's size in the
+        # golden set — never a sum, and never a denominator counted up from the
+        # attempts that happened to complete
+        "per_group": {group: {"of": of,
+                              "behavior_ok_per_attempt": [a.get(group, [0, 0])[0]
+                                                          for a in attempt_groups]}
+                      for group, of in expected["groups"].items()},
         "attempt_totals": attempt_totals,
-        # the per-attempt group tables, not only their sum: without them the
-        # report's own per-group range ("identify 1–2/3") cannot be reproduced
-        # from this file, and a summed 4/9 does not carry it
-        "attempt_groups": [{group: {"behavior_ok": passed, "of": of}
-                            for group, (passed, of) in sorted(groups.items())}
+        "attempt_groups": [{group: {"behavior_ok": groups.get(group, [0, 0])[0], "of": of}
+                            for group, of in expected["groups"].items()}
                            for groups in attempt_groups],
         "questions": records,
     }
@@ -922,6 +995,10 @@ def main(argv: list[str] | None = None) -> None:
     out_path = RESULTS_DIR / f"answers-{stamp}.md"
     json_path = RESULTS_DIR / f"answers-{stamp}.json"
 
+    # what ONE attempt over this set owes, read off the golden items: every
+    # denominator in the repeated-run report and in the sidecar comes from here
+    expected = expected_of(items)
+
     graph = build_graph()
     # One totals dict and one group table PER ATTEMPT INDEX; the report's own
     # block is their sum, and the spread is read across them. At --repeat 1 the
@@ -955,9 +1032,14 @@ def main(argv: list[str] | None = None) -> None:
                     spent = usage_fields()
                     for key in ("cost_usd", "llm_calls", "tokens_in", "tokens_out"):
                         totals[key] += spent[key]
+                    # the message goes into the report AND the sidecar, and
+                    # summarize_report.py copies the report's ERROR lines into
+                    # the committed summary: an absolute path in it is the
+                    # reader's home directory, so it is redacted in both
+                    said = redact_paths(f"{error}")
                     record["attempts"].append({"attempt": attempt,
-                                               "error": f"{type(error).__name__}: {error}", **spent})
-                    out.write(f"\n## {item['id']} — ERROR\n{error}\n"
+                                               "error": f"{type(error).__name__}: {said}", **spent})
+                    out.write(f"\n## {item['id']} — ERROR\n{said}\n"
                               f"({f'attempt {attempt}/{repeat}, ' if repeat > 1 else ''}"
                               f"spent before the error: ${spent['cost_usd']:.4f}, "
                               f"{spent['llm_calls']} calls)\n")
@@ -1032,7 +1114,7 @@ def main(argv: list[str] | None = None) -> None:
             # the sidecar carries the per-item spread at every N (at 1 it is the
             # one attempt stated as such); the report prints it only when there
             # is a spread to print, so a single run's Markdown is unchanged
-            record["spread"] = item_spread(record["attempts"], repeat)
+            record["spread"] = item_spread(item, record["attempts"], repeat)
             if repeat > 1:
                 out.write(render_item_spread(item["id"], record["spread"]))
                 out.flush()
@@ -1046,14 +1128,15 @@ def main(argv: list[str] | None = None) -> None:
             for group, (passed, of) in groups.items():
                 row = per_group.setdefault(group, [0, 0])
                 row[0] += passed; row[1] += of
-        summary = render_summary(totals, per_group, repeat, attempt_totals, attempt_groups)
+        summary = render_summary(totals, per_group, repeat, attempt_totals, attempt_groups,
+                                 expected)
         out.write(summary)
         ended = time.time()
         sidecar_written = False
         if args.json:
             try:
                 write_sidecar(json_path, out_path, facts_of_run, fingerprint, repeat, wanted_ids,
-                              started, ended, totals, per_group, attempt_totals, attempt_groups,
+                              started, ended, totals, attempt_totals, attempt_groups, expected,
                               records)
                 sidecar_written = True
             except Exception as error:
