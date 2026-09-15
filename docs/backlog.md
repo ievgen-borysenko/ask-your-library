@@ -188,18 +188,25 @@ open ones often refer to them.
   section key at ingest time instead.
 - Evidence block in the UI: show the source type (text / card / transcript) and whether the
   passage was cut; keep the passages for restored chats.
-- **On a phone, the answer after a clarify is gone before it can be read.** Measured on the
-  15.09 screen recording of the `h22` question at 390x844 (`_data/ui-recording/NOTES.md`, phase
-  log of the `h22` take): the agent asks back at +35.4 s, the reply goes in at +38.5 s, the answer
-  lands at +70.8 s — and by +72.3 s the badge had to be scrolled back INTO view, because the
-  provenance badge and the evidence block render right underneath the answer and push it off the
-  top of a 844 px viewport in about a second and a half (the passage opened at +73.1 s is taller
-  than the screen again). Nothing is broken and nothing is lost — scrolling up gets it back — but
-  the one thing the reader waited a minute for is the one thing they do not get to read. Noticed
-  while scripting `tests/ui`, which does not depend on it: the smoke test asserts on text being on
-  the page, not on where the page is scrolled to. Fix worth considering: keep the answer anchored
-  (scroll to the top of the answer message, not to the bottom of the thread) when a badge and an
-  evidence block follow it.
+- **On a phone, the answer after a clarify is gone before it can be read.** Measured on a screen
+  recording of the gothic-novel question (two candidates, one clarify) at 390x844 on 15.09, whose
+  phase log reads: question sent +13.3 s, the agent asks back +35.4 s, the reply goes in +38.5 s,
+  the answer lands +70.8 s, the badge had to be scrolled back INTO view +72.3 s. That last pair is
+  the item: the provenance badge and the evidence block render right underneath the answer and
+  push it off the top of an 844 px viewport in about a second and a half. Nothing is broken and
+  nothing is lost — scrolling up gets it back — but the one thing the reader waited a minute for
+  is the one thing they do not get to read. Noticed while scripting `tests/ui`, which does not
+  depend on it: the smoke test asserts that text is on the page, never where the page is scrolled
+  to. Fix worth considering: keep the answer anchored (scroll to the top of the answer message,
+  not to the bottom of the thread) when a badge and an evidence block follow it.
+- **A phone reload lands in a new chat, and nobody has decided whether it should.** In a wide
+  window Chainlit moves the browser onto `/thread/<id>` a beat after the first answer, so a reload
+  restores the conversation. At 390 px it never does: the thread history is off-canvas and is not
+  in the DOM until the sidebar toggle is pressed, so the address the reload would need exists only
+  as a link behind that toggle, and reloading the page a phone is actually showing opens an empty
+  chat. `tests/ui/test_ui_smoke.py` handles both shapes (it opens the sidebar and reads the link),
+  which is how the difference was found; what it cannot decide is whether losing the conversation
+  on a phone reload is acceptable, a Chainlit setting, or something `ui.py` should do for itself.
 - Rate limits and budgets only matter if the UI ever leaves localhost; before any hosted or
   multi-user deployment: isolation, budgets, retention, deployment security, a separate SCA.
 - A shorter README and a first-answer path that does not start with a 30-minute ingest (a small

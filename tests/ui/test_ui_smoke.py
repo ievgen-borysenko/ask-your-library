@@ -56,8 +56,11 @@ def _browser_problem() -> str:
     The browser is not a Python package and `uv sync` does not install it, so
     the whole module skips itself with the command to fix that in the reason —
     `uv run pytest -q` on a clone that never ran it stays green and fast, and
-    CI's `ui-smoke` job is the one place these tests actually run. Cheap: the
-    executable path is a lookup, nothing is launched.
+    CI's `ui-smoke` job is the one place these tests actually run.
+
+    Cheap, but not free: `sync_playwright()` starts the node driver, which the
+    `with` block then stops; the browser itself is never launched, and the
+    executable path is a lookup on an already-running driver.
     """
     try:
         from playwright.sync_api import sync_playwright
@@ -197,6 +200,11 @@ def chainlit_server(tmp_path_factory) -> Server:
         "AYL_UI_FAKE_BACKEND": str(SCRIPTED_BACKEND),
         "AYL_UI_FAKE_BACKEND_CONFIRM": "this-server-answers-from-a-script",
         "AYL_CLARIFY_TIMEOUT_S": str(CLARIFY_TIMEOUT_S),
+        # The one name in chainlit's tree that would send this conversation off
+        # the machine: its data layer uploads threads to Literal AI when it is
+        # set. A developer's shell may well have it; the questions typed below
+        # are not theirs to upload. Blank, not removed — dotenv fills a free name.
+        "LITERAL_API_KEY": "",
     }
     log_path = state / "chainlit-server.log"
     with log_path.open("w") as log:

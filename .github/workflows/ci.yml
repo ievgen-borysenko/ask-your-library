@@ -94,6 +94,11 @@ jobs:
     # LLM_BACKEND decides nothing here (the server is started with the local
     # one pinned, which is also the configuration with no key gate).
     runs-on: ubuntu-latest
+    # A browser download, two server starts and two 25 s clarify timeouts: the
+    # first run of the job took under two minutes. A run still going at fifteen
+    # is a hung page or a server that never came up, and would otherwise hold a
+    # runner until the six-hour default gives up on it.
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
