@@ -792,3 +792,40 @@ def test_a_chat_start_narrows_the_journal_siblings_too(ui, monkeypatch, tmp_path
     sibling.chmod(0o644)
     _chat_start(ui, monkeypatch, problems=["Ollama is not answering"])
     assert stat.S_IMODE(sibling.stat().st_mode) == 0o600
+
+
+# --- the scripted-backend seam, in the process shape `chainlit run` produces ---
+
+def test_a_scripted_backend_without_its_confirmation_refuses_to_serve(tmp_path):
+    """The seam that lets tests/ui start a server with no model and no index
+    (`ask_your_library.fake_backend`) needs two variables, and the refusal is
+    what makes one of them safe to have in a shell: a path alone stops the
+    server from coming up, rather than quietly serving scripted answers.
+
+    Asserted in a child, at ui.py's own import, because that is where the call
+    sits and where an operator would meet it."""
+    script = tmp_path / "backend.py"
+    script.write_text("def install():\n    raise AssertionError('this must never run')\n")
+    result = _run("import ui", check=False,
+                  CHAINLIT_AUTH_SECRET="test-secret", AYL_ALLOW_DEFAULT_LOGIN="1",
+                  AYL_ALLOW_START_WITHOUT_KEY="1", AYL_CHAINLIT_DIR=str(tmp_path / "chainlit"),
+                  AYL_UI_FAKE_BACKEND=str(script))
+    assert result.returncode != 0
+    assert "AYL_UI_FAKE_BACKEND_CONFIRM" in result.stderr
+    assert "this must never run" not in result.stderr        # the file was never executed
+
+
+def test_the_clarify_timeout_is_five_minutes_unless_a_test_shortens_it(tmp_path):
+    """ui.CLARIFY_TIMEOUT_SECONDS is what an unanswered ask-back waits for. The
+    default is the reader's five minutes; AYL_CLARIFY_TIMEOUT_S exists so the UI
+    smoke test can watch one expire. A nonsense value is refused, not rounded:
+    a server whose clarify expires immediately looks like a model that never
+    asks."""
+    environment = dict(CHAINLIT_AUTH_SECRET="test-secret", AYL_ALLOW_DEFAULT_LOGIN="1",
+                       AYL_ALLOW_START_WITHOUT_KEY="1", AYL_CHAINLIT_DIR=str(tmp_path / "chainlit"))
+    code = "import ui; print(ui.CLARIFY_TIMEOUT_SECONDS)"
+    assert _out(code, **environment) == "300"
+    assert _out(code, **environment, AYL_CLARIFY_TIMEOUT_S="25") == "25"
+    for bad in ("0", "-1", "soon"):
+        result = _run(code, check=False, **environment, AYL_CLARIFY_TIMEOUT_S=bad)
+        assert result.returncode != 0 and "AYL_CLARIFY_TIMEOUT_S" in result.stderr

@@ -22,6 +22,17 @@ a LangSmith key is the third path, and `LANGSMITH_TRACING_V2=false` plus
 `LANGCHAIN_TRACING_V2=false` close it whatever was inherited. See "Privacy and data flow" and
 "Threat model" in `docs/privacy-and-threat-model.md` for what is protected and what is not.
 
+One environment knob loads and runs code by design, and it is a test seam, not a feature:
+`AYL_UI_FAKE_BACKEND` names a Python file that `ui.py` executes at startup, which is how
+`tests/ui/test_ui_smoke.py` drives a real server with no model and no index
+(`src/ask_your_library/fake_backend.py`). It does nothing unless `AYL_UI_FAKE_BACKEND_CONFIRM`
+also reads exactly `this-server-answers-from-a-script`; set alone it stops the server from coming
+up, rather than letting one serve scripted answers that look real. The pair raises no privilege —
+anything that can set variables in the server's environment can already run code as the server —
+so the guard is against accident, not against an attacker, and neither name belongs in a `.env`,
+a shell profile or a deployment unit. With neither set, which is every ordinary start, nothing is
+loaded and nothing is patched.
+
 ## Reporting a vulnerability
 
 Please use GitHub's private vulnerability reporting for this repository (the **Security** tab,

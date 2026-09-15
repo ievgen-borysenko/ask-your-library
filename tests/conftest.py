@@ -167,6 +167,10 @@ SCRUBBED = frozenset(DEFAULTS) | frozenset(TRACING_OFF) | frozenset(BLANKED) | {
     "LANGCHAIN_ENDPOINT", "LANGSMITH_ENDPOINT",
     "ASK_SCRATCH_DIR", "ASK_DEBUG",
     "AYL_ALLOW_START_WITHOUT_KEY", "AYL_ALLOW_DEFAULT_LOGIN", "AYL_CHAINLIT_DIR",
+    # The scripted-backend seam and the clarify timeout the UI smoke test
+    # shortens: a child that inherited these would answer from a script, or
+    # expire an ask-back, without the test that started it asking for either.
+    "AYL_UI_FAKE_BACKEND", "AYL_UI_FAKE_BACKEND_CONFIRM", "AYL_CLARIFY_TIMEOUT_S",
     "CHAINLIT_AUTH_SECRET", "CHAINLIT_USERNAME", "CHAINLIT_PASSWORD",
     "CHAINLIT_COOKIE_SAMESITE",
 } | {name for base in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY")
