@@ -42,6 +42,23 @@ where a planner or catalogue fallback searched instead). Quote provenance totals
 **answer correctness is still a manual read**, which is why the harness writes every answer
 into a report with a per-question correctness checkbox.
 
+**`expected_facts` and the `facts_ok` row (2026-09-15).** Every golden item whose answer has
+content carries one to four short, checkable strings - a name, a number, a place, one fact per
+string - derived from that item's own `notes` and, where the notes were vague, from the book card
+in `corpus/cards/`. The harness reports `facts_found/facts_expected` on the question's report line
+and `facts_ok` when every one of them occurs in the answer text: folded and whitespace-normalised
+substring presence, no stemming, no synonyms, no edit distance, so a red row means exactly "this
+string is not in the answer". Both counts are summed in the totals block, and
+`eval/summarize_report.py` carries them into the committed summary together with every behaviour
+PASS whose answer is missing a fact. It is a **fourth deterministic row, not a fourth term in the
+behaviour verdict** (ADR-010: rows that cannot be confused, no composite score). Items that carry
+no facts score 0/0 and are counted in neither half of the totals: the refusals, which have nothing
+to narrate, and the clarify items whose two candidate books would each demand a different answer
+(c09, q06, h22, and the routing-only k09, which is not scored on what it names). The golden files'
+shape - allowed keys per file, required keys, types, unique ids and no repeated question - is
+pinned by `tests/test_golden_schema.py`; the facts scoring itself by
+`tests/test_agent_eval_facts.py`.
+
 Three golden sets, reported separately. **Core** (`eval/golden/en-demo.yaml`, 11 questions, the
 default `GOLDEN_PATH`): eight questions on books the golden author has read and a two-book
 comparison of two of them (Ivanhoe and Don Quixote), all nine reader-verified; h06, one of the two
@@ -225,5 +242,12 @@ ran the ablation, not a human verdict.
   the book card's plot summary without saying so. PASS and green provenance every time. Widening the observe window (measured during
   development, ADR-012) does not fix c06, because the passage is not in the window to widen. c05 (the windmills) once read an empty chapter because `reflect` passed the
   bare title while the index keys rows as "Title — Author"; fixed, and the tagged run quotes the Friston passage.
+- **Not that the expected facts are used correctly.** `facts_ok` asks whether each expected string
+  occurs in the answer and nothing else. "Saturday" is equally present in "Passepartout burst in:
+  to-day is Saturday" and in "he was told it was Saturday, so he had lost the wager" - a fact can
+  sit inside a negation, a wrong sentence, or a restatement of the question. It is blind the other
+  way too: an answer that is right in other words ("executed" where the golden says "beheaded")
+  scores red. The row narrows where a reader should look first; it does not do the reading, which
+  is why it stays out of the behaviour verdict and the correctness checkbox stays in the report.
 - **Not generalization.** The demo corpus is 33 classics with a golden set written against them.
   Numbers on your own library will differ.

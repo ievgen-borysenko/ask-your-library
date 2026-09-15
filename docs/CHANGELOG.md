@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+- **The golden items say which facts an answer must carry, and the report says which are
+  missing.** Behavioural compliance, quote provenance and the manual correctness read were the
+  three rows, and only the third could tell whether c06's answer reaches Passepartout's "to-day is
+  Saturday" — a read of every answer in the report, from the top, every run. Every golden item
+  whose answer has content now carries `expected_facts`: one to four short checkable strings — a
+  name, a number, a place — derived from that item's own notes and, where they were vague, from
+  the book card in `corpus/cards/`. The eval scores them as a fourth deterministic row
+  (`facts_found`/`facts_expected` and `facts_ok`, folded and whitespace-normalised substring
+  presence, no stemming and no synonyms), prints it on the question's line and in the totals, and
+  `summarize_report.py` names every behaviour PASS whose answer is missing one. The row is
+  deliberately **not** part of the behaviour verdict: ADR-010 rejected a composite score, a fact
+  can sit inside a wrong sentence, and a right answer written in other words scores red — so it
+  narrows where the reader starts and decides nothing (ADR-010, amended). 32 of the 42 items carry
+  facts; the refusals and the clarify items whose two candidate books would each demand a
+  different answer carry an empty list on purpose. The shape of the three files is now pinned by
+  `tests/test_golden_schema.py` — allowed keys per file (a misspelled `expected_behaviour` used to
+  be ignored silently and score green), required keys, types, unique ids and no repeated question
+  — and the scoring by `tests/test_agent_eval_facts.py`. No run was made and no published number
+  changed.
+
 ## 0.3.1 (2026-09-15)
 
 A documentation and CI patch over `v0.3.0`; nothing under `src/` changed. It exists because at
