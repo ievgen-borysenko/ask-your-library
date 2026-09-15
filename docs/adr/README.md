@@ -196,6 +196,18 @@ recorded as honestly: runs are single, the hosted model varies, and the scorer i
 LLM judge stays out until human verdicts exist. A catalogue set of ten questions joined the two in
 September (ADR-016).
 
+Amended 2026-09-15: a fourth deterministic row. Every golden item whose answer has content carries
+`expected_facts`, one to four short checkable strings taken from its own notes and the book cards,
+and the harness reports `facts_found`/`facts_expected` per question and in the totals, `facts_ok`
+when all of them occur in the answer text — folded, whitespace-normalised substring presence,
+nothing fuzzy. It is reported beside the verdict and never inside it: the rejection of a single
+headline score stands, the rows still cannot be confused, and there is still no LLM judge. What it
+buys is the first step of the manual correctness read done deterministically — the report names the
+answers that do not carry what the golden item says they must, instead of leaving all of them to be
+read from the top — at the cost of a check that cannot tell a fact in a right sentence from the
+same fact in a wrong one, which is why it decides nothing. The shape of the golden files is pinned
+by a schema test from the same change (`tests/test_golden_schema.py`).
+
 ## ADR-011: Publishing by allowlist into a fresh repository, fail-closed tooling
 
 Status: accepted.

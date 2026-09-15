@@ -204,7 +204,12 @@ open ones often refer to them.
   `QUESTION_DEADLINE_S`, `--deadline`); `nodes.py` split (llm client, prompts, nodes, clarify
   resolver, coverage gate, provenance engine); loop budgets as config knobs; end-to-end tests of
   the real graph with a scripted model (`tests/test_graph_e2e.py`); `plan` degrades on malformed
-  JSON; eval validates requested ids and records per-question cost and tokens.
+  JSON; eval validates requested ids and records per-question cost and tokens. Pinned since
+  15.09: the golden files' own shape (`tests/test_golden_schema.py` — the keys each file allows,
+  so a misspelled `expected_behaviour` fails instead of being ignored, required keys, types,
+  ids unique across the three sets, no question asked twice) and the `expected_facts` /
+  `facts_ok` row (`tests/test_agent_eval_facts.py` — the matching rule, the empty case, and that
+  the facts do not move `behavior_ok`).
 - Non-goals documented in `docs/known-limits.md`: re-ingest per corpus change (and the staged
   rebuild of `ayl-add`), `get_chapter` caps, EN/UA-only injection patterns.
 - Workflow linter: a `workflows` job in `ci.yml` runs actionlint (release tarball, SHA-256

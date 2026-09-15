@@ -58,6 +58,8 @@ questions:
   expected_count: 33
   expected_total: 33
   expected_books: *all_books
+  expected_facts:
+  - "33"
   notes: The number must be len() of the list the code produced, and that list must be the
     whole manifest (canaries excluded by their source column). No search step, one model call.
 - id: k02-list
@@ -67,6 +69,10 @@ questions:
   expected_count: 33
   expected_total: 33
   expected_books: *all_books
+  expected_facts:
+  - Robinson Crusoe
+  - Moby Dick
+  - The Kobzar of the Ukraine
   notes: Strict set equality against the manifest; a sample of 14 with a heading that says 17
     (the owner's smoke of 08.09 through the research loop) is exactly what this item rejects.
 - id: k03-has-yes
@@ -77,9 +83,12 @@ questions:
   expected_total: 33
   expected_books:
   - "Ivanhoe — Walter Scott"
+  expected_facts:
+  - Walter Scott
   notes: 'The key, not the title: "Ivanhoe — Wrong Author" would be another book. expected_total
     keeps a targeted run of this item from passing over a partial index, where the one right
-    answer says nothing about the other thirty-two books.'
+    answer says nothing about the other thirty-two books. The expected_fact is the author and
+    not the title, which is in the question: an answer echoing the question would score it green.'
 - id: k04-has-no
   question: Is War and Peace in my library?
   type: catalog
@@ -87,6 +96,7 @@ questions:
   expected_resolved: false
   expected_total: 33
   expected_books: []
+  expected_facts: []
   notes: Not in the demo corpus; the answer says so (closest titles may follow), nothing is
     searched, and no title is listed. expected_total is what keeps this item from passing over
     an empty or half-built index, where nothing is found either.
@@ -100,6 +110,10 @@ questions:
   - "Twenty Thousand Leagues Under the Sea — Jules Verne"
   - "Around the World in Eighty Days — Jules Verne"
   - "A Journey to the Interior of the Earth — Jules Verne"
+  expected_facts:
+  - Twenty Thousand Leagues Under the Sea
+  - Around the World in Eighty Days
+  - A Journey to the Interior of the Earth
 - id: k06-count-ua
   question: Скільки книжок у моїй бібліотеці?
   type: catalog
@@ -107,18 +121,26 @@ questions:
   expected_count: 33
   expected_total: 33
   expected_books: *all_books
+  expected_facts:
+  - "33"
   notes: The same intent in Ukrainian; the planner recognises it, the code answers.
 - id: k07-content-not-catalog
   question: What are the names of the three musketeers?
   type: answer
   expected_books:
   - The Three Musketeers
+  expected_facts:
+  - Athos
+  - Porthos
+  - Aramis
   notes: 'Negative control: "names" is not a catalogue question; the answer needs the book''s
     content (Athos, Porthos, Aramis). A catalogue listing on this item is a misroute and fails.'
 - id: k08-about-whaling
   question: What do I have about whaling?
   type: answer
   expected_books:
+  - Moby Dick
+  expected_facts:
   - Moby Dick
   notes: 'Negative control, the "what do I have about X" form: a topic, not a title, so the
     answer needs the books'' content. A catalogue result fails the item.'
@@ -127,6 +149,7 @@ questions:
   type: answer
   expected_behavior: research
   expected_books: []
+  expected_facts: []
   notes: 'Negative control, the form the planner prompt itself names as NOT catalog: it reads like
     a listing but needs the books'' content. Scored on routing only (research loop, at least one
     search, no catalogue result); which books the answer names is not scored, and the answer
@@ -136,6 +159,9 @@ questions:
   type: answer
   expected_books:
   - Dracula
+  expected_facts:
+  - solicitor
+  - prisoner
   expected_book_filter: Dracula
   notes: The hybrid of ADR-016. The planner names the book, code resolves it to the index key
     and retrieval is limited to it; the report row shows the filter, and a wrong single resolve

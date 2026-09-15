@@ -1,5 +1,38 @@
 # Changelog
 
+## Unreleased
+
+- **The golden items say which facts an answer must carry, and the report says which are
+  missing.** Behavioural compliance, quote provenance and the manual correctness read were the
+  three rows, and only the third could tell whether c06's answer reaches Passepartout's "to-day is
+  Saturday" — a read of every answer in the report, from the top, every run. Every golden item
+  whose answer has content now carries `expected_facts`: one to four short checkable strings — a
+  name, a number, a place — derived from that item's own notes and, where they were vague, from
+  the book card in `corpus/cards/`. The eval scores them as a fourth deterministic row
+  (`facts_found`/`facts_expected` and `facts_ok`, folded and whitespace-normalised substring
+  presence, no stemming and no synonyms), prints it on the question's line and in the totals, and
+  `summarize_report.py` names every behaviour PASS whose answer is missing one. The row is
+  deliberately **not** part of the behaviour verdict: ADR-010 rejected a composite score, a fact
+  can sit inside a wrong sentence, and a right answer written in other words scores red — so it
+  narrows where the reader starts and decides nothing (ADR-010, amended). 32 of the 42 items carry
+  facts; the refusals and the clarify items whose two candidate books would each demand a
+  different answer carry an empty list on purpose. The shape of the three files is now pinned by
+  a contract the harness owns and enforces when it loads any golden file, before the graph is
+  built and before the first billed call: the keys allowed for the item's type, the required keys
+  (`expected_facts` among them, so a misspelled `expected_fact:` fails instead of silently turning
+  the row off) and the type of every field, with every problem in the file reported at once.
+  `tests/test_golden_schema.py` runs that check over the three files here and adds what only holds
+  across a set — ids unique across the files, no question asked twice, no fact its own question
+  already contains, which would score green by being restated — and
+  `tests/test_agent_eval_facts.py` pins the scoring, including that the verdict does not move with
+  the facts on any branch of `score()`. **All three golden checksums moved**:
+  `en-demo.yaml` `efb25bda` → `edc15194`, `en-demo-extended.yaml` `8eec61c9` → `836d3870`,
+  `en-demo-catalog.yaml` `14b001e2` → `72eb2c2b`, so **no report committed under
+  [`eval-results/`](eval-results/) reproduces against the current files**: every one of them was
+  measured on the golden set as it stood before this change, and their fingerprints say so. No run
+  was made here either — the facts column has not been measured once, on any configuration, and no
+  published number changed.
+
 ## 0.3.1 (2026-09-15)
 
 A documentation and CI patch over `v0.3.0`; nothing under `src/` changed. It exists because at

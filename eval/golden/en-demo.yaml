@@ -14,6 +14,10 @@ questions:
   type: identify
   expected_books:
   - Ivanhoe
+  expected_facts:
+  - Cedric
+  - Palmer
+  - disinherited
   notes: 'Reader-verified 2026-09-05. Wilfred of Ivanhoe returns disguised as a Palmer after
     Cedric disinherited him; Saxon-Norman conflict; Richard the Lionheart returns in disguise
     (the Black Knight). Text: "Palmer" and "disinherited" each appear in 5+ chapters.'
@@ -23,6 +27,10 @@ questions:
   type: answer
   expected_books:
   - Adventures of Huckleberry Finn
+  expected_facts:
+  - Jim
+  - letter
+  - Miss Watson
   notes: 'Reader-verified 2026-09-05. Huck decides not to betray Jim: he tears up the letter
     to Miss Watson that would reveal where Jim is and chooses to help Jim stay free. Raised to
     believe that helping an enslaved man escape is a sin, he accepts damnation rather than
@@ -36,6 +44,10 @@ questions:
   type: answer
   expected_books:
   - The Three Musketeers
+  expected_facts:
+  - Coquenard
+  - Chevreuse
+  - Marie Michon
   notes: 'Reader-verified 2026-09-05. Porthos: Madame Coquenard, the procurator''s wife.
     Aramis keeps his connection deliberately secret; the novel ties it to Madame de Chevreuse
     under the name Marie Michon (letter signed "MARIE MICHON", Chapter XLVIII). A good answer
@@ -47,11 +59,15 @@ questions:
   type: answer
   expected_books:
   - Robinson Crusoe
+  expected_facts:
+  - footprint
+  - Friday
   notes: 'Reader-verified 2026-09-05. The footprint ("the print of a man''s naked foot",
     Chapter XI) and later remains on the shore terrify him; he hides, fortifies, plans an
     ambush, then reasons that he has no right to kill them for customs they do not know as
     crimes. Much later he attacks a party to save a captive, who becomes Friday. Expected
-    answer: no, not immediately.'
+    answer: no, not immediately. The expected_fact "footprint" is the word this note and the
+    book card use; the novel itself says it as the phrase quoted above.'
 
 - id: c05-quixote-windmills
   question: Why does Don Quixote attack the windmills even after Sancho tells him what they
@@ -59,6 +75,9 @@ questions:
   type: answer
   expected_books:
   - Don Quixote
+  expected_facts:
+  - giants
+  - Friston
   notes: 'Reader-verified 2026-09-05. He reads the windmills as giants through the logic of
     chivalric romances and charges despite Sancho''s warning. Beaten, he claims the sage
     Friston (Ormsby''s spelling in this edition, not "Freston") turned the giants into
@@ -70,6 +89,10 @@ questions:
   type: answer
   expected_books:
   - Around the World in Eighty Days
+  expected_facts:
+  - one day
+  - Saturday
+  - Reform Club
   notes: 'Reader-verified 2026-09-05. Fogg believes he arrived a day late. Travelling
     eastward he "gained one day on his journey" without noticing (Chapter XXXVII).
     Passepartout bursts in: "to-day is Saturday", not Sunday; Fogg reaches the Reform Club in
@@ -81,6 +104,10 @@ questions:
   type: answer
   expected_books:
   - Alice's Adventures in Wonderland
+  expected_facts:
+  - full size
+  - Sentence first
+  - pack of cards
   notes: 'Reader-verified 2026-09-05. Alice has grown back to full size and sees the trial as
     nonsense; she objects to "Sentence first - verdict afterwards" and dismisses them:
     "You''re nothing but a pack of cards!" (Chapter XII).'
@@ -89,6 +116,7 @@ questions:
   question: How did Tom Sawyer make the other boys pay him for the chance to paint the fence?
   type: refusal
   expected_books: []
+  expected_facts: []
   notes: 'Reader-verified 2026-09-05. The Adventures of Tom Sawyer is not in this library.
     Strong near-miss: Adventures of Huckleberry Finn IS present and names Tom Sawyer in 16
     chapters (Chapter I names the earlier book), so retrieval will return Huck Finn hits. The
@@ -105,6 +133,7 @@ questions:
   expected_books:
   - Robinson Crusoe
   - Gulliver's Travels
+  expected_facts: []
   notes: 'PROPOSED 2026-09-05, needs the reader''s verdict. Reworded 2026-09-05 (two AI sessions, reader to confirm): the first wording ("has to work out how to live there") leaned to Crusoe; this one names the two readings without naming a book. Both fit: Crusoe (island,
     first-person journal) and Gulliver (shipwrecked in Lilliput, first-person travel account).
     A single pick without asking is a fail; the pass is a question such as "alone on an
@@ -118,6 +147,9 @@ questions:
   expected_books:
   - Ivanhoe
   - Don Quixote
+  expected_facts:
+  - chivalric
+  - parody
   notes: 'Reader-verified 2026-09-05 (both books read). Ivanhoe: chivalric romance,
     tournaments, honour as a real code (with Rebecca''s critique of it). Don Quixote: parody
     of the chivalric romances; the code exists only in the hero''s head. Both books must be
@@ -130,6 +162,10 @@ questions:
   type: answer
   expected_books:
   - The Kobzar of the Ukraine
+  expected_facts:
+  - Naimechka
+  - Hanna
+  - deathbed
   notes: 'Text-verified 2026-09-05 (not reader-verified): "Naimechka; or The Servant". Hanna
     leaves Mark with Trophimus and Nastasia so that his mother''s shame does not "to poverty
     bind" him (Prologue); returns as their servant to raise him; deathbed confession ("For I -
