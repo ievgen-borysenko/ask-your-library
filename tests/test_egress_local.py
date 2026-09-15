@@ -27,9 +27,12 @@ that reaches libc without passing through CPython: a native extension with its
 own C sockets, or a `ctypes` call straight into `getaddrinfo` or `connect`. The
 audit events come from CPython's socket module, so code that skips it skips
 them. `test_a_ctypes_call_into_libc_is_the_known_blind_spot` pins that as an
-xfail rather than leaving it as a sentence, and
-`test_no_native_networking_in_the_environment` closes the practical half: a
-blind spot nothing installed can reach is a different thing from an open door.
+xfail rather than leaving it as a sentence, and two tests close the practical
+half — a blind spot nothing installed can reach is a different thing from an
+open door. They ask two questions that do not have the same answer everywhere:
+`test_no_native_networking_in_the_interpreter` is about the process running this
+file, and `test_no_native_networking_in_the_locked_runtime` about the
+application's own locked closure, read from the lockfile.
 
 SCOPE, and it is a narrow one. This is what ONE Python process did, on ONE path
 through the package: `runner.run_question` over the compiled graph, with the
@@ -44,9 +47,12 @@ repository can be started:
     it is not only that they are untested: that extra's dependency tree brings
     `grpcio` and `opentelemetry-exporter-otlp-proto-grpc`, which do their own
     networking in C, so a Chainlit process is exactly the process this guard
-    could not speak for. `test_no_native_networking_in_the_environment` is what
-    keeps that separation honest — it fails if the extra is ever installed into
-    a leg that runs this file.
+    could not speak for. That is also why the two tests above are two:
+    an interpreter WITH the extra — a developer's own, or the `ui-smoke` job's —
+    was never inside this claim, so `..._in_the_interpreter` skips itself there
+    and says so, while `..._in_the_locked_runtime` runs everywhere and must
+    pass. The first still fails where such a package arrives for any other
+    reason, which is the separation it exists to keep honest.
   * **Ollama is a separate process.** What it does with a prompt once it has
     it — a model pulled on demand, a telemetry ping, a remote inference backend
     someone configured — is outside this interpreter and outside this test.
