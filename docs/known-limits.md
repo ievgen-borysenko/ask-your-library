@@ -45,7 +45,8 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   `LLM_BACKEND=ollama uv run eval/run_agent_eval.py`.
 - **"Nothing leaves the machine" is tested for one process, not for your machine.**
   `tests/test_egress_local.py` records every outbound connection attempt the application's own
-  Python process makes — at the socket, the DNS lookup and the httpx transport — and asserts that
+  Python process makes — at the socket, all five resolver entry points and the httpx transport —
+  and asserts that
   in the shipped local configuration every one of them goes to loopback on the configured Ollama
   port, with no hosted provider and no tracing endpoint contacted or even looked up. That is the
   CLI, the eval and the Chainlit server's Python half. It is not Ollama, which is a separate

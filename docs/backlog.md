@@ -120,8 +120,23 @@ open ones often refer to them.
   folder.
 - Enable SQLite foreign keys in the Chainlit schema; a retention/cleanup command for the
   scratchpad and chat history once the tool outgrows single-user local use.
-- `pyproject`: declare `httpx` and `langchain-core` as direct dependencies (both are imported
-  directly and currently arrive transitively).
+- `pyproject`: declare `langchain-core` as a direct dependency (`llm.py` imports
+  `langchain_core.messages` at module import time and the name arrives transitively). `httpx` and
+  `openai` are declared since 0.3.1; this item is what is left of that one.
+- **There are two httpx distributions in the tree, and the second half of `llm.CallTimeout`
+  catches nothing.** The model client's SDK depends on `httpx2` 2.12 while `llm.py` imports
+  `httpx` 0.28 for its `Timeout` object and for `CallTimeout`; the two are unrelated packages, and
+  `issubclass(httpx2.TimeoutException, httpx.TimeoutException)` is False. So a timeout raised
+  inside the SDK's own transport is an `httpx2.TimeoutException` and the `httpx.TimeoutException`
+  arm of `CallTimeout` cannot see it. Harmless today — the SDK wraps such a timeout in
+  `APITimeoutError`, which is the other arm and is what actually fires — but the comment at
+  `llm.py:~228` ("the bare httpx class is kept beside it for a timeout raised before the SDK wraps
+  it") is false as written. The same seam is worth a second look next to it: the `httpx.Timeout`
+  object `llm.llm()` builds is stored on the SDK's client unconverted (it is not an
+  `httpx2.Timeout`), so whether the per-attempt bound is honoured rests on duck typing across two
+  packages. Found while writing the egress guard, which had to patch
+  both distributions' transports for the same reason (`tests/egress_guard.py`). Recorded, not
+  fixed: the fix is in `src/` and belongs to a change of its own.
 
 ## Product / spec decisions
 
@@ -161,8 +176,9 @@ open ones often refer to them.
 - **Nothing in the suite could see a connection attempt**, so the local configuration's central
   privacy claim was proved by construction (a faked model, an in-memory library, blanked
   credentials) rather than asserted. Closed by `tests/test_egress_local.py` and
-  `tests/egress_guard.py`: an egress guard records every outbound attempt at the socket, DNS and
-  httpx layers and refuses anything that is not loopback, and the real preflight, embedder and
+  `tests/egress_guard.py`: an egress guard records every outbound attempt at the socket, all five
+  resolver entry points and the httpx layer (in both installed httpx distributions) and refuses
+  anything that is not loopback, and the real preflight, embedder and
   compiled graph run under it in the shipped local configuration with Ollama not running — every
   attempt to loopback on the configured Ollama port, no hosted provider or tracing endpoint
   contacted or looked up, and a clean failure on the unreachable local runtime instead of a hosted

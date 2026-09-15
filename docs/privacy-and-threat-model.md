@@ -58,8 +58,12 @@ cleanup command.
 **The "nothing leaves the machine" claim is tested, and the test says exactly how far it
 reaches.** `tests/test_egress_local.py` instruments the Python process with an egress guard
 (`tests/egress_guard.py`) that records every outbound connection attempt at three layers — the
-socket, the DNS lookup, and the httpx transport the model client goes through — and refuses
-anything that is not loopback. It then runs the real thing in the shipped configuration
+socket, the resolver, and the httpx transport the model client goes through — and refuses
+anything that is not loopback. The resolver means all five of its entry points, not only
+`getaddrinfo`: `gethostbyname`, `gethostbyname_ex`, `gethostbyaddr` and `getnameinfo` are separate
+calls into it, and one of them is on a path this project loads — LangSmith's `_is_localhost()`
+asks `gethostbyname` about its own endpoint host. It then runs the real thing in the shipped
+configuration
 (`LLM_BACKEND=ollama`, `EMBED_BACKEND=ollama`, tracing off, no credentials) with Ollama *not*
 running: the real preflight, the real embedder, and the real compiled graph through
 `runner.run_question`. Every attempt recorded — 16 of them on the reference run, from preflight's

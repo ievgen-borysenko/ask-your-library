@@ -10,9 +10,14 @@
   whether or not the real one would have made a hosted one, and an import, an SDK or a tracing
   client can open a socket no assertion would notice. `tests/test_egress_local.py` instruments the
   process instead. `tests/egress_guard.py` records every outbound attempt at three layers — the
-  socket floor (`socket.socket.connect` / `connect_ex`, `socket.create_connection`), the DNS
-  lookup (`socket.getaddrinfo`), and the httpx transport — and refuses anything that is not
-  loopback, so a blocked host fails before a resolver on the network is told its name. Loopback is
+  socket floor (`socket.socket.connect` / `connect_ex`, `socket.create_connection`), the resolver,
+  and the httpx transport — and refuses anything that is not loopback, so a blocked host fails
+  before a resolver on the network is told its name. The resolver means all five of its entry
+  points: `getaddrinfo` is the door httpx and urllib3 use, and `gethostbyname`,
+  `gethostbyname_ex`, `gethostbyaddr` and `getnameinfo` are four more, one of them on a path this
+  project loads — LangSmith's `_is_localhost()` asks `gethostbyname` about its own endpoint host,
+  so a guard watching `getaddrinfo` alone would have let the name of a tracing endpoint onto the
+  wire while the file claimed no name leaves. Loopback is
   recorded too, which is what makes the allow-list an assertion rather than a silence. The test
   then runs the real thing in the shipped local configuration with Ollama not running: the real
   preflight, the real `embeddings`, the real compiled graph through `runner.run_question`. All 16
@@ -20,17 +25,23 @@
   the planner's call and its two retries — target loopback on the configured Ollama port, nothing
   else is contacted or looked up, and the run ends on the unreachable local runtime (preflight
   exit 5, then a connection error to that endpoint) instead of falling back to a hosted call.
-  Three controls keep that meaningful: the guard catching a deliberate outbound request before any
+  Four controls keep that meaningful: the guard catching a deliberate outbound request before any
   lookup, the same graph under `LLM_BACKEND=openrouter` with a placeholder key, where the guard
-  records `openrouter.ai:443` and refuses it, and the same backend with no key, where nothing is
-  attempted at all. Both httpx distributions installed here are patched, because the OpenAI SDK's
+  records `openrouter.ai:443` and refuses it, the same backend with no key, where nothing is
+  attempted at all, and the local run repeated with a usable-looking `OPENROUTER_API_KEY` present,
+  so that a silent hosted fallback would be stopped by the guard rather than excused by a missing
+  credential. Both httpx distributions installed here are patched, because the OpenAI SDK's
   client is not built on the `httpx` the application imports; the socket floor caught the model
   calls regardless, which is why there is a floor. Nothing in `src/` was touched: the application
   runs exactly as it ships and the process around it is instrumented. Scope is stated in the test
   and in the docs: one Python process — not Ollama, not the browser, not Chainlit's JavaScript,
   not a subprocess. The whole configuration is set per child interpreter through
   `conftest.run_fresh`, so both CI legs (`test (ollama)`, `test (openrouter)`) run the same thing,
-  with no network and no Ollama.
+  with no network and no Ollama; that scrub list now also covers the proxy variables
+  (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` and their lowercase twins), which this
+  project never reads but every HTTP client does — one of them set in a developer's shell would
+  send each request to the proxy's host instead of the configured endpoint, which is a different
+  destination for these tests to record and an off-machine hop out of a loopback URL.
 
 - **A JSON sidecar per run, and `--repeat N`, so a reported number can carry its spread.** Every
   run wrote one Markdown report and nothing else: a reader's document whose shape is a contract
