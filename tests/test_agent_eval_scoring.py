@@ -333,7 +333,8 @@ def test_error_items_keep_the_cost_they_spent(monkeypatch, tmp_path):
                 "provenance": {}, "steps_taken": 1, "read_chapters": [], "evidence_items": 0,
                 "clarify_asked": False, "clarify_candidates": [], "clarify_unresolved": False,
                 "clarify_chosen": "", "seconds": 1, "steps_log": [], "score": {"behavior_ok": True,
-                "titles_mentioned": 0, "titles_expected": 0}, **ev.usage_fields()}
+                "titles_mentioned": 0, "titles_expected": 0, "facts_found": 0, "facts_expected": 0,
+                "facts_ok": True}, **ev.usage_fields()}
 
     golden = tmp_path / "golden.yaml"
     golden.write_text("questions:\n- id: good\n  type: answer\n  question: q\n  expected_books: []\n"

@@ -17,6 +17,11 @@ Scored per question (no LLM judge; heuristics, not proof):
             otherwise -> all titles mentioned
   drilldown when the golden item sets expects_chapter_read, a full chapter of
             an expected book was read; part of the behaviour verdict
+  facts     every string in the item's expected_facts occurs in the answer
+            (folded, whitespace-normalised substring; no fuzzy matching), reported
+            as facts_found/facts_expected and facts_ok — a FOURTH row, deliberately
+            NOT part of behavior_ok: ADR-010 rejected a composite score, and a fact
+            can be present in a sentence that says the wrong thing about it
 Answer CORRECTNESS is not scored: a verbatim quote of a character's false claim
 passes provenance and titles and can still be wrong, and a green run can be
 incomplete when the answering passage was never retrieved (see the c06 trace in
@@ -312,10 +317,34 @@ def fold(text: str) -> str:
                    if not unicodedata.combining(c))
 
 
+def flat(text: str) -> str:
+    """Folded text with every run of whitespace collapsed to one space: a fact
+    written as two words must still be found when the answer wrapped it across
+    a line break."""
+    return " ".join(fold(text).split())
+
+
+def facts_score(item: dict, answer: str) -> dict:
+    """The fourth row: which of the item's expected_facts occur in the answer.
+
+    Presence of a short, checkable string — a name, a number, a place — folded
+    and whitespace-normalised, nothing fuzzy: no stemming, no synonyms, no
+    edit distance, so a red row is read as "this string is not in the answer",
+    never as "the answer is wrong". Deliberately kept OUT of behavior_ok
+    (ADR-010: three rows that cannot be confused, no composite score). An item
+    with no expected_facts scores 0/0 and ok — a refusal has no facts to carry."""
+    facts = item.get("expected_facts") or []
+    haystack = flat(answer)
+    found = [f for f in facts if flat(f) in haystack]
+    return {"facts_found": len(found), "facts_expected": len(facts),
+            "facts_ok": len(found) == len(facts)}
+
+
 def score(item: dict, r: dict) -> dict:
     """Behavioural score of one run against its golden item (pure function)."""
     expected = item.get("expected_books") or []
     answer = fold(r["answer"])
+    facts = facts_score(item, r["answer"])
     mentioned = [b for b in expected if fold(b) in answer]
     behavior = item.get("expected_behavior")
     if item["type"] == "catalog":
@@ -348,7 +377,7 @@ def score(item: dict, r: dict) -> dict:
         if "expected_resolved" in item:
             ok = ok and bool(listing.get("resolved")) == bool(item["expected_resolved"])
         return {"titles_mentioned": len(listed & wanted), "titles_expected": len(wanted),
-                "catalog_listed": len(listed), "behavior_ok": ok}
+                "catalog_listed": len(listed), **facts, "behavior_ok": ok}
     if item["type"] == "refusal":
         # Evidence-free answers are NOT automatically refusals: the model may
         # have answered from its own knowledge. Only an explicit refusal passes,
@@ -370,7 +399,7 @@ def score(item: dict, r: dict) -> dict:
         ok = r["clarify_asked"] or len(mentioned) == len(expected)
     else:
         ok = bool(expected) and len(mentioned) == len(expected)
-    out = {"titles_mentioned": len(mentioned), "titles_expected": len(expected)}
+    out = {"titles_mentioned": len(mentioned), "titles_expected": len(expected), **facts}
     if CLARIFY_PICK == "second" and r.get("clarify_asked") and len(expected) >= 2:
         # Diagnostic, not part of PASS: was the user's concrete choice honoured?
         chosen = expected[1]
@@ -456,6 +485,7 @@ def main() -> None:
     totals = {"run": 0, "errors": 0, "clarify": 0, "checked": 0, "confirmed": 0, "evidence": 0,
               "unattributed": 0, "broken": 0,
               "behavior_ok": 0, "titles_mentioned": 0, "titles_expected": 0,
+              "facts_found": 0, "facts_expected": 0, "facts_items": 0, "facts_items_ok": 0,
               "drill_expected": 0, "drill_ok": 0, "cost_usd": 0.0, "llm_calls": 0,
               "tokens_in": 0, "tokens_out": 0}
     per_group = {}   # group -> [pass, total]
@@ -491,12 +521,24 @@ def main() -> None:
             totals["behavior_ok"] += int(sc["behavior_ok"])
             totals["titles_mentioned"] += sc["titles_mentioned"]
             totals["titles_expected"] += sc["titles_expected"]
+            totals["facts_found"] += sc["facts_found"]
+            totals["facts_expected"] += sc["facts_expected"]
+            if sc["facts_expected"]:
+                # items that carry no expected_facts (refusals, the clarify items
+                # whose two candidates contradict each other) are not counted as
+                # green: they are not measured by this row at all
+                totals["facts_items"] += 1
+                totals["facts_items_ok"] += int(sc["facts_ok"])
             grp = per_group.setdefault(group_of(r), [0, 0])
             grp[0] += int(sc["behavior_ok"]); grp[1] += 1
             if "drilldown_ok" in sc:
                 totals["drill_expected"] += 1
                 totals["drill_ok"] += int(sc["drilldown_ok"])
             verdict = "PASS" if sc["behavior_ok"] else "FAIL"
+            # The facts row rides beside the verdict, never inside it: "facts 2/3 NO"
+            # on a PASS line is the report saying "behaviour held, read this answer".
+            facts = (f", facts {sc['facts_found']}/{sc['facts_expected']}"
+                     + ("" if sc["facts_ok"] else " NO")) if sc["facts_expected"] else ""
             drill = f", drilldown {'yes' if sc.get('drilldown_ok') else 'NO'}" if "drilldown_ok" in sc else ""
             if "choice" in sc:
                 drill += f", clarify choice {sc['choice']}"
@@ -521,7 +563,7 @@ def main() -> None:
                       f"{r['seconds']}s, ${r['cost_usd']:.4f}, {r['llm_calls']} calls, "
                       f"{r['tokens_in']} in / {r['tokens_out']} out tokens"
                       f"{', clarify' if r['clarify_asked'] else ''}) — "
-                      f"{verdict}: titles {sc['titles_mentioned']}/{sc['titles_expected']}{drill}\n\n"
+                      f"{verdict}: titles {sc['titles_mentioned']}/{sc['titles_expected']}{facts}{drill}\n\n"
                       f"- [ ] manual correctness (facts match the golden notes?)\n\n")
             out.write(f"**Question:** {r['question']}\n\n")
             for line in r["steps_log"]:
@@ -541,6 +583,10 @@ def main() -> None:
                    + f"); expected titles mentioned {totals['titles_mentioned']}/{totals['titles_expected']}"
                    + (f"; chapter drill-down {totals['drill_ok']}/{totals['drill_expected']}"
                       if totals["drill_expected"] else "")
+                   + (f"\nexpected facts found {totals['facts_found']}/{totals['facts_expected']}; "
+                      f"answers carrying every expected fact {totals['facts_items_ok']}/{totals['facts_items']} "
+                      f"(substring presence, not correctness; not part of behaviour PASS)"
+                      if totals["facts_expected"] else "")
                    + (f"\ncost ${totals['cost_usd']:.4f} total, ${totals['cost_usd'] / attempted:.4f} mean per "
                       f"attempted question ({totals['llm_calls']} LLM calls, {totals['tokens_in']} in / "
                       f"{totals['tokens_out']} out tokens; configured rates ${PRICE_IN_PER_MTOK}/M in, "
