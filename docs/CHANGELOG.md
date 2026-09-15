@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.3.1 (2026-09-15)
+
+A documentation patch over `v0.3.0`; no code changed. It exists because the README and the docs at
+the `v0.3.0` tag presented the shipped local default without the measured accuracy caveat, and the
+front page still carried the old diagram, which paraphrased the GIFs beneath it instead of naming
+the mechanism. The first two entries below are those two corrections; the other two carry the same
+diagram work into `docs/architecture.md` and give the author credit a profile to link to.
 
 - **The workflow files are linted in CI.** The backlog's release-status entry named this the one
   item left from the visibility-switch list ("a workflow linter, free on a public repository"); a
@@ -98,7 +104,7 @@
   nowhere. NOTICE names him too, with the repository URL rather than a profile, and needs no
   equivalent line.
 
-## 0.3.0 (unreleased)
+## 0.3.0 (2026-09-10)
 
 A minor release, not a patch: the shipped default changed. A clone answers on a
 local model through Ollama, with no account and nothing to pay, where it used to
