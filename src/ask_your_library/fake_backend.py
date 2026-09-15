@@ -33,11 +33,15 @@ A `.env` is not merely bad practice here, it is a live path: `chainlit`'s own
 `__init__` calls `load_dotenv(os.getcwd() + "/.env")` at import, i.e. before
 this module is even imported, so by the time `install_fake_backend()` reads the
 environment, a `.env` in the directory the server was started from has already
-put both names into it. Hence `DOTENV_FILES` below: when either name is a KEY in
-such a file, the seam refuses outright, whatever the value there and whatever
+put both names into it. Hence the dotenv check below: when either name is a KEY
+in such a file, the seam refuses outright, whatever the value there and whatever
 the process environment says. The rule is "these names are exported by the
 person starting the server, or not set at all" — no guessing where a value came
-from, and the refusal is the same shape as every other one here.
+from, and the refusal is the same shape as every other one here. The check runs
+whenever either name is PRESENT in the environment, blank or not: a bare
+`AYL_UI_FAKE_BACKEND=` line, or the confirmation on its own, is exactly the
+shape a `.env` takes, and those must reach the refusal rather than the quiet
+return they name nothing for.
 """
 import importlib.util
 import os
@@ -111,12 +115,19 @@ def install_fake_backend() -> str | None:
     cannot be honoured: a half-installed backend is the one outcome that must
     not reach a reader, because it looks exactly like a working one.
     """
-    requested = os.environ.get(ENABLE_VAR, "").strip()
-    if not requested:
+    # PRESENT, not usable: `AYL_UI_FAKE_BACKEND=` with nothing after it, or the
+    # confirmation on its own, are the shapes a `.env` line most easily takes,
+    # and a seam that returned quietly on those would leave the refusal
+    # SECURITY.md promises unenforced for exactly the cases that promise is
+    # about. Anything in the environment under either name earns the file check.
+    present = [name for name in (ENABLE_VAR, CONFIRM_VAR) if name in os.environ]
+    if not present:
+        # The ordinary start: two lookups, no file opened, nothing patched.
         return None
-    # Before the confirmation is even read: a `.env` that names either variable
-    # is how this gets armed without anyone deciding to arm it, and chainlit has
-    # already loaded that file into os.environ by now (see the module docstring).
+    # Before the path or the confirmation is read: a `.env` that names either
+    # variable is how this gets armed without anyone deciding to arm it, and
+    # chainlit has already loaded that file into os.environ by the time this
+    # runs (see the module docstring).
     planted = _named_in_a_dotenv()
     if planted:
         path, name = planted
@@ -125,6 +136,12 @@ def install_fake_backend() -> str | None:
             f"starting it says so in its environment, and a file that is read at import — "
             f"chainlit loads <cwd>/.env before anything here runs — is not that. Remove the "
             f"line and export the two variables for the command instead.")
+
+    requested = os.environ.get(ENABLE_VAR, "").strip()
+    if not requested:
+        # The confirmation without a script names nothing to install; a blank
+        # path is the same. Neither is an error — only the file above is.
+        return None
     if os.environ.get(CONFIRM_VAR, "").strip() != CONFIRM_PHRASE:
         raise SystemExit(
             f"{ENABLE_VAR} is set, so this server would answer from a script instead of "

@@ -135,6 +135,40 @@ def test_the_confirmation_alone_in_a_dotenv_is_refused_too(monkeypatch, tmp_path
     assert CONFIRM_VAR in str(refusal.value)
 
 
+def test_a_dotenv_carrying_only_the_confirmation_is_refused(monkeypatch, tmp_path):
+    """No path anywhere — the file names the confirmation, and that is all the
+    environment has. The old shape returned quietly here, because it read the
+    path first and found nothing to install, which left the promise in
+    SECURITY.md unenforced for the easiest way to break it."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text(f"{CONFIRM_VAR}={CONFIRM_PHRASE}\n")
+    enable(monkeypatch, confirm=CONFIRM_PHRASE)          # as dotenv would have left it
+    with pytest.raises(SystemExit) as refusal:
+        install_fake_backend()
+    assert CONFIRM_VAR in str(refusal.value) and ".env" in str(refusal.value)
+
+
+def test_a_dotenv_with_a_blank_path_is_refused_too(monkeypatch, tmp_path):
+    """`AYL_UI_FAKE_BACKEND=` with nothing after it: present, unusable, and a
+    line somebody left behind. The name being in the file is the finding."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text(f"{ENABLE_VAR}=\n")
+    enable(monkeypatch, path="")
+    with pytest.raises(SystemExit) as refusal:
+        install_fake_backend()
+    assert ENABLE_VAR in str(refusal.value)
+
+
+def test_a_blank_path_without_a_dotenv_installs_nothing_and_says_nothing(monkeypatch, tmp_path,
+                                                                        capsys):
+    """The other half of the same shape: present and unusable, but no file to
+    object to. Nothing to install is not an error."""
+    monkeypatch.chdir(tmp_path)
+    enable(monkeypatch, path="", confirm=CONFIRM_PHRASE)
+    assert install_fake_backend() is None
+    assert capsys.readouterr().err == ""
+
+
 def test_an_unrelated_dotenv_changes_nothing(monkeypatch, tmp_path, script, capsys):
     """The check is about these two names, not about having a `.env` at all —
     every developer has one, and it is what `cp .env.example .env` is for."""

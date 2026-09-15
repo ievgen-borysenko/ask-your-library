@@ -104,14 +104,16 @@ def _clarify_timeout_seconds() -> int:
     nonsense value is refused rather than rounded to a default: a server whose
     clarify silently expires after 0 s would look like a model that never asks.
 
-    Accepted: digits only, with surrounding whitespace ignored (a `.env` line
-    keeps its trailing spaces). Everything `int()` would also take is refused —
-    `1_0` is ten to Python and a typo to a reader, and `+5` or `-1` are neither
-    what anyone meant nor worth guessing at."""
+    Accepted: ASCII decimal digits only, with surrounding whitespace ignored (a
+    `.env` line keeps its trailing spaces) and blank meaning unset, as blank
+    does for every other knob here. Everything `int()` would also take is
+    refused — `1_0` is ten to Python and a typo to a reader, `+5` and `-1` are
+    neither what anyone meant nor worth guessing at — and `str.isdigit()` is not
+    the test for that either: it is true of `²`, which `int()` then rejects."""
     raw = os.environ.get("AYL_CLARIFY_TIMEOUT_S", "").strip()
     if not raw:
         return 300
-    if not raw.isdigit() or int(raw) <= 0:
+    if not re.fullmatch(r"[0-9]+", raw) or int(raw) <= 0:
         raise SystemExit("AYL_CLARIFY_TIMEOUT_S must be digits only, a number of seconds above 0")
     return int(raw)
 
