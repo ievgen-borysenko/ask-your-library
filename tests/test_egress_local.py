@@ -20,6 +20,17 @@ assertions are about the whole recorded list: loopback on the configured Ollama
 port, and nothing else — no OpenRouter, no LangSmith, not even a name lookup
 for one.
 
+WHAT IS SEEN. Every network call made through Python's socket module: that is
+the standard library, `requests`, urllib3, httpx, httpcore, asyncio and the
+model client's SDK — every client this project has. What is NOT seen is a call
+that reaches libc without passing through CPython: a native extension with its
+own C sockets, or a `ctypes` call straight into `getaddrinfo` or `connect`. The
+audit events come from CPython's socket module, so code that skips it skips
+them. `test_a_ctypes_call_into_libc_is_the_known_blind_spot` pins that as an
+xfail rather than leaving it as a sentence, and
+`test_no_native_networking_in_the_environment` closes the practical half: a
+blind spot nothing installed can reach is a different thing from an open door.
+
 SCOPE, and it is a narrow one. This is what ONE Python process did, on ONE path
 through the package: `runner.run_question` over the compiled graph, with the
 real `preflight` and the real `embeddings` beside it. That path is the one the
@@ -29,7 +40,13 @@ repository can be started:
 
   * **Chainlit is not exercised here.** The `ui` extra is not installed in the
     legs that run this file, so `ui.py` is not imported and its server, its
-    SQLite persistence and its own HTTP stack are outside these assertions.
+    SQLite persistence and its own HTTP stack are outside these assertions. And
+    it is not only that they are untested: that extra's dependency tree brings
+    `grpcio` and `opentelemetry-exporter-otlp-proto-grpc`, which do their own
+    networking in C, so a Chainlit process is exactly the process this guard
+    could not speak for. `test_no_native_networking_in_the_environment` is what
+    keeps that separation honest — it fails if the extra is ever installed into
+    a leg that runs this file.
   * **Ollama is a separate process.** What it does with a prompt once it has
     it — a model pulled on demand, a telemetry ping, a remote inference backend
     someone configured — is outside this interpreter and outside this test.
@@ -54,11 +71,16 @@ The runs that need a resolved configuration therefore go through
 one this test names — so both CI legs run the same thing.
 """
 import asyncio
+import ctypes
+import ctypes.util
 import importlib.util
 import json
 import socket
 import ssl
+import subprocess
+import tempfile
 import _socket
+from pathlib import Path
 
 import httpx
 import pytest
@@ -283,6 +305,92 @@ def test_loopback_is_allowed_and_still_recorded():
     assert guard.targets() == {("127.0.0.1", port)}
 
 
+# ------------------------------------------------------------ the blind spot
+# The known native-networking packages: each one opens sockets from C, or moves
+# asyncio's sockets into C, and would therefore be outside every assertion in
+# this file. `uvloop` is the sharpest of them — it replaces asyncio's event loop
+# wholesale, so every asyncio socket in the process would stop passing through
+# CPython's socket module. `httptools` is deliberately NOT here: it is a parser,
+# it owns no socket. Names are matched against distribution names, lowercased,
+# with `-`/`_`/`.` normalised, so `grpcio-status` and `psycopg-binary` count too.
+NATIVE_NETWORKING = ("grpcio", "pycurl", "pycares", "aiodns", "uvloop", "pyzmq",
+                     "zmq", "psycopg", "psycopg2", "pymongo", "redis", "hiredis")
+
+
+def _normalised_distributions() -> set[str]:
+    from importlib.metadata import distributions
+
+    return {(dist.metadata["Name"] or "").lower().replace("_", "-").replace(".", "-")
+            for dist in distributions()}
+
+
+def _native_hits(names) -> set[str]:
+    return {name for name in names
+            if any(name == bad or name.startswith(bad + "-") for bad in NATIVE_NETWORKING)}
+
+
+def test_no_native_networking_in_the_environment():
+    """The practical half of the blind spot below.
+
+    The guard sees every network call made through Python's socket module and
+    none made by a native extension with its own C sockets. That limit is only
+    theoretical while no such extension is here, so this test asserts it is not —
+    twice, because the two questions are different:
+
+    1. Nothing in the INTERPRETER running this file. If the `ui` extra were ever
+       added to the leg that runs these tests, this fails, and it should: that
+       tree carries `grpcio` and `opentelemetry-exporter-otlp-proto-grpc`, which
+       open sockets from C, and a process holding them is a process this guard
+       cannot speak for.
+    2. Nothing in the APPLICATION's own runtime closure, read from the lockfile
+       rather than from whatever happens to be installed — so the claim survives
+       a fresh environment, and a dependency bump that pulled one in fails here
+       instead of quietly widening the blind spot.
+    """
+    installed = _native_hits(_normalised_distributions())
+    assert installed == set(), (
+        f"{sorted(installed)} is installed here and does its own networking in C, "
+        "which no assertion in this file can see")
+
+    exported = subprocess.run(
+        ["uv", "export", "--no-dev", "--frozen", "--no-hashes", "--no-emit-project"],
+        cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True)
+    if exported.returncode != 0:                 # no uv on PATH: the half above still ran
+        pytest.skip(f"uv export is unavailable here: {exported.stderr.strip()[:200]}")
+    locked = {line.split("==")[0].lower().replace("_", "-").replace(".", "-")
+              for line in exported.stdout.splitlines()
+              if "==" in line and not line.startswith((" ", "#"))}
+    assert locked, "uv export produced no requirements; the check below would be vacuous"
+    assert _native_hits(locked) == set()
+
+
+@pytest.mark.xfail(strict=True, reason="known blind spot: a ctypes call reaches libc "
+                                       "without passing through CPython's socket module, "
+                                       "which is where the audit events are raised")
+def test_a_ctypes_call_into_libc_is_the_known_blind_spot():
+    """The limit, pinned instead of merely written down.
+
+    This test asserts what the file would LIKE to be true — that a resolver call
+    is seen however it is made — and it is expected to fail, because `ctypes`
+    calls libc's `getaddrinfo` directly and CPython raises its audit events from
+    its own socket module. `strict=True` is the point: if some future
+    interpreter, sandbox or seccomp layer closes this door, the test passes, the
+    strict xfail turns that pass into a failure, and whoever sees it has to come
+    here and rewrite the scope paragraphs that currently say the door is open.
+
+    The name resolved is `localhost`, from `/etc/hosts`: demonstrating that the
+    guard cannot see the call does not require making an unguarded query about a
+    public name leave the machine."""
+    libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+    result = ctypes.c_void_p()
+    with record_egress() as guard:
+        code = libc.getaddrinfo(b"localhost", None, None, ctypes.byref(result))
+    if code == 0:
+        libc.freeaddrinfo(result)
+    assert code == 0, "the probe did not resolve, so it proves nothing either way"
+    assert guard.attempts, "a ctypes call into libc was seen by the audit hook"
+
+
 def test_only_this_machine_counts_as_loopback():
     """The rule the whole file rests on, spelled out. A NAME that is not a known
     loopback name is off-machine without being resolved — the lookup would be
@@ -304,19 +412,23 @@ def test_only_this_machine_counts_as_loopback():
 # therefore runs last, after every other handler and after the interpreter has
 # joined its non-daemon threads.
 LOCAL_RUN = """
-from egress_guard import arm_guard
-guard = arm_guard()
+import os                                  # stdlib only, for the stream path
 
-import atexit, json, os, tempfile
+from egress_guard import arm_guard
+guard = arm_guard(stream_path=os.environ["AYL_EGRESS_STREAM"])
+
+import atexit, json, tempfile
 
 report = {}
 
 
 def emit():
-    report["attempts"] = [a.as_tuple() for a in guard.attempts]
-    report["targets"] = sorted(guard.targets(), key=repr)
-    report["off_machine"] = sorted(guard.off_machine(), key=repr)
-    report["binds"] = sorted(guard.binds(), key=repr)
+    # The SECONDARY record. The stream is the primary one: it is written as each
+    # attempt happens, so it survives whatever this process does next, and the
+    # parent derives its assertions from it. This snapshot is a cross-check —
+    # the parent requires it to be a prefix of the stream, which it can only be
+    # if the two agree about everything up to the moment it was taken.
+    report["snapshot"] = [a.as_tuple() for a in guard.attempts]
     print(json.dumps(report))
 
 
@@ -362,21 +474,53 @@ with tempfile.TemporaryDirectory() as scratch:
 
 
 def local_run(extra_env: str = "", **env) -> dict:
-    """The child above, in a fresh interpreter with `env` pinned, as JSON.
+    """The child above, in a fresh interpreter with `env` pinned.
 
-    Three things are checked about the child itself before its report is read,
-    because the report is written during shutdown and a shutdown is a place
-    where failures go quiet."""
-    result = _run(LOCAL_RUN % {"extra_env": extra_env}, check=False, **env)
+    The returned report's `attempts`, `targets`, `off_machine` and `binds` come
+    from the STREAM the child appended to as each attempt happened, not from the
+    summary it printed on the way out. A summary is evidence about a process
+    that lived long enough to write one; a stream is evidence either way, and it
+    keeps the records of attempts made after the summary was taken.
+
+    Several things are checked about the child itself first, because the summary
+    is written during shutdown and a shutdown is a place where failures go
+    quiet."""
+    with tempfile.TemporaryDirectory() as home:
+        stream_path = Path(home) / "egress.jsonl"
+        stream_path.touch()
+        result = _run(LOCAL_RUN % {"extra_env": extra_env}, check=False,
+                      AYL_EGRESS_STREAM=str(stream_path), **env)
+        records = [json.loads(line) for line in
+                   stream_path.read_text().splitlines() if line.strip()]
+
     assert result.returncode == 0, result.stderr[-3000:]
     # An exception raised inside an atexit handler is printed and swallowed: the
-    # exit code stays 0 and the report is already on stdout. So the one place a
+    # exit code stays 0 and the summary is already on stdout. So the one place a
     # late connection attempt would show is stderr.
     assert "Error in atexit._run_exitfuncs" not in result.stderr, result.stderr[-3000:]
     assert "EgressBlocked" not in result.stderr, result.stderr[-3000:]
     lines = [line for line in result.stdout.splitlines() if line.strip()]
     assert lines, f"the child printed no report; stderr: {result.stderr[-2000:]}"
-    return json.loads(lines[-1])        # the atexit emission is the last line
+    report = json.loads(lines[-1])      # the atexit emission is the last line
+
+    attempts = [[r["layer"], r["host"], r["port"], r["allowed"]] for r in records]
+    # The summary must be a PREFIX of the stream. The stream may be longer — an
+    # attempt made after the summary was taken is exactly what it exists to
+    # catch — but it can never disagree with it or be shorter.
+    snapshot = report.pop("snapshot")
+    assert attempts[:len(snapshot)] == snapshot, (
+        f"the stream and the child's own summary disagree:\n{attempts}\n{snapshot}")
+
+    def as_pairs(chosen) -> list:
+        return sorted(({(r["host"], r["port"]) for r in records if chosen(r)}), key=repr)
+
+    report["records"] = records
+    report["attempts"] = attempts
+    report["targets"] = [list(t) for t in
+                         as_pairs(lambda r: r["layer"] not in ("local", "socket.bind"))]
+    report["off_machine"] = [list(t) for t in as_pairs(lambda r: not r["allowed"])]
+    report["binds"] = [list(t) for t in as_pairs(lambda r: r["layer"] == "socket.bind")]
+    return report
 
 
 def test_the_guard_is_armed_before_the_first_import():
@@ -436,6 +580,11 @@ def test_the_local_configuration_talks_only_to_loopback():
     # The whole allow-list, as one equality: one host, one port.
     assert report["targets"] == [["127.0.0.1", port]]
     assert report["off_machine"] == []
+    # And at the level of the stream itself: not one refused record was written,
+    # which is a stronger statement than "none survived into the summary" — a
+    # refusal is streamed before it is raised, so an `except Exception:` inside
+    # the application cannot hide one.
+    assert [r for r in report["records"] if not r["allowed"]] == []
     # And no listening socket on a public interface either, which the bind
     # events would show.
     assert all(is_loopback(host) for host, _ in report["binds"])
@@ -489,6 +638,7 @@ def test_a_usable_hosted_key_does_not_move_the_local_run_off_the_machine():
                            OLLAMA_URL=f"http://127.0.0.1:{port}")
 
     assert report["off_machine"] == []
+    assert [r for r in report["records"] if not r["allowed"]] == []
     assert report["targets"] == [["127.0.0.1", port]]
     # The same failure as without the key: the local runtime, not a credential.
     assert report["preflight_exit"] == 5 and "no_ollama" in report["preflight_kinds"]

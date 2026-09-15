@@ -63,7 +63,25 @@ meet the audit hook underneath.
 
 Everything is RECORDED, loopback included: a guard that only recorded what it
 refused could not tell "talked to Ollama on loopback" from "talked to nothing",
-and the interesting assertion is the allow-list, not the block list.
+and the interesting assertion is the allow-list, not the block list. Records are
+also STREAMED, one JSON line per attempt written to an unbuffered file
+descriptor as it happens and before a refusal raises, so a child's evidence does
+not depend on the child surviving to summarise itself.
+
+What this guard sees, and what it does not
+------------------------------------------
+It sees **every network call made through Python's socket module**, which is
+every network call the standard library, `requests`, urllib3, httpx, httpcore,
+asyncio and the model client's SDK make.
+
+It does NOT see a call that reaches libc without passing through CPython: a
+native extension with its own C sockets, or a `ctypes` call into
+`getaddrinfo` / `connect`. The audit events are raised by CPython's own socket
+module, so code that skips it skips them. That limit is pinned by an xfail
+control in tests/test_egress_local.py rather than only written down here, and
+the environment is checked for the known native-networking packages by a test of
+its own — because the honest form of this limit is not "it could be bypassed in
+principle" but "nothing installed here can bypass it".
 
 Not in scope, and deliberately: this is one Python process. Ollama, Chainlit's
 node bundle and the browser are their own processes with their own sockets, and
@@ -72,6 +90,8 @@ nothing here can see them.
 import contextlib
 import importlib
 import ipaddress
+import json
+import os
 import socket
 import sys
 import threading
@@ -132,9 +152,14 @@ class EgressGuard:
     """The recorder. `attempts` is every outbound attempt in order, at every
     layer that saw it; the helpers below reduce it to the sets a test asserts on."""
 
-    def __init__(self, allow_loopback: bool = True):
+    def __init__(self, allow_loopback: bool = True, stream_fd: int | None = None):
         self.allow_loopback = allow_loopback
         self.attempts: list[Attempt] = []
+        # An open file descriptor, written with os.write (no buffer to lose) one
+        # JSON line per attempt, at the moment the attempt is seen. The in-memory
+        # list is a summary of a process that lived to produce it; this is the
+        # record of a process whether or not it did.
+        self._stream_fd = stream_fd
 
     # -- what the test asks -------------------------------------------------
     def targets(self) -> set[tuple[str, int | None]]:
@@ -159,9 +184,23 @@ class EgressGuard:
         return [a.layer for a in self.attempts if a.host == host]
 
     # -- the decision -------------------------------------------------------
+    def _record(self, attempt: Attempt) -> None:
+        """Append, and stream. `os.write` on a raw descriptor: no buffer that a
+        crash, a `os._exit` or a killed interpreter could swallow, and no audit
+        event of its own (CPython audits `open`, not `write`), so this cannot
+        re-enter the hook that called it."""
+        self.attempts.append(attempt)
+        if self._stream_fd is not None:
+            os.write(self._stream_fd, (json.dumps({
+                "layer": attempt.layer, "host": attempt.host,
+                "port": attempt.port, "allowed": attempt.allowed}) + "\n").encode())
+
     def check(self, layer: str, host: str, port: int | None):
         allowed = layer == BIND_EVENT or (self.allow_loopback and is_loopback(host))
-        self.attempts.append(Attempt(layer, host, port, allowed))
+        # Recorded BEFORE the refusal is raised: a caller that catches
+        # EgressBlocked — and the application catches broad exceptions in
+        # several places — must not be able to erase the fact that it tried.
+        self._record(Attempt(layer, host, port, allowed))
         if not allowed:
             raise EgressBlocked(
                 f"egress blocked at the {layer} layer: {host}:{port} is not this machine")
@@ -170,7 +209,7 @@ class EgressGuard:
         """A socket that cannot leave the machine (a Unix domain socket, a
         connected UDP send with no address of its own): recorded so nothing is
         invisible, never blocked."""
-        self.attempts.append(Attempt("local", str(address), None, True))
+        self._record(Attempt("local", str(address), None, True))
 
 
 # --------------------------------------------------------------- the floor
@@ -294,7 +333,15 @@ def disarm() -> None:
         _ACTIVE = None
 
 
-def arm_guard(allow_loopback: bool = True) -> EgressGuard:
+def _open_stream(stream_path: str | None) -> int | None:
+    """Append-only, created if missing. Opened here rather than handed in, so a
+    caller only has to know a path."""
+    if not stream_path:
+        return None
+    return os.open(stream_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+
+
+def arm_guard(allow_loopback: bool = True, stream_path: str | None = None) -> EgressGuard:
     """Arm the guard for the REST OF THIS PROCESS and never disarm it.
 
     For a child interpreter whose whole life is the thing under test. Called as
@@ -305,19 +352,25 @@ def arm_guard(allow_loopback: bool = True) -> EgressGuard:
     exporter's last upload, a thread joined on the way out.
 
     The hook goes on BEFORE the httpx modules are imported, so even the import
-    of the layer above the floor happens under the floor."""
-    guard = arm(EgressGuard(allow_loopback))
+    of the layer above the floor happens under the floor.
+
+    `stream_path` is where each attempt is appended as a JSON line as it
+    happens. The descriptor is deliberately never closed: this guard has no end,
+    and a close would be one more thing that could happen before the last
+    write."""
+    guard = arm(EgressGuard(allow_loopback, _open_stream(stream_path)))
     _patch_transports(guard)
     return guard
 
 
 @contextlib.contextmanager
-def record_egress(allow_loopback: bool = True):
+def record_egress(allow_loopback: bool = True, stream_path: str | None = None):
     """Arm the guard for the duration of the block, for an in-process test.
 
     The audit hook itself is never removed — it was installed at import of this
     module — so what this restores is the arming flag and the httpx patches."""
-    guard = arm(EgressGuard(allow_loopback))
+    stream_fd = _open_stream(stream_path)
+    guard = arm(EgressGuard(allow_loopback, stream_fd))
     patched = _patch_transports(guard)
     try:
         yield guard
@@ -325,6 +378,8 @@ def record_egress(allow_loopback: bool = True):
         disarm()
         for cls, attribute, original in patched:
             setattr(cls, attribute, original)
+        if stream_fd is not None:
+            os.close(stream_fd)
 
 
 @contextlib.contextmanager
