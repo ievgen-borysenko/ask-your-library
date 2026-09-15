@@ -13,28 +13,38 @@ So these tests instrument the PROCESS instead of the application (see
 tests/egress_guard.py) and then run the real thing: the real `llm` and
 `embeddings` modules, the real preflight, the real compiled graph through
 `runner.run_question`, with Ollama NOT running. Every outbound connection
-attempt is recorded at three layers (the socket, the resolver — all five of its
-entry points, not only `getaddrinfo` — and httpx) and refused unless the
-target is this machine, and the assertions are about the whole recorded list:
-loopback on the configured Ollama port, and nothing else — no OpenRouter, no
-LangSmith, not even a name lookup for one.
+attempt is recorded — at CPython's own socket audit events, which the C layer
+raises for every socket whatever its class or import path, plus an httpx
+transport layer above them — and refused unless the target is this machine. The
+assertions are about the whole recorded list: loopback on the configured Ollama
+port, and nothing else — no OpenRouter, no LangSmith, not even a name lookup
+for one.
 
-SCOPE, and it is a narrow one. This is what ONE Python process did — the
-interpreter that runs the CLI, the eval and the Chainlit server's Python half.
-It is not a claim about the machine:
+SCOPE, and it is a narrow one. This is what ONE Python process did, on ONE path
+through the package: `runner.run_question` over the compiled graph, with the
+real `preflight` and the real `embeddings` beside it. That path is the one the
+CLI and the eval harness run and the one the web UI's Python half calls into.
+It is not a claim about the machine, and not even a claim about every way this
+repository can be started:
 
-  * Ollama is a separate process. What it does with a prompt once it has it —
-    a model pulled on demand, a telemetry ping, a remote inference backend
+  * **Chainlit is not exercised here.** The `ui` extra is not installed in the
+    legs that run this file, so `ui.py` is not imported and its server, its
+    SQLite persistence and its own HTTP stack are outside these assertions.
+  * **Ollama is a separate process.** What it does with a prompt once it has
+    it — a model pulled on demand, a telemetry ping, a remote inference backend
     someone configured — is outside this interpreter and outside this test.
-  * Chainlit serves a browser and ships a JavaScript bundle; the browser's own
-    requests, and anything the node-side tooling does, are not seen here.
-  * A process started by this one (an `ollama pull`, a subprocess in a script)
-    has its own sockets and is not instrumented.
+  * **The browser is not in it.** Chainlit ships a JavaScript bundle; what a
+    page fetches is not a socket of this process.
+  * **A subprocess is not in it.** An audit hook is per interpreter: an
+    `ollama pull`, an installer script, anything this process spawns has its own
+    sockets and is not instrumented.
+  * **`scripts/` is not in it.** `ingest_demo_corpus.py` downloads a corpus on
+    purpose; it is a different path with a different claim.
 
-The honest reading is therefore: "the application's own Python process opens no
-connection to anything but the local Ollama endpoint it is configured with",
-which is the part of the privacy claim this repository can actually own. The
-rest is documented in docs/privacy-and-threat-model.md.
+The honest reading is therefore: "on the package's own runner path, the
+application's Python process opens no connection to anything but the local
+Ollama endpoint it is configured with". The rest is documented in
+docs/privacy-and-threat-model.md.
 
 The configuration is set per test and per child process, never inherited: CI
 runs this whole suite twice with LLM_BACKEND exported (`test (ollama)` and
@@ -43,26 +53,38 @@ The runs that need a resolved configuration therefore go through
 `conftest.run_fresh`, which scrubs every pinned name and starts a child with the
 one this test names — so both CI legs run the same thing.
 """
+import asyncio
+import importlib.util
 import json
 import socket
+import ssl
+import _socket
 
 import httpx
 import pytest
 from conftest import run_fresh as _run
 
-from egress_guard import EgressBlocked, closed_loopback_port, is_loopback, record_egress
+from egress_guard import EgressBlocked, is_loopback, record_egress, reserved_loopback_port
+
+# Captured BY VALUE, at the import of this module and before any guard is armed.
+# A module that did this could not be reached by a monkeypatch on `socket`; the
+# audit hook underneath still sees the call.
+from socket import getaddrinfo as getaddrinfo_by_value       # noqa: E402
 
 # A host that cannot resolve even if the guard let it through: .invalid is
 # reserved by RFC 2606 and has no DNS delegation anywhere.
 OFF_MACHINE = "example.invalid"
+# A literal off this machine, for the cases that must not involve a name at all
+# (a UDP datagram, a raw connect): documentation address space, RFC 5737.
+OFF_MACHINE_IP = "203.0.113.7"
 
 
 # --------------------------------------------------------------- the guard
 def test_the_guard_refuses_an_outbound_request_before_any_lookup():
     """The guard catching a deliberate attempt, which is what makes the silence
-    in the tests below mean something. httpx is the layer the OpenAI SDK (and
-    therefore every orchestrator call) goes through, so it is blocked there,
-    with the host and port still intact and no name lookup attempted at all."""
+    in the tests below mean something. httpx is the layer a model client goes
+    through, so it is blocked there, with the host and port still intact and no
+    name lookup attempted at all."""
     with record_egress() as guard:
         with pytest.raises(EgressBlocked) as blocked:
             httpx.get(f"https://{OFF_MACHINE}/v1/chat/completions", timeout=5)
@@ -73,74 +95,170 @@ def test_the_guard_refuses_an_outbound_request_before_any_lookup():
     assert guard.layers_for(OFF_MACHINE) == ["httpx"]
 
 
-def test_the_guard_refuses_a_bare_socket_too():
-    """Not every client is httpx: `requests` (embeddings, preflight) reaches the
-    network through urllib3, which brings its own `create_connection` and calls
-    `socket.getaddrinfo` itself. The floor has to hold on its own."""
+def test_both_httpx_distributions_are_watched():
+    """There are two of them installed, and the model client's SDK uses the one
+    the application does not import. A guard that knew only the first name would
+    have watched the wrong door for every model call in this project."""
+    httpx2 = pytest.importorskip("httpx2")
     with record_egress() as guard:
         with pytest.raises(EgressBlocked):
-            socket.create_connection((OFF_MACHINE, 443), timeout=5)
+            httpx2.get(f"https://{OFF_MACHINE}/v1/models", timeout=5)
+    assert guard.layers_for(OFF_MACHINE) == ["httpx"]
+    assert guard.off_machine() == {(OFF_MACHINE, 443)}
+
+
+# The floor is an audit hook rather than a set of monkeypatches because a socket
+# can be opened without touching the names a patch can reach. Each control below
+# is one of those ways.
+def test_the_floor_sees_a_socket_that_never_touches_the_python_class():
+    """`_socket.socket` is the C type `socket.socket` inherits from. An instance
+    of it has its own `connect`, so a patch on the Python subclass never runs."""
+    with record_egress() as guard:
         with pytest.raises(EgressBlocked):
-            socket.getaddrinfo(OFF_MACHINE, 443)
+            _socket.socket().connect((OFF_MACHINE_IP, 443))
+    assert guard.off_machine() == {(OFF_MACHINE_IP, 443)}
+    assert guard.layers_for(OFF_MACHINE_IP) == ["socket.connect"]
+
+
+def test_the_floor_sees_a_resolver_captured_before_the_guard():
+    """`from socket import getaddrinfo` binds the function BY VALUE. A module
+    that did that before the guard went on would keep calling the real one past
+    any patch on the `socket` module."""
+    with record_egress() as guard:
         with pytest.raises(EgressBlocked):
-            socket.socket().connect(("93.184.216.34", 443))
-    assert guard.off_machine() == {(OFF_MACHINE, 443), ("93.184.216.34", 443)}
+            getaddrinfo_by_value(OFF_MACHINE, 443)
+    assert guard.off_machine() == {(OFF_MACHINE, 443)}
+    assert guard.layers_for(OFF_MACHINE) == ["socket.getaddrinfo"]
+
+
+def test_the_floor_sees_udp_which_never_connects_at_all():
+    """UDP needs no `connect`: `sendto` and `sendmsg` carry the address, and a
+    resolver query or a telemetry ping is exactly that shape."""
+    with record_egress() as guard:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as datagram:
+            with pytest.raises(EgressBlocked):
+                datagram.sendto(b"ping", (OFF_MACHINE_IP, 53))
+            with pytest.raises(EgressBlocked):
+                datagram.sendmsg([b"ping"], [], 0, (OFF_MACHINE_IP, 53))
+    assert guard.off_machine() == {(OFF_MACHINE_IP, 53)}
+    assert guard.layers_for(OFF_MACHINE_IP) == ["socket.sendto", "socket.sendmsg"]
+
+
+def test_the_floor_sees_a_tls_socket():
+    """TLS is a wrapper around the same socket, so the connect underneath it is
+    the same audited event — and it is refused before any handshake."""
+    context = ssl.create_default_context()
+    with record_egress() as guard:
+        with pytest.raises(EgressBlocked):
+            with context.wrap_socket(socket.socket(),
+                                     server_hostname=OFF_MACHINE) as secure:
+                secure.connect((OFF_MACHINE_IP, 443))
+    assert guard.off_machine() == {(OFF_MACHINE_IP, 443)}
+
+
+def test_the_floor_sees_an_asyncio_connection():
+    """asyncio resolves in a worker thread and connects from the loop. The hook
+    is process-wide, so the thread is covered and the failure comes back through
+    the awaited call."""
+    async def connect():
+        await asyncio.open_connection(OFF_MACHINE, 443)
+
+    with record_egress() as guard:
+        with pytest.raises(EgressBlocked):
+            asyncio.run(connect())
+    assert guard.off_machine() == {(OFF_MACHINE, 443)}
+
+
+@pytest.mark.skipif(importlib.util.find_spec("aiohttp") is None,
+                    reason="aiohttp is not installed in this environment")
+def test_the_floor_sees_aiohttp():
+    """Not a dependency here; covered anyway, because the guard's claim is about
+    the process and not about the clients this project happens to use."""
+    import aiohttp
+
+    async def fetch():
+        async with aiohttp.ClientSession() as session:
+            await session.get(f"https://{OFF_MACHINE}/")
+
+    with record_egress() as guard:
+        with pytest.raises(EgressBlocked):
+            asyncio.run(fetch())
+    assert guard.off_machine() == {(OFF_MACHINE, 443)}
 
 
 # `getaddrinfo` is the resolver door httpx and urllib3 use, and it is not the
-# only one in the module. Each of these is a separate call into the same
-# resolver, and one of them is on a path this project loads: langsmith's
-# `_is_localhost()` calls `gethostbyname` on the endpoint host. A guard that
-# watched `getaddrinfo` alone would have let that lookup — the name of a tracing
-# endpoint, put on the wire — out unseen, while the file claimed no name leaves.
+# only one. Each of these is a separate call into the same resolver, and one of
+# them is on a path this project loads: langsmith's `_is_localhost()` calls
+# `gethostbyname` on the endpoint host. A guard that watched `getaddrinfo` alone
+# would have let that lookup — the name of a tracing endpoint, put on the
+# wire — out unseen, while the file claimed no name leaves.
+# `gethostbyname_ex` raises the `socket.gethostbyname` event, not one of its
+# own, which is why it shares a layer name here.
 NAME_LOOKUPS = [
-    ("getaddrinfo", lambda host: socket.getaddrinfo(host, 443)),
-    ("gethostbyname", lambda host: socket.gethostbyname(host)),
-    ("gethostbyname_ex", lambda host: socket.gethostbyname_ex(host)),
-    ("gethostbyaddr", lambda host: socket.gethostbyaddr(host)),
+    ("socket.getaddrinfo", 443, lambda host: socket.getaddrinfo(host, 443)),
+    ("socket.gethostbyname", None, lambda host: socket.gethostbyname(host)),
+    ("socket.gethostbyname", None, lambda host: socket.gethostbyname_ex(host)),
+    ("socket.gethostbyaddr", None, lambda host: socket.gethostbyaddr(host)),
 ]
+LOOKUP_IDS = ["getaddrinfo", "gethostbyname", "gethostbyname_ex", "gethostbyaddr"]
 
 
-@pytest.mark.parametrize("layer,lookup", NAME_LOOKUPS, ids=[n for n, _ in NAME_LOOKUPS])
-def test_every_resolver_door_is_watched(layer, lookup):
+@pytest.mark.parametrize("layer,port,lookup", NAME_LOOKUPS, ids=LOOKUP_IDS)
+def test_every_resolver_door_is_watched(layer, port, lookup):
     """Each one refuses an off-machine name and records which door was used."""
+    host = OFF_MACHINE_IP if layer == "socket.gethostbyaddr" else OFF_MACHINE
     with record_egress() as guard:
         with pytest.raises(EgressBlocked):
-            lookup(OFF_MACHINE)
-    assert guard.layers_for(OFF_MACHINE) == [layer]
-    assert guard.off_machine() == {(OFF_MACHINE, None if layer != "getaddrinfo" else 443)}
+            lookup(host)
+    assert guard.layers_for(host) == [layer]
+    assert guard.off_machine() == {(host, port)}
 
 
-@pytest.mark.parametrize("layer,lookup", NAME_LOOKUPS, ids=[n for n, _ in NAME_LOOKUPS])
-def test_every_resolver_door_still_answers_for_this_machine(layer, lookup):
+@pytest.mark.parametrize("layer,port,lookup", NAME_LOOKUPS, ids=LOOKUP_IDS)
+def test_every_resolver_door_still_answers_for_this_machine(layer, port, lookup):
     """And each one still works for loopback, recorded rather than refused —
     `gethostbyaddr` needs an address, so it gets one."""
-    host = "127.0.0.1" if layer == "gethostbyaddr" else "localhost"
+    host = "127.0.0.1" if layer == "socket.gethostbyaddr" else "localhost"
     with record_egress() as guard:
         assert lookup(host)
     assert guard.layers_for(host) == [layer] and guard.off_machine() == set()
 
 
 def test_the_reverse_lookup_is_watched_too():
-    """`getnameinfo` is the fifth door and the one whose host is not its first
-    argument: it takes a sockaddr. An address off this machine is a question
-    about somebody else's host, asked of a resolver over the wire."""
+    """`getnameinfo` is the fifth resolver door: an address off this machine is
+    a question about somebody else's host, asked of a resolver over the wire."""
     with record_egress() as guard:
         assert socket.getnameinfo(("127.0.0.1", 11434), 0)
         with pytest.raises(EgressBlocked):
-            socket.getnameinfo(("93.184.216.34", 443), 0)
-    assert guard.off_machine() == {("93.184.216.34", 443)}
-    assert guard.layers_for("127.0.0.1") == ["getnameinfo"]
+            socket.getnameinfo((OFF_MACHINE_IP, 443), 0)
+    assert guard.off_machine() == {(OFF_MACHINE_IP, 443)}
+    assert guard.layers_for("127.0.0.1") == ["socket.getnameinfo"]
+
+
+def test_a_bind_is_recorded_and_never_refused():
+    """A bind is the other direction, and refusing one would break a library
+    that opens a local socket for its own reasons. It is recorded so a test can
+    say this process opened no listening socket on a public interface, and it is
+    kept out of `targets()`, which answers "who was talked to"."""
+    with record_egress() as guard:
+        with socket.socket() as listener:
+            listener.bind(("0.0.0.0", 0))
+            bound_port = listener.getsockname()[1]
+    assert guard.off_machine() == set()
+    assert guard.binds() == {("0.0.0.0", 0)} and guard.targets() == set()
+    assert bound_port                                   # the bind really happened
 
 
 def test_loopback_is_allowed_and_still_recorded():
     """The allow-list is an assertion only because loopback is recorded too: a
     guard that logged nothing when it let something through could not tell
     "talked to the local Ollama" from "talked to nobody at all"."""
-    port = closed_loopback_port()
-    with record_egress() as guard:
-        with pytest.raises(OSError) as refused:       # nothing listens there
-            socket.create_connection(("127.0.0.1", port), timeout=5)
+    with reserved_loopback_port() as port:
+        with record_egress() as guard:
+            # Refused, not timed out: the reserved port is held on UDP and free
+            # on TCP exactly so that "nothing is there" is immediate.
+            with pytest.raises(ConnectionRefusedError) as refused:
+                socket.create_connection(("127.0.0.1", port), timeout=5)
     assert not isinstance(refused.value, EgressBlocked)
     assert guard.off_machine() == set()
     assert guard.targets() == {("127.0.0.1", port)}
@@ -159,38 +277,48 @@ def test_only_this_machine_counts_as_loopback():
 
 
 # ------------------------------------------------ the local configuration
-# The child that does the real work: the guard goes on, then the actual
-# preflight, the actual embedder and the actual compiled graph run against an
-# Ollama that is not there. Imports happen BEFORE the guard so that what is
-# recorded is the application running, not the import of a dependency.
+# The child that does the real work. The guard is armed as the FIRST statement,
+# before the package, before its dependencies and before the guard module itself
+# imports httpx — so an import-time lookup, a connection made while a dependency
+# loads, or a worker started during import is inside the recording. It is never
+# disarmed: the report is emitted from an atexit handler registered first, which
+# therefore runs last, after every other handler and after the interpreter has
+# joined its non-daemon threads.
 LOCAL_RUN = """
-import json, os, tempfile
-from pathlib import Path
+from egress_guard import arm_guard
+guard = arm_guard()
+
+import atexit, json, os, tempfile
+
+report = {}
+
+
+def emit():
+    report["attempts"] = [a.as_tuple() for a in guard.attempts]
+    report["targets"] = sorted(guard.targets(), key=repr)
+    report["off_machine"] = sorted(guard.off_machine(), key=repr)
+    report["binds"] = sorted(guard.binds(), key=repr)
+    print(json.dumps(report))
+
+
+# First registration, so atexit (which is LIFO) runs it LAST. Non-daemon threads
+# are joined by the interpreter before atexit callbacks run, so by the time this
+# prints, everything this process was going to do has been done under the guard.
+atexit.register(emit)
 
 from conftest import pin_environment
 pin_environment()
 %(extra_env)s
 
+from pathlib import Path
+
 from ask_your_library import config, embeddings, preflight
 from ask_your_library.graph import build_graph
 from ask_your_library.runner import run_question
-from egress_guard import record_egress
 
-report = {"backend": config.LLM_BACKEND, "embed_backend": config.EMBED_BACKEND,
-          "llm_base_url": config.LLM_BASE_URL, "ollama_url": config.OLLAMA_URL,
-          "openrouter_base_url": config.OPENROUTER_BASE_URL}
-
-# Entered, and deliberately never exited: this child exists to be watched and
-# then to die, so the patches stay in place through interpreter shutdown.
-# Anything that runs after the report is written — an atexit handler, an SDK's
-# background flush, a tracing exporter's last upload — still meets the guard,
-# where a `with` block would have restored the real socket module first and left
-# exactly that window unwatched. That window is the one a batching exporter uses.
-# `held` keeps the context manager alive: it is a generator behind
-# @contextmanager, and an unreferenced one is closed by the collector, which
-# runs the restore in its finally and quietly un-patches everything.
-held = record_egress()
-guard = held.__enter__()
+report.update(backend=config.LLM_BACKEND, embed_backend=config.EMBED_BACKEND,
+              llm_base_url=config.LLM_BASE_URL, ollama_url=config.OLLAMA_URL,
+              openrouter_base_url=config.OPENROUTER_BASE_URL)
 
 result = preflight.check_environment()
 report["preflight_kinds"] = list(result.kinds)
@@ -211,18 +339,57 @@ with tempfile.TemporaryDirectory() as scratch:
         report["run"] = {"raised": "", "answer": answer[:200]}
     except BaseException as error:
         report["run"] = {"raised": type(error).__name__, "message": str(error)[:300]}
-
-report["attempts"] = [a.as_tuple() for a in guard.attempts]
-report["targets"] = sorted(guard.targets(), key=repr)
-report["off_machine"] = sorted(guard.off_machine(), key=repr)
-print(json.dumps(report))
 """
 
 
 def local_run(extra_env: str = "", **env) -> dict:
-    """The child above, in a fresh interpreter with `env` pinned, as JSON."""
-    result = _run(LOCAL_RUN % {"extra_env": extra_env}, **env)
-    return json.loads(result.stdout)
+    """The child above, in a fresh interpreter with `env` pinned, as JSON.
+
+    Three things are checked about the child itself before its report is read,
+    because the report is written during shutdown and a shutdown is a place
+    where failures go quiet."""
+    result = _run(LOCAL_RUN % {"extra_env": extra_env}, check=False, **env)
+    assert result.returncode == 0, result.stderr[-3000:]
+    # An exception raised inside an atexit handler is printed and swallowed: the
+    # exit code stays 0 and the report is already on stdout. So the one place a
+    # late connection attempt would show is stderr.
+    assert "Error in atexit._run_exitfuncs" not in result.stderr, result.stderr[-3000:]
+    assert "EgressBlocked" not in result.stderr, result.stderr[-3000:]
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    assert lines, f"the child printed no report; stderr: {result.stderr[-2000:]}"
+    return json.loads(lines[-1])        # the atexit emission is the last line
+
+
+def test_the_guard_is_armed_before_the_first_import():
+    """The control for the child's shape: a module that opens a connection while
+    it is being imported is recorded, so "nothing was attempted" in the runs
+    below is a statement about import time as well as run time.
+
+    A monkeypatch installed after the application's imports could not say that,
+    and neither could a guard armed one line later than this one."""
+    code = """
+from egress_guard import arm_guard
+guard = arm_guard()
+
+import json, pathlib, sys, tempfile
+
+probe = pathlib.Path(tempfile.mkdtemp())
+(probe / "egress_import_probe.py").write_text(
+    "import socket\\nsocket.socket().connect(('%s', 443))\\n")
+sys.path.insert(0, str(probe))
+try:
+    import egress_import_probe
+    raised = ""
+except BaseException as error:
+    raised = type(error).__name__
+print(json.dumps({"raised": raised,
+                  "attempts": [a.as_tuple() for a in guard.attempts]}))
+""" % OFF_MACHINE_IP
+    report = json.loads(_run(code).stdout.strip().splitlines()[-1])
+    assert report["raised"] == "EgressBlocked"
+    assert [OFF_MACHINE_IP, 443] in [[host, port] for _, host, port, _ in report["attempts"]]
+    assert all(not allowed for _, host, _, allowed in report["attempts"]
+               if host == OFF_MACHINE_IP)
 
 
 def test_the_local_configuration_talks_only_to_loopback():
@@ -232,13 +399,15 @@ def test_the_local_configuration_talks_only_to_loopback():
     contacted — not OpenRouter, not LangSmith, and no resolver is asked about
     either of them.
 
-    The port is a free loopback port rather than 11434 so that a developer with
-    Ollama actually running does not have this test make a model call; what is
-    asserted is unchanged, since the assertion is that traffic went to the
-    CONFIGURED endpoint and to nothing else."""
-    port = closed_loopback_port()
-    report = local_run(LLM_BACKEND="ollama", EMBED_BACKEND="ollama",
-                       OLLAMA_URL=f"http://127.0.0.1:{port}")
+    The port is a reserved loopback port rather than 11434 so that a developer
+    with Ollama actually running does not have this test make a model call; what
+    is asserted is unchanged, since the assertion is that traffic went to the
+    CONFIGURED endpoint and to nothing else. It is bound and held for the whole
+    run, not bound and released, so "nothing is listening there" is deterministic
+    rather than a race with whatever else the machine is doing."""
+    with reserved_loopback_port() as port:
+        report = local_run(LLM_BACKEND="ollama", EMBED_BACKEND="ollama",
+                           OLLAMA_URL=f"http://127.0.0.1:{port}")
 
     # The configuration the child actually resolved, so a misfired pin cannot
     # make the silence below mean nothing.
@@ -248,14 +417,16 @@ def test_the_local_configuration_talks_only_to_loopback():
     # The whole allow-list, as one equality: one host, one port.
     assert report["targets"] == [["127.0.0.1", port]]
     assert report["off_machine"] == []
-    # And the guard was not merely silent — it watched a real amount of traffic
+    # And no listening socket on a public interface either, which the bind
+    # events would show.
+    assert all(is_loopback(host) for host, _ in report["binds"])
+    # The guard was not merely silent — it watched a real amount of traffic
     # (preflight's /api/tags, the embedder's /api/embed, the planner's call and
-    # its retries), each seen at several layers. Both doors were used: the model
-    # client goes out through httpx, `requests` through the socket floor, so a
-    # guard watching only one of them would have had a blind side here.
+    # its retries), each seen at more than one layer. Both doors were used: the
+    # model client goes out through httpx, `requests` through the socket floor.
     layers = {layer for layer, *_ in report["attempts"]}
     assert len(report["attempts"]) > 5
-    assert "httpx" in layers and {"socket", "getaddrinfo"} <= layers
+    assert "httpx" in layers and {"socket.connect", "socket.getaddrinfo"} <= layers
 
     # Named explicitly, because a missing assertion here is the whole bug class:
     # no hosted provider and no tracing endpoint was contacted OR looked up.
@@ -272,8 +443,8 @@ def test_the_local_configuration_talks_only_to_loopback():
     assert report["embed"] == "ConnectionError"
     # The connection to the local endpoint was refused, and the run ended on
     # that. The class name is matched by its tail: langchain wraps the SDK's
-    # `APIConnectionError` in a subclass of its own (`OpenAIConnectionError`),
-    # which is exactly the wrapping llm.py's `CallTimeout` comment describes.
+    # `APIConnectionError` in a subclass of its own, which is exactly the
+    # wrapping llm.py's `CallTimeout` comment describes.
     assert report["run"]["raised"].endswith("ConnectionError")
     assert "openrouter" not in report["run"]["message"].lower()
 
@@ -293,10 +464,10 @@ def test_a_usable_hosted_key_does_not_move_the_local_run_off_the_machine():
 
     The key is a placeholder that is not a key, and nothing carrying it ever
     reaches a transport."""
-    port = closed_loopback_port()
-    report = local_run(extra_env='os.environ["OPENROUTER_API_KEY"] = "not-a-key"',
-                       LLM_BACKEND="ollama", EMBED_BACKEND="ollama",
-                       OLLAMA_URL=f"http://127.0.0.1:{port}")
+    with reserved_loopback_port() as port:
+        report = local_run(extra_env='os.environ["OPENROUTER_API_KEY"] = "not-a-key"',
+                           LLM_BACKEND="ollama", EMBED_BACKEND="ollama",
+                           OLLAMA_URL=f"http://127.0.0.1:{port}")
 
     assert report["off_machine"] == []
     assert report["targets"] == [["127.0.0.1", port]]
@@ -306,7 +477,7 @@ def test_a_usable_hosted_key_does_not_move_the_local_run_off_the_machine():
 
 
 def test_the_shipped_defaults_point_at_this_machine():
-    """The test above configures its own endpoint, so on its own it proves
+    """The tests above configure their own endpoint, so on their own they prove
     nothing about what a fresh clone does. This one reads the DEFAULTS — a child
     with every name scrubbed and an empty working directory — and asserts the
     two endpoints the local configuration uses are loopback. No connection is
@@ -345,12 +516,10 @@ def test_the_hosted_backend_would_leave_the_machine_and_the_guard_sees_it():
     # What would have left: the hosted endpoint, at 443, and refused.
     assert ["openrouter.ai", 443] in report["off_machine"]
     assert report["targets"] == [["openrouter.ai", 443]]
-    # Refused at httpx for the orchestrator call and at the DNS/socket floor for
-    # the `requests`-based embedder: both doors, one guard. Both matter — the
-    # OpenAI SDK's client is not built on the httpx the application imports, so
-    # for a while the floor was the only layer that saw a model call at all.
+    # Refused at httpx for the orchestrator call and at the resolver for the
+    # `requests`-based embedder: both doors, one guard.
     layers = {layer for layer, host, _, _ in report["attempts"] if host == "openrouter.ai"}
-    assert "httpx" in layers and layers & {"getaddrinfo", "create_connection", "socket"}
+    assert "httpx" in layers and "socket.getaddrinfo" in layers
     # Nothing was sent: every attempt for that host was refused.
     assert all(not allowed for _, host, _, allowed in report["attempts"]
                if host == "openrouter.ai")
@@ -363,6 +532,6 @@ def test_the_hosted_backend_without_a_key_opens_no_connection_at_all():
     sees the same silence the ollama leg does."""
     report = local_run(LLM_BACKEND="openrouter", EMBED_BACKEND="openrouter")
     assert report["preflight_exit"] == 4 and "no_key" in report["preflight_kinds"]
-    assert report["attempts"] == []
+    assert report["targets"] == [] and report["off_machine"] == []
     assert report["run"]["raised"] == "RuntimeError"
     assert "OPENROUTER_API_KEY" in report["run"]["message"]

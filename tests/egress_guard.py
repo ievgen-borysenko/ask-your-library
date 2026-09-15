@@ -9,33 +9,57 @@ This module is the seam that makes the claim testable without touching `src/`:
 the application is left exactly as it ships, and the process it runs in is
 instrumented instead.
 
-Three layers are patched, because three different clients are in play and each
-reaches the network through a different door:
+The floor is an AUDIT HOOK, not a set of monkeypatches
+-----------------------------------------------------
+The first version of this file patched `socket.socket.connect`,
+`socket.create_connection` and the five resolver functions on the `socket`
+module. That watches one class and one set of module attributes, and a socket
+can be opened without touching either:
 
-  socket      `socket.socket.connect` / `connect_ex` and `socket.create_connection`
-              — the floor. urllib3 (which `requests` uses, in `embeddings` and
-              `preflight`) brings its own `create_connection`, so the method on
-              the class has to be patched too, not only the module function.
-  name        the resolver, so a blocked host is refused BEFORE a resolver on
-              the network is asked about it. A name is the first thing that
-              leaves a machine, and it leaves it over the wire. `getaddrinfo`
-              is the door httpx and urllib3 use, and it is NOT the only one:
-              `gethostbyname`, `gethostbyname_ex`, `gethostbyaddr` and
-              `getnameinfo` are separate calls into the same resolver, and one
-              of them is on a path this project actually loads — LangSmith's
-              `_is_localhost()` calls `gethostbyname` on its endpoint host to
-              decide whether to skip a check. All five are patched, so "no name
-              lookup for a hosted endpoint leaves this process" is a statement
-              about the resolver and not about one of its five front doors.
-  httpx       `HTTPTransport.handle_request` (and its async twin) — where the
-              OpenAI SDK's client, and therefore every orchestrator call, is
-              still holding a URL. Blocking here fails a hosted call with the
-              host and port intact and no lookup attempted at all. BOTH httpx
-              distributions installed here are patched: the OpenAI SDK does not
-              use the `httpx` the application imports, it uses `httpx2`, and a
-              guard that knew only the first name would have watched the wrong
-              door for every model call in the project. The socket floor caught
-              it anyway, which is the point of having a floor.
+  * `_socket.socket` is the C type `socket.socket` inherits from. An instance of
+    it has its own `connect` and never passes through the Python subclass.
+  * `_socket.getaddrinfo`, `_socket.gethostbyname` and friends are the C
+    functions the `socket` module re-exports; anything that imports them from
+    `_socket` bypasses a patch on `socket`.
+  * `from socket import getaddrinfo` binds the function BY VALUE. A module that
+    did that before the guard went on keeps calling the real one.
+  * UDP needs no `connect` at all: `sendto` and `sendmsg` carry the address, and
+    a DNS resolver or a telemetry ping is exactly that shape.
+
+CPython raises audit events from the C layer for all of it, whatever the class
+or the import path, so `sys.addaudithook` sees what a patch cannot. The events
+used here, each verified against the installed interpreter (CPython 3.12.13) by
+a probe rather than taken from the documentation:
+
+  socket.connect      (sock, address)   — also what `connect_ex` raises
+  socket.sendto       (sock, address)   — unconnected UDP
+  socket.sendmsg      (sock, address)   — unconnected UDP, scatter/gather form
+  socket.bind         (sock, address)   — recorded only, see below
+  socket.getaddrinfo  (host, port, family, type, proto)
+  socket.gethostbyname(hostname)        — raised by `gethostbyname_ex` too, so
+                                          there is no separate event for it
+  socket.gethostbyaddr(address)
+  socket.getnameinfo  (sockaddr,)
+
+`socket.bind` is RECORDED and never refused. A bind is not egress: it is the
+other direction, and refusing one would break a library that opens a local
+socket for its own reasons. It is recorded because a bind to something that is
+not loopback is a listening socket on a public interface, which a test about
+this process's network behaviour should be able to say did not happen.
+
+An audit hook cannot be removed once installed, so this module installs exactly
+one, at import, and arms it through a module-level flag under a lock. Disarmed,
+the hook is a single global read and a return. Armed, it is process-wide and
+therefore also covers background threads — which is the point: a batching
+exporter uploads from a thread nobody in the test is looking at.
+
+One layer sits ON TOP of the floor, and only because it says something the floor
+cannot: `HTTPTransport.handle_request` (and its async twin) is where a client
+still holds a URL, so a hosted call is refused there with its host and port
+intact and no lookup attempted at all. BOTH httpx distributions installed here
+are patched — the model client's SDK does not use the `httpx` the application
+imports, it uses `httpx2` — and a request that slipped past both would still
+meet the audit hook underneath.
 
 Everything is RECORDED, loopback included: a guard that only recorded what it
 refused could not tell "talked to Ollama on loopback" from "talked to nothing",
@@ -49,11 +73,13 @@ import contextlib
 import importlib
 import ipaddress
 import socket
+import sys
+import threading
 from dataclasses import dataclass
 
 # Every httpx distribution in the environment, because there is more than one:
 # `httpx` is what the application imports (llm.py's timeouts, CallTimeout) and
-# `httpx2` is what the OpenAI SDK's client is built on. A name that is not
+# `httpx2` is what the model client's SDK is built on. A name that is not
 # installed is simply not patched.
 HTTPX_MODULES = ("httpx", "httpx2")
 
@@ -62,7 +88,8 @@ HTTPX_MODULES = ("httpx", "httpx2")
 LOOPBACK_NAMES = frozenset({"localhost", "localhost.localdomain",
                             "ip6-localhost", "ip6-loopback"})
 
-_MISSING = object()
+# The one event that is recorded and never refused; see the module docstring.
+BIND_EVENT = "socket.bind"
 
 
 class EgressBlocked(RuntimeError):
@@ -70,16 +97,11 @@ class EgressBlocked(RuntimeError):
     whichever layer saw it first, so the caller fails where a firewall would."""
 
 
-# The five resolver entry points. Each takes its host as the first argument
-# except `getnameinfo`, whose first argument is a sockaddr tuple, so that one is
-# wrapped separately below.
-NAME_LOOKUPS = ("getaddrinfo", "gethostbyname", "gethostbyname_ex", "gethostbyaddr")
-
-
 @dataclass(frozen=True)
 class Attempt:
-    """One outbound attempt, as one layer saw it. `layer` is the name of the
-    function that was called, so a test can say which door was used."""
+    """One outbound attempt, as one layer saw it. `layer` is the audit event
+    name (or `httpx` / `httpx-async` for the URL layer above it), so a test can
+    say which door was used."""
     layer: str
     host: str
     port: int | None
@@ -116,13 +138,21 @@ class EgressGuard:
 
     # -- what the test asks -------------------------------------------------
     def targets(self) -> set[tuple[str, int | None]]:
-        """Every (host, port) that was attempted, once each. One connection
-        shows up at three layers; this is the question "who was talked to"."""
-        return {(a.host, a.port) for a in self.attempts if a.layer != "local"}
+        """Every (host, port) an EGRESS attempt named, once each. One connection
+        shows up at more than one layer; this is the question "who was talked
+        to". Binds and local sockets are not targets and are not in it."""
+        return {(a.host, a.port) for a in self.attempts
+                if a.layer not in ("local", BIND_EVENT)}
 
     def off_machine(self) -> set[tuple[str, int | None]]:
         """The attempts that were not loopback — the ones that would have left."""
         return {(a.host, a.port) for a in self.attempts if not a.allowed}
+
+    def binds(self) -> set[tuple[str, int | None]]:
+        """Every address this process bound a socket to. Recorded, never
+        refused; a non-loopback one would be a listening socket on a public
+        interface, which is the other direction and its own question."""
+        return {(a.host, a.port) for a in self.attempts if a.layer == BIND_EVENT}
 
     def layers_for(self, host: str) -> list[str]:
         """Which layers saw an attempt for `host`, in order."""
@@ -130,16 +160,80 @@ class EgressGuard:
 
     # -- the decision -------------------------------------------------------
     def check(self, layer: str, host: str, port: int | None):
-        allowed = self.allow_loopback and is_loopback(host)
+        allowed = layer == BIND_EVENT or (self.allow_loopback and is_loopback(host))
         self.attempts.append(Attempt(layer, host, port, allowed))
         if not allowed:
             raise EgressBlocked(
                 f"egress blocked at the {layer} layer: {host}:{port} is not this machine")
 
     def note_local(self, address) -> None:
-        """A non-IP socket (a Unix domain socket): recorded so nothing is
-        invisible, never blocked — it cannot leave the machine."""
+        """A socket that cannot leave the machine (a Unix domain socket, a
+        connected UDP send with no address of its own): recorded so nothing is
+        invisible, never blocked."""
         self.attempts.append(Attempt("local", str(address), None, True))
+
+
+# --------------------------------------------------------------- the floor
+_LOCK = threading.Lock()
+_ACTIVE: EgressGuard | None = None    # read by the hook on every audited event
+_HOOK_INSTALLED = False
+
+
+def _text(value) -> str:
+    """An audit event's host may arrive as bytes (the C layer passes through
+    what it was given)."""
+    return value.decode("utf-8", "replace") if isinstance(value, (bytes, bytearray)) else str(value)
+
+
+def _address(guard: EgressGuard, layer: str, address) -> None:
+    """A sockaddr as `connect` / `sendto` / `sendmsg` / `bind` carry it."""
+    if address is None:
+        # A connected UDP socket sends with no address: the `connect` that set
+        # it was audited already.
+        guard.note_local(f"{layer}(None)")
+    elif isinstance(address, (tuple, list)) and address:
+        guard.check(layer, _text(address[0]), address[1] if len(address) > 1 else None)
+    else:
+        # AF_UNIX (a path), AF_NETLINK (an int), anything else that cannot route.
+        guard.note_local(address)
+
+
+def _audit(event: str, args: tuple) -> None:
+    """The audit hook. Installed once per interpreter and never removed, so the
+    disarmed path — a global read and a return — is what the rest of the test
+    suite pays, and it must stay that cheap."""
+    guard = _ACTIVE
+    if guard is None:
+        return
+    if event == "socket.connect" or event == "socket.sendto" or event == "socket.sendmsg" \
+            or event == BIND_EVENT:
+        _address(guard, event, args[1] if len(args) > 1 else None)
+    elif event == "socket.getaddrinfo":
+        host = args[0] if args else None
+        if host is None:
+            guard.note_local("getaddrinfo(None)")     # a local bind, not egress
+        else:
+            port = args[1] if len(args) > 1 and isinstance(args[1], int) else None
+            guard.check(event, _text(host), port)
+    elif event == "socket.gethostbyname" or event == "socket.gethostbyaddr":
+        guard.check(event, _text(args[0]), None)
+    elif event == "socket.getnameinfo":
+        _address(guard, event, args[0] if args else None)
+
+
+def install_audit_hook() -> None:
+    """Install the hook, once. Idempotent, and irreversible by design: CPython
+    offers no way to remove an audit hook, which is exactly why arming is a flag
+    and not an installation."""
+    global _HOOK_INSTALLED
+    with _LOCK:
+        if _HOOK_INSTALLED:
+            return
+        sys.addaudithook(_audit)
+        _HOOK_INSTALLED = True
+
+
+install_audit_hook()          # at import: one hook per interpreter, disarmed
 
 
 def _port_of(url) -> int:
@@ -158,78 +252,8 @@ def _httpx_modules() -> list:
     return modules
 
 
-@contextlib.contextmanager
-def record_egress(allow_loopback: bool = True):
-    """Record (and, off loopback, refuse) every outbound connection attempt made
-    inside the block. Yields the `EgressGuard` holding what was seen.
-
-    Everything is restored on the way out, including the case where
-    `socket.socket.connect` was only ever inherited from `_socket.socket`:
-    assigning the inherited slot back would leave the subclass carrying an
-    attribute it never had, so the patch is deleted instead."""
-    guard = EgressGuard(allow_loopback)
-
-    inet_families = {socket.AF_INET, socket.AF_INET6}
-    originals = {name: vars(socket.socket).get(name, _MISSING)
-                 for name in ("connect", "connect_ex")}
-    real_connect = socket.socket.connect
-    real_connect_ex = socket.socket.connect_ex
-    real_create_connection = socket.create_connection
-    real_lookups = {name: getattr(socket, name) for name in NAME_LOOKUPS}
-    real_getnameinfo = socket.getnameinfo
-    transports = [(module.HTTPTransport, "handle_request",
-                   module.HTTPTransport.handle_request, False)
-                  for module in _httpx_modules()]
-    transports += [(module.AsyncHTTPTransport, "handle_async_request",
-                    module.AsyncHTTPTransport.handle_async_request, True)
-                   for module in _httpx_modules()]
-
-    def _check_address(layer: str, sock, address) -> None:
-        if sock.family not in inet_families or not isinstance(address, (tuple, list)):
-            guard.note_local(address)
-            return
-        guard.check(layer, str(address[0]), address[1] if len(address) > 1 else None)
-
-    def connect(self, address):
-        _check_address("socket", self, address)
-        return real_connect(self, address)
-
-    def connect_ex(self, address):
-        _check_address("socket", self, address)
-        return real_connect_ex(self, address)
-
-    def create_connection(address, *args, **kwargs):
-        host, port = address[0], address[1]
-        guard.check("create_connection", str(host), port)
-        return real_create_connection(address, *args, **kwargs)
-
-    def name_lookup(name: str, original):
-        """One of the four resolver calls whose FIRST argument is the host.
-
-        `getaddrinfo` carries a port as its second argument and the other three
-        do not, so the port is read positionally only when it is really one: a
-        `gethostbyname_ex` has no second argument at all, and `getaddrinfo`'s
-        may be a service name ("https") rather than a number."""
-        def lookup(host, *args, **kwargs):
-            # host=None is a local bind ("give me my own addresses"), not egress.
-            if host is None:
-                guard.note_local(f"{name}(None)")
-            else:
-                port = args[0] if args and isinstance(args[0], int) else None
-                guard.check(name, str(host), port)
-            return original(host, *args, **kwargs)
-        return lookup
-
-    def getnameinfo(sockaddr, flags):
-        """The reverse direction, and the one whose host is not the first
-        argument: a sockaddr, so the address and its port are both known."""
-        if isinstance(sockaddr, (tuple, list)) and sockaddr:
-            guard.check("getnameinfo", str(sockaddr[0]),
-                        sockaddr[1] if len(sockaddr) > 1 else None)
-        else:
-            guard.note_local(sockaddr)
-        return real_getnameinfo(sockaddr, flags)
-
+def _patch_transports(guard: EgressGuard) -> list:
+    """The URL layer on top of the floor. Returns what to restore."""
     def sync_transport(original):
         def handle_request(self, request):
             guard.check("httpx", request.url.host, _port_of(request.url))
@@ -242,50 +266,123 @@ def record_egress(allow_loopback: bool = True):
             return await original(self, request)
         return handle_async_request
 
-    socket.socket.connect = connect
-    socket.socket.connect_ex = connect_ex
-    socket.create_connection = create_connection
-    for name, original in real_lookups.items():
-        setattr(socket, name, name_lookup(name, original))
-    socket.getnameinfo = getnameinfo
-    for transport, attribute, original, is_async in transports:
-        setattr(transport, attribute,
-                (async_transport if is_async else sync_transport)(original))
+    patched = []
+    for module in _httpx_modules():
+        for cls, attribute, wrap in ((module.HTTPTransport, "handle_request", sync_transport),
+                                     (module.AsyncHTTPTransport, "handle_async_request",
+                                      async_transport)):
+            original = getattr(cls, attribute)
+            patched.append((cls, attribute, original))
+            setattr(cls, attribute, wrap(original))
+    return patched
+
+
+def arm(guard: EgressGuard) -> EgressGuard:
+    """Arm the process-wide hook with `guard`. Not nestable on purpose: two
+    guards would each see half of what happened."""
+    global _ACTIVE
+    with _LOCK:
+        if _ACTIVE is not None:
+            raise RuntimeError("an egress guard is already armed in this process")
+        _ACTIVE = guard
+    return guard
+
+
+def disarm() -> None:
+    global _ACTIVE
+    with _LOCK:
+        _ACTIVE = None
+
+
+def arm_guard(allow_loopback: bool = True) -> EgressGuard:
+    """Arm the guard for the REST OF THIS PROCESS and never disarm it.
+
+    For a child interpreter whose whole life is the thing under test. Called as
+    the first statement, before the application or any dependency is imported,
+    it also covers import-time lookups and connections, background workers
+    started during import, and — because nothing ever disarms it — everything
+    that still runs during interpreter shutdown: an atexit handler, a batching
+    exporter's last upload, a thread joined on the way out.
+
+    The hook goes on BEFORE the httpx modules are imported, so even the import
+    of the layer above the floor happens under the floor."""
+    guard = arm(EgressGuard(allow_loopback))
+    _patch_transports(guard)
+    return guard
+
+
+@contextlib.contextmanager
+def record_egress(allow_loopback: bool = True):
+    """Arm the guard for the duration of the block, for an in-process test.
+
+    The audit hook itself is never removed — it was installed at import of this
+    module — so what this restores is the arming flag and the httpx patches."""
+    guard = arm(EgressGuard(allow_loopback))
+    patched = _patch_transports(guard)
     try:
         yield guard
     finally:
-        for name, original in originals.items():
-            if original is _MISSING:
-                delattr(socket.socket, name)
-            else:
-                setattr(socket.socket, name, original)
-        socket.create_connection = real_create_connection
-        for name, original in real_lookups.items():
-            setattr(socket, name, original)
-        socket.getnameinfo = real_getnameinfo
-        for transport, attribute, original, _ in transports:
-            setattr(transport, attribute, original)
+        disarm()
+        for cls, attribute, original in patched:
+            setattr(cls, attribute, original)
 
 
-def closed_loopback_port() -> int:
-    """A loopback port with nothing behind it: bound to 0 so the kernel names a
-    free one, then released. Used instead of Ollama's real 11434 so that a
-    developer who happens to be running Ollama does not have this test make a
-    model call — the port is the configured one either way, and what is asserted
-    is that the traffic went to loopback AND to that port and nowhere else.
+@contextlib.contextmanager
+def reserved_loopback_port(attempts: int = 20):
+    """A loopback port that nothing answers on, reserved for the whole block.
 
-    Bind-and-release is a race, and an accepted one. Between the release here
-    and the child's first connection, something else on this machine could take
-    the port; a connection would then succeed instead of being refused. It is
-    accepted because nothing the test asserts depends on the refusal: the
-    assertions are about WHERE the attempts went (loopback, this port, nothing
-    else), and a listener that answered would still be on loopback and would
-    still not be a hosted provider — at worst the run's failure mode changes
-    from "connection refused" to "not Ollama", which the preflight reports as a
-    bad reply and the graph pass as a client error, and the test would say so
-    instead of passing quietly. Holding the socket open for the duration would
-    trade that for a real listener on the port, which is worse: the child would
-    connect to a socket nobody reads and wait out the timeout."""
+    Used instead of Ollama's real 11434 so that a developer who happens to be
+    running Ollama does not have a test make a model call; what the tests assert
+    is unchanged, because they assert that traffic went to the CONFIGURED
+    endpoint and to nothing else.
+
+    The port is held on UDP and left free on TCP, which is not the obvious
+    arrangement, so: the tests want two things from this port, and holding a
+    bound TCP socket gives only one of them.
+
+      * No race. Bind, read the port, close, hand the number out — and in the
+        window before the child connects, the kernel can hand the same number to
+        anything else on the machine. That is the thing to avoid.
+      * A fast, deterministic "nothing is there". The child is standing in for
+        "Ollama is not running", and what that looks like is ECONNREFUSED,
+        immediately.
+
+    A TCP socket bound and not listening does not give the second on macOS.
+    Measured here (Darwin 25.6, CPython 3.12): a connect to a bound,
+    non-listening loopback port TIMES OUT — the SYN is dropped, 4.00 s to a
+    4 s deadline — while the same port after the socket is closed refuses in
+    0.00 s. Linux answers RST in both cases, but a test that is only fast on the
+    CI leg is not a test anyone runs. Worse than slow, it changes what is under
+    test: with every connect stalling for its full connect timeout the run stops
+    failing on an unreachable endpoint and starts degrading into an answer, so
+    the assertions would be describing a different path.
+
+    Holding a UDP socket on the number gives the first without costing the
+    second. TCP and UDP are separate port spaces: the TCP side is genuinely
+    free, so a connect gets RST at once, while the kernel will not hand this
+    number out as an ephemeral port to anything else for the life of the block.
+    What is left is not a race but a deliberate collision — something choosing
+    to bind this exact TCP port in the ephemeral range — and if it happened, it
+    would have to answer Ollama's `/api/tags` on loopback for a test to pass
+    wrongly; every assertion here is about WHERE the traffic went, and loopback
+    is where it went either way."""
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
-        return int(probe.getsockname()[1])
+        port = int(probe.getsockname()[1])
+    for _ in range(attempts):
+        reserved = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            reserved.bind(("127.0.0.1", port))
+        except OSError:
+            # Taken between the probe and here; ask the kernel for another one.
+            reserved.close()
+            with socket.socket() as probe:
+                probe.bind(("127.0.0.1", 0))
+                port = int(probe.getsockname()[1])
+            continue
+        try:
+            yield port
+        finally:
+            reserved.close()
+        return
+    raise RuntimeError("could not reserve a free loopback port")
