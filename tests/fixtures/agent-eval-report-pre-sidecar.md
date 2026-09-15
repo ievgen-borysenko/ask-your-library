@@ -30,5 +30,5 @@ Moby Dick aboard the Pequod
 2 completed, 0 errors, 0 clarify interrupts; quotes verified 4/4 (confirmed / unattributed / broken = 4 / 0 / 0); evidence items 6
 behavior PASS 2/2 (answer 1/1, identify 1/1); expected titles mentioned 2/2
 expected facts found 1/1; answers carrying every expected fact 1/1 (substring presence, not correctness; not part of behaviour PASS)
-cost $0.0200 total, $0.0100 mean per attempted question (6 LLM calls, 2000 in / 200 out tokens; configured rates $0.0/M in, $0.0/M out, cache reads not discounted)
+cost $0.0200 total, $0.0100 mean per attempted question (6 LLM calls, 2000 in / 200 out tokens; configured rates $3.0/M in, $15.0/M out, cache reads not discounted)
 manual correctness: not scored — tick the checkboxes above

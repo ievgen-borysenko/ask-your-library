@@ -63,6 +63,13 @@ def prepared(monkeypatch, tmp_path, argv, results, golden=GOLDEN):
     monkeypatch.setattr(harness, "GOLDEN_PATH", golden)
     monkeypatch.setattr(harness, "RESULTS_DIR", tmp_path)
     monkeypatch.setattr(harness, "build_graph", lambda: object())
+    # The hosted list prices, pinned: config reads them at import time, so the
+    # cost line of a report rendered here would otherwise say $0.0/M on a local
+    # backend and $3.0/M on a hosted one — and the byte-compat fixture below is
+    # one report, not one per backend (tests/test_agent_eval_scoring.py pins
+    # them for the same reason).
+    monkeypatch.setattr(harness, "PRICE_IN_PER_MTOK", 3.0)
+    monkeypatch.setattr(harness, "PRICE_OUT_PER_MTOK", 15.0)
     monkeypatch.setattr(harness, "run_facts", lambda repeat=1: {"code": "abc1234", "repeat": repeat})
     monkeypatch.setattr(harness, "render_fingerprint", lambda facts: "code abc1234 | single run")
     monkeypatch.setattr(harness, "run_one", lambda graph, item, attempt=1: results(item, attempt))
