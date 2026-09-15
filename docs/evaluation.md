@@ -42,6 +42,21 @@ where a planner or catalogue fallback searched instead). Quote provenance totals
 **answer correctness is still a manual read**, which is why the harness writes every answer
 into a report with a per-question correctness checkbox.
 
+**`tests/ui` - the web UI's release walkthrough, in a browser (2026-09-15).** Not an eval: a test,
+and the one that replaced a manual pass. `pytest tests/ui` starts a real `chainlit run ui.py
+--headless` on a free loopback port and drives it with Playwright at two viewports (1280x800 and
+390x844): first start and login, a research question with its live `plan` / `act` / `observe`
+steps, the quote-provenance badge with its numbers, an evidence passage opened and readable, the
+catalogue answer with its count, a reload that restores the conversation, and a clarify left
+unanswered until it times out. The model, the two retrieval functions, the catalogue reader and
+the preflight come from `tests/ui/scripted_backend.py`, so the run needs no Ollama, no key and no
+index and answers the same way every time; everything else - the server, the compiled graph, the
+clarify interrupt, the provenance check and every rendered line - is the shipped code. The browser
+binary is not a Python package, so the directory skips itself (with the install command in the
+reason) wherever it is missing; CI's `ui-smoke` job is where it runs, and uploads a screenshot of
+any failing page. What it proves is that the path works and what the screen says, never that an
+answer is good: the answers are written into the script.
+
 **`expected_facts` and the `facts_ok` row (2026-09-15).** Every golden item whose answer has
 content carries one to four short, checkable strings - a name, a number, a place, one fact per
 string - derived from that item's own `notes` and, where the notes were vague, from the book card

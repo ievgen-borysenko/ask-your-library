@@ -14,7 +14,10 @@ open ones often refer to them.
 - Released and public since 2026-09-09 (tag `v0.2.0`), after the short live check of the web UI
   on a clean environment — the passage under an evidence item readable in the browser (not merely
   sent), a clarify including the no-reply case, chat restore after a reload, and a first start by
-  the README.
+  the README. That check is no longer a manual one: since 2026-09-15 `tests/ui` walks the same
+  path in a browser against a scripted backend, at desktop and phone width, and CI runs it in the
+  `ui-smoke` job (below, and in `docs/evaluation.md`). The job is deliberately NOT in the branch
+  ruleset's required checks: it is the newest and the slowest, and it should earn that first.
 - Done since: security CI (`.github/workflows/security.yml`: gitleaks over the complete range of
   each event, OSV-Scanner over `uv.lock`, weekly; Dependabot; every action pinned to a commit SHA)
   and Chainlit 2.12.0, the release that closes the two MCP advisories, with the config cleaned and
@@ -185,6 +188,25 @@ open ones often refer to them.
   section key at ingest time instead.
 - Evidence block in the UI: show the source type (text / card / transcript) and whether the
   passage was cut; keep the passages for restored chats.
+- **On a phone, the answer after a clarify is gone before it can be read.** Measured on a screen
+  recording of the gothic-novel question (two candidates, one clarify) at 390x844 on 15.09, whose
+  phase log reads: question sent +13.3 s, the agent asks back +35.4 s, the reply goes in +38.5 s,
+  the answer lands +70.8 s, the badge had to be scrolled back INTO view +72.3 s. That last pair is
+  the item: the provenance badge and the evidence block render right underneath the answer and
+  push it off the top of an 844 px viewport in about a second and a half. Nothing is broken and
+  nothing is lost — scrolling up gets it back — but the one thing the reader waited a minute for
+  is the one thing they do not get to read. Noticed while scripting `tests/ui`, which does not
+  depend on it: the smoke test asserts that text is on the page, never where the page is scrolled
+  to. Fix worth considering: keep the answer anchored (scroll to the top of the answer message,
+  not to the bottom of the thread) when a badge and an evidence block follow it.
+- **A phone reload lands in a new chat, and nobody has decided whether it should.** In a wide
+  window Chainlit moves the browser onto `/thread/<id>` a beat after the first answer, so a reload
+  restores the conversation. At 390 px it never does: the thread history is off-canvas and is not
+  in the DOM until the sidebar toggle is pressed, so the address the reload would need exists only
+  as a link behind that toggle, and reloading the page a phone is actually showing opens an empty
+  chat. `tests/ui/test_ui_smoke.py` handles both shapes (it opens the sidebar and reads the link),
+  which is how the difference was found; what it cannot decide is whether losing the conversation
+  on a phone reload is acceptable, a Chainlit setting, or something `ui.py` should do for itself.
 - Rate limits and budgets only matter if the UI ever leaves localhost; before any hosted or
   multi-user deployment: isolation, budgets, retention, deployment security, a separate SCA.
 - A shorter README and a first-answer path that does not start with a 30-minute ingest (a small
@@ -285,6 +307,17 @@ open ones often refer to them.
   the facts do not move `behavior_ok`).
 - Non-goals documented in `docs/known-limits.md`: re-ingest per corpus change (and the staged
   rebuild of `ayl-add`), `get_chapter` caps, EN/UA-only injection patterns.
+- **The web UI's release walkthrough was a manual pass before every release** (the release-status
+  item above): first start, login, a question, the live steps, the badge, an evidence passage
+  opened, the catalogue answer, a reload that restores the chat, a clarify left unanswered. Closed
+  on 2026-09-15 by `tests/ui/test_ui_smoke.py`, which drives a real `chainlit run ui.py --headless`
+  with Playwright at 1280x800 and 390x844, and by the `ui-smoke` CI job that installs the browser
+  and uploads a screenshot of any failing page. It needs no model, no key and no index: the seam
+  is `AYL_UI_FAKE_BACKEND` plus its spelled-out confirmation
+  (`src/ask_your_library/fake_backend.py`, `docs/configuration.md`, `SECURITY.md`), which loads
+  `tests/ui/scripted_backend.py` into the server process and replaces the model, the two retrieval
+  functions, the catalogue reader and the preflight — the same substitution `tests/test_graph_e2e.py`
+  makes in-process. With neither variable set nothing is loaded and nothing is patched.
 - Workflow linter: a `workflows` job in `ci.yml` runs actionlint (release tarball, SHA-256
   verified, no third-party action) over every file under `.github/workflows/`, shellcheck included
   since it ships on `ubuntu-latest`, pyflakes not installed so it stays off; first run found

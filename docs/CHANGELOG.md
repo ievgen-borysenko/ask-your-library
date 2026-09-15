@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+- **The web UI's release check is a test now, not a walk-through.** First start, login, a
+  question, the live agent steps, the quote-provenance badge, an evidence passage opened and
+  readable, the catalogue answer with its count, a reload that restores the conversation, a
+  clarify left unanswered until it times out — that path was checked by hand on a clean
+  environment before every release. `tests/ui/test_ui_smoke.py` walks it in a browser instead:
+  a real `chainlit run ui.py --headless` on a free loopback port, driven with Playwright at
+  1280x800 and at 390x844, because the phone rendering has traps of its own (the steps render
+  collapsed, the composer floats over the bottom of the thread, and at that width Chainlit keeps
+  the thread history — and the conversation's own address, which is what a reload restores —
+  behind the sidebar toggle). Every assertion is on text on the screen, every wait carries its own
+  timeout, and a failing page is screenshotted into the run's `--basetemp`.
+
+  The server it drives has no model, no key and no index. The seam is `AYL_UI_FAKE_BACKEND`, a
+  path to a Python file that `ui.py` loads at startup and whose `install()` replaces the model
+  client, the two retrieval functions `nodes` imports, the catalogue reader and the preflight —
+  the same substitution `tests/test_graph_e2e.py` has always made in-process, made in a server
+  process by the server itself (`src/ask_your_library/fake_backend.py`,
+  `tests/ui/scripted_backend.py`). Everything else is the shipped code: the compiled graph, the
+  clarify interrupt, the coverage gate, the quote check, and every rendered line. It takes two
+  variables, not one: without `AYL_UI_FAKE_BACKEND_CONFIRM=this-server-answers-from-a-script` the
+  server refuses to start rather than serving scripted answers that look real, and with neither
+  set — every ordinary start — the seam reads two environment variables, finds nothing, and
+  returns before importing or patching anything. `tests/test_fake_backend.py` pins the refusals;
+  `docs/configuration.md` and `SECURITY.md` say what the pair is and where it must never be set.
+  A `.env` is one of those places and not a figure of speech: `chainlit`'s own import calls
+  `load_dotenv(<cwd>/.env)` before `ui.py` runs a line, so such a file would arm the seam as
+  surely as an exported variable — which is why either name appearing as a key in `<cwd>/.env`,
+  or in the nearest `.env` above it, is refused outright, whatever the value there.
+
+  Alongside it, `AYL_CLARIFY_TIMEOUT_S` makes the web UI's ask-back timeout configurable (default
+  300 s, unchanged), so a test can watch an unanswered clarify expire instead of waiting five
+  minutes; a value that is not a whole number above 0 is refused at startup.
+
+  CI: a new `ui-smoke` job installs the `ui` extra, `playwright install --with-deps chromium`,
+  runs `tests/ui` and uploads the screenshots of any failing page. It is not in the branch
+  ruleset's required checks. `uv run pytest -q` is unaffected on a machine without the browser:
+  `tests/ui/test_ui_smoke.py` skips itself with the install command in the reason.
+
 - **Docs: ADR-011 marked superseded.** The export it described ran once, on 2026-09-08; since
   then this repository is developed directly, by pull request against `main` under the branch
   ruleset, with no allowlist kept for new files. ADR-011's status line and a dated note record
@@ -149,13 +187,16 @@
   `test_a_ctypes_call_into_libc_is_the_known_blind_spot` performs the bypass and is
   `xfail(strict)`, so if a future interpreter or sandbox ever closes that door the test passes,
   the strict marker turns the pass into a failure, and the scope paragraphs have to be rewritten.
-  `test_no_native_networking_in_the_environment` bounds it in practice: no `grpcio`, `pycurl`,
-  `pycares`, `aiodns`, `uvloop`, `pyzmq`, `psycopg`, `pymongo` or `redis` in the interpreter that
-  runs these tests, and none in the application's locked runtime closure read from `uv export
-  --no-dev`. `uvloop` is the sharpest of them — it would move every asyncio socket in the process
-  out of the hook's sight — and `grpcio` plus an OTLP gRPC exporter arrive with the **`ui`
-  extra**, which is why the Chainlit process is excluded from the claim rather than merely
-  untested, and why that test fails if the extra is ever installed into a leg that runs this file.
+  Two more tests bound it in practice: no `grpcio`, `pycurl`, `pycares`, `aiodns`, `uvloop`,
+  `pyzmq`, `psycopg`, `pymongo` or `redis` in the interpreter that runs these tests
+  (`test_no_native_networking_in_the_interpreter`), and none in the application's locked runtime
+  closure read from `uv export --no-dev` (`test_no_native_networking_in_the_locked_runtime`).
+  `uvloop` is the sharpest of them — it would move every asyncio socket in the process out of the
+  hook's sight — and `grpcio` plus an OTLP gRPC exporter arrive with the **`ui` extra**, which is
+  why the Chainlit process is excluded from the claim rather than merely untested. That exclusion
+  is also why the two are separate: an interpreter that HAS the extra — a developer's own, or the
+  `ui-smoke` job's — skips the first with the reason stated, because such an environment was
+  never inside the claim, while the second runs there like everywhere else and must pass.
 
   The test then runs the real thing in the shipped local configuration with Ollama not running:
   the real preflight, the real `embeddings`, the real compiled graph through

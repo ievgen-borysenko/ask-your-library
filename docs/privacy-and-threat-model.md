@@ -97,10 +97,16 @@ through CPython**: a native extension with its own C sockets, or a `ctypes` call
 `test_a_ctypes_call_into_libc_is_the_known_blind_spot` performs the bypass and is marked
 `xfail(strict)`, so the limit is pinned: if some future interpreter or sandbox closes the door,
 that test starts passing and forces this paragraph to be rewritten.
-`test_no_native_networking_in_the_environment` closes the practical half — no
+`test_no_native_networking_in_the_interpreter` and
+`test_no_native_networking_in_the_locked_runtime` close the practical half — no
 `grpcio`, `pycurl`, `pycares`, `aiodns`, `uvloop`, `pyzmq`, `psycopg`, `pymongo` or `redis` is
 installed in the interpreter that runs these tests, and none is in the application's own locked
-runtime closure. `uvloop` is the sharpest of those: it replaces asyncio's event loop wholesale, so
+runtime closure. The first of the two skips itself, with the reason stated, in an interpreter
+that has the `ui` extra installed (a developer's working environment, and the `ui-smoke` job):
+that tree carries `grpcio`, and an interpreter holding it was never inside this claim — which is
+the same fact as the exclusion of Chainlit below, not a new exception to it. The second runs
+everywhere and must pass: the extra can excuse an environment, never the application's own
+dependencies. `uvloop` is the sharpest of those: it replaces asyncio's event loop wholesale, so
 every asyncio socket in the process would stop passing through the socket module. None arrives
 with the application; `grpcio` and an OTLP gRPC exporter do arrive with the **`ui` extra**, which
 is why the Chainlit process is excluded from the claim rather than merely untested.

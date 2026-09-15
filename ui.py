@@ -40,11 +40,22 @@ from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 from chainlit.server import app as chainlit_app
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from ask_your_library.graph import build_graph
-from ask_your_library.i18n import LANG, set_lang, status_word, t
-from ask_your_library.preflight import check_api_key, check_environment
-from ask_your_library.runner import history_entry, run_question
-from ask_your_library.sanitize import LINE_BREAK_RE
+from ask_your_library.fake_backend import install_fake_backend
+
+# The scripted-backend seam (fake_backend.py): a no-op unless BOTH
+# AYL_UI_FAKE_BACKEND (a script path) and AYL_UI_FAKE_BACKEND_CONFIRM are set,
+# which is how tests/ui/test_ui_smoke.py starts a server with no model, no key
+# and no index. It runs HERE, before the imports below, because what it
+# replaces is what they bind: the model client, the library readers and the
+# preflight. Unset — every production start — it returns before touching
+# anything, and the module below is the module that always ran.
+install_fake_backend()
+
+from ask_your_library.graph import build_graph                      # noqa: E402
+from ask_your_library.i18n import LANG, set_lang, status_word, t    # noqa: E402
+from ask_your_library.preflight import check_api_key, check_environment  # noqa: E402
+from ask_your_library.runner import history_entry, run_question     # noqa: E402
+from ask_your_library.sanitize import LINE_BREAK_RE                 # noqa: E402
 
 # A single-user local app never needs the login cookie on a cross-site request;
 # strict keeps it off one, and Chainlit's own default is lax. CHAINLIT_COOKIE_SAMESITE
@@ -83,7 +94,31 @@ SCRATCH_DIR = Path(os.environ.get("ASK_SCRATCH_DIR", ".scratch"))
 # repo's .chainlit/ (the import creates the chat db and the auth secret there).
 CHAINLIT_DIR = Path(os.environ.get("AYL_CHAINLIT_DIR", Path(__file__).parent / ".chainlit"))
 CHAT_DB_PATH = CHAINLIT_DIR / "chat.db"
-CLARIFY_TIMEOUT_SECONDS = 300
+
+
+def _clarify_timeout_seconds() -> int:
+    """How long the ask-back waits for the reader before the agent goes on
+    without an answer. Five minutes for a person reading a numbered list;
+    AYL_CLARIFY_TIMEOUT_S shortens it for a test that has to SEE the timeout
+    (tests/ui/test_ui_smoke.py leaves a clarify unanswered on purpose). A
+    nonsense value is refused rather than rounded to a default: a server whose
+    clarify silently expires after 0 s would look like a model that never asks.
+
+    Accepted: ASCII decimal digits only, with surrounding whitespace ignored (a
+    `.env` line keeps its trailing spaces) and blank meaning unset, as blank
+    does for every other knob here. Everything `int()` would also take is
+    refused — `1_0` is ten to Python and a typo to a reader, `+5` and `-1` are
+    neither what anyone meant nor worth guessing at — and `str.isdigit()` is not
+    the test for that either: it is true of `²`, which `int()` then rejects."""
+    raw = os.environ.get("AYL_CLARIFY_TIMEOUT_S", "").strip()
+    if not raw:
+        return 300
+    if not re.fullmatch(r"[0-9]+", raw) or int(raw) <= 0:
+        raise SystemExit("AYL_CLARIFY_TIMEOUT_S must be digits only, a number of seconds above 0")
+    return int(raw)
+
+
+CLARIFY_TIMEOUT_SECONDS = _clarify_timeout_seconds()
 
 GREEN = "#16a34a"
 YELLOW = "#ca8a04"

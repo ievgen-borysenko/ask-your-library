@@ -4,7 +4,9 @@ import asyncio
 import importlib
 import json
 import logging
+import os
 import stat
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -792,3 +794,88 @@ def test_a_chat_start_narrows_the_journal_siblings_too(ui, monkeypatch, tmp_path
     sibling.chmod(0o644)
     _chat_start(ui, monkeypatch, problems=["Ollama is not answering"])
     assert stat.S_IMODE(sibling.stat().st_mode) == 0o600
+
+
+# --- the scripted-backend seam, in the process shape `chainlit run` produces ---
+
+def test_a_scripted_backend_without_its_confirmation_refuses_to_serve(tmp_path):
+    """The seam that lets tests/ui start a server with no model and no index
+    (`ask_your_library.fake_backend`) needs two variables, and the refusal is
+    what makes one of them safe to have in a shell: a path alone stops the
+    server from coming up, rather than quietly serving scripted answers.
+
+    Asserted in a child, at ui.py's own import, because that is where the call
+    sits and where an operator would meet it."""
+    script = tmp_path / "backend.py"
+    script.write_text("def install():\n    raise AssertionError('this must never run')\n")
+    result = _run("import ui", check=False,
+                  CHAINLIT_AUTH_SECRET="test-secret", AYL_ALLOW_DEFAULT_LOGIN="1",
+                  AYL_ALLOW_START_WITHOUT_KEY="1", AYL_CHAINLIT_DIR=str(tmp_path / "chainlit"),
+                  AYL_UI_FAKE_BACKEND=str(script))
+    assert result.returncode != 0
+    assert "AYL_UI_FAKE_BACKEND_CONFIRM" in result.stderr
+    assert "this must never run" not in result.stderr        # the file was never executed
+
+
+def test_the_clarify_timeout_is_five_minutes_unless_a_test_shortens_it(tmp_path):
+    """ui.CLARIFY_TIMEOUT_SECONDS is what an unanswered ask-back waits for. The
+    default is the reader's five minutes; AYL_CLARIFY_TIMEOUT_S exists so the UI
+    smoke test can watch one expire. A nonsense value is refused, not rounded:
+    a server whose clarify expires immediately looks like a model that never
+    asks. Digits only, surrounding whitespace ignored — `int()` would also read
+    `1_0` as ten, which is a typo to everyone but Python."""
+    environment = dict(CHAINLIT_AUTH_SECRET="test-secret", AYL_ALLOW_DEFAULT_LOGIN="1",
+                       AYL_ALLOW_START_WITHOUT_KEY="1", AYL_CHAINLIT_DIR=str(tmp_path / "chainlit"))
+    code = "import ui; print(ui.CLARIFY_TIMEOUT_SECONDS)"
+    assert _out(code, **environment) == "300"
+    assert _out(code, **environment, AYL_CLARIFY_TIMEOUT_S="25") == "25"
+    assert _out(code, **environment, AYL_CLARIFY_TIMEOUT_S=" 25 ") == "25"   # a .env keeps its spaces
+    # Blank is absent, as everywhere else in this project (a copied .env.example
+    # line): the default stands rather than the server refusing to start.
+    assert _out(code, **environment, AYL_CLARIFY_TIMEOUT_S="  ") == "300"
+    # "²" is isdigit() and not int()-able: the parser matches ASCII digits.
+    for bad in ("0", "-1", "soon", "1_0", "+5", "2.5", "25s", "²", "٢٥"):
+        result = _run(code, check=False, **environment, AYL_CLARIFY_TIMEOUT_S=bad)
+        assert result.returncode != 0 and "AYL_CLARIFY_TIMEOUT_S" in result.stderr
+
+
+# --- the browser smoke run's own gate, without a browser ----------------------
+
+def _pytest_on_the_smoke_directory(browsers_dir, **environment) -> subprocess.CompletedProcess:
+    """Collect tests/ui in a child, with the browser made unfindable. Nothing is
+    launched: the module's own probe answers at collection time."""
+    base = {k: v for k, v in os.environ.items() if k != "AYL_UI_SMOKE_REQUIRED"}
+    base["PLAYWRIGHT_BROWSERS_PATH"] = str(browsers_dir)
+    return subprocess.run([sys.executable, "-m", "pytest", "-q", "tests/ui", "-rs",
+                           "-p", "no:cacheprovider"],
+                          cwd=REPO, env={**base, **environment},
+                          capture_output=True, text=True)
+
+
+def test_the_smoke_run_skips_by_default_and_is_an_error_where_ci_requires_it(tmp_path):
+    """tests/ui skips itself wherever chromium is missing, which is what keeps
+    `uv run pytest -q` green and fast on a clone that never ran `playwright
+    install` — and is exactly the wrong answer in the job whose only purpose is
+    that file, where it would turn a release check that stopped running into a
+    green tick. AYL_UI_SMOKE_REQUIRED=1, set in the `ui-smoke` job and nowhere
+    else, makes the missing browser a collection error instead.
+
+    Both halves are asserted in a child interpreter with the browser path
+    pointed at an empty directory, so the test needs no browser itself."""
+    pytest.importorskip("playwright", reason="the smoke directory's own gate needs the library")
+    empty = tmp_path / "no-browsers-here"
+    empty.mkdir()
+
+    skipped = _pytest_on_the_smoke_directory(empty)
+    # 5 is pytest's "no tests ran": this child collects nothing else. In the real
+    # `uv run pytest -q` the rest of the suite runs and the status is 0 — what
+    # matters here is that a missing browser is not a failure.
+    assert skipped.returncode == 5, skipped.stdout[-2000:]
+    assert "chromium is not installed" in skipped.stdout          # -rs prints the reason
+    assert "1 skipped" in skipped.stdout
+
+    required = _pytest_on_the_smoke_directory(empty, AYL_UI_SMOKE_REQUIRED="1")
+    assert required.returncode != 0, required.stdout[-2000:]
+    output = required.stdout + required.stderr
+    assert "AYL_UI_SMOKE_REQUIRED=1" in output and "chromium is not installed" in output
+    assert "skipped" not in required.stdout.splitlines()[-1]

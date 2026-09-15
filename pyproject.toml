@@ -43,7 +43,18 @@ ask-library = "ask_your_library.cli:main"
 ayl-add = "ask_your_library.ingest.add_folder:main"
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+# playwright drives the real Chainlit server in a real browser (tests/ui). The
+# browser binary itself is NOT a Python package: `uv run playwright install
+# chromium` fetches it, and tests/ui/test_ui_smoke.py skips itself with that
+# command in the reason when it is absent, so `uv run pytest -q` stays green and
+# fast on a clone that never ran it.
+#
+# The library, not the pytest-playwright plugin: its `browser` fixture is
+# session-scoped, and Playwright's sync driver keeps a RUNNING asyncio loop in
+# the main thread for as long as it is open, which makes every later
+# `asyncio.run(...)` in the suite (tests/test_ui.py is full of them) raise. The
+# test owns the browser for one test instead, and needs no plugin to do it.
+dev = ["pytest>=8.0", "playwright>=1.49"]
 
 [build-system]
 requires = ["hatchling"]

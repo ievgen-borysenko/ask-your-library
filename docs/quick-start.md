@@ -88,4 +88,7 @@ uv run eval/run_agent_eval.py            # full agentic loop over the golden set
 uv run eval/injection_canary.py          # one LLM call (the last stage; free on the local backend)
 uv run --extra ui eval/injection_canary.py --no-live  # all available stages, no LLM call, free
 uv run --group dev pytest -q             # unit tests, the compiled graph end to end with a scripted model, golden-set/manifest guard
+uv run playwright install chromium      # once: the browser tests/ui drives (not a Python package)
+uv run --group dev --extra ui pytest -q tests/ui  # the web UI's release walkthrough in a browser,
+                                        # desktop and phone, against a scripted backend (no model, no index)
 ```
