@@ -13,7 +13,8 @@ So these tests instrument the PROCESS instead of the application (see
 tests/egress_guard.py) and then run the real thing: the real `llm` and
 `embeddings` modules, the real preflight, the real compiled graph through
 `runner.run_question`, with Ollama NOT running. Every outbound connection
-attempt is recorded at three layers (socket, DNS, httpx) and refused unless the
+attempt is recorded at three layers (the socket, the resolver — all five of its
+entry points, not only `getaddrinfo` — and httpx) and refused unless the
 target is this machine, and the assertions are about the whole recorded list:
 loopback on the configured Ollama port, and nothing else — no OpenRouter, no
 LangSmith, not even a name lookup for one.
@@ -86,6 +87,52 @@ def test_the_guard_refuses_a_bare_socket_too():
     assert guard.off_machine() == {(OFF_MACHINE, 443), ("93.184.216.34", 443)}
 
 
+# `getaddrinfo` is the resolver door httpx and urllib3 use, and it is not the
+# only one in the module. Each of these is a separate call into the same
+# resolver, and one of them is on a path this project loads: langsmith's
+# `_is_localhost()` calls `gethostbyname` on the endpoint host. A guard that
+# watched `getaddrinfo` alone would have let that lookup — the name of a tracing
+# endpoint, put on the wire — out unseen, while the file claimed no name leaves.
+NAME_LOOKUPS = [
+    ("getaddrinfo", lambda host: socket.getaddrinfo(host, 443)),
+    ("gethostbyname", lambda host: socket.gethostbyname(host)),
+    ("gethostbyname_ex", lambda host: socket.gethostbyname_ex(host)),
+    ("gethostbyaddr", lambda host: socket.gethostbyaddr(host)),
+]
+
+
+@pytest.mark.parametrize("layer,lookup", NAME_LOOKUPS, ids=[n for n, _ in NAME_LOOKUPS])
+def test_every_resolver_door_is_watched(layer, lookup):
+    """Each one refuses an off-machine name and records which door was used."""
+    with record_egress() as guard:
+        with pytest.raises(EgressBlocked):
+            lookup(OFF_MACHINE)
+    assert guard.layers_for(OFF_MACHINE) == [layer]
+    assert guard.off_machine() == {(OFF_MACHINE, None if layer != "getaddrinfo" else 443)}
+
+
+@pytest.mark.parametrize("layer,lookup", NAME_LOOKUPS, ids=[n for n, _ in NAME_LOOKUPS])
+def test_every_resolver_door_still_answers_for_this_machine(layer, lookup):
+    """And each one still works for loopback, recorded rather than refused —
+    `gethostbyaddr` needs an address, so it gets one."""
+    host = "127.0.0.1" if layer == "gethostbyaddr" else "localhost"
+    with record_egress() as guard:
+        assert lookup(host)
+    assert guard.layers_for(host) == [layer] and guard.off_machine() == set()
+
+
+def test_the_reverse_lookup_is_watched_too():
+    """`getnameinfo` is the fifth door and the one whose host is not its first
+    argument: it takes a sockaddr. An address off this machine is a question
+    about somebody else's host, asked of a resolver over the wire."""
+    with record_egress() as guard:
+        assert socket.getnameinfo(("127.0.0.1", 11434), 0)
+        with pytest.raises(EgressBlocked):
+            socket.getnameinfo(("93.184.216.34", 443), 0)
+    assert guard.off_machine() == {("93.184.216.34", 443)}
+    assert guard.layers_for("127.0.0.1") == ["getnameinfo"]
+
+
 def test_loopback_is_allowed_and_still_recorded():
     """The allow-list is an assertion only because loopback is recorded too: a
     guard that logged nothing when it let something through could not tell
@@ -133,26 +180,37 @@ report = {"backend": config.LLM_BACKEND, "embed_backend": config.EMBED_BACKEND,
           "llm_base_url": config.LLM_BASE_URL, "ollama_url": config.OLLAMA_URL,
           "openrouter_base_url": config.OPENROUTER_BASE_URL}
 
-with record_egress() as guard:
-    result = preflight.check_environment()
-    report["preflight_kinds"] = list(result.kinds)
-    report["preflight_exit"] = preflight.exit_code(result)
-    report["preflight_text"] = " | ".join(result)[:400]
+# Entered, and deliberately never exited: this child exists to be watched and
+# then to die, so the patches stay in place through interpreter shutdown.
+# Anything that runs after the report is written — an atexit handler, an SDK's
+# background flush, a tracing exporter's last upload — still meets the guard,
+# where a `with` block would have restored the real socket module first and left
+# exactly that window unwatched. That window is the one a batching exporter uses.
+# `held` keeps the context manager alive: it is a generator behind
+# @contextmanager, and an unreferenced one is closed by the collector, which
+# runs the restore in its finally and quietly un-patches everything.
+held = record_egress()
+guard = held.__enter__()
 
+result = preflight.check_environment()
+report["preflight_kinds"] = list(result.kinds)
+report["preflight_exit"] = preflight.exit_code(result)
+report["preflight_text"] = " | ".join(result)[:400]
+
+try:
+    embeddings.get_embedder(config.EMBED_BACKEND).embed_query("who narrates Moby Dick?")
+    report["embed"] = "no error"
+except BaseException as error:
+    report["embed"] = type(error).__name__
+
+with tempfile.TemporaryDirectory() as scratch:
     try:
-        embeddings.get_embedder(config.EMBED_BACKEND).embed_query("who narrates Moby Dick?")
-        report["embed"] = "no error"
+        answer = run_question(build_graph(), "Who narrates Moby Dick?", [], Path(scratch),
+                              on_event=lambda name, update: None,
+                              on_clarify=lambda question: "")
+        report["run"] = {"raised": "", "answer": answer[:200]}
     except BaseException as error:
-        report["embed"] = type(error).__name__
-
-    with tempfile.TemporaryDirectory() as scratch:
-        try:
-            answer = run_question(build_graph(), "Who narrates Moby Dick?", [], Path(scratch),
-                                  on_event=lambda name, update: None,
-                                  on_clarify=lambda question: "")
-            report["run"] = {"raised": "", "answer": answer[:200]}
-        except BaseException as error:
-            report["run"] = {"raised": type(error).__name__, "message": str(error)[:300]}
+        report["run"] = {"raised": type(error).__name__, "message": str(error)[:300]}
 
 report["attempts"] = [a.as_tuple() for a in guard.attempts]
 report["targets"] = sorted(guard.targets(), key=repr)
@@ -218,6 +276,33 @@ def test_the_local_configuration_talks_only_to_loopback():
     # which is exactly the wrapping llm.py's `CallTimeout` comment describes.
     assert report["run"]["raised"].endswith("ConnectionError")
     assert "openrouter" not in report["run"]["message"].lower()
+
+
+def test_a_usable_hosted_key_does_not_move_the_local_run_off_the_machine():
+    """The same local run with a usable-looking `OPENROUTER_API_KEY` in the
+    environment.
+
+    The test above runs with the key blanked, so a silent hosted fallback in it
+    would have been caught by the MISSING KEY — an error about a credential,
+    which is a weaker statement than the one this file makes. Here the key is
+    present and the credential excuse is gone: if anything in the local
+    configuration reached for the hosted provider, it would be able to build a
+    client and the guard, not a `RuntimeError`, is what stops it. `off_machine`
+    staying empty is therefore the load-bearing assertion, and the allow-list is
+    still exactly the configured loopback endpoint.
+
+    The key is a placeholder that is not a key, and nothing carrying it ever
+    reaches a transport."""
+    port = closed_loopback_port()
+    report = local_run(extra_env='os.environ["OPENROUTER_API_KEY"] = "not-a-key"',
+                       LLM_BACKEND="ollama", EMBED_BACKEND="ollama",
+                       OLLAMA_URL=f"http://127.0.0.1:{port}")
+
+    assert report["off_machine"] == []
+    assert report["targets"] == [["127.0.0.1", port]]
+    # The same failure as without the key: the local runtime, not a credential.
+    assert report["preflight_exit"] == 5 and "no_ollama" in report["preflight_kinds"]
+    assert report["run"]["raised"].endswith("ConnectionError")
 
 
 def test_the_shipped_defaults_point_at_this_machine():

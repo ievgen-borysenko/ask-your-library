@@ -16,6 +16,14 @@ working. `load_dotenv` never overrides a variable that is already present, so
 pinning also neutralises a .env in the repository root — but only for names it
 can see, which is why the credentials are pinned BLANK instead of removed:
 a removed name is a free name, and dotenv fills a free name in.
+
+One class of variable is scrubbed from `run_fresh`'s children without ever being
+pinned here: the proxy names (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`,
+`NO_PROXY`, and their lowercase twins). This project never reads them; the HTTP
+clients do, and a machine with one set would send every request to the proxy's
+host instead of the endpoint the code named — which is a different destination
+for the egress tests to record, and an off-machine hop out of a loopback URL.
+See the note on SCRUBBED below.
 """
 import os
 import tempfile
@@ -141,6 +149,16 @@ def clean_run_state():
 # shell, or the pinned defaults above, deciding what the child measures. It is a
 # superset of DEFAULTS on purpose: a value pinned here must not reach a child
 # that is meant to see a default.
+#
+# The proxy variables are in it for a different reason, and they are scrubbed in
+# BOTH cases (the SDKs read the lowercase names too, and on a case-sensitive
+# system those are separate variables). They are not configuration this project
+# reads: `requests` and httpx read them themselves, and a machine with one set
+# sends every request to the proxy's host and port instead of the one the code
+# named. That silently rewrites what the egress tests assert on — the target a
+# connection attempt carries would be the proxy, not the configured endpoint —
+# and it would make an off-machine hop out of a loopback URL. A child must
+# therefore start from no proxy at all, whatever the developer's shell holds.
 SCRUBBED = frozenset(DEFAULTS) | frozenset(TRACING_OFF) | frozenset(BLANKED) | {
     "LLM_TIMEOUT_S", "QUESTION_DEADLINE_S", "LANGCHAIN_TRACING", "LANGSMITH_TRACING", "LANGCHAIN_PROJECT",
     # The tracing destination, under both prefixes. Nothing here sets it, but a
@@ -151,7 +169,8 @@ SCRUBBED = frozenset(DEFAULTS) | frozenset(TRACING_OFF) | frozenset(BLANKED) | {
     "AYL_ALLOW_START_WITHOUT_KEY", "AYL_ALLOW_DEFAULT_LOGIN", "AYL_CHAINLIT_DIR",
     "CHAINLIT_AUTH_SECRET", "CHAINLIT_USERNAME", "CHAINLIT_PASSWORD",
     "CHAINLIT_COOKIE_SAMESITE",
-}
+} | {name for base in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY")
+     for name in (base, base.lower())}
 
 
 def run_fresh(code: str, cwd=None, check=True, **env) -> subprocess.CompletedProcess:

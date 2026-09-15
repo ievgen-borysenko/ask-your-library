@@ -16,9 +16,17 @@ reaches the network through a different door:
               — the floor. urllib3 (which `requests` uses, in `embeddings` and
               `preflight`) brings its own `create_connection`, so the method on
               the class has to be patched too, not only the module function.
-  getaddrinfo the DNS lookup, so a blocked host is refused BEFORE a resolver on
+  name        the resolver, so a blocked host is refused BEFORE a resolver on
               the network is asked about it. A name is the first thing that
-              leaves a machine, and it leaves it over the wire.
+              leaves a machine, and it leaves it over the wire. `getaddrinfo`
+              is the door httpx and urllib3 use, and it is NOT the only one:
+              `gethostbyname`, `gethostbyname_ex`, `gethostbyaddr` and
+              `getnameinfo` are separate calls into the same resolver, and one
+              of them is on a path this project actually loads — LangSmith's
+              `_is_localhost()` calls `gethostbyname` on its endpoint host to
+              decide whether to skip a check. All five are patched, so "no name
+              lookup for a hosted endpoint leaves this process" is a statement
+              about the resolver and not about one of its five front doors.
   httpx       `HTTPTransport.handle_request` (and its async twin) — where the
               OpenAI SDK's client, and therefore every orchestrator call, is
               still holding a URL. Blocking here fails a hosted call with the
@@ -62,10 +70,17 @@ class EgressBlocked(RuntimeError):
     whichever layer saw it first, so the caller fails where a firewall would."""
 
 
+# The five resolver entry points. Each takes its host as the first argument
+# except `getnameinfo`, whose first argument is a sockaddr tuple, so that one is
+# wrapped separately below.
+NAME_LOOKUPS = ("getaddrinfo", "gethostbyname", "gethostbyname_ex", "gethostbyaddr")
+
+
 @dataclass(frozen=True)
 class Attempt:
-    """One outbound attempt, as one layer saw it."""
-    layer: str            # socket | create_connection | getaddrinfo | httpx | httpx-async | local
+    """One outbound attempt, as one layer saw it. `layer` is the name of the
+    function that was called, so a test can say which door was used."""
+    layer: str
     host: str
     port: int | None
     allowed: bool
@@ -160,7 +175,8 @@ def record_egress(allow_loopback: bool = True):
     real_connect = socket.socket.connect
     real_connect_ex = socket.socket.connect_ex
     real_create_connection = socket.create_connection
-    real_getaddrinfo = socket.getaddrinfo
+    real_lookups = {name: getattr(socket, name) for name in NAME_LOOKUPS}
+    real_getnameinfo = socket.getnameinfo
     transports = [(module.HTTPTransport, "handle_request",
                    module.HTTPTransport.handle_request, False)
                   for module in _httpx_modules()]
@@ -187,13 +203,32 @@ def record_egress(allow_loopback: bool = True):
         guard.check("create_connection", str(host), port)
         return real_create_connection(address, *args, **kwargs)
 
-    def getaddrinfo(host, port, *args, **kwargs):
-        # host=None is a local bind ("give me my own addresses"), not egress.
-        if host is None:
-            guard.note_local(f"getaddrinfo(None, {port})")
+    def name_lookup(name: str, original):
+        """One of the four resolver calls whose FIRST argument is the host.
+
+        `getaddrinfo` carries a port as its second argument and the other three
+        do not, so the port is read positionally only when it is really one: a
+        `gethostbyname_ex` has no second argument at all, and `getaddrinfo`'s
+        may be a service name ("https") rather than a number."""
+        def lookup(host, *args, **kwargs):
+            # host=None is a local bind ("give me my own addresses"), not egress.
+            if host is None:
+                guard.note_local(f"{name}(None)")
+            else:
+                port = args[0] if args and isinstance(args[0], int) else None
+                guard.check(name, str(host), port)
+            return original(host, *args, **kwargs)
+        return lookup
+
+    def getnameinfo(sockaddr, flags):
+        """The reverse direction, and the one whose host is not the first
+        argument: a sockaddr, so the address and its port are both known."""
+        if isinstance(sockaddr, (tuple, list)) and sockaddr:
+            guard.check("getnameinfo", str(sockaddr[0]),
+                        sockaddr[1] if len(sockaddr) > 1 else None)
         else:
-            guard.check("getaddrinfo", str(host), port if isinstance(port, int) else None)
-        return real_getaddrinfo(host, port, *args, **kwargs)
+            guard.note_local(sockaddr)
+        return real_getnameinfo(sockaddr, flags)
 
     def sync_transport(original):
         def handle_request(self, request):
@@ -210,7 +245,9 @@ def record_egress(allow_loopback: bool = True):
     socket.socket.connect = connect
     socket.socket.connect_ex = connect_ex
     socket.create_connection = create_connection
-    socket.getaddrinfo = getaddrinfo
+    for name, original in real_lookups.items():
+        setattr(socket, name, name_lookup(name, original))
+    socket.getnameinfo = getnameinfo
     for transport, attribute, original, is_async in transports:
         setattr(transport, attribute,
                 (async_transport if is_async else sync_transport)(original))
@@ -223,7 +260,9 @@ def record_egress(allow_loopback: bool = True):
             else:
                 setattr(socket.socket, name, original)
         socket.create_connection = real_create_connection
-        socket.getaddrinfo = real_getaddrinfo
+        for name, original in real_lookups.items():
+            setattr(socket, name, original)
+        socket.getnameinfo = real_getnameinfo
         for transport, attribute, original, _ in transports:
             setattr(transport, attribute, original)
 
@@ -233,7 +272,20 @@ def closed_loopback_port() -> int:
     free one, then released. Used instead of Ollama's real 11434 so that a
     developer who happens to be running Ollama does not have this test make a
     model call — the port is the configured one either way, and what is asserted
-    is that the traffic went to loopback AND to that port and nowhere else."""
+    is that the traffic went to loopback AND to that port and nowhere else.
+
+    Bind-and-release is a race, and an accepted one. Between the release here
+    and the child's first connection, something else on this machine could take
+    the port; a connection would then succeed instead of being refused. It is
+    accepted because nothing the test asserts depends on the refusal: the
+    assertions are about WHERE the attempts went (loopback, this port, nothing
+    else), and a listener that answered would still be on loopback and would
+    still not be a hosted provider — at worst the run's failure mode changes
+    from "connection refused" to "not Ollama", which the preflight reports as a
+    bad reply and the graph pass as a client error, and the test would say so
+    instead of passing quietly. Holding the socket open for the duration would
+    trade that for a real listener on the port, which is worse: the child would
+    connect to a socket nobody reads and wait out the timeout."""
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         return int(probe.getsockname()[1])
