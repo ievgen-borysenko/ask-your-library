@@ -246,7 +246,7 @@ here changed, and no recording of a real golden set has been made yet.
 
 ## ADR-011: Publishing by allowlist into a fresh repository, fail-closed tooling
 
-Status: accepted.
+Status: accepted; superseded on 2026-09-08 — see the note below.
 
 The development repository stays the source of truth, and the public tree is produced from an
 explicit file allowlist by an export tool that refuses to run on anything it does not recognise: an
@@ -261,6 +261,21 @@ with its history rewritten, would have left every intermediate artifact and ever
 The export is a command plus a manual push, and it was verified on a dry run before anything was
 made public. The price, decided with the approach, is that later public updates are snapshots
 rather than history.
+
+**2026-09-08.** The export above ran once, to produce this repository from the development one;
+no second export has followed it. Since that date this repository is developed directly: every
+change lands as a pull request against `main`, gated by the checks the branch ruleset requires
+("Automated checks" in [`SECURITY.md`](../../SECURITY.md)), and no allowlist is maintained for a
+file added after 2026-09-08 — a new path ships because a reviewer and the ruleset's checks let it,
+not because an earlier list named it. The development repository is now an archive; its last
+commit predates `v0.2.0`, the first public tag. What remains true: CI's secret scan on every pull
+request and push to `main`, and the audit of the built tree — commit identity, notices,
+resolvable links, no AI names — run against a fresh clone before any change to this repository's
+visibility. What the fail-closed export tool no longer guards: the marker-file, symlink and
+repo/home refusals and the check that every allowlisted path still exists ran once, at that
+export, and do not run again for anything added since — nothing in this repository's own checks
+re-derives or verifies an allowlist, so a new file's presence is gated by review and the ruleset,
+not by that tool.
 
 ## ADR-012: Widen what `observe` sees — 1,200 to 2,500 characters per search hit
 

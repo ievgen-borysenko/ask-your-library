@@ -332,20 +332,24 @@ way; the first one will be made by the next paid run of the core set with `--rec
 
 ## Where the measured code lives
 
-The measurements were made in the private development repository before this repository was
-created, and the reports name that repository's commits (`33dba3f`, `88881ee`, `1222b09`, ...):
-those identify the measured trees in that history, they are not commits you can check out here,
-and they are kept as recorded because rewriting them would suggest that a different code was
-measured. What you can check instead: the first commit of this repository carries the eval harness
-(`eval/*.py`) and `scripts/ingest_demo_corpus.py` byte-identical to the measured `33dba3f`, `src/`
-and `ui.py` identical up to one comment line each (a review credit removed; the launch command in
-the `ui.py` docstring completed with `--host 127.0.0.1`), and `eval/golden/en-demo.yaml` identical
-except for one editorial note on c09 (a review credit removed after the run; the questions are
-unchanged, and the core report's header records the resulting checksum change); the other
-differences are documentation, the eval reports themselves and the version string. Reports of intermediate development runs are
-not exported; the ones here are the tagged baselines the text refers to. The export from the
-development repository is done by a private allowlist tool (a deny-by-default file list, a
-private-marker grep and a gitleaks scan) that is not part of this repository.
+The measurements before `v0.2.0` were made in the private development repository, which was this
+project's source of truth until 2026-09-08, and the reports for those runs name that repository's
+commits (`33dba3f`, `88881ee`, `1222b09`, ...): those identify the measured trees in that history,
+they are not commits you can check out here, and they are kept as recorded because rewriting them
+would suggest that a different code was measured. What you can check instead: the first commit of
+this repository carries the eval harness (`eval/*.py`) and `scripts/ingest_demo_corpus.py`
+byte-identical to the measured `33dba3f`, `src/` and `ui.py` identical up to one comment line each
+(a review credit removed; the launch command in the `ui.py` docstring completed with
+`--host 127.0.0.1`), and `eval/golden/en-demo.yaml` identical except for one editorial note on c09
+(a review credit removed after the run; the questions are unchanged, and the core report's header
+records the resulting checksum change); the other differences are documentation, the eval reports
+themselves and the version string. Reports of intermediate development runs are not exported; the
+ones here are the tagged baselines the text refers to. That one export — a private allowlist tool
+(a deny-by-default file list, a private-marker grep and a gitleaks scan) that is not part of this
+repository — produced this repository and has not run again. Every measured run from `v0.2.0` on,
+the 2026-09-09 catalogue run on `50b9347` above included, was made directly in this tree, on a
+commit this repository holds; ADR-011 in [`adr/README.md`](adr/README.md) has the fuller account
+of the switch.
 
 | Measurement | Core v0.1.0 (12 questions, window 1,200) | Core v0.2.0-rc1 (11 questions, 2,500 + gate) | Extended v0.1.0 | Extended v0.2.0-rc1 |
 |---|---|---|---|---|
