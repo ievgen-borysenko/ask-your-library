@@ -1,0 +1,38 @@
+# A synthetic golden set for the plan-only replay tests (tests/test_plan_replay.py).
+# Four items, one per branch of the mapping in eval/run_plan_eval.py: a catalogue
+# question with an expected operation, a content question that names one book and
+# pins the retrieval filter, a research control that must NOT take the catalogue
+# path, and one item the paired recording deliberately fails.
+#
+# EDITING THIS FILE CHANGES ITS CHECKSUM, and tests/fixtures/plan-replay-recording.jsonl
+# carries that checksum in its header — which is the staleness rule under test.
+# Change one and the recording's header has to be changed with it; the test
+# `test_a_fresh_recording_is_not_stale` says so when they drift apart.
+#
+# The books named here are in corpus/manifest.yaml, because the replay resolves
+# names against the catalogue the same way a real run does.
+questions:
+- id: f01-count
+  type: catalog
+  question: How many books do I have?
+  expected_books: []
+  expected_facts: []
+  expected_op: count
+  expected_total: 33
+- id: f02-named-book
+  type: answer
+  question: Do I have Dracula, and why does Harker stay at the castle?
+  expected_books: [Dracula]
+  expected_facts: []
+  expected_book_filter: Dracula
+- id: f03-research-control
+  type: answer
+  question: Which of my books mention London?
+  expected_books: []
+  expected_facts: []
+  expected_behavior: research
+- id: f04-planner-gave-nothing
+  type: identify
+  question: What was that novel about a whale?
+  expected_books: [Moby Dick]
+  expected_facts: []
