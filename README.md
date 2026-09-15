@@ -173,11 +173,11 @@ diagram sources, the backlog and the changelog.
 
 ## Status and licence
 
-`v0.3.0`, a minor release over `v0.2.1` because the shipped default changed: a clone now answers
-on a local model through Ollama, with no account and nothing to pay, where it used to need an
-OpenRouter key. The hosted path is unchanged and opt-in (`LLM_BACKEND=openrouter`). The release
-history is in [`docs/CHANGELOG.md`](docs/CHANGELOG.md) and the open gaps in
-[`docs/backlog.md`](docs/backlog.md).
+`v0.3.1`, a documentation and CI patch over `v0.3.0`, the minor release where the shipped default
+changed: a clone now answers on a local model through Ollama, with no account and nothing to pay,
+where it used to need an OpenRouter key. The hosted path is unchanged and opt-in
+(`LLM_BACKEND=openrouter`). The release history is in [`docs/CHANGELOG.md`](docs/CHANGELOG.md)
+and the open gaps in [`docs/backlog.md`](docs/backlog.md).
 
 The code and the project's own files are under Apache-2.0 (`LICENSE`, attribution in
 [`NOTICE`](NOTICE)); one file in the tree is somebody else's — Chainlit's own
