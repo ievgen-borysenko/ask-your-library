@@ -113,6 +113,23 @@ open ones often refer to them.
   for the first variant already found the book under another section, is future work. The row
   cap (1,000) still truncates a single section longer than that (logged) and, on the bare-title
   fallback, is refused as `ambiguous` because candidate books may have been cut.
+- **The egress test's "Ollama is not running" port is reserved on UDP, which is not the same as
+  owning it.** `tests/egress_guard.py`'s `reserved_loopback_port` needs two things at once: a port
+  nothing else can take for the length of the run, and a connection to it that fails *fast* and as
+  ECONNREFUSED, because that is what "Ollama is not running" looks like. Holding a bound,
+  non-listening TCP socket gives the first and not the second — measured on macOS (Darwin 25.6,
+  CPython 3.12): a connect to such a port TIMES OUT, the SYN is dropped, 4.00 s against a 4 s
+  deadline, while the same port after the socket closes refuses in 0.00 s (Linux answers RST in
+  both cases). Beyond the seconds, the stall changes what is under test: every connect waits out
+  its whole connect timeout, the run stops failing on an unreachable endpoint and starts degrading
+  into an answer. So the port is held on UDP and left free on TCP — separate port spaces, so the
+  kernel will not hand the number out as an ephemeral port while TCP still refuses at once. What
+  remains is not a race but a deliberate collision: something choosing to bind this exact TCP port
+  in the ephemeral range. Two ways to close it properly, neither done: a held TCP **listener**
+  that accepts and immediately closes, with the tests' failure-class assertions loosened from
+  "refused" to "no usable reply" (it owns the port outright, at the cost of a fuzzier assertion);
+  or a controlled local stub that owns the port and answers a documented 4xx, which is precise but
+  is a second server to maintain and a second thing that can be wrong.
 - Typed evidence/hit models instead of dicts.
 - Sentence splitter consumes closing quotes/brackets into the separator; very long
   punctuation-free sentences exceed the chunk target.
@@ -120,8 +137,23 @@ open ones often refer to them.
   folder.
 - Enable SQLite foreign keys in the Chainlit schema; a retention/cleanup command for the
   scratchpad and chat history once the tool outgrows single-user local use.
-- `pyproject`: declare `httpx` and `langchain-core` as direct dependencies (both are imported
-  directly and currently arrive transitively).
+- `pyproject`: declare `langchain-core` as a direct dependency (`llm.py` imports
+  `langchain_core.messages` at module import time and the name arrives transitively). `httpx` and
+  `openai` are declared since 0.3.1; this item is what is left of that one.
+- **There are two httpx distributions in the tree, and the second half of `llm.CallTimeout`
+  catches nothing.** The model client's SDK depends on `httpx2` 2.12 while `llm.py` imports
+  `httpx` 0.28 for its `Timeout` object and for `CallTimeout`; the two are unrelated packages, and
+  `issubclass(httpx2.TimeoutException, httpx.TimeoutException)` is False. So a timeout raised
+  inside the SDK's own transport is an `httpx2.TimeoutException` and the `httpx.TimeoutException`
+  arm of `CallTimeout` cannot see it. Harmless today — the SDK wraps such a timeout in
+  `APITimeoutError`, which is the other arm and is what actually fires — but the comment at
+  `llm.py:~228` ("the bare httpx class is kept beside it for a timeout raised before the SDK wraps
+  it") is false as written. The same seam is worth a second look next to it: the `httpx.Timeout`
+  object `llm.llm()` builds is stored on the SDK's client unconverted (it is not an
+  `httpx2.Timeout`), so whether the per-attempt bound is honoured rests on duck typing across two
+  packages. Found while writing the egress guard, which had to patch
+  both distributions' transports for the same reason (`tests/egress_guard.py`). Recorded, not
+  fixed: the fix is in `src/` and belongs to a change of its own.
 
 ## Product / spec decisions
 
@@ -158,6 +190,22 @@ open ones often refer to them.
   h12 removed from the core set by the reader on 06.09 (never reader-verified; a character's lie
   taken as fact was its failure), the core set is eleven questions from `v0.2.0-rc1`; the
   canonical failure trace is c06 (`docs/examples/c06-fogg-missing-day.md`).
+- **Nothing in the suite could see a connection attempt**, so the local configuration's central
+  privacy claim was proved by construction (a faked model, an in-memory library, blanked
+  credentials) rather than asserted. Closed by `tests/test_egress_local.py` and
+  `tests/egress_guard.py`: an egress guard whose floor is CPython's socket audit hook (every
+  socket, whatever its class or import path, background threads and UDP included) with an httpx
+  transport layer above it in both installed httpx distributions, refusing anything that is not
+  loopback; the real preflight, embedder and compiled graph run under it in the shipped local
+  configuration with Ollama not running — every attempt to loopback on the configured Ollama port,
+  no hosted provider or tracing endpoint contacted or looked up, and a clean failure on the
+  unreachable local runtime instead of a hosted fallback. Controls: each door refusing a
+  deliberate attempt, a module that connects at import time, and the same graph under
+  `LLM_BACKEND=openrouter` where the attempt to `openrouter.ai:443` is recorded and refused.
+  Scope, stated in the test and in `docs/privacy-and-threat-model.md`: one Python process on the
+  `runner.run_question` path — not Chainlit, not Ollama, not the browser, not a subprocess.
+  Still open: the Chainlit server's own egress is untested, because the `ui` extra is not
+  installed in the legs that run this file.
 - **Eval reports record single runs.** Closed by `--repeat N` and a JSON sidecar per run
   (`eval/run_agent_eval.py`, ADR-010 amended 15.09): each item runs N times, scoring stays per
   attempt, and both files carry the spread — the boolean rows as how many attempts of N passed,

@@ -2,6 +2,89 @@
 
 ## Unreleased
 
+- **An egress test: the local configuration's central claim, asserted instead of assumed.** The
+  project's headline promise is that a question and the passages retrieved for it stay on the
+  machine, and nothing in the suite could see a connection attempt. Every end-to-end test proved
+  the claim by construction — the model is faked, the library is in memory, the credentials are
+  blanked — and construction is the wrong evidence for it: a fake model makes no connection
+  whether or not the real one would have made a hosted one, and an import, an SDK or a tracing
+  client can open a socket no assertion would notice. `tests/test_egress_local.py` instruments the
+  process instead.
+
+  The floor of `tests/egress_guard.py` is CPython's own socket audit hook (`sys.addaudithook`),
+  not a set of monkeypatches — because a socket can be opened without touching any name a patch
+  can reach: `_socket.socket` is the C type `socket.socket` inherits from and has its own
+  `connect`; `from socket import getaddrinfo` binds the function by value, so a module that did
+  that before the guard went on keeps calling the real one; and UDP needs no `connect` at all, its
+  address rides on `sendto` / `sendmsg`, which is the shape of a resolver query and of a telemetry
+  ping. The interpreter raises `socket.connect`, `socket.sendto`, `socket.sendmsg`, `socket.bind`,
+  `socket.getaddrinfo`, `socket.gethostbyname` (which `gethostbyname_ex` raises too),
+  `socket.gethostbyaddr` and `socket.getnameinfo` from the C layer for every socket whatever its
+  class or import path — each event name verified against the installed interpreter by a probe,
+  not taken from the documentation — so one hook sees all of it, background threads included. A
+  bind is recorded and never refused: it is the other direction, and recording it is what lets the
+  test also say no listening socket was opened on a public interface. One layer sits on top,
+  because it says something the floor cannot: the httpx transport, in **both** installed httpx
+  distributions (the model client's SDK does not use the `httpx` the application imports), where a
+  hosted call is refused with its URL intact and before any lookup. Loopback is recorded too,
+  which is what makes the allow-list an assertion rather than a silence. The hook is installed
+  once per interpreter at import and armed through a flag, since CPython cannot remove one.
+  Records are also streamed — one JSON line per attempt, written to an unbuffered descriptor as it
+  happens and, for a refusal, before the refusal is raised — so the evidence does not depend on
+  the process living long enough to summarise itself, and an `except` inside the application
+  cannot erase the fact that something tried. The parent derives its assertions from that stream
+  and requires the child's own end-of-life summary to be a prefix of it.
+
+  **What this sees and what it does not**, stated in the test, the guard, the README and the
+  privacy page rather than left to a reader: every network call made through Python's socket
+  module — the standard library, `requests`, urllib3, httpx, httpcore, asyncio and the model
+  client's SDK, which is every client this project has. It does NOT see a call that reaches libc
+  without passing through CPython: a native extension with its own C sockets, or a `ctypes` call
+  into `getaddrinfo` / `connect`. The limit is pinned rather than only written:
+  `test_a_ctypes_call_into_libc_is_the_known_blind_spot` performs the bypass and is
+  `xfail(strict)`, so if a future interpreter or sandbox ever closes that door the test passes,
+  the strict marker turns the pass into a failure, and the scope paragraphs have to be rewritten.
+  `test_no_native_networking_in_the_environment` bounds it in practice: no `grpcio`, `pycurl`,
+  `pycares`, `aiodns`, `uvloop`, `pyzmq`, `psycopg`, `pymongo` or `redis` in the interpreter that
+  runs these tests, and none in the application's locked runtime closure read from `uv export
+  --no-dev`. `uvloop` is the sharpest of them — it would move every asyncio socket in the process
+  out of the hook's sight — and `grpcio` plus an OTLP gRPC exporter arrive with the **`ui`
+  extra**, which is why the Chainlit process is excluded from the claim rather than merely
+  untested, and why that test fails if the extra is ever installed into a leg that runs this file.
+
+  The test then runs the real thing in the shipped local configuration with Ollama not running:
+  the real preflight, the real `embeddings`, the real compiled graph through
+  `runner.run_question`. All 14 recorded attempts of the reference run — preflight's `/api/tags`,
+  the embedder's `/api/embed`, the planner's call and its two retries — target loopback on the
+  configured Ollama port, the only bind is loopback, nothing else is contacted or looked up, and
+  the run ends on the unreachable local runtime (preflight exit 5, then a connection error to that
+  endpoint) instead of falling back to a hosted call. In the child the guard is armed as the first
+  statement — before the package, before its dependencies, before the guard module itself imports
+  httpx — and is never disarmed, so import-time lookups and everything that still runs during
+  interpreter shutdown are inside the recording; the report is emitted from an `atexit` handler
+  registered first, which therefore runs last, after the interpreter has joined its non-daemon
+  threads, and the parent checks the child's exit code, its stderr and that the report is the last
+  line it printed. Controls keep the silence meaningful: each door refusing a deliberate attempt
+  (raw `_socket`, a by-value resolver, UDP, TLS, asyncio, both httpx distributions), a module that
+  connects while it is being imported, the same graph under `LLM_BACKEND=openrouter` with a
+  placeholder key where the guard records `openrouter.ai:443` and refuses it, that backend with no
+  key where nothing is attempted at all, and the local run repeated with a usable-looking
+  `OPENROUTER_API_KEY` present, so a silent hosted fallback would be stopped by the guard rather
+  than excused by a missing credential.
+
+  Nothing in `src/` was touched: the application runs exactly as it ships and the process around
+  it is instrumented. The scope is stated in the test and in the docs, and the README's "no other
+  path out" is narrowed to match it: one Python process on one path — `runner.run_question` with
+  the real preflight and embedder — and not Chainlit (the `ui` extra is not installed in the legs
+  that run this file), not Ollama, not the browser, not a subprocess, not `scripts/`. The
+  configuration is set per child interpreter through `conftest.run_fresh`, so both CI legs
+  (`test (ollama)`, `test (openrouter)`) run the same thing, with no network and no Ollama; that
+  scrub list now also covers the proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`,
+  `NO_PROXY` and their lowercase twins), which this project never reads but every HTTP client
+  does — one of them set in a developer's shell would send each request to the proxy's host
+  instead of the configured endpoint, which is a different destination for these tests to record
+  and an off-machine hop out of a loopback URL.
+
 - **A JSON sidecar per run, and `--repeat N`, so a reported number can carry its spread.** Every
   run wrote one Markdown report and nothing else: a reader's document whose shape is a contract
   with `summarize_report.py`, where every number has to be scraped back out of prose, and one

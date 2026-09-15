@@ -43,6 +43,28 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   `qwen2.5:14b` throughout and the catalogue half of both combined rows describe the prompt as it
   stood in Runs 1-6. Measure your own model before trusting it:
   `LLM_BACKEND=ollama uv run eval/run_agent_eval.py`.
+- **"Nothing leaves the machine" is tested for one process on one path, not for your machine.**
+  `tests/test_egress_local.py` records every outbound connection attempt the application's own
+  Python process makes — through CPython's socket audit events, which cover every socket whatever
+  its class or import path, plus an httpx transport layer above them — and asserts that in the
+  shipped local configuration every one of them goes to loopback on the configured Ollama port,
+  with no hosted provider and no tracing endpoint contacted or even looked up. What it sees is
+  every network call made **through Python's socket module**: the standard library, `requests`,
+  urllib3, httpx, httpcore, asyncio and the model client's SDK. What it does **not** see is a call
+  that reaches libc without passing through CPython — a native extension with its own C sockets,
+  or a `ctypes` call into `getaddrinfo` / `connect`. That blind spot is pinned by a deliberately
+  failing control test and bounded by another that asserts no known native-networking package
+  (`grpcio`, `pycurl`, `pycares`, `aiodns`, `uvloop`, `pyzmq`, `psycopg`, `pymongo`, `redis`) is
+  installed in that interpreter or in the application's locked runtime closure; `uvloop` in
+  particular would move every asyncio socket out of the hook's sight, and `grpcio` arrives with
+  the `ui` extra, which is one more reason the Chainlit process is outside the claim. The path is
+  `runner.run_question` over the compiled graph, with the real preflight and the real embedder:
+  what the CLI and the eval harness run, and what the web UI's Python half calls into. It is **not**
+  Chainlit, which the test does not exercise (the `ui` extra is not installed in those CI legs);
+  not Ollama, which is a separate process and does what it does with a prompt once it has one; not
+  the browser or Chainlit's JavaScript bundle; not any process started by this one; and not
+  `scripts/ingest_demo_corpus.py`, which downloads a corpus on purpose. See
+  [Privacy](privacy-and-threat-model.md).
 - **Identify mode can still stop at one book.** The coverage gate (ADR-013, since 0.2.0-rc1) spends the
   planner's next queued query before `reflect` may say "enough" with a single book, which is
   what brought Gulliver (c09) and the second gothic candidate (h22) into the clarify list; q06

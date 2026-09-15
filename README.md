@@ -150,8 +150,16 @@ themselves are in [`docs/eval-results/`](docs/eval-results/).
   the hosted path is `LLM_BACKEND=openrouter` ([`docs/configuration.md`](docs/configuration.md)).
 - Run this on your own machine, over books you legally own.
 - By default nothing leaves the machine: the answering model and the embeddings both run on this
-  Ollama, and with tracing off there is no other path out. Set `LLM_BACKEND=openrouter` and the
-  question **and the retrieved corpus fragments** go to that provider, and on to the model vendor.
+  Ollama, and with tracing off there is no other path out **of the Python process that answers
+  your question** — which is the part that is tested (`tests/test_egress_local.py` records every
+  connection attempt of a real run and asserts they all go to loopback on the configured Ollama
+  port). It sees every network call made through Python's socket module; a native extension or a
+  `ctypes` call that talks to libc directly is its blind spot, and a test asserts no such package
+  is installed. It is not a claim about Ollama, which is a separate process, nor about the browser
+  or the Chainlit server, which the test does not exercise; the scope is spelled out in
+  [`docs/privacy-and-threat-model.md`](docs/privacy-and-threat-model.md). Set
+  `LLM_BACKEND=openrouter` and the question **and the retrieved corpus fragments** go to that
+  provider, and on to the model vendor.
 - A question on the default local model costs **nothing**. On the hosted one it costs roughly
   **$0.04-0.05 on the demo set** at v0.2.0-rc1; `validate` is free in both, it is plain code.
 - Designed for **localhost, single user**, not for internet exposure — the full text, the four injection layers and their limits: [`docs/privacy-and-threat-model.md`](docs/privacy-and-threat-model.md), [`docs/cost.md`](docs/cost.md).
