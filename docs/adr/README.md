@@ -263,19 +263,22 @@ made public. The price, decided with the approach, is that later public updates 
 rather than history.
 
 **2026-09-08.** The export above ran once, to produce this repository from the development one;
-no second export has followed it. Since that date this repository is developed directly: every
-change lands as a pull request against `main`, gated by the checks the branch ruleset requires
-("Automated checks" in [`SECURITY.md`](../../SECURITY.md)), and no allowlist is maintained for a
-file added after 2026-09-08 — a new path ships because a reviewer and the ruleset's checks let it,
-not because an earlier list named it. The development repository is now an archive; its last
-commit predates `v0.2.0`, the first public tag. What remains true: CI's secret scan on every pull
-request and push to `main`, and the audit of the built tree — commit identity, notices,
-resolvable links, no AI names — run against a fresh clone before any change to this repository's
-visibility. What the fail-closed export tool no longer guards: the marker-file, symlink and
-repo/home refusals and the check that every allowlisted path still exists ran once, at that
-export, and do not run again for anything added since — nothing in this repository's own checks
-re-derives or verifies an allowlist, so a new file's presence is gated by review and the ruleset,
-not by that tool.
+no second export has followed it. Recorded here from the archived repository, which is private
+(`ievgen-borysenko/ask-your-library-dev`) and not something a reader of this tree can check
+directly: its final commit is `ef92368` (2026-09-08), and that commit's own subject says the
+repository became the archive. What this repository does let a reader check: its first commit,
+`945e549` (2026-09-08, `git log --reverse` to find it), is the export. Since that date this
+repository is developed directly: every change lands as a pull request against `main`, gated by
+the checks the branch ruleset requires ("Automated checks" in [`SECURITY.md`](../../SECURITY.md)),
+and no allowlist is maintained for a file added after 2026-09-08 — a new path ships because a
+reviewer and the ruleset's checks let it, not because an earlier list named it. What remains true:
+CI's secret scan on every pull request and push to `main`, and the audit of the built tree —
+commit identity, notices, resolvable links, no AI names — run against a fresh clone before any
+change to this repository's visibility. What the fail-closed export tool no longer guards: the
+marker-file, symlink and repo/home refusals and the check that every allowlisted path still exists
+ran once, at that export, and do not run again for anything added since — nothing in this
+repository's own checks re-derives or verifies an allowlist, so a new file's presence is gated by
+review and the ruleset, not by that tool.
 
 ## ADR-012: Widen what `observe` sees — 1,200 to 2,500 characters per search hit
 
