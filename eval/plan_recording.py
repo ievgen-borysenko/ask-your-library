@@ -85,6 +85,17 @@ class SecretInRecording(RuntimeError):
     committed. The recording is not finalised and the offending line is named."""
 
 
+class RecordingIncomplete(RuntimeError):
+    """A line of this recording could not be written — a full disk, a read-only
+    directory, a descriptor that went away.
+
+    The observer swallows its own exceptions on purpose: a recorder must never
+    turn a paid run into a failed one. But the swallow left no state anywhere, so
+    a recording that lost half its lines was finalised, named and committed as if
+    it were complete. The failure is latched here instead, and the file does not
+    get its final name."""
+
+
 # --- what must never reach a committed file -----------------------------------
 # A recording is committed, so the cost of a leak is a push and not a file on one
 # machine. Two defences, both fail-closed: absolute paths of ANY platform are
@@ -100,16 +111,34 @@ class SecretInRecording(RuntimeError):
 # under the reader's home and not collapse to `~<path>`. So a run only counts as
 # an absolute path when nothing precedes its leading slash.
 ABSOLUTE_PATH_RE = re.compile(
-    r"(?<![\w~<>.\-/])"
-    r"(?:[A-Za-z]:\\[^\s\"'<>|]*"                                  # C:\Users\...
-    r"|/(?:Volumes|private|tmp|var|Users|home|mnt|media|opt|srv|Applications|Library)"
-    r"(?:/[^\s\"'<>|]*)*)")
+    # A POSIX absolute path: a leading slash that begins something, followed by
+    # two or more segments. Generic rather than a list of roots — the roots a
+    # payload can carry are not enumerable, and /etc/hosts, /usr/local/bin/x and
+    # /data/index are exactly the ones a list forgets.
+    #
+    # The lookbehind is what keeps URLs and the two informative stand-ins whole:
+    # a slash preceded by a word character ("London/Paris"), by a colon or
+    # another slash ("https://example.com/a/b" — both slashes of the scheme, and
+    # the path after the host is preceded by a word character), by "~" or by ">"
+    # ("~/private/notes.txt" and "<repo>/eval/golden/x.yaml", which `redact`
+    # has already made readable) does not start an absolute path.
+    r"(?<![\w~:>/])/[^\s\"'<>|/\\]+(?:/[^\s\"'<>|\\]*)+"
+    # C:\Users\... and C:/Users/..., but not the "s:" inside "https://"
+    r"|(?<!\w)[A-Za-z]:[\\/][^\s\"'<>|]*"
+    # \\server\share\file
+    r"|\\\\[^\s\"'<>|\\]+\\[^\s\"'<>|]*")
 
 SECRET_PATTERNS = (
     ("an OpenRouter/OpenAI-style key", re.compile(r"sk-(?:or-)?[A-Za-z0-9._-]{8,}")),
     ("an Authorization header", re.compile(r"Bearer\s+[A-Za-z0-9._\-/+=]{8,}")),
-    ("a GitHub token", re.compile(r"gh[pousr]_[A-Za-z0-9]{8,}")),
-    ("an AWS access key id", re.compile(r"AKIA[0-9A-Z]{8,}")),
+    # header.payload.signature, base64url; the signature may be empty ("alg":"none")
+    ("a JSON web token", re.compile(r"eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]*")),
+    ("a Slack token", re.compile(r"xox[abposr]-[A-Za-z0-9-]{8,}")),
+    ("a GitHub token", re.compile(r"gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,}")),
+    ("a Google API key", re.compile(r"AIza[A-Za-z0-9_-]{8,}")),
+    ("an AWS access key id", re.compile(r"A[KS]IA[0-9A-Z]{8,}")),
+    ("an api key assignment", re.compile(r"(?i)api[_-]?key\s*[:=]\s*\S{16,}")),
+    ("a private key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
     ("a long value beside the word key/token/secret",
      re.compile(r"(?i)(?:key|token|secret)[^A-Za-z0-9]{0,4}[A-Za-z0-9+/=_-]{32,}")),
 )
@@ -336,6 +365,7 @@ class PlanRecorder:
         self.header = header or {}
         self.lines = 0
         self.refused: list = []         # lines a secret kept out of the file
+        self.failure = None             # (line number, reason) of the first write that failed
         self._literals = environment_secrets()
         self._file = None
         self._previous_observer = None
@@ -353,14 +383,27 @@ class PlanRecorder:
         return self
 
     def __exit__(self, *exc) -> bool:
+        self.close(failed=exc[0] is not None)
+        return False
+
+    def close(self, failed: bool = False) -> None:
+        """Disarm, close the file, and give it its final name — or refuse to,
+        and say why.
+
+        Idempotent, and called twice on purpose: the harness calls it where it
+        can put the refusal into the report it is still writing, and the context
+        manager calls it again on the way out so a crash still disarms the
+        observer."""
+        if self._file is None:
+            return
         llm.JSON_CALL_OBSERVER = self._previous_observer
         self._file.close()
         self._file = None
-        if exc[0] is not None:
+        if failed:
             # A crash leaves the .partial where it is: the calls it holds were
             # paid for, and losing them to a failed last item would be the
             # expensive half of this change undone.
-            return False
+            return
         if self.refused:
             # Fail closed, and loudly. The lines never reached the file, so
             # nothing secret is on disk — but a recording that had one in it is
@@ -372,12 +415,25 @@ class PlanRecorder:
                 f"{self.partial.name}). "
                 + "; ".join(f"line {number} ({item}): {', '.join(why)}"
                             for number, item, why in self.refused))
+        if self.failure is not None:
+            number, reason = self.failure
+            raise RecordingIncomplete(
+                f"line {number} of this recording could not be written ({reason}); it is short by "
+                f"at least one call and was NOT finalised (it stays at {self.partial.name})")
         os.replace(self.partial, self.path)
-        return False
 
     def _write(self, record: dict) -> None:
-        self._file.write(json.dumps(record, ensure_ascii=False) + "\n")
-        self._file.flush()          # a long paid run must not hold its record in a buffer
+        try:
+            self._file.write(json.dumps(record, ensure_ascii=False) + "\n")
+            self._file.flush()      # a long paid run must not hold its record in a buffer
+        except Exception as error:
+            # Latched, then re-raised into the observer, which logs and swallows
+            # it so the paid run goes on. The latch is the part that matters:
+            # without it the run ends with a short file wearing the name of a
+            # complete one.
+            if self.failure is None:
+                self.failure = (self.lines + 1, f"{type(error).__name__}: {error}")
+            raise
         self.lines += 1
 
     # -- what the calls belong to -------------------------------------------

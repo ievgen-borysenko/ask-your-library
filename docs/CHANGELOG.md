@@ -56,13 +56,21 @@
   tokens unrounded — a planner call is often under $0.0001, and the report's four decimals would
   write a run's worth of them down as free.
 
-  Two guards stand between a run and a committed recording. Nothing **token-shaped** may enter one:
-  a key, an `Authorization` header, a GitHub or AWS credential, a long value beside the word
+  Three guards stand between a run and a committed recording. Nothing **token-shaped** may enter
+  one: a provider key, an `Authorization` header, a JWT, a Slack, GitHub, Google or AWS credential,
+  an `api_key = …` assignment, a private-key header, a long value beside the word
   key/token/secret, or the literal value of any `*_KEY`/`*_TOKEN`/`*_SECRET` in the environment
   refuses the line, leaves it unwritten and refuses to finalise the file, naming the line — not
-  masked and written, because a masked line still means a credential passed through. And every
-  absolute path of any platform is replaced (`/Volumes/…`, `/tmp/…`, another account's home, a
-  Windows drive), on top of the `<repo>` and `~` substitutions, which only know this machine.
+  masked and written, because a masked line still means a credential passed through; the gitleaks
+  step in `security.yml` is the second net over what is actually committed. Every **absolute path**
+  is replaced on top of the `<repo>` and `~` substitutions, which only know this machine, and the
+  detection is generic rather than a list of roots — any POSIX path of two or more segments, any
+  Windows drive path, any UNC share — with URLs left intact, because `/etc/hosts`,
+  `/usr/local/bin/x` and `/data/index` are exactly the roots a list forgets. And a recording whose
+  own **writing failed** is not finalised either: the observer still swallows its exceptions so a
+  paid run goes on, but the recorder latches the first failure, keeps the `.partial`, and the run
+  puts the reason in its report tail and exits non-zero rather than committing a short file under
+  the name of a complete one.
   A recording also refuses to replace one that is already there unless `--overwrite`, before the
   graph is built and before the first call, and a run of selected ids writes a
   `.subset-<k>of<n>.jsonl` of its own that the replay harness reports as a subset.

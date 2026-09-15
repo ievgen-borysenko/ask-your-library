@@ -1197,6 +1197,19 @@ def main(argv: list[str] | None = None) -> None:
                 out.write(render_item_spread(item["id"], record["spread"]))
                 out.flush()
 
+        # Closed HERE, not on the way out of the ExitStack: a recording that
+        # refuses to finalise — a line that held something token-shaped, a write
+        # that failed — has to say so in the report this run is still writing,
+        # and turn its exit code, rather than raise past a finished report.
+        recording_problem = ""
+        if recorder is not None:
+            try:
+                recorder.close()
+            except (plan_recording.SecretInRecording,
+                    plan_recording.RecordingIncomplete) as error:
+                recording_problem = redact_paths(f"{type(error).__name__}: {error}")
+                print(recording_problem, file=sys.stderr)
+
         totals = empty_totals()
         for one in attempt_totals:
             for key, value in one.items():
@@ -1208,6 +1221,8 @@ def main(argv: list[str] | None = None) -> None:
                 row[0] += passed; row[1] += of
         summary = render_summary(totals, per_group, repeat, attempt_totals, attempt_groups,
                                  expected)
+        if recording_problem:
+            summary += f"{recording_problem}\n"
         out.write(summary)
         ended = time.time()
         sidecar_written = False
@@ -1237,7 +1252,7 @@ def main(argv: list[str] | None = None) -> None:
     # Under --repeat the threshold is a floor on every attempt, not on their sum:
     # a set that passes 11/11 twice and 7/11 once has not met a --min-pass of 11.
     weakest = min(t["behavior_ok"] for t in attempt_totals)
-    if totals["errors"] or (min_pass is not None and weakest < min_pass):
+    if totals["errors"] or recording_problem or (min_pass is not None and weakest < min_pass):
         sys.exit(1)
 
 

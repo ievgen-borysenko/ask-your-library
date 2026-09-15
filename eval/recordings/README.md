@@ -18,8 +18,12 @@ A recording is the input a replayed number was produced from: without it in the
 tree, "the planner's routing held on 41 of 42 items" is a number nobody else can
 reproduce, and the run that produced it costs money. They are small — one line
 per item and attempt, a few hundred kilobytes for the largest golden set — and
-they carry no absolute path and no credential: every payload and reply goes
-through the same `redact_paths` the reports and sidecars use.
+they carry no absolute path and no credential. Every payload and reply goes
+through the same `redact_paths` the reports and sidecars use, then through a
+generic absolute-path sweep (POSIX, Windows, UNC; URLs left alone), and anything
+token-shaped refuses the line and refuses to finalise the file rather than being
+masked into it. The gitleaks step in `.github/workflows/security.yml` is the
+second net, over whatever actually gets committed.
 
 Make one with a run you were going to make anyway:
 

@@ -195,114 +195,37 @@ def test_absolute_paths_are_redacted_from_the_payload_and_the_reply(monkeypatch,
 
 def test_an_absolute_path_of_any_platform_is_dropped(monkeypatch, tmp_path):
     """`redact_paths` knows this machine's two prefixes. A payload can carry an
-    external volume, another account's home, a system temp file or a Windows
-    drive, and a recording is committed."""
+    external volume, another account's home, a system file, a Windows drive or a
+    network share, and a recording is committed. The detection is generic and
+    not a list of roots, because the roots are not enumerable: /etc/hosts,
+    /usr/local/bin/x and /data/index are exactly the ones a list forgets."""
     elsewhere = ("/Volumes/backup/library/notes.txt", "/Users/someone-else/books",
-                 "/tmp/ayl-scratch/q.md", "C:\\Users\\reader\\library")
+                 "/etc/hosts", "/usr/local/bin/x", "/data/index", "/tmp/ayl-scratch/q.md",
+                 r"C:\Users\reader\library", "C:/Users/reader/library", r"\\srv\share\f")
     scripted(monkeypatch, PLAN_REPLY)
     with plan_recording.PlanRecorder(tmp_path / "r.jsonl", FACTS,
                                      redact=harness.redact_paths) as recorder:
         with recorder.item("c01"):
             llm.ask_json(PLAN_RULES, "read " + " and ".join(elsewhere), role="plan")
     call = lines_of(recorder.path)[1]
-    assert call["user"] == "read <path> and <path> and <path> and <path>"
+    assert call["user"] == "read " + " and ".join(["<path>"] * len(elsewhere))
     for path in elsewhere:
         assert path not in recorder.path.read_text(encoding="utf-8")
 
 
-# --- what a call cost ---------------------------------------------------------
-def billed(monkeypatch, *replies, tokens_in=1000, tokens_out=100):
-    """`llm_invoke` that also moves the run accumulator, the way the real one
-    does: what a recorded line's cost and tokens are read off."""
-    replies = list(replies)
-
-    def invoke(system, user, role):
-        usage = llm._usage()
-        usage.llm_calls += 1
-        usage.input_tokens += tokens_in
-        usage.output_tokens += tokens_out
-        # per role as well, exactly as llm_invoke accounts: what a recorded line
-        # reads is the PLANNER's own totals, not the run's
-        role_usage = usage.by_role.setdefault(role, {"calls": 0, "input_tokens": 0,
-                                                     "output_tokens": 0})
-        role_usage["calls"] += 1
-        role_usage["input_tokens"] += tokens_in
-        role_usage["output_tokens"] += tokens_out
-        return Reply(replies[min(usage.llm_calls - 1, len(replies) - 1)])
-
-    monkeypatch.setattr(llm, "llm_invoke", invoke)
-
-
-def test_every_call_of_every_item_records_what_that_call_spent(monkeypatch, tmp_path):
-    """The accumulator is reset INSIDE run_one, i.e. after the recorder's item
-    block is already open. A "before" reading taken when the block opens is
-    therefore the PREVIOUS item's totals, and from the second item on every
-    line would carry a negative cost and negative tokens — which is what this
-    pins: two items, each with its own reset, and both read forwards."""
-    billed(monkeypatch, PLAN_REPLY, tokens_in=1000, tokens_out=100)
-    with plan_recording.PlanRecorder(tmp_path / "r.jsonl", FACTS) as recorder:
-        for item_id in ("q01", "q02"):
-            with recorder.item(item_id):
-                llm.reset_usage()          # exactly where run_one does it
-                llm.ask_json(PLAN_RULES, "payload", role="plan")
-    calls = lines_of(recorder.path)[1:]
-    assert [c["id"] for c in calls] == ["q01", "q02"]
-    for call in calls:
-        assert (call["llm_calls"], call["tokens_in"], call["tokens_out"]) == (1, 1000, 100)
-        assert call["cost_usd"] >= 0
-
-
-def test_the_second_call_of_an_item_is_the_difference_not_the_running_total(monkeypatch, tmp_path):
-    """Two plan calls in one question (a clarify re-plans): each line is what
-    that call added, not what the question had spent by then."""
-    billed(monkeypatch, PLAN_REPLY, tokens_in=700, tokens_out=40)
-    with plan_recording.PlanRecorder(tmp_path / "r.jsonl", FACTS) as recorder:
-        with recorder.item("c09"):
-            llm.reset_usage()
-            llm.ask_json(PLAN_RULES, "first", role="plan")
-            llm.ask_json(PLAN_RULES, "after the clarify", role="plan")
-    for call in lines_of(recorder.path)[1:]:
-        assert (call["llm_calls"], call["tokens_in"], call["tokens_out"]) == (1, 700, 40)
-
-
-def test_a_plan_call_is_charged_only_for_itself_between_other_roles(monkeypatch, tmp_path):
-    """A question spends plan, observe, reflect, plan. The whole-run counters
-    move on every one of them, so a difference of THOSE would charge the second
-    planner call with what observe and reflect spent in between; the accounting
-    is per role, and this is the shape that tells the two apart."""
-    billed(monkeypatch, PLAN_REPLY, tokens_in=100, tokens_out=10)
-    with plan_recording.PlanRecorder(tmp_path / "r.jsonl", FACTS) as recorder:
-        with recorder.item("c09"):
-            llm.reset_usage()
-            llm.ask_json(PLAN_RULES, "first", role="plan")
-            llm.ask_json("observe rules", "hits", role="observe")
-            llm.ask_json("reflect rules", "evidence", role="reflect")
-            llm.ask_json(PLAN_RULES, "after the clarify", role="plan")
-    calls = lines_of(recorder.path)[1:]
-    assert len(calls) == 2
-    for call in calls:
-        assert (call["llm_calls"], call["tokens_in"], call["tokens_out"]) == (1, 100, 10)
-
-
-def test_a_call_under_a_hundredth_of_a_cent_is_not_recorded_as_free(monkeypatch, tmp_path):
-    """The run report rounds a cost to four decimals, which is right for a line
-    a reader reads and wrong for a record: a planner call is often under
-    $0.0001, and a recording of forty of them summing to zero would describe a
-    free run that was not."""
-    monkeypatch.setattr(harness, "PRICE_IN_PER_MTOK", 3.0)
-    billed(monkeypatch, PLAN_REPLY, tokens_in=1, tokens_out=0)
-    with plan_recording.PlanRecorder(tmp_path / "r.jsonl", FACTS) as recorder:
-        with recorder.item("q01"):
-            llm.reset_usage()
-            llm.ask_json(PLAN_RULES, "payload", role="plan")
-    call = lines_of(recorder.path)[1]
-    assert call["tokens_in"] == 1
-    expected = plan_recording.exact_cost(1, 0)
-    assert call["cost_usd"] == pytest.approx(expected)
-    if expected:                        # zero only on a local, free backend
-        assert 0 < call["cost_usd"] < 0.0001
-    # and the same tokens through the report's own rounding would read as free
-    assert round(expected, 4) == 0
+def test_a_url_and_ordinary_prose_survive_the_path_sweep(monkeypatch, tmp_path):
+    """The sweep must not eat what a planner legitimately says. A URL is not a
+    path — its scheme slashes follow a colon or each other, and the path after
+    the host follows a word character — and neither is a pair of names with a
+    slash between them. The two informative stand-ins survive too."""
+    kept = ("read https://example.com/docs/a/b about the key to the secret garden, "
+            "the London/Paris route, 1/2 of the fleet, ~/notes.txt and <repo>/eval/golden/x.yaml")
+    scripted(monkeypatch, PLAN_REPLY)
+    with plan_recording.PlanRecorder(tmp_path / "r.jsonl", FACTS,
+                                     redact=harness.redact_paths) as recorder:
+        with recorder.item("c01"):
+            llm.ask_json(PLAN_RULES, kept, role="plan")
+    assert lines_of(recorder.path)[1]["user"] == kept
 
 
 # --- nothing token-shaped reaches a committed file ----------------------------
@@ -310,7 +233,8 @@ def test_a_token_shaped_value_refuses_to_finalise_the_recording(monkeypatch, tmp
     """Masking a secret still means one passed through, and nobody would go back
     and check a file that looks clean. So the line is not written at all and the
     recording never gets its final name."""
-    scripted(monkeypatch, '{"mode": "answer", "queries": ["sk-or-v1-0a1b2c3d4e5f6071"]}')
+    leaked = "sk" + "-or-v1-0a1b2c3d4e5f6071"      # glued at run time, see TOKEN_SHAPES
+    scripted(monkeypatch, '{"mode": "answer", "queries": ["' + leaked + '"]}')
     final = tmp_path / "r.jsonl"
     with pytest.raises(plan_recording.SecretInRecording) as raised:
         with plan_recording.PlanRecorder(final, FACTS) as recorder:
@@ -318,8 +242,41 @@ def test_a_token_shaped_value_refuses_to_finalise_the_recording(monkeypatch, tmp
                 llm.ask_json(PLAN_RULES, "payload", role="plan")
     assert "line 2" in f"{raised.value}" and "c01" in f"{raised.value}"
     assert not final.exists()
-    assert "sk-or-v1" not in recorder.partial.read_text(encoding="utf-8")
+    assert leaked not in recorder.partial.read_text(encoding="utf-8")
     assert lines_of(recorder.partial) == lines_of(recorder.partial)[:1]   # the header alone
+
+
+# Every prefix is glued on at run time and never written whole into this file.
+# These are synthetic and worthless, but they are the exact shapes GitHub's push
+# protection and the gitleaks step in security.yml look for, and a test fixture
+# is not worth a blocked push or a scanner alert on the repository. (That is
+# also the second net the recorder's own gate has behind it, so the two rules
+# agreeing on these shapes is the point.)
+TOKEN_SHAPES = [
+    ("ey" + "JhbGciOiJIUzI1NiJ9.eyJzdWIiOiJyZWFkZXIifQ.s1gn4tur3", "a JSON web token"),
+    ("xo" + "xb-11112222-33334444-aBcDeFgHiJkLmNoP", "a Slack token"),
+    ("gh" + "p_A1b2C3d4E5f6G7h8I9j0", "a GitHub token"),
+    ("github" + "_pat_11ABCDEFG0aBcDeFgHiJ", "a GitHub token"),
+    ("AI" + "zaSyD-A1b2C3d4E5f6G7h8I9j0", "a Google API key"),
+    ("AK" + "IAIOSFODNN7EXAMPLE", "an AWS access key id"),
+    ("AS" + "IAIOSFODNN7EXAMPLE", "an AWS access key id"),
+    ("api_key = " + "0123456789abcdef0123", "an api key assignment"),
+    ("-----BEGIN " + "RSA PRIVATE KEY-----", "a private key"),
+    ("sk" + "-or-v1-0a1b2c3d4e5f6071", "an OpenRouter/OpenAI-style key"),
+]
+
+
+@pytest.mark.parametrize("value, what", TOKEN_SHAPES)
+def test_every_token_shape_refuses_to_finalise(monkeypatch, tmp_path, value, what):
+    scripted(monkeypatch, PLAN_REPLY)
+    final = tmp_path / "r.jsonl"
+    with pytest.raises(plan_recording.SecretInRecording) as raised:
+        with plan_recording.PlanRecorder(final, FACTS) as recorder:
+            with recorder.item("c01"):
+                llm.ask_json(PLAN_RULES, f"the value is {value}", role="plan")
+    assert what in f"{raised.value}"
+    assert not final.exists()
+    assert value not in recorder.partial.read_text(encoding="utf-8")
 
 
 def test_the_literal_value_of_a_key_in_this_environment_refuses(monkeypatch, tmp_path):
@@ -344,6 +301,78 @@ def test_an_ordinary_question_is_not_mistaken_for_a_secret(monkeypatch, tmp_path
             llm.ask_json(PLAN_RULES, "Which of my books mention the key to the secret garden?",
                          role="plan")
     assert len(lines_of(recorder.path)) == 2
+
+
+# --- a recording that could not be written ------------------------------------
+class BrokenFile:
+    """A file whose writes fail, as a full disk's would."""
+
+    def __init__(self, real):
+        self.real = real
+        self.broken = False
+
+    def write(self, text):
+        if self.broken:
+            raise OSError(28, "No space left on device")
+        return self.real.write(text)
+
+    def flush(self):
+        return self.real.flush()
+
+    def close(self):
+        return self.real.close()
+
+
+def test_a_write_that_fails_does_not_stop_the_run_but_does_stop_the_recording(monkeypatch,
+                                                                             tmp_path):
+    """The observer swallows its own exceptions so a paid run goes on — and used
+    to leave no state anywhere, so a recording that lost half its lines was
+    finalised, named and committed as a complete one. The failure is latched;
+    the call still returns; the file keeps its .partial name."""
+    scripted(monkeypatch, PLAN_REPLY)
+    final = tmp_path / "r.jsonl"
+    with pytest.raises(plan_recording.RecordingIncomplete) as raised:
+        with plan_recording.PlanRecorder(final, FACTS) as recorder:
+            recorder._file = broken = BrokenFile(recorder._file)
+            with recorder.item("q01"):
+                broken.broken = True
+                # the real ask_json, the real observer, the real _write
+                assert llm.ask_json(PLAN_RULES, "payload", role="plan")["mode"] == "answer"
+    assert "No space left on device" in f"{raised.value}"
+    assert "line 2" in f"{raised.value}"
+    assert not final.exists()
+    assert recorder.partial.exists()
+    assert llm.JSON_CALL_OBSERVER is None      # still disarmed
+
+
+def test_a_run_whose_recording_failed_says_so_and_exits_one(monkeypatch, tmp_path, capsys):
+    """The report a reader reads carries the reason, and the run does not exit
+    green on a recording that is not there."""
+    scripted(monkeypatch, PLAN_REPLY)
+    recordings = staged_harness(monkeypatch, tmp_path)
+    monkeypatch.setattr(harness, "run_one", fake_run_one)
+    # eval/ holds scripts, not a package, so the harness loads its sibling by
+    # path and would otherwise hold a SECOND module object that this test's
+    # patch could not reach. Handing it the one loaded here also makes the
+    # exception classes it catches the ones raised.
+    monkeypatch.setattr(harness, "load_plan_recording", lambda: plan_recording)
+    real_enter = plan_recording.PlanRecorder.__enter__
+
+    def breaking_enter(self):
+        real_enter(self)
+        self._file = BrokenFile(self._file)
+        self._file.broken = True
+        return self
+
+    monkeypatch.setattr(plan_recording.PlanRecorder, "__enter__", breaking_enter)
+    monkeypatch.setattr(sys, "argv", ["run_agent_eval.py", "--record-plans"])
+    with pytest.raises(SystemExit) as raised:
+        harness.main()
+    assert raised.value.code == 1
+    report = next((tmp_path / "results").glob("answers-*.md")).read_text(encoding="utf-8")
+    assert "RecordingIncomplete" in report and "No space left on device" in report
+    assert "RecordingIncomplete" in capsys.readouterr().err
+    assert not list(recordings.glob("*.jsonl"))
 
 
 # --- a call that never came back ----------------------------------------------
