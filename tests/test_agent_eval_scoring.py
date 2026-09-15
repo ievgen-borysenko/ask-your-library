@@ -323,7 +323,7 @@ def test_error_items_keep_the_cost_they_spent(monkeypatch, tmp_path):
     from ask_your_library import llm
     ev = harness
 
-    def fake_run_one(graph, item):
+    def fake_run_one(graph, item, attempt=1):   # the harness passes the attempt since --repeat
         llm.reset_usage()
         u = llm._usage()
         u.llm_calls += 2
@@ -354,7 +354,10 @@ def test_error_items_keep_the_cost_they_spent(monkeypatch, tmp_path):
         monkeypatch.setattr(module, "PRICE_OUT_PER_MTOK", 15.0)
     monkeypatch.setattr(ev, "run_one", fake_run_one)
     monkeypatch.setattr(ev, "build_graph", lambda: object())
-    monkeypatch.setattr(ev, "run_fingerprint", lambda: "code test")
+    # the fingerprint is read once as fields and rendered from them (the sidecar
+    # stores the same dict), so both halves are stubbed here
+    monkeypatch.setattr(ev, "run_facts", lambda repeat=1: {"repeat": repeat})
+    monkeypatch.setattr(ev, "render_fingerprint", lambda facts: "code test")
     monkeypatch.setattr(ev, "GOLDEN_PATH", golden)
     monkeypatch.setattr(ev, "RESULTS_DIR", tmp_path)
     monkeypatch.setattr(sys, "argv", ["run_agent_eval.py"])
