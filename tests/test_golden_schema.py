@@ -3,38 +3,31 @@
 The golden sets are read by the eval harness with `item.get(...)` throughout, so
 a misspelled key is silently ignored — `expected_behaviour` instead of
 `expected_behavior` turns a clarify item into an ordinary one and the run still
-prints a green row. The allowed sets below are what the three files use today
-plus `expected_facts`; a key outside them is a typo until someone adds it here
-on purpose, which is the point.
+prints a green row, and `expected_fact:` disables the facts row while the report
+says 0/0. The contract is therefore not written here: it lives in
+`eval/run_agent_eval.py` (`ALLOWED_KEYS` per item type, `REQUIRED_KEYS`,
+`FIELD_CHECKS`) next to the code that reads it, where a run of ANY golden file
+is refused before the graph is built. This file checks the three files in the
+repository against that same table, and adds the rules that only make sense
+across a set: ids unique across files, no question asked twice, no fact the
+question already contains.
 
 What this file does NOT check: whether the expected books exist in the manifest
 (`tests/test_golden_books_in_manifest.py`) or whether a fact is true (a reader).
 """
+import importlib.util
+import unicodedata
 from pathlib import Path
 
-import unicodedata
-
+import pytest
 import yaml
 
 REPO = Path(__file__).resolve().parents[1]
 GOLDEN_DIR = REPO / "eval" / "golden"
 
-REQUIRED = {"id", "question", "type", "expected_books", "expected_facts"}
-
-# Per file, because the sets are not interchangeable: the catalogue items are
-# scored on a structured result and carry keys no research item may use, and a
-# research key on a catalogue item (or the reverse) is a scoring mistake, not a
-# style one.
-COMMON = REQUIRED | {"notes", "expected_behavior"}
-ALLOWED = {
-    "en-demo.yaml": COMMON,
-    "en-demo-extended.yaml": COMMON | {"expects_chapter_read"},
-    "en-demo-catalog.yaml": COMMON | {"expected_op", "expected_count", "expected_total",
-                                      "expected_resolved", "expected_book_filter",
-                                      "expects_chapter_read"},
-}
-
-TYPES = {"identify", "answer", "aggregation", "refusal", "catalog"}
+spec = importlib.util.spec_from_file_location("run_agent_eval", REPO / "eval" / "run_agent_eval.py")
+harness = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(harness)
 
 
 def golden_files() -> list[Path]:
@@ -52,47 +45,62 @@ def fold(text: str) -> str:
                    if not unicodedata.combining(c))
 
 
-def test_every_golden_file_has_a_declared_key_set():
-    """A new golden set must state its allowed keys here before it can be run:
-    otherwise the guard silently stops covering the file it was written for."""
-    undeclared = [p.name for p in golden_files() if p.name not in ALLOWED]
-    assert not undeclared, f"golden files with no declared key set: {undeclared}"
-
-
-def test_no_unknown_keys():
-    problems = []
+def test_the_harness_guard_accepts_every_golden_file():
+    """The same check a run makes, over the files in the repository: allowed keys
+    for the item's type, required keys (expected_facts among them, and
+    expected_total for a catalogue item), and the type of every field."""
     for path in golden_files():
-        for item in items_of(path):
-            unknown = set(item) - ALLOWED[path.name]
-            if unknown:
-                problems.append(f"{path.name}:{item.get('id')}: unknown keys {sorted(unknown)}")
-    assert not problems, "\n".join(problems)
+        try:
+            harness.check_golden(items_of(path))
+        except ValueError as error:
+            pytest.fail(f"{path.name}: {error}")
 
 
-def test_required_keys_present():
-    problems = []
-    for path in golden_files():
-        for index, item in enumerate(items_of(path)):
-            missing = REQUIRED - set(item)
-            if missing:
-                problems.append(f"{path.name}:{item.get('id', f'#{index}')}: missing {sorted(missing)}")
-    assert not problems, "\n".join(problems)
+# Every allowed field, with values its rule must accept and values it must
+# refuse. The table is the readable half of the contract: the harness enforces
+# it, this says what it means.
+FIELD_SAMPLES = {
+    "id": (["c01-ivanhoe"], ["", "   ", None, 1]),
+    "question": (["Which book?"], ["", None, 1]),
+    "type": (["identify", "answer", "aggregation", "refusal", "catalog"], ["Answer", "", None]),
+    "notes": (["Reader-verified 2026-09-05."], ["", None, 1]),
+    "expected_books": ([[], ["Ivanhoe"]], [["  "], "Ivanhoe", None, [7]]),
+    "expected_facts": ([[], ["Cedric"]], [[33], "Cedric", None, ["  "]]),
+    "expected_behavior": (["clarify", "clarify_or_answer", "research"], ["clarify_or_ask", "", None, True]),
+    "expects_chapter_read": ([True, False], ["true", 1, None]),
+    "expected_book_filter": (["Dracula"], ["", "   ", None, 7]),
+    "expected_op": (["count", "list", "has", "by_author"], ["counts", "", None, True]),
+    "expected_count": ([0, 33], [True, "33", 3.5, None]),
+    "expected_total": ([0, 33], [True, "33", 3.5, None]),
+    "expected_resolved": ([True, False], ["false", 0, None]),
+}
 
 
-def test_field_types():
-    problems = []
-    for path in golden_files():
-        for item in items_of(path):
-            where = f"{path.name}:{item.get('id')}"
-            for key in ("id", "question"):
-                if not isinstance(item.get(key), str) or not item.get(key).strip():
-                    problems.append(f"{where}: {key} must be a non-empty string")
-            if item.get("type") not in TYPES:
-                problems.append(f"{where}: type {item.get('type')!r} not in {sorted(TYPES)}")
-            books = item.get("expected_books")
-            if not isinstance(books, list) or not all(isinstance(b, str) and b.strip() for b in books):
-                problems.append(f"{where}: expected_books must be a list of non-empty strings")
-    assert not problems, "\n".join(problems)
+def test_every_allowed_key_has_a_rule_and_the_rule_is_the_one_it_should_be():
+    """A key allowed for some item type but typed by nothing would be free text
+    the scorer reads as if it meant something, so the two tables must cover each
+    other exactly — and each rule is exercised, not just present."""
+    allowed = set().union(*harness.ALLOWED_KEYS.values())
+    assert allowed == set(harness.FIELD_CHECKS) == set(FIELD_SAMPLES), (
+        "keys allowed in an item, keys with a type rule and keys sampled here must be the same set")
+    for key, (good, bad) in FIELD_SAMPLES.items():
+        check = harness.FIELD_CHECKS[key][0]
+        for value in good:
+            assert check(value), f"{key} should accept {value!r}"
+        for value in bad:
+            assert not check(value), f"{key} should refuse {value!r}"
+
+
+def test_a_catalog_item_may_not_carry_research_keys_or_the_reverse():
+    """The two key sets are not interchangeable: expects_chapter_read on a
+    catalogue item is never read, and expected_op on a research item is not
+    either — both are scoring mistakes that would pass silently."""
+    assert "expects_chapter_read" not in harness.ALLOWED_KEYS["catalog"]
+    assert "expected_op" not in harness.ALLOWED_KEYS["answer"]
+    with pytest.raises(ValueError, match="unknown keys"):
+        harness.check_golden([{"id": "k99", "type": "catalog", "question": "how many?",
+                               "expected_books": [], "expected_facts": [], "expected_total": 33,
+                               "expects_chapter_read": True}])
 
 
 def test_expected_facts_are_short_non_empty_strings():

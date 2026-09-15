@@ -17,11 +17,15 @@
   narrows where the reader starts and decides nothing (ADR-010, amended). 32 of the 42 items carry
   facts; the refusals and the clarify items whose two candidate books would each demand a
   different answer carry an empty list on purpose. The shape of the three files is now pinned by
-  `tests/test_golden_schema.py` — allowed keys per file (a misspelled `expected_behaviour` used to
-  be ignored silently and score green), required keys, types, unique ids and no repeated question
-  — and the scoring by `tests/test_agent_eval_facts.py`, with the harness refusing a malformed
-  `expected_facts` when it loads the file, before the graph is built and before the first billed
-  call (`GOLDEN_PATH` may point anywhere). **All three golden checksums moved**:
+  a contract the harness owns and enforces when it loads any golden file, before the graph is
+  built and before the first billed call: the keys allowed for the item's type, the required keys
+  (`expected_facts` among them, so a misspelled `expected_fact:` fails instead of silently turning
+  the row off) and the type of every field, with every problem in the file reported at once.
+  `tests/test_golden_schema.py` runs that check over the three files here and adds what only holds
+  across a set — ids unique across the files, no question asked twice, no fact its own question
+  already contains, which would score green by being restated — and
+  `tests/test_agent_eval_facts.py` pins the scoring, including that the verdict does not move with
+  the facts on any branch of `score()`. **All three golden checksums moved**:
   `en-demo.yaml` `efb25bda` → `edc15194`, `en-demo-extended.yaml` `8eec61c9` → `836d3870`,
   `en-demo-catalog.yaml` `14b001e2` → `72eb2c2b`, so **no report committed under
   [`eval-results/`](eval-results/) reproduces against the current files**: every one of them was

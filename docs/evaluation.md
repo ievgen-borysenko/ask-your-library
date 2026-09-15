@@ -58,11 +58,18 @@ a different answer (c09, q06, h22); k09, which is scored on routing alone and wh
 be exhaustive; and k04, whose answer is a negative ("War and Peace is not in this library"), which
 substring presence cannot check. A fact may also not be a string its own question already contains
 - an answer restates its question, so such a fact would score green without measuring anything.
-The golden files' shape - allowed keys per file, required keys, types, facts that are non-empty
-strings and are absent from their question, unique ids and no repeated question - is pinned by
-`tests/test_golden_schema.py`; the facts scoring itself by `tests/test_agent_eval_facts.py`. The
-harness validates `expected_facts` of every item when it loads the file, before the graph is built
-and before the first model call, because `GOLDEN_PATH` may point at a file no test has seen.
+The shape of a golden item is a contract in the harness itself (`ALLOWED_KEYS` per item type,
+`REQUIRED_KEYS`, `FIELD_CHECKS` in `eval/run_agent_eval.py`), and the harness checks **every item
+of whatever file `GOLDEN_PATH` names** against it when it loads it - before the graph is built and
+before the first billed call, reporting every problem in the file at once. It has to be there and
+not only in a test: `score()` reads items with `.get()`, so a misspelled `expected_fact:` would
+disable this row for that item and the run would end with a green 0/0 that measured nothing, and
+`expected_behaviour` would score a clarify item as an ordinary one. Required on every item:
+`id`, `question`, `type`, `expected_books`, `expected_facts` (a refusal carries `[]` explicitly),
+plus `expected_total` on a catalogue item. `tests/test_golden_schema.py` runs that same check over
+the three files in the repository and adds what only holds across a set - ids unique across the
+files, no question asked twice, no fact its own question already contains; the facts scoring
+itself is pinned by `tests/test_agent_eval_facts.py`, over every branch of `score()`.
 
 Three golden sets, reported separately. **Core** (`eval/golden/en-demo.yaml`, 11 questions, the
 default `GOLDEN_PATH`): eight questions on books the golden author has read and a two-book

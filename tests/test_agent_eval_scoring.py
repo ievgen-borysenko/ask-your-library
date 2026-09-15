@@ -305,7 +305,9 @@ def test_unknown_golden_id_exits_nonzero(monkeypatch, tmp_path):
     import pytest
 
     golden = tmp_path / "g.yaml"
-    golden.write_text("questions:\n- id: q01-x\n  question: q\n  type: answer\n  expected_books: [A]\n")
+    # expected_facts is required of every item since the harness checks the file
+    # it is about to run (a missing key used to disable the facts row silently)
+    golden.write_text("questions:\n- id: q01-x\n  question: q\n  type: answer\n  expected_books: [A]\n  expected_facts: []\n")
     monkeypatch.setattr(harness, "GOLDEN_PATH", golden)
     monkeypatch.setattr(sys, "argv", ["run_agent_eval.py", "q01-typo"])
     monkeypatch.setattr(harness, "build_graph", lambda: (_ for _ in ()).throw(AssertionError("must not build")))
@@ -338,7 +340,9 @@ def test_error_items_keep_the_cost_they_spent(monkeypatch, tmp_path):
 
     golden = tmp_path / "golden.yaml"
     golden.write_text("questions:\n- id: good\n  type: answer\n  question: q\n  expected_books: []\n"
-                      "- id: bad\n  type: answer\n  question: q\n  expected_books: []\n", encoding="utf-8")
+                      "  expected_facts: []\n"
+                      "- id: bad\n  type: answer\n  question: q\n  expected_books: []\n"
+                      "  expected_facts: []\n", encoding="utf-8")
     # The dollar figures below are the hosted list prices; config reads them at
     # import time, so pin them here rather than depend on the developer's
     # LLM_BACKEND (the local mode prices every token at 0). Two namespaces, two

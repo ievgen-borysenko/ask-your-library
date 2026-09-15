@@ -20,9 +20,10 @@ harness = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(harness)
 
 
-def run(answer="", clarify=False, checked=1, chapters=None, catalog=None):
+def run(answer="", clarify=False, checked=1, chapters=None, catalog=None, steps=0, book_filter=""):
     return {"answer": answer, "clarify_asked": clarify, "provenance": {"checked": checked},
-            "read_chapters": chapters or [], "catalog": catalog or {}}
+            "read_chapters": chapters or [], "catalog": catalog or {}, "steps_taken": steps,
+            "book_filter": book_filter}
 
 
 def test_every_expected_fact_present_is_ok():
@@ -75,18 +76,71 @@ def test_matching_is_substring_only_never_fuzzy():
     assert harness.score(item, run("Frankenstein: the female companionship"))["facts_ok"]
 
 
-def test_behavior_ok_is_unchanged_by_the_facts_row():
-    """ADR-010: three rows that cannot be confused. The facts must not add a term
-    to the verdict in either direction — a behaviour PASS with no fact present
-    stays PASS, and a behaviour FAIL with every fact present stays FAIL."""
-    answer = "Ivanhoe is the book."
-    with_facts = {"type": "identify", "expected_books": ["Ivanhoe"], "expected_facts": ["Cedric", "Richard"]}
-    without = {"type": "identify", "expected_books": ["Ivanhoe"]}
-    assert harness.score(with_facts, run(answer))["behavior_ok"] is True
-    assert harness.score(with_facts, run(answer))["behavior_ok"] == harness.score(without, run(answer))["behavior_ok"]
-    missed_title = {"type": "identify", "expected_books": ["Dracula"], "expected_facts": ["Ivanhoe"]}
-    sc = harness.score(missed_title, run(answer))
-    assert sc["facts_ok"] and sc["behavior_ok"] is False
+CATALOG_OK = {"op": "count", "count": 2, "total": 2,
+              "books": ["Ivanhoe — Walter Scott", "Dracula — Bram Stoker"]}
+CATALOG_ITEM = {"type": "catalog", "expected_op": "count", "expected_count": 2, "expected_total": 2,
+                "expected_books": ["Ivanhoe — Walter Scott", "Dracula — Bram Stoker"]}
+
+# Every branch of score(), each in the shape that passes and the shape that
+# fails: (name, item, result, expected behavior_ok).
+BRANCHES = [
+    ("answer pass", {"type": "answer", "expected_books": ["Ivanhoe"]},
+     run("Ivanhoe is the book."), True),
+    ("answer fail", {"type": "answer", "expected_books": ["Ivanhoe"]},
+     run("Some other book entirely."), False),
+    ("aggregation fail on one missing title",
+     {"type": "aggregation", "expected_books": ["Ivanhoe", "Dracula"]}, run("Ivanhoe alone."), False),
+    ("refusal pass", {"type": "refusal", "expected_books": []},
+     run("That book is not in the library.", checked=0), True),
+    ("refusal fail, narrated from memory", {"type": "refusal", "expected_books": []},
+     run("Tom whitewashed the fence and sold the privilege to every boy who passed.", checked=0), False),
+    ("research pass", {"type": "answer", "expected_books": [], "expected_behavior": "research"},
+     run("Several books mention London.", steps=2), True),
+    ("research fail, no search", {"type": "answer", "expected_books": [], "expected_behavior": "research"},
+     run("Several books mention London.", steps=0), False),
+    ("clarify pass", {"type": "identify", "expected_books": ["Ivanhoe"], "expected_behavior": "clarify"},
+     run("", clarify=True), True),
+    ("clarify fail, answered instead",
+     {"type": "identify", "expected_books": ["Ivanhoe"], "expected_behavior": "clarify"},
+     run("Ivanhoe."), False),
+    ("clarify_or_answer pass by answering",
+     {"type": "identify", "expected_books": ["Ivanhoe"], "expected_behavior": "clarify_or_answer"},
+     run("Ivanhoe."), True),
+    ("clarify_or_answer fail",
+     {"type": "identify", "expected_books": ["Ivanhoe"], "expected_behavior": "clarify_or_answer"},
+     run("No idea."), False),
+    ("drill-down yes", {"type": "answer", "expected_books": ["Moby Dick"], "expects_chapter_read": True},
+     run("Moby Dick.", chapters=["Moby Dick — Herman Melville|CHAPTER 135"]), True),
+    ("drill-down no", {"type": "answer", "expected_books": ["Moby Dick"], "expects_chapter_read": True},
+     run("Moby Dick."), False),
+    ("book filter expected", {"type": "answer", "expected_books": ["Dracula"], "expected_book_filter": "Dracula"},
+     run("Dracula.", book_filter="Dracula — Bram Stoker"), True),
+    ("book filter wrong book", {"type": "answer", "expected_books": ["Dracula"], "expected_book_filter": "Dracula"},
+     run("Dracula.", book_filter="Ivanhoe — Walter Scott"), False),
+    ("catalogue pass", CATALOG_ITEM, run("You have 2 books.", catalog=CATALOG_OK), True),
+    ("catalogue fail on the count", CATALOG_ITEM,
+     run("You have 2 books.", catalog={**CATALOG_OK, "count": 3}), False),
+    ("catalogue misroute of a content question", {"type": "answer", "expected_books": ["Ivanhoe"]},
+     run("Ivanhoe.", catalog=CATALOG_OK), False),
+]
+
+
+@pytest.mark.parametrize("name,item_,result,expected", BRANCHES, ids=[b[0] for b in BRANCHES])
+@pytest.mark.parametrize("facts", ["absent", "satisfied", "unsatisfied"])
+def test_behavior_ok_is_unchanged_by_the_facts_row(name, item_, result, expected, facts):
+    """ADR-010: rows that cannot be confused. Over every branch of score() and
+    every state of the facts row, the verdict is the same one the item would get
+    with no expected_facts at all — the row is reported beside it, never in it."""
+    word = result["answer"].split()[0] if result["answer"].split() else None
+    variants = {"absent": None, "satisfied": [word] if word else [], "unsatisfied": ["Thibermesnil"]}
+    scored = harness.score({**item_, "expected_facts": variants[facts]} if variants[facts] is not None
+                           else dict(item_), result)
+    assert scored["behavior_ok"] is expected, f"{name}: behaviour moved with facts {facts}"
+    assert scored["behavior_ok"] == harness.score(dict(item_), result)["behavior_ok"]
+    if facts == "unsatisfied":
+        assert scored["facts_ok"] is False
+    if facts == "satisfied" and word:
+        assert scored["facts_ok"] is True
 
 
 def test_the_catalog_branch_carries_the_facts_row_too():
@@ -103,18 +157,69 @@ def test_the_catalog_branch_carries_the_facts_row_too():
     assert missed["behavior_ok"] and not missed["facts_ok"]
 
 
+def item(**over) -> dict:
+    """A golden item the guard accepts, to be spoiled one key at a time."""
+    return {"id": "c01-ivanhoe", "type": "answer", "question": "Which book?",
+            "expected_books": ["Ivanhoe"], "expected_facts": ["Cedric"], **over}
+
+
+def test_the_guard_accepts_a_well_formed_file():
+    harness.check_golden([item(), item(id="c08-refusal", type="refusal", expected_books=[],
+                                       expected_facts=[]),
+                          item(id="k01-count", type="catalog", expected_facts=["33"],
+                               expected_op="count", expected_count=33, expected_total=33)])
+
+
 def test_a_bad_expected_facts_value_is_refused_by_name():
     """The value is matched as a substring per fact, so int, bare string and
     empty string each break the row in a different silent way."""
-    harness.check_expected_facts([{"id": "ok", "expected_facts": ["Cedric"]},
-                                  {"id": "no-facts-key", "type": "answer"},
-                                  {"id": "empty-list", "expected_facts": []}])
-    for bad in ([{"id": "unquoted-number", "expected_facts": [33]}],
-                [{"id": "bare-string", "expected_facts": "Cedric"}],
-                [{"id": "blank-fact", "expected_facts": ["Cedric", "   "]}]):
+    for bad in ([item(id="unquoted-number", expected_facts=[33])],
+                [item(id="bare-string", expected_facts="Cedric")],
+                [item(id="blank-fact", expected_facts=["Cedric", "   "])]):
         with pytest.raises(ValueError) as error:
-            harness.check_expected_facts(bad)
+            harness.check_golden(bad)
         assert bad[0]["id"] in str(error.value)
+
+
+def test_a_missing_expected_facts_key_is_refused():
+    """It used to be read as an empty list: a typo like `expected_fact:` would
+    turn the row off for that item and the run would end with a green 0/0 that
+    measured nothing. A refusal says it has no facts by carrying an empty list."""
+    with pytest.raises(ValueError) as error:
+        harness.check_golden([{"id": "no-facts-key", "type": "answer", "question": "q",
+                               "expected_books": ["Ivanhoe"]}])
+    assert "no-facts-key" in str(error.value) and "expected_facts" in str(error.value)
+
+
+def test_a_misspelled_key_is_refused_rather_than_ignored():
+    """The whole class the guard exists for: score() reads items with .get(), so
+    a typo is not an error, it is a different (green) measurement."""
+    spoiled = {"expected_fact": ["Cedric"], "expected_behaviour": "clarify",
+               "expects_chapter_reads": True, "expected_totals": 33}
+    for key, value in spoiled.items():
+        bad = item(id=f"typo-{key}")
+        bad[key] = value
+        with pytest.raises(ValueError) as error:
+            harness.check_golden([bad])
+        assert key in str(error.value) and f"typo-{key}" in str(error.value)
+
+
+def test_an_unknown_type_and_an_out_of_enum_value_are_refused():
+    with pytest.raises(ValueError, match="type 'Answer'"):
+        harness.check_golden([item(type="Answer")])
+    with pytest.raises(ValueError, match="expected_behavior"):
+        harness.check_golden([item(expected_behavior="clarify_or_ask")])
+    with pytest.raises(ValueError, match="expected_op"):
+        harness.check_golden([item(id="k99", type="catalog", expected_total=33, expected_op="counts")])
+    with pytest.raises(ValueError, match="expected_total"):
+        harness.check_golden([item(id="k98", type="catalog")])
+
+
+def test_every_problem_in_the_file_is_reported_at_once():
+    """Fixing a golden file one failed run at a time is the cost this avoids."""
+    with pytest.raises(ValueError) as error:
+        harness.check_golden([item(id="first", expected_facts=[33]), item(id="second", type="nonsense")])
+    assert "first" in str(error.value) and "second" in str(error.value)
 
 
 def test_a_bad_golden_file_fails_before_the_graph_is_built(tmp_path, monkeypatch):

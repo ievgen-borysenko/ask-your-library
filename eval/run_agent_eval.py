@@ -43,6 +43,7 @@ from pathlib import Path
 import yaml
 from langgraph.types import Command
 
+from ask_your_library.catalog import CATALOG_OPS
 from ask_your_library.graph import build_graph
 from ask_your_library.library import title_of
 from ask_your_library.i18n import t
@@ -340,23 +341,98 @@ def facts_score(item: dict, answer: str) -> dict:
             "facts_ok": len(found) == len(facts)}
 
 
-def check_expected_facts(items: list[dict]) -> None:
-    """Refuse a golden file whose expected_facts are not lists of non-empty
-    strings, BEFORE the first model call.
+# --- the golden item contract -------------------------------------------------
+# One table, read by the load-time guard below AND by tests/test_golden_schema.py,
+# so the harness and the guard over the repository's own files cannot drift apart.
+# Every key here is a key score() or the report reads; anything else in an item is
+# a typo, and a typo is silent: score() reads items with .get() throughout, so
+# `expected_behaviour` turns a clarify item into an ordinary one and the run still
+# prints a green row. Keys are allowed per TYPE, not per file: a catalogue item has
+# no use for expects_chapter_read, and expected_op on a research item would never
+# be read.
+COMMON_KEYS = {"id", "question", "type", "expected_books", "expected_facts", "notes"}
+RESEARCH_KEYS = COMMON_KEYS | {"expected_behavior", "expects_chapter_read", "expected_book_filter"}
+CATALOG_KEYS = COMMON_KEYS | {"expected_op", "expected_count", "expected_total", "expected_resolved"}
+ALLOWED_KEYS = {"identify": RESEARCH_KEYS, "answer": RESEARCH_KEYS, "aggregation": RESEARCH_KEYS,
+                "refusal": RESEARCH_KEYS, "catalog": CATALOG_KEYS}
+# expected_facts is required, not optional: a missing key would score 0/0 and ok,
+# so a run could end with a green facts row that measured nothing. A refusal says
+# so by carrying an empty list.
+REQUIRED_KEYS = {"id", "question", "type", "expected_books", "expected_facts"}
+# expected_total is the one catalogue key score() cannot pass without.
+REQUIRED_BY_TYPE = {"catalog": REQUIRED_KEYS | {"expected_total"}}
+# The values the branches of score() actually read; anything else falls through to
+# the default branch, which is exactly the silent misscoring this guard is for.
+BEHAVIORS = {"research", "clarify", "clarify_or_answer"}
 
-    GOLDEN_PATH points wherever the caller says, and the failure modes are not
-    cosmetic: an unquoted `- 33` is an int and raises inside the scorer, in the
-    middle of a run that has already been billed for every item before it; a
-    bare string (`expected_facts: Cedric`) is iterated per character, so the row
-    silently measures letters; an empty string is contained in every answer and
-    is therefore always green. tests/test_golden_schema.py checks the three
-    files in the repository — this checks the file actually being run."""
-    for item in items:
-        facts = item.get("expected_facts", [])
-        if not isinstance(facts, list) or not all(isinstance(f, str) and f.strip() for f in facts):
-            raise ValueError(
-                f"{item.get('id', '<no id>')}: expected_facts must be a list of non-empty strings, "
-                f"got {facts!r} (a number needs quoting: - \"33\")")
+
+def _is_text(value) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _is_text_list(value) -> bool:
+    return isinstance(value, list) and all(_is_text(v) for v in value)
+
+
+def _is_whole(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+# key -> (predicate, what it must be). Every allowed key has an entry; a new key
+# without one is caught by tests/test_golden_schema.py.
+FIELD_CHECKS = {
+    "id": (_is_text, "a non-empty string"),
+    "question": (_is_text, "a non-empty string"),
+    "type": (lambda v: v in ALLOWED_KEYS, f"one of {sorted(ALLOWED_KEYS)}"),
+    "notes": (_is_text, "a non-empty string"),
+    "expected_books": (_is_text_list, "a list of non-empty strings"),
+    "expected_facts": (_is_text_list, 'a list of non-empty strings (a number needs quoting: - "33")'),
+    "expected_behavior": (lambda v: v in BEHAVIORS, f"one of {sorted(BEHAVIORS)}"),
+    "expects_chapter_read": (lambda v: isinstance(v, bool), "true or false"),
+    "expected_book_filter": (_is_text, "a non-empty string"),
+    "expected_op": (lambda v: v in CATALOG_OPS, f"one of {sorted(CATALOG_OPS)}"),
+    "expected_count": (_is_whole, "a whole number"),
+    "expected_total": (_is_whole, "a whole number"),
+    "expected_resolved": (lambda v: isinstance(v, bool), "true or false"),
+}
+
+
+def check_golden(items: list[dict]) -> None:
+    """Refuse an unusable golden file BEFORE the graph is built and before the
+    first billed call.
+
+    GOLDEN_PATH points wherever the caller says, and every failure here is
+    silent at run time rather than loud: a misspelled `expected_fact:` disables
+    the facts row and the run ends with a misleading 0/0; `expected_behaviour`
+    scores a clarify item as an ordinary one; an unquoted `- 33` is an int and
+    raises inside the scorer, after every earlier item has been billed; a bare
+    string (`expected_facts: Cedric`) is matched per character; an empty fact is
+    contained in every answer. Every problem in the file is reported at once —
+    fixing them one run at a time is the cost this guard exists to avoid."""
+    problems = []
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            problems.append(f"item #{index}: {item!r} is not a mapping")
+            continue
+        where = item.get("id") if _is_text(item.get("id")) else f"item #{index}"
+        kind = item.get("type")
+        if kind not in ALLOWED_KEYS:
+            # every other rule depends on the type; nothing more can be said
+            problems.append(f"{where}: type {kind!r} is not one of {sorted(ALLOWED_KEYS)}")
+            continue
+        missing = sorted(REQUIRED_BY_TYPE.get(kind, REQUIRED_KEYS) - set(item))
+        if missing:
+            problems.append(f"{where}: missing {missing}")
+        unknown = sorted(set(item) - ALLOWED_KEYS[kind])
+        if unknown:
+            problems.append(f"{where}: unknown keys {unknown} for type {kind!r} "
+                            f"(allowed: {sorted(ALLOWED_KEYS[kind])})")
+        for key, value in item.items():
+            check = FIELD_CHECKS.get(key)
+            if check and not check[0](value):
+                problems.append(f"{where}: {key} must be {check[1]}, got {value!r}")
+    if problems:
+        raise ValueError("this golden file cannot be scored as written:\n  " + "\n  ".join(problems))
 
 
 def score(item: dict, r: dict) -> dict:
@@ -469,7 +545,7 @@ def main() -> None:
     golden = yaml.safe_load(GOLDEN_PATH.read_text(encoding="utf-8"))
     # the whole file, not only the requested ids: a bad item must fail the run
     # before the graph is built and before anything is billed
-    check_expected_facts(golden["questions"])
+    check_golden(golden["questions"])
     # optional acceptance threshold: --min-pass N makes the run exit 1 below N behaviour PASSes
     argv = sys.argv[1:]
     min_pass = None
