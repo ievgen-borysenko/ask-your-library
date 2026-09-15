@@ -94,3 +94,37 @@ jobs:
         run: uv sync --locked --group dev
       - name: The macOS installer, dry run against recorders
         run: uv run pytest -q tests/test_install_script.py -rs
+
+  workflows:
+    # Lints every workflow file's syntax, expressions, and the shell embedded
+    # in their `run:` steps. Nothing here needs more than the files this
+    # checkout already has, and nothing is pushed back.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install actionlint (release tarball, SHA-256 verified)
+        # A pinned binary over the third-party raven-actions/actionlint
+        # wrapper: that action is not published by actionlint's own author,
+        # and pinning it to a SHA would still trust whatever the action's own
+        # code fetches at run time unless that is re-read on every bump. A
+        # tarball straight from rhysd/actionlint's release, checked against
+        # its published checksum, is one hop instead of two.
+        run: |
+          set -euo pipefail
+          version=1.7.12
+          sha256=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+          curl -sSfL -o actionlint.tgz "https://github.com/rhysd/actionlint/releases/download/v${version}/actionlint_${version}_linux_amd64.tar.gz"
+          echo "${sha256}  actionlint.tgz" | sha256sum -c -
+          tar -xzf actionlint.tgz actionlint
+          sudo install -m 0755 actionlint /usr/local/bin/actionlint
+          actionlint -version
+      - name: Lint the workflows
+        # shellcheck ships on ubuntu-latest and actionlint finds it on PATH
+        # with no extra install, so every `run:` step's shell is checked too.
+        # pyflakes is not installed here, so actionlint's python-only checks
+        # disable themselves rather than half-running.
+        run: actionlint -color .github/workflows/*.yml
