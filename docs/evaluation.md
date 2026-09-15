@@ -71,6 +71,30 @@ the three files in the repository and adds what only holds across a set - ids un
 files, no question asked twice, no fact its own question already contains; the facts scoring
 itself is pinned by `tests/test_agent_eval_facts.py`, over every branch of `score()`.
 
+**A JSON sidecar per run, and `--repeat N` (2026-09-15).** Every run now writes two files side by
+side: the Markdown report a reader reads (`eval/results/answers-<ts>.md`, unchanged) and
+`answers-<ts>.json`, the same run as data. The sidecar carries the fingerprint as *fields* rather
+than as one line - the code stamp and whether it was a verified clean commit, the golden path and
+checksum, the manifest and TOC checksums, the backend, the model, the index stamps, every knob
+that changes an answer (hit budgets, step and streak limits, clarify candidates, the question
+deadline, strict hit ids, the configured prices), the repeat count and the wall-clock start and
+end - and then, per question, its group and *every attempt* exactly as the harness produced it:
+the full answer, the provenance triple, steps, chapters read, clarify state, stop reason, planner
+and catalogue fallbacks, cost, calls, tokens, seconds, and the `score()` dict computed from that
+attempt. The line in the report and the fields in the sidecar are rendered from the same dict, so
+they cannot say different things about one run. Written with `ensure_ascii=False` and indent 2 in
+a fixed key order, so two runs diff line by line; `--no-json` turns it off.
+`--repeat N` runs each golden item N times (default 1). Scoring stays per attempt - the scorer
+never sees more than one run - and the aggregation is reported beside it: each boolean row
+(`behavior_ok`, `facts_ok`, drill-down) as **how many attempts of N passed**, never as an average
+of true and false, and cost, seconds, tokens and calls as **min / median / max**. Under `--repeat`
+the totals block's headline reads `behavior PASS <min>–<max>/<items> over N attempts (mean ... per
+attempt)` instead of a sum that would look like a larger set, each aggregate gains its own spread
+line, and `--min-pass` becomes a floor on the *weakest* attempt rather than on the average. At
+`--repeat 1` the Markdown report and its `---` tail are byte for byte what the harness has always
+written, which is pinned by a test: every artifact under [`eval-results/`](eval-results/) and
+`eval/summarize_report.py` read the same format they always did.
+
 Three golden sets, reported separately. **Core** (`eval/golden/en-demo.yaml`, 11 questions, the
 default `GOLDEN_PATH`): eight questions on books the golden author has read and a two-book
 comparison of two of them (Ivanhoe and Don Quixote), all nine reader-verified; h06, one of the two
@@ -100,6 +124,16 @@ Re-measured on `466fc82` (10.09, this repository's `main` at the merge of `#18`,
 four research items — one evidence item fewer on the London question — and $0.1762 for the set, of
 which the six catalogue items again cost $0.0136
 ([`eval-results/2026-09-10-catalogue-set.md`](eval-results/2026-09-10-catalogue-set.md)).
+
+Every number on this page was measured **once**, and a single sample of a system whose output
+varies is not a number with a spread: on any of these rows a difference of one or two questions
+between two runs is not a measured effect, which is why the ablation table below says so in its own
+limits and why the reports state the count of runs in their fingerprints. From this release that is
+a choice rather than a missing capability - `uv run eval/run_agent_eval.py --repeat 5` reports
+every row as "how many attempts of 5 passed" with min / median / max cost and seconds, and the
+fingerprint of such a run reads `5 attempts per item` instead of `single run`, so the two kinds
+cannot be confused. No repeated run has been made yet: nothing below has been re-measured, and the
+numbers in the tables are what they always were.
 
 Two measured trees, both single runs, clean tree (`--require-clean`), strict hit-id mode, the same
 bge-m3 index: **v0.1.0**, 2026-09-05 on code `88881ee` (the last code commit before tag `v0.1.0`;

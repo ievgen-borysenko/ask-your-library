@@ -71,9 +71,8 @@ open ones often refer to them.
 - Behavioural scoring is heuristic (substring titles, refusal phrase markers); refusal markers are
   loose ("do not have", "доказів") and should be anchored to the library; an LLM judge for answer
   correctness remains future work.
-- Eval reports record single runs; repeat runs or state the single-run limitation (the reports
-  do); publish failures alongside numbers (they do). Still open from the ablation idea: vector-only
-  vs BM25-only, and the planner's rewritten query vs the raw question.
+- Still open from the ablation idea: vector-only vs BM25-only, and the planner's rewritten query
+  vs the raw question.
 
 ## Retrieval, ingest, eval harness, code quality
 
@@ -159,6 +158,16 @@ open ones often refer to them.
   h12 removed from the core set by the reader on 06.09 (never reader-verified; a character's lie
   taken as fact was its failure), the core set is eleven questions from `v0.2.0-rc1`; the
   canonical failure trace is c06 (`docs/examples/c06-fogg-missing-day.md`).
+- **Eval reports record single runs.** Closed by `--repeat N` and a JSON sidecar per run
+  (`eval/run_agent_eval.py`, ADR-010 amended 15.09): each item runs N times, scoring stays per
+  attempt, and both files carry the spread — the boolean rows as how many attempts of N passed,
+  cost / seconds / tokens as min / median / max, the totals headline as a range with the
+  per-attempt mean beside it, and `--min-pass` as a floor on the weakest attempt. The fingerprint
+  says which kind of run it was (`N attempts per item` vs `single run`), and `answers-<ts>.json`
+  is the machine-readable record beside the Markdown: the fingerprint as fields, every attempt
+  with its answer and its `score()` dict. A run at `--repeat 1` writes the Markdown byte for byte
+  as before. Failures are published alongside the numbers, as they already were. Not done: no
+  repeated run has been made, so no published number carries a spread yet.
 - ADR-012: `SEARCH_HIT_CHARS` is a config knob, default raised 1,200 -> 2,500 after measuring
   1,200 / 2,500 / 4,000 on the core set (c03 complete at 2,500 and 4,000; c06 is not a window
   problem, the answering passage is never in the window).
