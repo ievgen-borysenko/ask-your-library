@@ -72,7 +72,13 @@ open ones often refer to them.
   loose ("do not have", "доказів") and should be anchored to the library; an LLM judge for answer
   correctness remains future work.
 - Still open from the ablation idea: vector-only vs BM25-only, and the planner's rewritten query
-  vs the raw question.
+  vs the raw question. The second of those has a **free path** since the plan-only replay
+  (`eval/run_plan_eval.py`): a recording holds the planner's rewritten queries for every golden
+  item, and the raw question is in the golden file beside it, so the two query sets can be fed to
+  the retriever — which `eval/run_retrieval_eval.py` already does with the raw question and no
+  model call — and compared at the cost of one recording that a normal run makes anyway. What
+  that would compare is the retrieval WINDOW of each, not the answers: a full comparison of the
+  finished answers still needs two paid runs.
 
 ## Retrieval, ingest, eval harness, code quality
 
