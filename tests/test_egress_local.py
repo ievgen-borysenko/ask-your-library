@@ -329,33 +329,59 @@ def _native_hits(names) -> set[str]:
             if any(name == bad or name.startswith(bad + "-") for bad in NATIVE_NETWORKING)}
 
 
-def test_no_native_networking_in_the_environment():
-    """The practical half of the blind spot below.
+# Distributions that only ever arrive with the `ui` extra, and are therefore how
+# this interpreter says "I am a UI environment, not the application's own". The
+# extra's tree carries `grpcio` (through literalai -> traceloop-sdk -> the OTLP
+# gRPC exporter), which is exactly the kind of native socket the guard cannot
+# see — which is why the Chainlit process is excluded from the egress claim
+# rather than merely untested (docs/privacy-and-threat-model.md).
+UI_EXTRA_MARKERS = ("chainlit", "literalai")
+
+
+def test_no_native_networking_in_the_interpreter():
+    """The practical half of the blind spot below, question one: nothing in the
+    INTERPRETER running this file networks from C.
 
     The guard sees every network call made through Python's socket module and
     none made by a native extension with its own C sockets. That limit is only
-    theoretical while no such extension is here, so this test asserts it is not —
-    twice, because the two questions are different:
+    theoretical while no such extension is here.
 
-    1. Nothing in the INTERPRETER running this file. If the `ui` extra were ever
-       added to the leg that runs these tests, this fails, and it should: that
-       tree carries `grpcio` and `opentelemetry-exporter-otlp-proto-grpc`, which
-       open sockets from C, and a process holding them is a process this guard
-       cannot speak for.
-    2. Nothing in the APPLICATION's own runtime closure, read from the lockfile
-       rather than from whatever happens to be installed — so the claim survives
-       a fresh environment, and a dependency bump that pulled one in fails here
-       instead of quietly widening the blind spot.
+    Skipped, rather than failed, where the `ui` extra is installed — a developer
+    following docs/quick-start.md has it, and so does the `ui-smoke` job. The
+    claim was never about that environment: a process holding `grpcio` is one
+    this guard cannot speak for, which is the documented reason Chainlit is
+    outside the scope. What must not be skipped is the locked closure below:
+    that is the question the extra cannot excuse.
     """
-    installed = _native_hits(_normalised_distributions())
+    installed_names = _normalised_distributions()
+    ui_extra = sorted(name for name in UI_EXTRA_MARKERS if name in installed_names)
+    if ui_extra:
+        pytest.skip(
+            f"the ui extra is installed here ({', '.join(ui_extra)}), and its tree carries "
+            "grpcio, which networks from C: this interpreter is outside the egress claim by "
+            "design, and the Chainlit process it can start is the process that claim excludes. "
+            "test_no_native_networking_in_the_locked_runtime still covers the application's own "
+            "closure.")
+    installed = _native_hits(installed_names)
     assert installed == set(), (
         f"{sorted(installed)} is installed here and does its own networking in C, "
         "which no assertion in this file can see")
 
+
+def test_no_native_networking_in_the_locked_runtime():
+    """Question two, and the one no environment can excuse: nothing in the
+    APPLICATION's own runtime closure networks from C.
+
+    Read from the lockfile rather than from whatever happens to be installed, so
+    the claim survives a fresh environment and a dependency bump that pulled one
+    in fails here instead of quietly widening the blind spot. `--no-dev` and the
+    absence of any `--extra`: this is the tree a plain `uv sync` gives the CLI
+    and the eval harness, which is what the claim is about.
+    """
     exported = subprocess.run(
         ["uv", "export", "--no-dev", "--frozen", "--no-hashes", "--no-emit-project"],
         cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True)
-    if exported.returncode != 0:                 # no uv on PATH: the half above still ran
+    if exported.returncode != 0:                 # no uv on PATH: nothing to read the lockfile with
         pytest.skip(f"uv export is unavailable here: {exported.stderr.strip()[:200]}")
     locked = {line.split("==")[0].lower().replace("_", "-").replace(".", "-")
               for line in exported.stdout.splitlines()

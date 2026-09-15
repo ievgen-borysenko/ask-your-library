@@ -57,7 +57,11 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   (`grpcio`, `pycurl`, `pycares`, `aiodns`, `uvloop`, `pyzmq`, `psycopg`, `pymongo`, `redis`) is
   installed in that interpreter or in the application's locked runtime closure; `uvloop` in
   particular would move every asyncio socket out of the hook's sight, and `grpcio` arrives with
-  the `ui` extra, which is one more reason the Chainlit process is outside the claim. The path is
+  the `ui` extra, which is one more reason the Chainlit process is outside the claim. Those are
+  two tests, and they answer differently where the extra IS installed — a developer following
+  [Quick start](quick-start.md), or the `ui-smoke` CI job: the interpreter half skips itself and
+  says why (that environment was never inside the claim), while the locked-closure half runs
+  everywhere and must pass, because no extra can excuse what the application itself depends on. The path is
   `runner.run_question` over the compiled graph, with the real preflight and the real embedder:
   what the CLI and the eval harness run, and what the web UI's Python half calls into. It is **not**
   Chainlit, which the test does not exercise (the `ui` extra is not installed in those CI legs);
