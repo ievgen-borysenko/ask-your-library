@@ -225,6 +225,25 @@ byte for byte as before (pinned by a test), so every artifact committed under
 `docs/eval-results/` and the summary tool that reads them are unaffected. No repeated run has been
 made yet and no published number changed here.
 
+Amended 2026-09-15: a FOURTH harness, and the first one whose runs are free. `plan()` is one model
+call followed by a hundred lines of deterministic post-processing, and until now the only way to
+reach that code with a real planner reply was a paid run of a golden set — so it was usually not
+measured at all. `eval/run_agent_eval.py --record-plans` keeps every `role="plan"` request/response
+pair of a run that was happening anyway, and `eval/run_plan_eval.py` replays them through the real
+node and the real routing, scoring the route, the catalogue operation, the named-book filter, the
+fallbacks and the query count. The recording is committed (`eval/recordings/`, unlike
+`eval/results/`) because it is the *input* a replayed number came from, and this record's
+"every number is attributable to a run" means nothing if the input is on one machine. The seams
+are a passive observer in `llm.py` and two rebound names; `nodes.py` is untouched, which keeps the
+measured code the shipped code. **What it deliberately does not do is grade a prompt change**: the
+recorded replies answer the `PLAN_RULES` of the tree they were recorded on, so the recording
+carries that prompt's checksum next to the golden file's and the harness refuses to replay when
+either has moved, stamping the report when it is told to anyway. A prompt change needs a new
+recording and therefore a paid run — the cost this decision has always accepted for anything that
+gets published, moved to the one place where it is unavoidable. The three rows that cannot be
+confused, the fourth deterministic row, no LLM judge and `--require-clean` all stand; no number
+here changed, and no recording of a real golden set has been made yet.
+
 ## ADR-011: Publishing by allowlist into a fresh repository, fail-closed tooling
 
 Status: accepted.

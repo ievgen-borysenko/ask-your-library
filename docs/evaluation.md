@@ -192,6 +192,144 @@ the machine; not reader-graded, and only the research subset was re-measured aft
 change, which the report's own coverage caveat states:
 [`eval-results/2026-09-10-local-models.md`](eval-results/2026-09-10-local-models.md).
 
+## Plan-only replay
+
+**`eval/run_plan_eval.py` - the planner's decisions, re-measured for nothing (2026-09-15).**
+`plan()` is one model call followed by a hundred lines of deterministic post-processing: the
+validated mode, the parsed catalogue operation, the mixed-intent gate, the query filter, the
+named-book resolution against the catalogue, the planner and catalogue fallbacks, and then the
+routing decision `route_after_plan` makes from what came out. Until now the only way to reach that
+code with a real planner reply was a full paid run of a golden set, so a one-line change to the
+query filter cost the same as a release measurement and was therefore usually not measured at all.
+It does not have to be: the model's share of the decision is a string, and a string can be kept.
+
+**Recording.** `uv run eval/run_agent_eval.py --record-plans` writes every `role="plan"`
+request/response pair of the run it was going to make anyway into
+`eval/recordings/<golden-stem>.<golden-sha12>.<model>.jsonl` - one JSON line per golden id and
+`--repeat` attempt (and a second line when `ask_json` had to retry a malformed reply, because a
+replay that dropped the bad first one would replay a retry that never happened). Each line holds
+the exact user payload, the raw reply text, the hash of the system prompt, the model, the backend
+and every knob of the call, the clock, and what that one call cost in money and tokens. It costs
+nothing extra: the calls are made either way. The mechanism is a passive observer
+(`llm.JSON_CALL_OBSERVER`) that `ask_json` notifies and that cannot change what a call returns -
+its own failure is logged and swallowed, because losing a recording is cheap and losing a paid run
+is not. `nodes.py` is untouched by any of it, as it is by the replay (`llm.ask_json` and
+`nodes.list_books` are rebound by name, the seam `eval/run_ablation.py` already uses).
+A call that never came back is recorded too, with an empty reply and its exception's name: without
+that line a timed-out planner would be indistinguishable from an item nobody ran. What a line says
+it spent is the **planner's own** tokens - `llm_invoke` accounts per node role, and a difference of
+the whole-run counters would charge a plan call with whatever `observe` and `reflect` spent between
+it and the previous one - and the cost is computed from those tokens at the configured rates
+*unrounded*, because a planner call is often under $0.0001 and the report's four decimals would
+write a run's worth of them down as free.
+
+The file is written as `.jsonl.partial` and renamed on a clean close, so a file at the final name
+is a run that finished and a crashed run still leaves everything it paid for - and a recording
+whose own writing failed is **not** finalised either: the recorder latches the first write error,
+refuses the rename, keeps the `.partial`, and the run's report tail carries the reason and its exit
+code turns non-zero. (The observer itself still swallows its exceptions, because the paid run must
+go on; what it must not do is leave a short file wearing the name of a complete one.) Two guards
+stand between a run and that file. It **refuses to replace an existing recording** unless
+`--overwrite`: that file is the artefact of a run somebody paid for, and the refusal happens before
+the graph is built and before the first call rather than after the money is spent. And a run of
+*selected ids* records only those ids, so it writes `...<model>.subset-<k>of<n>.jsonl` with
+`subset: true` in its header instead of overwriting the complete recording with three items under a
+name that still claims the whole set; the replay harness reports such a recording as a subset in
+its own report and sidecar.
+`eval/recordings/` is **committed** - unlike `eval/results/` - because a recording is the *input* a
+replayed number came from, and a number whose input is not in the tree is not reproducible by
+anyone who did not pay for the run. Being committed is also why two rules guard what may enter it.
+Every payload and reply passes through the main harness's `redact_paths` (the repository becomes
+`<repo>`, this machine's home becomes `~`) **and then through a generic absolute-path sweep** -
+any POSIX path of two or more segments, any Windows drive path, any UNC share - each replaced by
+`<path>`, with URLs left intact, because `redact_paths` only knows this machine's two prefixes and
+a payload can carry an external volume, a system file, another account's home or a colleague's
+drive. And anything **token-shaped fails the recording closed**: a provider key, an
+`Authorization` header, a JWT, a Slack, GitHub, Google or AWS credential, an `api_key = ...`
+assignment, a private-key header, or the literal value of any `*_KEY`/`*_TOKEN`/`*_SECRET` set in
+the environment of the run. Such a line is **not written at all** and the recording is **not given
+its final name**; the error says which line and what tripped it. It is deliberately not
+masked-and-written: a masked line still means a credential passed through, and a file that looks
+clean is one nobody goes back to check. The gitleaks step in `.github/workflows/security.yml` is
+the second net, over whatever is actually committed.
+
+**Replaying.** `uv run eval/run_plan_eval.py` loads a golden set and a recording, and for every
+item calls the **real** `plan()` node with `llm.ask_json` replaced by a replayer that returns the
+recorded reply - re-parsed by `llm.json_object`, the very function that parsed it live, so a reply
+that was malformed twice raises the same error here and the node degrades to its fallback exactly
+as it did on the paid run, and a call that timed out raises the same `CallTimeout` so the node
+takes its timeout branch and not its fallback branch - they are different states of the node and a
+report must not confuse them. Then the real `route_after_plan` over the state it produced. No model is
+called, `$0.0000` is spent, and the report's first line says so. Names are resolved against the
+index when there is one; without a readable index the harness falls back to `corpus/manifest.yaml`,
+read as the catalogue a fully built demo index would hold, and **says which of the two answered**
+in the report - they are not the same thing, because a half-built index holds fewer books than its
+manifest and a replay against the manifest would not notice.
+
+**Only the FIRST planner call of an item is replayed**, and the report says so in its header. A
+second `plan()` of the same question happens only after a clarify, and what it receives is a
+function of the graph state at that moment - the evidence collected, the candidates offered, the
+reader's reply - which the observer never saw and the recording therefore does not hold. Replaying
+it would mean inventing that state. So it is *accounted for* instead: every item reports
+`calls_recorded` / `calls_replayed`, an unreplayed call is named in the report, the totals and the
+sidecar, and it exits 1 unless `--allow-unreplayed`. Recording that state from the runner, so the
+re-plan after a clarify can be replayed too, is a follow-up in [`backlog.md`](backlog.md).
+
+Scored per item and per recorded attempt, with the mapping from a golden item to what the planner
+owes it written out in the harness rather than inferred: `mode_ok` is the **route** the golden set
+actually pins - the catalogue path for a `catalog` item, the research loop for every other type,
+which is exactly where `score()` in the main harness already fails a run (`catalog_misroute`) -
+plus, for an `expected_behavior: research` control, that the planner routed it there itself rather
+than being rescued by a `catalog_fallback`. A `plan_fallback` fails this row too, whatever route
+the state ended on: the planner produced nothing usable and code searched the raw question, so
+"not the catalogue path" is true of it only because there was no path to take, and a green
+`mode_ok` on it would mark every failed planner correct on the row a reader looks at first. Then
+`op_ok` (the catalogue operation is the item's
+`expected_op`), `book_filter_ok` (the named book resolved to the item's `expected_book_filter`),
+`fallback_ok` (no `plan_fallback`), `queries_ok` (a non-blank query survived the filter) and
+`queries_range` (as many queries as `PLAN_RULES` asks for, 2-4). Whether the planner said
+`identify` or `answer` is reported as `mode_exact` **beside the verdict and never inside it**: the
+golden `type` labels the question, not the planner's reading of it, and an `identify` question
+whose book is obvious is legitimately answered. A Markdown report and a JSON sidecar are written
+side by side in the shape family of the main harness (`eval/results/plan-replay-<ts>.{md,json}`),
+with the run fingerprint as fields and the recording's identity beside it.
+
+**The request is checked, not only the reply.** A recorded reply is replayed whatever question it
+answered, so a change to how `plan()` *assembles* its payload - a new data block, a different
+history window, a reworded clarification note - would be graded against a reply to a payload this
+tree no longer sends, and the run would look clean. **Every attempt** of every replayed call
+therefore compares the payload the node builds now with the recorded one (sanitised the way it was
+written), the system prompt by its hash, and the order the attempts were recorded in. The retry's
+payload is the first plus the retry wording, so it is rebuilt by `llm.retry_payload` - the one
+function that writes those words, here and in `ask_json` - rather than by a copy of them, and the
+recording's header carries a checksum of that wording next to the prompt's, so a reworded retry is
+a stale recording and not a silent difference. A mismatch is reported per item as `payload_drift`,
+in the report line, the totals and the sidecar, and exits 1 unless `--allow-drift`. It is deliberately **not** part of
+the per-item verdict: drift says the *replay* is questionable, not that the planner decided wrongly.
+
+**What it cannot measure: a change to `PLAN_RULES`.** The recorded reply answers the prompt that
+was in the tree when it was recorded; replaying it under a new prompt measures the post-processing
+of an answer to a question nobody asked. So the recording's header carries the checksum of the
+golden file **and** of `PLAN_RULES` (and of the retry wording, which is the second half of what a
+retried call was asked), and the harness **refuses to run** when any of them has moved (exit 2). `--check` answers that question on its own and replays nothing; `--allow-stale` replays
+anyway and stamps the report and the sidecar with a block saying that nothing in them measures this
+tree - there is no quiet way to do it. **A prompt change needs a new recording, and a new recording
+needs a paid run.** Nor does this harness see anything downstream of `plan`: retrieval, the answer,
+quote provenance and cost are the full harness's business, and the replay report's tail says so.
+An item the recording does not hold exits 1 unless `--allow-missing`, and "missing" means what it
+says. A planner call that ran out of time is **recorded** - an empty reply and its exception's
+name - and **replayed as a timeout**, on the first attempt and on the retry alike, so `plan()`
+takes the call-timeout branch it took on the paid run rather than the fallback branch. The two are
+different states of the node (the timeout branch runs no query at all and routes straight to
+synthesize; the fallback searches the raw question), and neither is ever mistaken for an item
+nobody ran.
+
+The mechanism is proved on fixture recordings (`tests/test_plan_recording.py`,
+`tests/test_plan_replay.py`, with the synthetic pair under `tests/fixtures/`), including that a
+replay makes **no network attempt at all** under the process-level egress guard.
+**No recording of a real golden set has been made yet**, so nothing on this page was produced this
+way; the first one will be made by the next paid run of the core set with `--record-plans`.
+
 ## Where the measured code lives
 
 The measurements were made in the private development repository before this repository was

@@ -26,9 +26,10 @@ open ones often refer to them.
   where corpus text becomes index metadata, prompt text or a printed line, evidence passages
   readable again after 2.12 rendered them as code snippets, an honest quote out of a poisoned
   passage confirmed again, and a `conftest.py` that stops the suite inheriting the shell.
-- Done at the visibility switch (2026-09-09): a ruleset on `main` requires the seven checks
+- Done at the visibility switch (2026-09-09): a ruleset on `main` requires the checks
   `test (openrouter)`, `test (ollama)`, `test-ui (openrouter)`, `test-ui (ollama)`,
-  `install-script`, `secrets` and `dependencies`, keeps branches up to date, and allows no
+  `install-script`, `secrets` and `dependencies` — eight since `workflows` joined them on
+  2026-09-15 — keeps branches up to date, and allows no
   force-push, no deletion and no bypass; a code scanning rule blocks on CodeQL security alerts of
   high or higher and on other alerts at error level; Dependabot alerts, secret scanning with push
   protection, and private vulnerability reporting are on.
@@ -71,8 +72,23 @@ open ones often refer to them.
 - Behavioural scoring is heuristic (substring titles, refusal phrase markers); refusal markers are
   loose ("do not have", "доказів") and should be anchored to the library; an LLM judge for answer
   correctness remains future work.
+- **The re-plan after a clarify is recorded but not replayed.** `eval/run_plan_eval.py` replays the
+  first planner call of an item; a clarify sends the run back through `plan()`, and what that
+  second call receives is a function of graph state — the evidence collected, the candidates the
+  loop offered, the reader's reply — which the `llm.JSON_CALL_OBSERVER` seam never sees. The
+  harness accounts for it (`calls_recorded` / `calls_replayed`, non-zero exit unless
+  `--allow-unreplayed`) rather than inventing the state. Replaying it needs the runner to snapshot
+  that state beside each recorded call, which is a second record with its own redaction question
+  (evidence passages are book text) and its own size — the reason it is a follow-up and not part of
+  the first slice.
 - Still open from the ablation idea: vector-only vs BM25-only, and the planner's rewritten query
-  vs the raw question.
+  vs the raw question. The second of those has a **free path** since the plan-only replay
+  (`eval/run_plan_eval.py`): a recording holds the planner's rewritten queries for every golden
+  item, and the raw question is in the golden file beside it, so the two query sets can be fed to
+  the retriever — which `eval/run_retrieval_eval.py` already does with the raw question and no
+  model call — and compared at the cost of one recording that a normal run makes anyway. What
+  that would compare is the retrieval WINDOW of each, not the answers: a full comparison of the
+  finished answers still needs two paid runs.
 
 ## Retrieval, ingest, eval harness, code quality
 
@@ -272,5 +288,5 @@ open ones often refer to them.
 - Workflow linter: a `workflows` job in `ci.yml` runs actionlint (release tarball, SHA-256
   verified, no third-party action) over every file under `.github/workflows/`, shellcheck included
   since it ships on `ubuntu-latest`, pyflakes not installed so it stays off; first run found
-  nothing to fix in the three existing workflows. The ruleset's seven required checks (above) are
-  unchanged; `workflows` is not among them.
+  nothing to fix in the three existing workflows. `workflows` was added to the ruleset's required
+  checks on 2026-09-15, so there are eight (the seven above plus this one).

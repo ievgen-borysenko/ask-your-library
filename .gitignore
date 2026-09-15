@@ -39,6 +39,11 @@ __pycache__/
 
 # Eval run outputs (numbers are recorded in docs/)
 eval/results/
+# eval/recordings/ is deliberately NOT here: a plan recording is the INPUT a
+# replayed number was produced from, not the output of a run, and a number whose
+# input is not in the tree cannot be reproduced by anyone who did not pay for it.
+# The half-written file of a run that died is not a record, though:
+eval/recordings/*.partial
 
 # Private session handoffs (never committed)
 docs/phase*-notes.md

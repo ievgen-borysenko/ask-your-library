@@ -9,6 +9,7 @@ call of a run, which is what the tests, the ablation and the injection canary do
 import contextvars
 import email.utils
 import json
+import logging
 import math
 import random
 import re
@@ -29,6 +30,8 @@ from .config import (LLM_BACKEND, LLM_BASE_URL, LLM_MAX_RETRIES, LLM_NEEDS_KEY, 
                      QUESTION_DEADLINE_S)
 from .embeddings import openrouter_api_key
 from .sanitize import LINE_BREAK_RE, strip_control_chars
+
+log = logging.getLogger(__name__)
 
 # Per-run accumulators live in a ContextVar: one shared graph serves concurrent
 # web sessions from worker threads, and module globals would mix their numbers.
@@ -377,26 +380,105 @@ def llm(role: str = "", capped: bool | None = None) -> ChatOpenAI:
     )
 
 
+def json_object(reply: str) -> tuple[dict | None, str]:
+    """The first top-level JSON object in a model reply, and — when there is
+    none — why not.
+
+    Split out of `ask_json` so a REPLAY of a recorded reply is parsed by exactly
+    the code that parsed it live (eval/plan_recording.py). An empty reason with
+    no object means "no braces in the reply at all", which carries no
+    information the model could act on and therefore leaves `ask_json`'s
+    `last_error` where it was, as it always did."""
+    match = re.search(r"\{.*\}", reply, re.S)
+    if not match:
+        return None, ""
+    try:
+        parsed = json.loads(match.group(0))
+    except json.JSONDecodeError as error:
+        return None, f"{error}"
+    if not isinstance(parsed, dict):
+        return None, f"top-level JSON must be an object, got {type(parsed).__name__}"
+    return parsed, ""
+
+
+# --- the recording seam -------------------------------------------------------
+# ONE optional observer of every JSON call: the eval harness installs it to
+# record what a node asked and what the model actually said, so that a change to
+# the deterministic half of a node can be replayed against the recording instead
+# of paid for again (eval/plan_recording.py, docs/evaluation.md "Plan-only
+# replay"). Nothing in the application ever sets it, no node knows it exists,
+# and it cannot change what a call returns: it is handed a finished record and
+# its own failure is logged rather than raised — a recorder must never turn a
+# paid run into a failed one.
+#
+# A plain module global and not a ContextVar: the only caller is an eval harness,
+# which runs one question at a time in one thread. The web UI serves concurrent
+# sessions and never installs one.
+JSON_CALL_OBSERVER = None
+
+# What the record says about a reply that held no JSON object at all. `ask_json`
+# itself keeps its own `last_error` unchanged for that case — an empty reason
+# tells the model nothing, and its retry prompt is a contract — so the record
+# needs a word of its own rather than an empty string that reads like success.
+NO_JSON_OBJECT = "no JSON object in reply"
+
+
+def _observe_json_call(call: dict) -> None:
+    observer = JSON_CALL_OBSERVER
+    if observer is None:
+        return
+    try:
+        observer(call)
+    except Exception as error:
+        log.warning("the JSON-call observer failed (%s: %s); the run goes on",
+                    type(error).__name__, error)
+
+
+# What the retry says, as a template rather than an inline f-string: a replay
+# has to rebuild the SECOND payload of a recorded call to check that the request
+# has not drifted, and rebuilding it from a copy of these words would be a
+# second thing that can be wrong. `retry_payload` is the only writer of it, here
+# and in eval/plan_recording.py.
+RETRY_RULE = ("\n\nYOUR PREVIOUS REPLY WAS INVALID JSON ({error}). "
+              "Return ONLY valid JSON. Escape every double quote inside string "
+              "values as \\\" — book quotes often contain dialogue in quotes.")
+
+
+def retry_payload(user: str, error) -> str:
+    """The user message of the retry: the original payload with the model's own
+    error appended. Byte for byte what `ask_json` has always sent."""
+    return user + RETRY_RULE.format(error=error)
+
+
 def ask_json(system: str, user: str, role: str) -> dict:
     """Ask the model for JSON. On malformed JSON (typically an unescaped quote
     inside a quoted string) retry once, showing the model its own error."""
     attempt_user = user
     last_error = None
     for attempt in range(2):
-        reply = llm_invoke(system, attempt_user, role).content
-        match = re.search(r"\{.*\}", reply, re.S)
-        if match:
-            try:
-                parsed = json.loads(match.group(0))
-                if isinstance(parsed, dict):
-                    return parsed
-                last_error = f"top-level JSON must be an object, got {type(parsed).__name__}"
-            except json.JSONDecodeError as error:
-                last_error = error
-        attempt_user = (user +
-            f"\n\nYOUR PREVIOUS REPLY WAS INVALID JSON ({last_error}). "
-            "Return ONLY valid JSON. Escape every double quote inside string "
-            "values as \\\" — book quotes often contain dialogue in quotes.")
+        try:
+            reply = llm_invoke(system, attempt_user, role).content
+        except Exception as error:
+            # A call that never came back is still a call a recording owes an
+            # account of: without this line a timed-out planner leaves no record
+            # at all, and a replay cannot tell that from an item nobody ran. The
+            # bare `raise` re-raises the same exception object, so no frame above
+            # this one sees any difference.
+            _observe_json_call({"role": role, "attempt": attempt + 1, "system": system,
+                                "user": attempt_user, "raw": "",
+                                "error": f"{type(error).__name__}: {error}"})
+            raise
+        parsed, why = json_object(reply)
+        if why:
+            last_error = why
+        # every attempt, parsed or not: a recording that dropped the malformed
+        # first reply would replay a retry that never happened
+        _observe_json_call({"role": role, "attempt": attempt + 1, "system": system,
+                            "user": attempt_user, "raw": reply,
+                            "error": "" if parsed is not None else (why or NO_JSON_OBJECT)})
+        if parsed is not None:
+            return parsed
+        attempt_user = retry_payload(user, last_error)
     raise ValueError(f"model failed to produce valid JSON twice: {last_error}")
 
 
