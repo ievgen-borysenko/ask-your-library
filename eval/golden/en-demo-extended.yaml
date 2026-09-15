@@ -14,7 +14,7 @@ questions:
   - The Hound of the Baskervilles
   expected_facts:
   - Holmes
-  - moor
+  - Baskerville
   expected_behavior: clarify_or_answer
   notes: UNVERIFIED — phrased to first evoke the whole Holmes corpus (detective + companion investigating)
     before the family-curse spectral-hound detail narrows it specifically to The Hound of the Baskervilles;
@@ -114,7 +114,6 @@ questions:
   expected_books:
   - A Study in Scarlet
   expected_facts:
-  - army doctor
   - wrist
   - left arm
   notes: 'PROPOSED (human-style set, 03.09; verify against data/prepared/<id>.json): Medical yet military
@@ -198,7 +197,8 @@ questions:
   - bacteria
   notes: 'PROPOSED (human-style set, 03.09; verify against data/prepared/<id>.json): Time Machine: Eloi/Morlocks,
     no reversal, the Traveller only escapes and later vanishes. War of the Worlds: humans do not defeat
-    the Martians; Earth microbes kill them.'
+    the Martians; Earth bacteria kill them - "bacteria" is the word the text and the card use,
+    and it is the expected_fact.'
 - id: h16-which-stoic-book
   question: I want to start one of the two Stoic books in my library. Which one feels like a man reminding
     himself how to behave, and which one feels more like someone teaching other people?
@@ -221,7 +221,6 @@ questions:
   - The Adventures of Sherlock Holmes
   expected_facts:
   - Thibermesnil
-  - too late
   notes: 'PROPOSED (rewritten 03.09: the earlier wording was answerable from Lupin alone, so the Doyle
     book in expected_books made the test defective). ''Sherlock Holmes Arrives Too Late'': Holmes reconstructs
     the Thibermesnil passage but Lupin has already robbed and escaped and takes Holmes''s watch; the contrast

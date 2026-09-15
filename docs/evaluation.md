@@ -51,13 +51,18 @@ substring presence, no stemming, no synonyms, no edit distance, so a red row mea
 string is not in the answer". Both counts are summed in the totals block, and
 `eval/summarize_report.py` carries them into the committed summary together with every behaviour
 PASS whose answer is missing a fact. It is a **fourth deterministic row, not a fourth term in the
-behaviour verdict** (ADR-010: rows that cannot be confused, no composite score). Items that carry
-no facts score 0/0 and are counted in neither half of the totals: the refusals, which have nothing
-to narrate, and the clarify items whose two candidate books would each demand a different answer
-(c09, q06, h22, and the routing-only k09, which is not scored on what it names). The golden files'
-shape - allowed keys per file, required keys, types, unique ids and no repeated question - is
-pinned by `tests/test_golden_schema.py`; the facts scoring itself by
-`tests/test_agent_eval_facts.py`.
+behaviour verdict** (ADR-010: rows that cannot be confused, no composite score). Ten of the 42
+items carry no facts, score 0/0 and are counted in neither half of the totals: the five refusals,
+which have nothing to narrate; the three clarify items whose two candidate books would each demand
+a different answer (c09, q06, h22); k09, which is scored on routing alone and whose answer cannot
+be exhaustive; and k04, whose answer is a negative ("War and Peace is not in this library"), which
+substring presence cannot check. A fact may also not be a string its own question already contains
+- an answer restates its question, so such a fact would score green without measuring anything.
+The golden files' shape - allowed keys per file, required keys, types, facts that are non-empty
+strings and are absent from their question, unique ids and no repeated question - is pinned by
+`tests/test_golden_schema.py`; the facts scoring itself by `tests/test_agent_eval_facts.py`. The
+harness validates `expected_facts` of every item when it loads the file, before the graph is built
+and before the first model call, because `GOLDEN_PATH` may point at a file no test has seen.
 
 Three golden sets, reported separately. **Core** (`eval/golden/en-demo.yaml`, 11 questions, the
 default `GOLDEN_PATH`): eight questions on books the golden author has read and a two-book

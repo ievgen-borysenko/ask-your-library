@@ -11,6 +11,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parents[1]
 
 spec = importlib.util.spec_from_file_location("run_agent_eval", REPO / "eval" / "run_agent_eval.py")
@@ -101,6 +103,38 @@ def test_the_catalog_branch_carries_the_facts_row_too():
     assert missed["behavior_ok"] and not missed["facts_ok"]
 
 
+def test_a_bad_expected_facts_value_is_refused_by_name():
+    """The value is matched as a substring per fact, so int, bare string and
+    empty string each break the row in a different silent way."""
+    harness.check_expected_facts([{"id": "ok", "expected_facts": ["Cedric"]},
+                                  {"id": "no-facts-key", "type": "answer"},
+                                  {"id": "empty-list", "expected_facts": []}])
+    for bad in ([{"id": "unquoted-number", "expected_facts": [33]}],
+                [{"id": "bare-string", "expected_facts": "Cedric"}],
+                [{"id": "blank-fact", "expected_facts": ["Cedric", "   "]}]):
+        with pytest.raises(ValueError) as error:
+            harness.check_expected_facts(bad)
+        assert bad[0]["id"] in str(error.value)
+
+
+def test_a_bad_golden_file_fails_before_the_graph_is_built(tmp_path, monkeypatch):
+    """GOLDEN_PATH points wherever the caller says. The refusal has to come
+    before the first model call, not from the scorer of item 27."""
+    golden = tmp_path / "golden.yaml"
+    golden.write_text("questions:\n- id: unquoted-number\n  type: answer\n  question: q\n"
+                      "  expected_books: []\n  expected_facts:\n  - 33\n", encoding="utf-8")
+
+    def never():
+        raise AssertionError("the graph was built: the run would have been billed")
+
+    monkeypatch.setattr(harness, "build_graph", never)
+    monkeypatch.setattr(harness, "GOLDEN_PATH", golden)
+    monkeypatch.setattr(harness, "RESULTS_DIR", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["run_agent_eval.py"])
+    with pytest.raises(ValueError, match="unquoted-number"):
+        harness.main()
+
+
 def load_summarizer():
     spec = importlib.util.spec_from_file_location(
         "summarize_report", REPO / "eval" / "summarize_report.py")
@@ -180,3 +214,18 @@ def test_summary_carries_the_facts_totals_and_names_incomplete_answers(tmp_path,
     assert "`c06-fogg`: PASS on behaviour but only 1/3 expected facts are present" in out
     assert "`c02-huck`" not in out
     assert "- none" not in out
+
+
+def test_a_report_written_before_this_row_existed_still_summarises(tmp_path, capsys, monkeypatch):
+    """Every report under docs/eval-results/ was written without a facts column;
+    the summary must still read them, and say nothing about facts."""
+    report = tmp_path / "answers-old.md"
+    report.write_text("# Agent eval — x\n\nrun: code abc\n\n"
+                      "## c01-a (identify, 1 steps, 3s) — PASS: titles 1/1\n\ntext\n\n"
+                      "---\n1 completed, 0 errors, 0 clarify interrupts; quotes verified 1/1; evidence items 1\n"
+                      "behavior PASS 1/1 (identify 1/1); expected titles mentioned 1/1\n"
+                      "manual correctness: not scored — tick the checkboxes above\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["summarize_report.py", str(report)])
+    load_summarizer().main()
+    out = capsys.readouterr().out
+    assert "behavior PASS 1/1" in out and "- none" in out and "facts" not in out.split("## Failures")[0]

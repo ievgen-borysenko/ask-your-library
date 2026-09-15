@@ -12,6 +12,8 @@ What this file does NOT check: whether the expected books exist in the manifest
 """
 from pathlib import Path
 
+import unicodedata
+
 import yaml
 
 REPO = Path(__file__).resolve().parents[1]
@@ -41,6 +43,13 @@ def golden_files() -> list[Path]:
 
 def items_of(path: Path) -> list[dict]:
     return yaml.safe_load(path.read_text(encoding="utf-8"))["questions"]
+
+
+def fold(text: str) -> str:
+    """The harness's folding (run_agent_eval.fold), copied rather than imported
+    so this guard needs nothing but yaml — as in test_golden_books_in_manifest."""
+    return "".join(c for c in unicodedata.normalize("NFKD", text.lower())
+                   if not unicodedata.combining(c))
 
 
 def test_every_golden_file_has_a_declared_key_set():
@@ -111,6 +120,25 @@ def test_expected_facts_are_short_non_empty_strings():
             if len(facts) > 4:
                 problems.append(f"{where}: {len(facts)} facts; keep it to the few a reader can check")
     assert not problems, "\n".join(problems)
+
+
+def test_no_fact_is_already_in_its_own_question():
+    """A fact the question itself contains is free: the answer restates the
+    question — every answer does, at least partly — and the row goes green
+    without measuring anything. "Was he an army doctor back from Afghanistan?"
+    was exactly that, and so was asking a catalogue item about Ivanhoe to say
+    "Ivanhoe". Folded on both sides, the same rule the scorer matches by."""
+    def flat(text: str) -> str:
+        return " ".join(fold(text).split())
+
+    problems = []
+    for path in golden_files():
+        for item in items_of(path):
+            question = flat(item["question"])
+            for fact in item.get("expected_facts") or []:
+                if flat(fact) in question:
+                    problems.append(f"{path.name}:{item['id']}: {fact!r} is already in the question")
+    assert not problems, "facts an answer scores by echoing the question:\n" + "\n".join(problems)
 
 
 def test_refusal_items_carry_no_facts():

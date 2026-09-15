@@ -16,8 +16,8 @@ questions:
   - Ivanhoe
   expected_facts:
   - Cedric
-  - Richard
-  - Saxon
+  - Palmer
+  - disinherited
   notes: 'Reader-verified 2026-09-05. Wilfred of Ivanhoe returns disguised as a Palmer after
     Cedric disinherited him; Saxon-Norman conflict; Richard the Lionheart returns in disguise
     (the Black Knight). Text: "Palmer" and "disinherited" each appear in 5+ chapters.'
@@ -66,7 +66,8 @@ questions:
     Chapter XI) and later remains on the shore terrify him; he hides, fortifies, plans an
     ambush, then reasons that he has no right to kill them for customs they do not know as
     crimes. Much later he attacks a party to save a captive, who becomes Friday. Expected
-    answer: no, not immediately.'
+    answer: no, not immediately. The expected_fact "footprint" is the word this note and the
+    book card use; the novel itself says it as the phrase quoted above.'
 
 - id: c05-quixote-windmills
   question: Why does Don Quixote attack the windmills even after Sancho tells him what they

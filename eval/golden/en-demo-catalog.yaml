@@ -84,10 +84,11 @@ questions:
   expected_books:
   - "Ivanhoe — Walter Scott"
   expected_facts:
-  - Ivanhoe
+  - Walter Scott
   notes: 'The key, not the title: "Ivanhoe — Wrong Author" would be another book. expected_total
     keeps a targeted run of this item from passing over a partial index, where the one right
-    answer says nothing about the other thirty-two books.'
+    answer says nothing about the other thirty-two books. The expected_fact is the author and
+    not the title, which is in the question: an answer echoing the question would score it green.'
 - id: k04-has-no
   question: Is War and Peace in my library?
   type: catalog

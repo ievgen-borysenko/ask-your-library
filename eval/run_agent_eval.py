@@ -340,6 +340,25 @@ def facts_score(item: dict, answer: str) -> dict:
             "facts_ok": len(found) == len(facts)}
 
 
+def check_expected_facts(items: list[dict]) -> None:
+    """Refuse a golden file whose expected_facts are not lists of non-empty
+    strings, BEFORE the first model call.
+
+    GOLDEN_PATH points wherever the caller says, and the failure modes are not
+    cosmetic: an unquoted `- 33` is an int and raises inside the scorer, in the
+    middle of a run that has already been billed for every item before it; a
+    bare string (`expected_facts: Cedric`) is iterated per character, so the row
+    silently measures letters; an empty string is contained in every answer and
+    is therefore always green. tests/test_golden_schema.py checks the three
+    files in the repository — this checks the file actually being run."""
+    for item in items:
+        facts = item.get("expected_facts", [])
+        if not isinstance(facts, list) or not all(isinstance(f, str) and f.strip() for f in facts):
+            raise ValueError(
+                f"{item.get('id', '<no id>')}: expected_facts must be a list of non-empty strings, "
+                f"got {facts!r} (a number needs quoting: - \"33\")")
+
+
 def score(item: dict, r: dict) -> dict:
     """Behavioural score of one run against its golden item (pure function)."""
     expected = item.get("expected_books") or []
@@ -448,6 +467,9 @@ def score(item: dict, r: dict) -> dict:
 
 def main() -> None:
     golden = yaml.safe_load(GOLDEN_PATH.read_text(encoding="utf-8"))
+    # the whole file, not only the requested ids: a bad item must fail the run
+    # before the graph is built and before anything is billed
+    check_expected_facts(golden["questions"])
     # optional acceptance threshold: --min-pass N makes the run exit 1 below N behaviour PASSes
     argv = sys.argv[1:]
     min_pass = None

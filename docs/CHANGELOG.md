@@ -19,8 +19,15 @@
   different answer carry an empty list on purpose. The shape of the three files is now pinned by
   `tests/test_golden_schema.py` — allowed keys per file (a misspelled `expected_behaviour` used to
   be ignored silently and score green), required keys, types, unique ids and no repeated question
-  — and the scoring by `tests/test_agent_eval_facts.py`. No run was made and no published number
-  changed.
+  — and the scoring by `tests/test_agent_eval_facts.py`, with the harness refusing a malformed
+  `expected_facts` when it loads the file, before the graph is built and before the first billed
+  call (`GOLDEN_PATH` may point anywhere). **All three golden checksums moved**:
+  `en-demo.yaml` `efb25bda` → `edc15194`, `en-demo-extended.yaml` `8eec61c9` → `836d3870`,
+  `en-demo-catalog.yaml` `14b001e2` → `72eb2c2b`, so **no report committed under
+  [`eval-results/`](eval-results/) reproduces against the current files**: every one of them was
+  measured on the golden set as it stood before this change, and their fingerprints say so. No run
+  was made here either — the facts column has not been measured once, on any configuration, and no
+  published number changed.
 
 ## 0.3.1 (2026-09-15)
 
