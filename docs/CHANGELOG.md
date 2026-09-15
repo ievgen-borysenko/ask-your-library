@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Docs: ADR-011 marked superseded.** The export it described ran once, on 2026-09-08; since
+  then this repository is developed directly, by pull request against `main` under the branch
+  ruleset, with no allowlist kept for new files. ADR-011's status line and a dated note record
+  the switch; "Where the measured code lives" in [`evaluation.md`](evaluation.md) is updated to
+  match. No code changed.
 - **A plan-only evaluation: record the planner's decisions once, replay them for nothing.**
   `plan()` is one model call followed by a hundred lines of deterministic post-processing — the
   validated mode, the parsed catalogue operation, the mixed-intent gate, the query filter, the
