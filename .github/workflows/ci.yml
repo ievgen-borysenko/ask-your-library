@@ -127,4 +127,8 @@ jobs:
         # with no extra install, so every `run:` step's shell is checked too.
         # pyflakes is not installed here, so actionlint's python-only checks
         # disable themselves rather than half-running.
-        run: actionlint -color .github/workflows/*.yml
+        #
+        # No glob argument: `*.yml` would silently skip a future `*.yaml`
+        # file. Bare `actionlint` auto-discovers every workflow file under
+        # .github/workflows/ regardless of extension.
+        run: actionlint -color
