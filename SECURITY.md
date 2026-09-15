@@ -29,9 +29,17 @@ One environment knob loads and runs code by design, and it is a test seam, not a
 also reads exactly `this-server-answers-from-a-script`; set alone it stops the server from coming
 up, rather than letting one serve scripted answers that look real. The pair raises no privilege —
 anything that can set variables in the server's environment can already run code as the server —
-so the guard is against accident, not against an attacker, and neither name belongs in a `.env`,
-a shell profile or a deployment unit. With neither set, which is every ordinary start, nothing is
-loaded and nothing is patched.
+so the guard is against accident, not against an attacker. With neither set, which is every
+ordinary start, nothing is loaded and nothing is patched.
+
+**A `.env` in the directory the server is started from is part of that environment**, and earlier
+than it looks: `chainlit`'s own import calls `load_dotenv(<cwd>/.env)` before `ui.py` runs a line
+of its own, so a `.env` carrying both names would arm the seam without anyone typing them — the
+operator chooses the working directory, not just the exported variables. Because of that,
+`install_fake_backend()` refuses outright when either name appears as a key in `<cwd>/.env` or in
+the nearest `.env` above it, whatever the value there: these two are exported for one command by
+the person starting the server, or they are not set at all. Neither belongs in a `.env`, a shell
+profile or a deployment unit.
 
 ## Reporting a vulnerability
 

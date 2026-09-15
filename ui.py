@@ -102,18 +102,18 @@ def _clarify_timeout_seconds() -> int:
     AYL_CLARIFY_TIMEOUT_S shortens it for a test that has to SEE the timeout
     (tests/ui/test_ui_smoke.py leaves a clarify unanswered on purpose). A
     nonsense value is refused rather than rounded to a default: a server whose
-    clarify silently expires after 0 s would look like a model that never
-    asks."""
+    clarify silently expires after 0 s would look like a model that never asks.
+
+    Accepted: digits only, with surrounding whitespace ignored (a `.env` line
+    keeps its trailing spaces). Everything `int()` would also take is refused —
+    `1_0` is ten to Python and a typo to a reader, and `+5` or `-1` are neither
+    what anyone meant nor worth guessing at."""
     raw = os.environ.get("AYL_CLARIFY_TIMEOUT_S", "").strip()
     if not raw:
         return 300
-    try:
-        seconds = int(raw)
-    except ValueError:
-        seconds = 0
-    if seconds <= 0:
-        raise SystemExit("AYL_CLARIFY_TIMEOUT_S must be a whole number of seconds above 0")
-    return seconds
+    if not raw.isdigit() or int(raw) <= 0:
+        raise SystemExit("AYL_CLARIFY_TIMEOUT_S must be digits only, a number of seconds above 0")
+    return int(raw)
 
 
 CLARIFY_TIMEOUT_SECONDS = _clarify_timeout_seconds()

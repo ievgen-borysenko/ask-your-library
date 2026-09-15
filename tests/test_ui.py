@@ -820,12 +820,17 @@ def test_the_clarify_timeout_is_five_minutes_unless_a_test_shortens_it(tmp_path)
     default is the reader's five minutes; AYL_CLARIFY_TIMEOUT_S exists so the UI
     smoke test can watch one expire. A nonsense value is refused, not rounded:
     a server whose clarify expires immediately looks like a model that never
-    asks."""
+    asks. Digits only, surrounding whitespace ignored — `int()` would also read
+    `1_0` as ten, which is a typo to everyone but Python."""
     environment = dict(CHAINLIT_AUTH_SECRET="test-secret", AYL_ALLOW_DEFAULT_LOGIN="1",
                        AYL_ALLOW_START_WITHOUT_KEY="1", AYL_CHAINLIT_DIR=str(tmp_path / "chainlit"))
     code = "import ui; print(ui.CLARIFY_TIMEOUT_SECONDS)"
     assert _out(code, **environment) == "300"
     assert _out(code, **environment, AYL_CLARIFY_TIMEOUT_S="25") == "25"
-    for bad in ("0", "-1", "soon"):
+    assert _out(code, **environment, AYL_CLARIFY_TIMEOUT_S=" 25 ") == "25"   # a .env keeps its spaces
+    # Blank is absent, as everywhere else in this project (a copied .env.example
+    # line): the default stands rather than the server refusing to start.
+    assert _out(code, **environment, AYL_CLARIFY_TIMEOUT_S="  ") == "300"
+    for bad in ("0", "-1", "soon", "1_0", "+5", "2.5", "25s"):
         result = _run(code, check=False, **environment, AYL_CLARIFY_TIMEOUT_S=bad)
         assert result.returncode != 0 and "AYL_CLARIFY_TIMEOUT_S" in result.stderr

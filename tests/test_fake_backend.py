@@ -107,6 +107,63 @@ def test_the_banner_names_the_script_it_installed(monkeypatch, script, capsys):
     assert str(script) in capsys.readouterr().err
 
 
+# --- the .env path, which is how this would be armed by accident --------------
+def test_a_dotenv_naming_either_variable_refuses_to_start(monkeypatch, tmp_path, script):
+    """chainlit's own import calls load_dotenv(<cwd>/.env) before ui.py runs a
+    line, so a `.env` carrying these names IS the process environment by the time
+    the seam reads it. The refusal does not try to work out where the current
+    value came from: the name being a key in that file is enough."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text(f"{ENABLE_VAR}={script}\n{CONFIRM_VAR}={CONFIRM_PHRASE}\n")
+    # Exactly what dotenv would have done, so the test describes the real shape.
+    enable(monkeypatch, path=script, confirm=CONFIRM_PHRASE)
+    with pytest.raises(SystemExit) as refusal:
+        install_fake_backend()
+    message = str(refusal.value)
+    assert ENABLE_VAR in message and ".env" in message
+    assert MODULE_NAME not in sys.modules          # nothing was loaded, let alone run
+
+
+def test_the_confirmation_alone_in_a_dotenv_is_refused_too(monkeypatch, tmp_path, script):
+    """Either name is enough: half a pair in a file is still a pair nobody
+    typed, and the half that is missing is the easy one to export by habit."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text(f"{CONFIRM_VAR}={CONFIRM_PHRASE}\n")
+    enable(monkeypatch, path=script, confirm=CONFIRM_PHRASE)
+    with pytest.raises(SystemExit) as refusal:
+        install_fake_backend()
+    assert CONFIRM_VAR in str(refusal.value)
+
+
+def test_an_unrelated_dotenv_changes_nothing(monkeypatch, tmp_path, script, capsys):
+    """The check is about these two names, not about having a `.env` at all —
+    every developer has one, and it is what `cp .env.example .env` is for."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text("LLM_BACKEND=ollama\nLIBRARY_DB_PATH=data/lancedb\n")
+    enable(monkeypatch, path=script, confirm=CONFIRM_PHRASE)
+    assert install_fake_backend() == str(script)
+    assert "FAKE BACKEND" in capsys.readouterr().err
+
+
+def test_an_unparsable_dotenv_does_not_invent_a_refusal(monkeypatch, tmp_path, script):
+    """dotenv itself skips what it cannot read; a refusal nobody could explain
+    would be worse than the sentence in SECURITY.md."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_bytes(b"\xff\xfe not text at all \x00")
+    enable(monkeypatch, path=script, confirm=CONFIRM_PHRASE)
+    assert install_fake_backend() == str(script)
+
+
+def test_the_dotenv_is_not_read_at_all_when_the_seam_is_off(monkeypatch, tmp_path):
+    """The file is consulted only once the seam has been asked for. An ordinary
+    start — neither name in the environment — reads two environment variables
+    and returns, whatever any `.env` nearby happens to say."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text(f"{ENABLE_VAR}=/nowhere.py\n")
+    enable(monkeypatch)                              # neither name in the environment
+    assert install_fake_backend() is None
+
+
 def test_the_phrase_is_a_sentence_not_a_flag():
     """A one-character value ("1", "true") is the shape an operator sets by
     habit; this one has to be typed on purpose."""
