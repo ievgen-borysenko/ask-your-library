@@ -64,7 +64,8 @@ import httpx
 import pytest
 from conftest import run_fresh as _run
 
-from egress_guard import EgressBlocked, is_loopback, record_egress, reserved_loopback_port
+from egress_guard import (EgressBlocked, EgressGuard, is_loopback, record_egress,
+                          reserved_loopback_port)
 
 # Captured BY VALUE, at the import of this module and before any guard is armed.
 # A module that did this could not be reached by a monkeypatch on `socket`; the
@@ -148,6 +149,9 @@ def test_the_floor_sees_a_tls_socket():
     """TLS is a wrapper around the same socket, so the connect underneath it is
     the same audited event — and it is refused before any handshake."""
     context = ssl.create_default_context()
+    # No handshake ever happens here, but a context that would accept TLS 1.0 is
+    # a finding wherever it is written, and a test file is not an exemption.
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     with record_egress() as guard:
         with pytest.raises(EgressBlocked):
             with context.wrap_socket(socket.socket(),
@@ -235,18 +239,33 @@ def test_the_reverse_lookup_is_watched_too():
     assert guard.layers_for("127.0.0.1") == ["socket.getnameinfo"]
 
 
-def test_a_bind_is_recorded_and_never_refused():
-    """A bind is the other direction, and refusing one would break a library
-    that opens a local socket for its own reasons. It is recorded so a test can
-    say this process opened no listening socket on a public interface, and it is
-    kept out of `targets()`, which answers "who was talked to"."""
+def test_a_bind_is_recorded_and_kept_out_of_the_targets():
+    """A bind is the other direction. It is recorded — so a test can say this
+    process opened no listening socket on a public interface — and it is kept
+    out of `targets()`, which answers "who was talked to"."""
     with record_egress() as guard:
         with socket.socket() as listener:
-            listener.bind(("0.0.0.0", 0))
+            listener.bind(("127.0.0.1", 0))
             bound_port = listener.getsockname()[1]
-    assert guard.off_machine() == set()
-    assert guard.binds() == {("0.0.0.0", 0)} and guard.targets() == set()
     assert bound_port                                   # the bind really happened
+    assert guard.off_machine() == set()
+    assert guard.binds() == {("127.0.0.1", 0)} and guard.targets() == set()
+
+
+def test_a_bind_off_this_machine_is_recorded_and_still_not_refused():
+    """The policy half, exercised on the guard directly rather than by opening a
+    socket on every interface: refusing a bind would break a library that opens
+    a local socket for its own reasons, so a wildcard bind is recorded and
+    allowed — and it is visible afterwards, which is what a test needs to say it
+    did not happen during a real run."""
+    guard = EgressGuard()
+    guard.check("socket.bind", "0.0.0.0", 8000)          # does not raise
+    assert guard.off_machine() == set()
+    assert guard.binds() == {("0.0.0.0", 8000)} and guard.targets() == set()
+    # And the same address through any other door is refused, so "never refused"
+    # is a property of the bind event and not of the address.
+    with pytest.raises(EgressBlocked):
+        guard.check("socket.connect", "0.0.0.0", 8000)
 
 
 def test_loopback_is_allowed_and_still_recorded():
