@@ -115,7 +115,10 @@ and the OpenRouter prices in a copied `.env` are OpenRouter settings and are not
 nothing goes to OpenRouter by accident; `OPENROUTER_BASE_URL` keeps serving `EMBED_BACKEND=openrouter`
 if you use it. An unknown `LLM_BACKEND` value refuses to start rather than falling back to
 either backend. "Nothing leaves the machine" holds with the defaults as shipped — `LLM_BACKEND=ollama`,
-`EMBED_BACKEND=ollama`, an `OLLAMA_URL` that points at this machine — and no LangSmith tracing. Tracing is switched on by the environment, and the
+`EMBED_BACKEND=ollama`, an `OLLAMA_URL` that points at this machine — and no LangSmith tracing; it is
+asserted for the package's own answering path by `tests/test_egress_local.py`, whose scope (this
+Python process, not Ollama's, not the browser's, not Chainlit's) is stated in
+[Privacy](privacy-and-threat-model.md). Tracing is switched on by the environment, and the
 SDK reads two prefixes: `build_graph` sets `LANGCHAIN_TRACING_V2=true` whenever `LANGCHAIN_API_KEY` is
 present and that variable is unset, and the SDK itself honours `LANGSMITH_TRACING` /
 `LANGSMITH_TRACING_V2` with `LANGSMITH_API_KEY`, which another project's shell may have exported. To

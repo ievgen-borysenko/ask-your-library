@@ -9,39 +9,59 @@
   blanked — and construction is the wrong evidence for it: a fake model makes no connection
   whether or not the real one would have made a hosted one, and an import, an SDK or a tracing
   client can open a socket no assertion would notice. `tests/test_egress_local.py` instruments the
-  process instead. `tests/egress_guard.py` records every outbound attempt at three layers — the
-  socket floor (`socket.socket.connect` / `connect_ex`, `socket.create_connection`), the resolver,
-  and the httpx transport — and refuses anything that is not loopback, so a blocked host fails
-  before a resolver on the network is told its name. The resolver means all five of its entry
-  points: `getaddrinfo` is the door httpx and urllib3 use, and `gethostbyname`,
-  `gethostbyname_ex`, `gethostbyaddr` and `getnameinfo` are four more, one of them on a path this
-  project loads — LangSmith's `_is_localhost()` asks `gethostbyname` about its own endpoint host,
-  so a guard watching `getaddrinfo` alone would have let the name of a tracing endpoint onto the
-  wire while the file claimed no name leaves. Loopback is
-  recorded too, which is what makes the allow-list an assertion rather than a silence. The test
-  then runs the real thing in the shipped local configuration with Ollama not running: the real
-  preflight, the real `embeddings`, the real compiled graph through `runner.run_question`. All 16
-  recorded attempts of the reference run — preflight's `/api/tags`, the embedder's `/api/embed`,
-  the planner's call and its two retries — target loopback on the configured Ollama port, nothing
-  else is contacted or looked up, and the run ends on the unreachable local runtime (preflight
-  exit 5, then a connection error to that endpoint) instead of falling back to a hosted call.
-  Four controls keep that meaningful: the guard catching a deliberate outbound request before any
-  lookup, the same graph under `LLM_BACKEND=openrouter` with a placeholder key, where the guard
-  records `openrouter.ai:443` and refuses it, the same backend with no key, where nothing is
-  attempted at all, and the local run repeated with a usable-looking `OPENROUTER_API_KEY` present,
-  so that a silent hosted fallback would be stopped by the guard rather than excused by a missing
-  credential. Both httpx distributions installed here are patched, because the OpenAI SDK's
-  client is not built on the `httpx` the application imports; the socket floor caught the model
-  calls regardless, which is why there is a floor. Nothing in `src/` was touched: the application
-  runs exactly as it ships and the process around it is instrumented. Scope is stated in the test
-  and in the docs: one Python process — not Ollama, not the browser, not Chainlit's JavaScript,
-  not a subprocess. The whole configuration is set per child interpreter through
-  `conftest.run_fresh`, so both CI legs (`test (ollama)`, `test (openrouter)`) run the same thing,
-  with no network and no Ollama; that scrub list now also covers the proxy variables
-  (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` and their lowercase twins), which this
-  project never reads but every HTTP client does — one of them set in a developer's shell would
-  send each request to the proxy's host instead of the configured endpoint, which is a different
-  destination for these tests to record and an off-machine hop out of a loopback URL.
+  process instead.
+
+  The floor of `tests/egress_guard.py` is CPython's own socket audit hook (`sys.addaudithook`),
+  not a set of monkeypatches — because a socket can be opened without touching any name a patch
+  can reach: `_socket.socket` is the C type `socket.socket` inherits from and has its own
+  `connect`; `from socket import getaddrinfo` binds the function by value, so a module that did
+  that before the guard went on keeps calling the real one; and UDP needs no `connect` at all, its
+  address rides on `sendto` / `sendmsg`, which is the shape of a resolver query and of a telemetry
+  ping. The interpreter raises `socket.connect`, `socket.sendto`, `socket.sendmsg`, `socket.bind`,
+  `socket.getaddrinfo`, `socket.gethostbyname` (which `gethostbyname_ex` raises too),
+  `socket.gethostbyaddr` and `socket.getnameinfo` from the C layer for every socket whatever its
+  class or import path — each event name verified against the installed interpreter by a probe,
+  not taken from the documentation — so one hook sees all of it, background threads included. A
+  bind is recorded and never refused: it is the other direction, and recording it is what lets the
+  test also say no listening socket was opened on a public interface. One layer sits on top,
+  because it says something the floor cannot: the httpx transport, in **both** installed httpx
+  distributions (the model client's SDK does not use the `httpx` the application imports), where a
+  hosted call is refused with its URL intact and before any lookup. Loopback is recorded too,
+  which is what makes the allow-list an assertion rather than a silence. The hook is installed
+  once per interpreter at import and armed through a flag, since CPython cannot remove one.
+
+  The test then runs the real thing in the shipped local configuration with Ollama not running:
+  the real preflight, the real `embeddings`, the real compiled graph through
+  `runner.run_question`. All 14 recorded attempts of the reference run — preflight's `/api/tags`,
+  the embedder's `/api/embed`, the planner's call and its two retries — target loopback on the
+  configured Ollama port, the only bind is loopback, nothing else is contacted or looked up, and
+  the run ends on the unreachable local runtime (preflight exit 5, then a connection error to that
+  endpoint) instead of falling back to a hosted call. In the child the guard is armed as the first
+  statement — before the package, before its dependencies, before the guard module itself imports
+  httpx — and is never disarmed, so import-time lookups and everything that still runs during
+  interpreter shutdown are inside the recording; the report is emitted from an `atexit` handler
+  registered first, which therefore runs last, after the interpreter has joined its non-daemon
+  threads, and the parent checks the child's exit code, its stderr and that the report is the last
+  line it printed. Controls keep the silence meaningful: each door refusing a deliberate attempt
+  (raw `_socket`, a by-value resolver, UDP, TLS, asyncio, both httpx distributions), a module that
+  connects while it is being imported, the same graph under `LLM_BACKEND=openrouter` with a
+  placeholder key where the guard records `openrouter.ai:443` and refuses it, that backend with no
+  key where nothing is attempted at all, and the local run repeated with a usable-looking
+  `OPENROUTER_API_KEY` present, so a silent hosted fallback would be stopped by the guard rather
+  than excused by a missing credential.
+
+  Nothing in `src/` was touched: the application runs exactly as it ships and the process around
+  it is instrumented. The scope is stated in the test and in the docs, and the README's "no other
+  path out" is narrowed to match it: one Python process on one path — `runner.run_question` with
+  the real preflight and embedder — and not Chainlit (the `ui` extra is not installed in the legs
+  that run this file), not Ollama, not the browser, not a subprocess, not `scripts/`. The
+  configuration is set per child interpreter through `conftest.run_fresh`, so both CI legs
+  (`test (ollama)`, `test (openrouter)`) run the same thing, with no network and no Ollama; that
+  scrub list now also covers the proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`,
+  `NO_PROXY` and their lowercase twins), which this project never reads but every HTTP client
+  does — one of them set in a developer's shell would send each request to the proxy's host
+  instead of the configured endpoint, which is a different destination for these tests to record
+  and an off-machine hop out of a loopback URL.
 
 - **A JSON sidecar per run, and `--repeat N`, so a reported number can carry its spread.** Every
   run wrote one Markdown report and nothing else: a reader's document whose shape is a contract

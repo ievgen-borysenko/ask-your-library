@@ -55,35 +55,54 @@ key, and the diagram's yellow describes what the hosted alternative would send.
 All local storage is persistent, plaintext and unencrypted. There is no retention policy and no
 cleanup command.
 
-**The "nothing leaves the machine" claim is tested, and the test says exactly how far it
-reaches.** `tests/test_egress_local.py` instruments the Python process with an egress guard
-(`tests/egress_guard.py`) that records every outbound connection attempt at three layers — the
-socket, the resolver, and the httpx transport the model client goes through — and refuses
-anything that is not loopback. The resolver means all five of its entry points, not only
-`getaddrinfo`: `gethostbyname`, `gethostbyname_ex`, `gethostbyaddr` and `getnameinfo` are separate
-calls into it, and one of them is on a path this project loads — LangSmith's `_is_localhost()`
-asks `gethostbyname` about its own endpoint host. It then runs the real thing in the shipped
-configuration
-(`LLM_BACKEND=ollama`, `EMBED_BACKEND=ollama`, tracing off, no credentials) with Ollama *not*
-running: the real preflight, the real embedder, and the real compiled graph through
-`runner.run_question`. Every attempt recorded — 16 of them on the reference run, from preflight's
-`/api/tags`, the embedder's `/api/embed` and the planner's call with its retries — targets
-loopback on the configured Ollama port and nothing else. No OpenRouter, no LangSmith, and no name
-lookup for either: a DNS query is itself a packet leaving the machine, so a blocked host is
-refused before the resolver is asked about it. The run then fails on the unreachable local runtime
-(preflight exits 5, the question ends in a connection error to that endpoint) rather than falling
-back to a hosted call. Two control tests keep that silence meaningful: the guard catching a
-deliberate outbound request, and the same graph with `LLM_BACKEND=openrouter`, where the guard
-records the attempt to `openrouter.ai:443` and refuses it — proof that it sees what it claims to
-see. Both CI legs (`test (ollama)` and `test (openrouter)`) run it, with no network and no Ollama.
+**The "nothing leaves the machine" claim is tested on one path, and the test says exactly which.**
+`tests/test_egress_local.py` instruments the Python process with an egress guard
+(`tests/egress_guard.py`) and then runs the package's own answering path in the shipped
+configuration (`LLM_BACKEND=ollama`, `EMBED_BACKEND=ollama`, tracing off, no credentials) with
+Ollama *not* running: the real `preflight.check_environment()`, the real `embeddings` embedder,
+and the real compiled graph through `runner.run_question` — the path the CLI and the eval harness
+take, and the one the web UI's Python half calls into.
 
-**Its scope is one process.** It covers the interpreter that runs the CLI, the eval and the
-Chainlit server's Python half, and nothing else. Ollama is a separate process: what it does with a
-prompt once it has it — a model pulled on demand, a telemetry ping, a remote inference backend
-someone configured — is outside the test. So are the browser's own requests and anything
-Chainlit's JavaScript bundle does, and so is any process this one starts. Read the result as "the
-application's own Python process opens no connection to anything but the local Ollama endpoint it
-is configured with", which is the part of the claim this repository can own.
+The floor of the guard is CPython's own socket audit hook (`sys.addaudithook`), not a set of
+monkeypatches: the interpreter raises `socket.connect`, `socket.sendto`, `socket.sendmsg`,
+`socket.bind`, `socket.getaddrinfo`, `socket.gethostbyname`, `socket.gethostbyaddr` and
+`socket.getnameinfo` from the C layer for every socket, whatever its class or import path, which
+covers a raw `_socket` object, a resolver function captured by value, a UDP datagram that never
+calls `connect` at all, and anything a background thread does. On top of it sits one httpx
+transport layer (in both installed httpx distributions), so a hosted call is refused while its URL
+is still intact and before any name lookup. Everything is recorded, loopback included; everything
+that is not loopback is refused. A bind is recorded and never refused — it is the other direction —
+so the test can also say no listening socket was opened on a public interface.
+
+On the reference run the guard recorded 14 attempts, all to loopback on the configured Ollama
+port: preflight's `/api/tags`, the embedder's `/api/embed`, and the planner's call with its two
+retries, each seen at the socket floor and, for the model calls, at the httpx layer above it. No
+OpenRouter, no LangSmith, and no name lookup for either — a DNS query is itself a packet leaving
+the machine, so a blocked host is refused before the resolver is asked about it. The run then
+fails on the unreachable local runtime (preflight exits 5, the question ends in a connection error
+to that endpoint) rather than falling back to a hosted call. Controls keep that silence
+meaningful: the guard catching a deliberate outbound request at each door, a module that connects
+while it is being imported, the same run with a usable-looking `OPENROUTER_API_KEY` present, and
+the same graph with `LLM_BACKEND=openrouter`, where the guard records the attempt to
+`openrouter.ai:443` and refuses it — proof that it sees what it claims to see. Both CI legs
+(`test (ollama)` and `test (openrouter)`) run it, with no network and no Ollama.
+
+**Its scope is one process, on one path.** Read the result as: *on the package's own runner path,
+the application's Python process opens no connection to anything but the local Ollama endpoint it
+is configured with*. It is not a claim about the machine, and not about every way this repository
+can be started:
+
+- **Chainlit is not exercised.** The `ui` extra is not installed in the CI legs that run this
+  file, so `ui.py`, its server, its SQLite persistence and its own HTTP stack are outside these
+  assertions.
+- **Ollama is a separate process.** What it does with a prompt once it has it — a model pulled on
+  demand, a telemetry ping, a remote inference backend someone configured — is outside the test.
+- **The browser is not in it.** Chainlit ships a JavaScript bundle; what a page fetches is not a
+  socket of this process.
+- **A subprocess is not in it.** An audit hook is per interpreter, so anything this process spawns
+  has its own sockets and is not instrumented.
+- **`scripts/` is not in it.** `scripts/ingest_demo_corpus.py` downloads a corpus on purpose; that
+  is a different path with a different claim.
 
 ## Threat model
 

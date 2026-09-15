@@ -176,16 +176,19 @@ open ones often refer to them.
 - **Nothing in the suite could see a connection attempt**, so the local configuration's central
   privacy claim was proved by construction (a faked model, an in-memory library, blanked
   credentials) rather than asserted. Closed by `tests/test_egress_local.py` and
-  `tests/egress_guard.py`: an egress guard records every outbound attempt at the socket, all five
-  resolver entry points and the httpx layer (in both installed httpx distributions) and refuses
-  anything that is not loopback, and the real preflight, embedder and
-  compiled graph run under it in the shipped local configuration with Ollama not running — every
-  attempt to loopback on the configured Ollama port, no hosted provider or tracing endpoint
-  contacted or looked up, and a clean failure on the unreachable local runtime instead of a hosted
-  fallback. Controls: the guard catching a deliberate outbound request, and the same graph under
+  `tests/egress_guard.py`: an egress guard whose floor is CPython's socket audit hook (every
+  socket, whatever its class or import path, background threads and UDP included) with an httpx
+  transport layer above it in both installed httpx distributions, refusing anything that is not
+  loopback; the real preflight, embedder and compiled graph run under it in the shipped local
+  configuration with Ollama not running — every attempt to loopback on the configured Ollama port,
+  no hosted provider or tracing endpoint contacted or looked up, and a clean failure on the
+  unreachable local runtime instead of a hosted fallback. Controls: each door refusing a
+  deliberate attempt, a module that connects at import time, and the same graph under
   `LLM_BACKEND=openrouter` where the attempt to `openrouter.ai:443` is recorded and refused.
-  Scope, stated in the test and in `docs/privacy-and-threat-model.md`: one Python process, not
-  Ollama's, not the browser's, not a subprocess's.
+  Scope, stated in the test and in `docs/privacy-and-threat-model.md`: one Python process on the
+  `runner.run_question` path — not Chainlit, not Ollama, not the browser, not a subprocess.
+  Still open: the Chainlit server's own egress is untested, because the `ui` extra is not
+  installed in the legs that run this file.
 - **Eval reports record single runs.** Closed by `--repeat N` and a JSON sidecar per run
   (`eval/run_agent_eval.py`, ADR-010 amended 15.09): each item runs N times, scoring stays per
   attempt, and both files carry the spread — the boolean rows as how many attempts of N passed,
