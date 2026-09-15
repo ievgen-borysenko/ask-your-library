@@ -984,7 +984,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                              "eval/recordings/<golden>.<sha>.<model>.jsonl, so that a later change "
                              "to plan()'s deterministic half can be replayed for free by "
                              "eval/run_plan_eval.py. Costs nothing extra: it rides on the run "
-                             "that is happening anyway")
+                             "that is happening anyway. A run of selected ids writes a "
+                             ".subset-<k>of<n>.jsonl of its own instead")
+    parser.add_argument("--overwrite", action="store_true",
+                        help="let --record-plans replace a recording that is already there. "
+                             "Refused by default: that file is the artefact of a run somebody "
+                             "paid for")
     # parse_intermixed_args, not parse_args: the hand-rolled slicing this
     # replaced cut the flags out wherever they stood and kept everything else as
     # ids, so `c01 --min-pass 11 c02` meant two ids. Plain argparse stops
@@ -1044,10 +1049,33 @@ def main(argv: list[str] | None = None) -> None:
     attempt_groups = [{} for _ in range(repeat)]    # group -> [pass, total]
     records = []                                    # the sidecar's per-question rows
     started = time.time()
-    recording_path = None
+    # Read before the report is opened and before anything is billed: a run that
+    # is going to refuse to write its recording must refuse now, not after the
+    # money is spent (--record-plans below).
+    facts_of_run = run_facts(repeat)
+    fingerprint = render_fingerprint(facts_of_run)
+    recording_path = plan_recording = recording_header = None
+    if args.record_plans:
+        plan_recording = load_plan_recording()
+        # A run of selected ids records those ids and no others. Under the name
+        # of the whole set it would overwrite the complete recording of a paid
+        # run with three items and leave a file whose name still claims 42, so
+        # it gets a name and a header flag of its own.
+        subset = (len(items), len(golden["questions"])) if wanted_ids else None
+        recording_path = plan_recording.RECORDINGS_DIR / plan_recording.recording_name(
+            facts_of_run["golden_name"], facts_of_run["golden_sha256_12"],
+            facts_of_run["model"], subset=subset)
+        recording_header = {"subset": bool(subset), "subset_items": len(items),
+                            "golden_items": len(golden["questions"]),
+                            "requested_ids": list(wanted_ids)}
+        if recording_path.exists() and not args.overwrite:
+            print(f"refusing to record over {redact_paths(str(recording_path))}: that file is the "
+                  "artefact of a run somebody paid for, and this run would replace it. "
+                  "--overwrite replaces it on purpose; moving it aside keeps both",
+                  file=sys.stderr)
+            sys.exit(2)
+
     with open(out_path, "w", encoding="utf-8") as out, contextlib.ExitStack() as recording:
-        facts_of_run = run_facts(repeat)
-        fingerprint = render_fingerprint(facts_of_run)
         out.write(f"# Agent eval — {time.strftime('%Y-%m-%d %H:%M')} — {GOLDEN_PATH.name}\n\n"
                   f"run: {fingerprint}\n")
         recorder = None
@@ -1056,13 +1084,9 @@ def main(argv: list[str] | None = None) -> None:
             # made either way, and this only keeps what came back, so that the
             # deterministic half of plan() can be re-measured for free later
             # (eval/run_plan_eval.py).
-            plan_recording = load_plan_recording()
-            recording_path = plan_recording.RECORDINGS_DIR / plan_recording.recording_name(
-                facts_of_run["golden_name"], facts_of_run["golden_sha256_12"],
-                facts_of_run["model"])
             recorder = recording.enter_context(plan_recording.PlanRecorder(
                 recording_path, facts_of_run, redact=redact_paths,
-                knobs=plan_recording.model_knobs()))
+                knobs=plan_recording.model_knobs(), header=recording_header))
             out.write(f"planner calls recorded into: {recording_path.name}\n")
             print(f"recording planner calls into {recording_path}", flush=True)
         for item in items:

@@ -1,0 +1,16 @@
+# A one-item synthetic golden for the call ACCOUNTING of the plan-only replay
+# (tests/test_plan_replay.py): a clarify sends the run back through `plan()`, so
+# the paired recording holds TWO planner calls for this one item and only the
+# first of them can be replayed — the second is a function of graph state (the
+# evidence collected, the candidates offered, the reader's reply) that the
+# recording does not hold.
+#
+# EDITING THIS FILE CHANGES ITS CHECKSUM, which lives in the header of
+# tests/fixtures/plan-replay-clarify-recording.jsonl; regenerate the two together.
+questions:
+- id: g01-clarify-replan
+  type: identify
+  question: There was a book told entirely in the first person by a castaway.
+  expected_books: [Robinson Crusoe]
+  expected_facts: []
+  expected_behavior: clarify

@@ -35,11 +35,37 @@
   question, not the planner's reading of it. A Markdown report and a JSON sidecar are written side
   by side in the shape family of the main harness.
 
-  The request is checked too, not only the reply: each replayed call compares the payload the node
-  builds now with the recorded one and the system prompt by its hash, and a mismatch is reported as
-  `payload_drift` and exits 1 unless `--allow-drift` — otherwise a change to how the payload is
-  *assembled* would be graded against a reply to a payload this tree no longer sends, and the run
-  would look clean.
+  The request is checked too, not only the reply: every attempt of each replayed call compares the
+  payload the node builds now with the recorded one, the system prompt by its hash and the order
+  the attempts were recorded in, and a mismatch is reported as `payload_drift` and exits 1 unless
+  `--allow-drift` — otherwise a change to how the payload is *assembled* would be graded against a
+  reply to a payload this tree no longer sends, and the run would look clean. The retry's payload
+  is rebuilt by `llm.retry_payload`, the one function that writes those words, and its checksum
+  joins the golden file's and the prompt's in the staleness check.
+
+  **Only the first planner call of an item is replayed**, and the harness says so rather than
+  implying otherwise: a second `plan()` happens after a clarify and is a function of graph state
+  the recording does not hold, so every item reports `calls_recorded` / `calls_replayed` and an
+  unreplayed call exits 1 unless `--allow-unreplayed`. A call that never came back is recorded with
+  its exception and replayed as one, so `plan()` takes its timeout branch and not its fallback
+  branch — two different states of the node that a report must not confuse.
+
+  What a recorded line says it spent is the **planner's own** tokens, read from the per-role
+  accounting rather than from the run totals (a plan call would otherwise be charged with the
+  `observe` and `reflect` calls between it and the previous one), with the cost computed from those
+  tokens unrounded — a planner call is often under $0.0001, and the report's four decimals would
+  write a run's worth of them down as free.
+
+  Two guards stand between a run and a committed recording. Nothing **token-shaped** may enter one:
+  a key, an `Authorization` header, a GitHub or AWS credential, a long value beside the word
+  key/token/secret, or the literal value of any `*_KEY`/`*_TOKEN`/`*_SECRET` in the environment
+  refuses the line, leaves it unwritten and refuses to finalise the file, naming the line — not
+  masked and written, because a masked line still means a credential passed through. And every
+  absolute path of any platform is replaced (`/Volumes/…`, `/tmp/…`, another account's home, a
+  Windows drive), on top of the `<repo>` and `~` substitutions, which only know this machine.
+  A recording also refuses to replace one that is already there unless `--overwrite`, before the
+  graph is built and before the first call, and a run of selected ids writes a
+  `.subset-<k>of<n>.jsonl` of its own that the replay harness reports as a subset.
 
   **What it cannot measure, said in the harness, the report and the sidecar: a change to
   `PLAN_RULES`.** A recorded reply answers the prompt that was in the tree when it was recorded, so

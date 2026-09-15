@@ -40,18 +40,23 @@ plan_recording = replay.plan_recording
 
 GOLDEN = FIXTURES / "plan-replay-golden.yaml"
 RECORDING = FIXTURES / "plan-replay-recording.jsonl"
+# the second pair: one item whose recording holds TWO planner calls, because a
+# clarify sent the run back through plan()
+CLARIFY_GOLDEN = FIXTURES / "plan-replay-clarify-golden.yaml"
+CLARIFY_RECORDING = FIXTURES / "plan-replay-clarify-recording.jsonl"
 # what the fixture recording makes the planner decide, item by item
 EXPECTED = {"f01-count": True, "f02-named-book": True, "f03-research-control": True,
             "f04-planner-gave-nothing": False}
 
 
-def staged(tmp_path, *, golden_sha=None, prompt_sha=None, drop=(), repayload=(),
-           resystem=()) -> Path:
+def staged(tmp_path, *, golden=None, source=None, golden_sha=None, prompt_sha=None,
+           retry_sha=None, drop=(), repayload=(), resystem=(), timeout=()) -> Path:
     """The fixture recording in `tmp_path`, stamped current unless a test asks
     for a stamp that is wrong. `repayload` / `resystem` spoil the recorded
     REQUEST of the named items, which is what a change to how plan() builds its
     payload would look like from here."""
-    lines = [json.loads(line) for line in RECORDING.read_text(encoding="utf-8").splitlines()
+    golden, source = golden or GOLDEN, source or RECORDING
+    lines = [json.loads(line) for line in source.read_text(encoding="utf-8").splitlines()
              if line.strip()]
     header, calls = lines[0], [line for line in lines[1:] if line["id"] not in drop]
     for call in calls:
@@ -59,10 +64,13 @@ def staged(tmp_path, *, golden_sha=None, prompt_sha=None, drop=(), repayload=(),
             call["user"] = call["user"] + "\n<an older payload>"
         if call["id"] in resystem:
             call["system_sha256_12"] = "000000000000"
+        if call["id"] in timeout:
+            call["raw"], call["error"] = "", "APITimeoutError: the call ran out of time"
     header["golden_sha256_12"] = golden_sha or plan_recording.sha12(
-        GOLDEN.read_text(encoding="utf-8"))
+        golden.read_text(encoding="utf-8"))
     header["plan_rules_sha256_12"] = prompt_sha or plan_recording.prompt_hash()
-    path = tmp_path / RECORDING.name
+    header["retry_rule_sha256_12"] = retry_sha or plan_recording.retry_hash()
+    path = tmp_path / source.name
     path.write_text("".join(json.dumps(line, ensure_ascii=False) + "\n"
                             for line in [header, *calls]), encoding="utf-8")
     return path
@@ -73,17 +81,19 @@ def replayed(monkeypatch, tmp_path, capsys):
     """`main()` with the golden file, the results directory and the fingerprint
     pinned, and the catalogue forced onto the documented manifest fallback so a
     developer's own index cannot decide what these tests measure."""
-    def run(*argv, recording=None, **staging):
-        monkeypatch.setattr(replay.harness, "GOLDEN_PATH", GOLDEN)
+    def run(*argv, recording=None, golden=None, **staging):
+        golden = golden or GOLDEN
+        monkeypatch.setattr(replay.harness, "GOLDEN_PATH", golden)
         monkeypatch.setattr(replay, "RESULTS_DIR", tmp_path / "results")
         monkeypatch.setattr(replay.harness, "run_facts", lambda repeat=1: {
-            "golden_name": GOLDEN.name, "golden_path": f"tests/fixtures/{GOLDEN.name}",
-            "golden_sha256_12": plan_recording.sha12(GOLDEN.read_text(encoding="utf-8")),
+            "golden_name": golden.name, "golden_path": f"tests/fixtures/{golden.name}",
+            "golden_sha256_12": plan_recording.sha12(golden.read_text(encoding="utf-8")),
             "model": "anthropic/claude-sonnet-4.6", "backend": "openrouter",
             "code": "1b88943", "repeat": repeat})
         monkeypatch.setattr(replay.harness, "render_fingerprint", lambda facts: "code 1b88943")
         monkeypatch.setattr(replay, "catalogue_from_index", lambda: None)
-        path = recording if recording is not None else staged(tmp_path, **staging)
+        path = (recording if recording is not None
+                else staged(tmp_path, golden=golden, **staging))
         code = 0
         try:
             replay.main(["--recording", str(path), *argv])
@@ -334,6 +344,95 @@ def test_the_identify_or_answer_reading_is_reported_and_never_part_of_the_verdic
     assert answered["plan_ok"] is True
 
 
+# --- what a replay does NOT cover ---------------------------------------------
+def clarify(replayed, *argv, **staging):
+    return replayed(*argv, golden=CLARIFY_GOLDEN, source=CLARIFY_RECORDING, **staging)
+
+
+def test_only_the_first_planner_call_of_an_item_is_replayed_and_it_is_accounted(replayed):
+    """A clarify sends the run back through `plan()`, so this item recorded two
+    calls. The second is a function of graph state — the evidence collected, the
+    candidates offered, the reader's reply — that the observer never saw, so it
+    is counted rather than invented, and the count is not a footnote: it decides
+    the exit code."""
+    result = clarify(replayed)
+    assert result["code"] == 1
+    assert result["sidecar"]["calls"] == {"g01-clarify-replan": {"recorded": 2, "replayed": 1}}
+    assert "calls replayed 1/2" in result["report"]
+    assert "only the first planner call of an item is replayed" in result["report"]
+    assert "not replayed" in result["err"] and "g01-clarify-replan" in result["err"]
+    # the first call DID replay, through the real node
+    score = result["sidecar"]["attempts"][0]["score"]
+    assert score["mode"] == "identify" and score["route"] == "act"
+
+
+def test_allow_unreplayed_accepts_it_and_the_report_still_counts_it(replayed):
+    result = clarify(replayed, "--allow-unreplayed")
+    assert result["code"] == 0
+    assert "recorded planner calls not replayed on 1 of 1 attempts" in result["report"]
+    assert result["sidecar"]["calls"]["g01-clarify-replan"]["replayed"] == 1
+
+
+def test_an_item_whose_only_call_is_replayed_is_not_reported_as_unreplayed(replayed):
+    result = replayed()
+    assert all(c == {"recorded": 1, "replayed": 1} for c in result["sidecar"]["calls"].values())
+    assert "calls replayed" not in result["report"]
+
+
+# --- a call that never came back ----------------------------------------------
+def scripted_timeout_update():
+    """What `plan()` returns when its own call times out, taken from a directly
+    scripted run rather than from a reading of the node."""
+    from openai import APITimeoutError
+    from ask_your_library.runner import initial_state
+
+    def timing_out(system, user, role):
+        raise APITimeoutError(request=None)
+
+    original, llm.ask_json = llm.ask_json, timing_out
+    try:
+        state = initial_state("Which of my books mention London?", history=[],
+                              scratchpad=Path("/dev/null"))
+        return nodes.plan(state)
+    finally:
+        llm.ask_json = original
+
+
+def test_a_recorded_timeout_replays_as_the_timeout_branch(replayed):
+    """The paid run's planner never got an answer and `plan()` has a branch for
+    it. A replay that raised ValueError instead would put the item in the
+    fallback branch and report a planner that produced nothing usable, which is
+    a different state of the node."""
+    result = replayed(timeout={"f03-research-control"})
+    assert result["code"] == 0
+    score = {a["id"]: a["score"] for a in result["sidecar"]["attempts"]}["f03-research-control"]
+    # the timeout branch: no query at all, so routing goes straight to synthesize
+    # — where the FALLBACK branch would have searched the raw question
+    assert score["route"] == "synthesize"
+    assert score["plan_fallback"] is False
+    direct = scripted_timeout_update()
+    assert (direct["mode"], direct["current_query"], direct["queries"]) == (
+        score["mode"], "", [])
+    assert direct["stop_reason"]
+
+
+def test_a_timeout_on_the_retry_replays_as_the_timeout_branch_too(replayed, tmp_path):
+    """The first reply was malformed and recorded; the retry never came back.
+    One line parses to nothing and the next is the timeout, so the node takes
+    the timeout branch and not the fallback."""
+    path = staged(tmp_path)
+    lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    for line in lines[1:]:
+        if line["id"] == "f04-planner-gave-nothing" and line["json_attempt"] == 2:
+            line["raw"], line["error"] = "", "APITimeoutError: the call ran out of time"
+    path.write_text("".join(json.dumps(line, ensure_ascii=False) + "\n" for line in lines),
+                    encoding="utf-8")
+    result = replayed(recording=path)
+    assert result["code"] == 0
+    score = {a["id"]: a["score"] for a in result["sidecar"]["attempts"]}["f04-planner-gave-nothing"]
+    assert score["plan_fallback"] is False and score["route"] == "synthesize"
+
+
 # --- payload drift ------------------------------------------------------------
 def test_a_payload_the_node_no_longer_builds_is_reported_and_exits_one(replayed):
     """The reply is replayed whatever the question was. A change to how plan()
@@ -366,6 +465,73 @@ def test_allow_drift_accepts_it_and_still_says_so(replayed):
     assert result["code"] == 0
     assert "payload drift on 1 of 4 attempts" in result["report"]
     assert list(result["sidecar"]["payload_drift"]) == ["f02-named-book"]
+
+
+def test_the_retry_payload_is_compared_too(replayed, tmp_path):
+    """Only the first attempt of a call used to be checked. The retry's payload
+    is the first plus the retry wording, and both halves can move."""
+    path = staged(tmp_path)
+    lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    for line in lines[1:]:
+        if line["id"] == "f04-planner-gave-nothing" and line["json_attempt"] == 2:
+            line["user"] = line["user"].replace("INVALID JSON", "BAD JSON")
+    path.write_text("".join(json.dumps(line, ensure_ascii=False) + "\n" for line in lines),
+                    encoding="utf-8")
+    result = replayed(recording=path)
+    assert result["code"] == 1
+    assert any("attempt 2" in reason
+               for reason in result["sidecar"]["payload_drift"]["f04-planner-gave-nothing"])
+
+
+def test_attempts_recorded_out_of_order_are_drift(replayed, tmp_path):
+    path = staged(tmp_path)
+    lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    for line in lines[1:]:
+        if line["id"] == "f04-planner-gave-nothing" and line["json_attempt"] == 2:
+            line["json_attempt"] = 7
+    path.write_text("".join(json.dumps(line, ensure_ascii=False) + "\n" for line in lines),
+                    encoding="utf-8")
+    result = replayed(recording=path)
+    assert result["code"] == 1
+    assert any("out of order" in reason
+               for reason in result["sidecar"]["payload_drift"]["f04-planner-gave-nothing"])
+
+
+def test_a_retry_wording_that_moved_is_stale(replayed):
+    """The SECOND payload of a call is the first plus those words, so a change
+    to them changes what the model was asked — and the PLAN_RULES hash does not
+    cover it."""
+    result = replayed(retry_sha="000000000000")
+    assert result["code"] == 2
+    assert "retry wording checksum" in result["err"]
+
+
+def test_a_line_without_a_call_index_is_refused(replayed, tmp_path):
+    """The order of the calls of one item is data, not a property of the file:
+    a recording that leaves it implicit cannot be accounted for."""
+    path = staged(tmp_path)
+    lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    lines[1].pop("call_index")
+    path.write_text("".join(json.dumps(line, ensure_ascii=False) + "\n" for line in lines),
+                    encoding="utf-8")
+    result = replayed(recording=path)
+    assert result["code"] == 2 and "call_index" in result["err"]
+
+
+# --- a partial recording ------------------------------------------------------
+def test_a_subset_recording_is_reported_as_one(replayed, tmp_path):
+    """A run of three ids records three items. A report that presented that as a
+    run over the set would be a smaller measurement wearing a bigger name."""
+    path = staged(tmp_path, drop={"f04-planner-gave-nothing"})
+    lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    lines[0].update({"subset": True, "subset_items": 3, "golden_items": 4})
+    path.write_text("".join(json.dumps(line, ensure_ascii=False) + "\n" for line in lines),
+                    encoding="utf-8")
+    result = replayed("--allow-missing", recording=path)
+    assert result["code"] == 0
+    assert "a SUBSET recording: 3 of 4 items" in result["report"]
+    assert "not the set" in result["report"]
+    assert result["sidecar"]["subset"].startswith("a SUBSET recording")
 
 
 # --- the catalogue the replay resolves against --------------------------------

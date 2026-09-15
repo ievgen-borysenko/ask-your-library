@@ -94,7 +94,7 @@ def test_a_plan_call_is_recorded_with_what_it_asked_and_what_came_back(monkeypat
                 "mode": "answer", "queries": ["whale", "white whale"]}
     call = lines_of(recorder.path)[1]
     assert call["kind"] == "call"
-    assert (call["id"], call["attempt"], call["call"]) == ("c01-ivanhoe", 2, 1)
+    assert (call["id"], call["attempt"], call["call_index"]) == ("c01-ivanhoe", 2, 1)
     assert call["role"] == "plan"
     assert call["user"] == "<question>whales</question>"      # the exact payload
     assert call["raw"] == PLAN_REPLY                          # the raw reply text
@@ -116,7 +116,7 @@ def test_both_attempts_of_a_retry_are_recorded(monkeypatch, tmp_path):
         with recorder.item("c01"):
             llm.ask_json(PLAN_RULES, "payload", role="plan")
     calls = lines_of(recorder.path)[1:]
-    assert [(c["call"], c["json_attempt"]) for c in calls] == [(1, 1), (1, 2)]
+    assert [(c["call_index"], c["json_attempt"]) for c in calls] == [(1, 1), (1, 2)]
     assert calls[0]["raw"] == "not json at all"
     assert calls[1]["raw"] == PLAN_REPLY
 
@@ -150,7 +150,7 @@ def test_two_plan_calls_of_one_item_are_numbered(monkeypatch, tmp_path):
         with recorder.item("c09"):
             llm.ask_json(PLAN_RULES, "first", role="plan")
             llm.ask_json(PLAN_RULES, "after the clarify", role="plan")
-    assert [c["call"] for c in lines_of(recorder.path)[1:]] == [1, 2]
+    assert [c["call_index"] for c in lines_of(recorder.path)[1:]] == [1, 2]
 
 
 # --- what is NOT recorded -----------------------------------------------------
@@ -187,8 +187,27 @@ def test_absolute_paths_are_redacted_from_the_payload_and_the_reply(monkeypatch,
     written = recorder.path.read_text(encoding="utf-8")
     assert str(Path.home()) not in written and str(REPO) not in written
     call = lines_of(recorder.path)[1]
+    # the two informative substitutions survive: the absolute-path sweep below
+    # must not collapse what `redact_paths` already made readable
     assert call["user"] == "<question>~/private/library/notes.txt</question>"
     assert "<repo>/eval/golden/en-demo.yaml" in call["raw"]
+
+
+def test_an_absolute_path_of_any_platform_is_dropped(monkeypatch, tmp_path):
+    """`redact_paths` knows this machine's two prefixes. A payload can carry an
+    external volume, another account's home, a system temp file or a Windows
+    drive, and a recording is committed."""
+    elsewhere = ("/Volumes/backup/library/notes.txt", "/Users/someone-else/books",
+                 "/tmp/ayl-scratch/q.md", "C:\\Users\\reader\\library")
+    scripted(monkeypatch, PLAN_REPLY)
+    with plan_recording.PlanRecorder(tmp_path / "r.jsonl", FACTS,
+                                     redact=harness.redact_paths) as recorder:
+        with recorder.item("c01"):
+            llm.ask_json(PLAN_RULES, "read " + " and ".join(elsewhere), role="plan")
+    call = lines_of(recorder.path)[1]
+    assert call["user"] == "read <path> and <path> and <path> and <path>"
+    for path in elsewhere:
+        assert path not in recorder.path.read_text(encoding="utf-8")
 
 
 # --- what a call cost ---------------------------------------------------------
@@ -202,6 +221,13 @@ def billed(monkeypatch, *replies, tokens_in=1000, tokens_out=100):
         usage.llm_calls += 1
         usage.input_tokens += tokens_in
         usage.output_tokens += tokens_out
+        # per role as well, exactly as llm_invoke accounts: what a recorded line
+        # reads is the PLANNER's own totals, not the run's
+        role_usage = usage.by_role.setdefault(role, {"calls": 0, "input_tokens": 0,
+                                                     "output_tokens": 0})
+        role_usage["calls"] += 1
+        role_usage["input_tokens"] += tokens_in
+        role_usage["output_tokens"] += tokens_out
         return Reply(replies[min(usage.llm_calls - 1, len(replies) - 1)])
 
     monkeypatch.setattr(llm, "llm_invoke", invoke)
@@ -237,6 +263,133 @@ def test_the_second_call_of_an_item_is_the_difference_not_the_running_total(monk
             llm.ask_json(PLAN_RULES, "after the clarify", role="plan")
     for call in lines_of(recorder.path)[1:]:
         assert (call["llm_calls"], call["tokens_in"], call["tokens_out"]) == (1, 700, 40)
+
+
+def test_a_plan_call_is_charged_only_for_itself_between_other_roles(monkeypatch, tmp_path):
+    """A question spends plan, observe, reflect, plan. The whole-run counters
+    move on every one of them, so a difference of THOSE would charge the second
+    planner call with what observe and reflect spent in between; the accounting
+    is per role, and this is the shape that tells the two apart."""
+    billed(monkeypatch, PLAN_REPLY, tokens_in=100, tokens_out=10)
+    with plan_recording.PlanRecorder(tmp_path / "r.jsonl", FACTS) as recorder:
+        with recorder.item("c09"):
+            llm.reset_usage()
+            llm.ask_json(PLAN_RULES, "first", role="plan")
+            llm.ask_json("observe rules", "hits", role="observe")
+            llm.ask_json("reflect rules", "evidence", role="reflect")
+            llm.ask_json(PLAN_RULES, "after the clarify", role="plan")
+    calls = lines_of(recorder.path)[1:]
+    assert len(calls) == 2
+    for call in calls:
+        assert (call["llm_calls"], call["tokens_in"], call["tokens_out"]) == (1, 100, 10)
+
+
+def test_a_call_under_a_hundredth_of_a_cent_is_not_recorded_as_free(monkeypatch, tmp_path):
+    """The run report rounds a cost to four decimals, which is right for a line
+    a reader reads and wrong for a record: a planner call is often under
+    $0.0001, and a recording of forty of them summing to zero would describe a
+    free run that was not."""
+    monkeypatch.setattr(harness, "PRICE_IN_PER_MTOK", 3.0)
+    billed(monkeypatch, PLAN_REPLY, tokens_in=1, tokens_out=0)
+    with plan_recording.PlanRecorder(tmp_path / "r.jsonl", FACTS) as recorder:
+        with recorder.item("q01"):
+            llm.reset_usage()
+            llm.ask_json(PLAN_RULES, "payload", role="plan")
+    call = lines_of(recorder.path)[1]
+    assert call["tokens_in"] == 1
+    expected = plan_recording.exact_cost(1, 0)
+    assert call["cost_usd"] == pytest.approx(expected)
+    if expected:                        # zero only on a local, free backend
+        assert 0 < call["cost_usd"] < 0.0001
+    # and the same tokens through the report's own rounding would read as free
+    assert round(expected, 4) == 0
+
+
+# --- nothing token-shaped reaches a committed file ----------------------------
+def test_a_token_shaped_value_refuses_to_finalise_the_recording(monkeypatch, tmp_path):
+    """Masking a secret still means one passed through, and nobody would go back
+    and check a file that looks clean. So the line is not written at all and the
+    recording never gets its final name."""
+    scripted(monkeypatch, '{"mode": "answer", "queries": ["sk-or-v1-0a1b2c3d4e5f6071"]}')
+    final = tmp_path / "r.jsonl"
+    with pytest.raises(plan_recording.SecretInRecording) as raised:
+        with plan_recording.PlanRecorder(final, FACTS) as recorder:
+            with recorder.item("c01"):
+                llm.ask_json(PLAN_RULES, "payload", role="plan")
+    assert "line 2" in f"{raised.value}" and "c01" in f"{raised.value}"
+    assert not final.exists()
+    assert "sk-or-v1" not in recorder.partial.read_text(encoding="utf-8")
+    assert lines_of(recorder.partial) == lines_of(recorder.partial)[:1]   # the header alone
+
+
+def test_the_literal_value_of_a_key_in_this_environment_refuses(monkeypatch, tmp_path):
+    """A credential need not look like one. Whatever this machine's
+    *_KEY / *_TOKEN / *_SECRET hold is compared literally."""
+    monkeypatch.setenv("SOME_PROVIDER_TOKEN", "an-ordinary-looking-passphrase")
+    scripted(monkeypatch, PLAN_REPLY)
+    final = tmp_path / "r.jsonl"
+    with pytest.raises(plan_recording.SecretInRecording):
+        with plan_recording.PlanRecorder(final, FACTS) as recorder:
+            with recorder.item("c01"):
+                llm.ask_json(PLAN_RULES, "the setting is an-ordinary-looking-passphrase",
+                             role="plan")
+    assert not final.exists()
+    assert "an-ordinary-looking-passphrase" not in recorder.partial.read_text(encoding="utf-8")
+
+
+def test_an_ordinary_question_is_not_mistaken_for_a_secret(monkeypatch, tmp_path):
+    scripted(monkeypatch, PLAN_REPLY)
+    with plan_recording.PlanRecorder(tmp_path / "r.jsonl", FACTS) as recorder:
+        with recorder.item("c01"):
+            llm.ask_json(PLAN_RULES, "Which of my books mention the key to the secret garden?",
+                         role="plan")
+    assert len(lines_of(recorder.path)) == 2
+
+
+# --- a call that never came back ----------------------------------------------
+def test_a_timed_out_call_is_recorded_and_the_exception_is_unchanged(monkeypatch, tmp_path):
+    """Without a line, a timed-out planner is indistinguishable from an item
+    nobody ran. The exception object itself must reach the caller untouched."""
+    from openai import APITimeoutError
+
+    boom = APITimeoutError(request=None)
+
+    def timing_out(system, user, role):
+        raise boom
+
+    monkeypatch.setattr(llm, "llm_invoke", timing_out)
+    with plan_recording.PlanRecorder(tmp_path / "r.jsonl", FACTS) as recorder:
+        with recorder.item("c01"):
+            with pytest.raises(llm.CallTimeout) as raised:
+                llm.ask_json(PLAN_RULES, "payload", role="plan")
+    assert raised.value is boom                    # the same object, not a copy
+    call = lines_of(recorder.path)[1]
+    assert call["raw"] == "" and call["error"].startswith("APITimeoutError: ")
+    assert call["json_attempt"] == 1
+
+
+def test_a_timeout_on_the_retry_is_recorded_after_the_malformed_first_reply(monkeypatch, tmp_path):
+    from openai import APITimeoutError
+
+    calls = []
+
+    def once_then_timeout(system, user, role):
+        calls.append(user)
+        if len(calls) == 1:
+            return Reply("not json")
+        raise APITimeoutError(request=None)
+
+    monkeypatch.setattr(llm, "llm_invoke", once_then_timeout)
+    with plan_recording.PlanRecorder(tmp_path / "r.jsonl", FACTS) as recorder:
+        with recorder.item("c01"):
+            with pytest.raises(llm.CallTimeout):
+                llm.ask_json(PLAN_RULES, "payload", role="plan")
+    first, second = lines_of(recorder.path)[1:]
+    assert (first["json_attempt"], second["json_attempt"]) == (1, 2)
+    assert first["raw"] == "not json" and second["raw"] == ""
+    assert second["error"].startswith("APITimeoutError: ")
+    # the retry's payload is the one ask_json really sent
+    assert second["user"] == llm.retry_payload("payload", None)
 
 
 # --- the seam cannot hurt the run ---------------------------------------------
@@ -286,14 +439,24 @@ GOLDEN = ("questions:\n"
           "  expected_books: [Dracula]\n  expected_facts: []\n")
 
 
-def test_record_plans_writes_the_recording_of_a_whole_run(monkeypatch, tmp_path):
-    """`--record-plans` on eval/run_agent_eval.py: one recording per golden set,
-    one line per item and attempt, written by the run that was happening anyway.
+def fake_run_one(graph, item, attempt=1):
+    """A `run_one` that makes the planner's call and nothing else, so the lines
+    under test are produced by the real `ask_json` through the real observer."""
+    llm.ask_json(PLAN_RULES, f"<question>{item['question']}</question>", role="plan")
+    return {"id": item["id"], "type": item["type"], "question": item["question"],
+            "answer": "Moby Dick aboard the Pequod", "verification": "0/0",
+            "provenance": {}, "steps_taken": 1, "read_chapters": [], "evidence_items": 0,
+            "clarify_asked": False, "clarify_candidates": [], "clarify_unresolved": False,
+            "clarify_chosen": "", "plan_fallback": False, "stop_reason": "", "catalog": {},
+            "book_filter": "", "book_unresolved": "", "catalog_fallback": "", "seconds": 0,
+            "steps_log": [], "cost_usd": 0.0, "llm_calls": 1, "tokens_in": 1, "tokens_out": 1,
+            "score": {"titles_mentioned": 1, "titles_expected": 1, "facts_found": 0,
+                      "facts_expected": 0, "facts_ok": True, "behavior_ok": True}}
 
-    The graph is replaced by a `run_one` that makes the planner's call and
-    nothing else, with `llm_invoke` scripted — so the line under test is
-    produced by the real `ask_json` through the real observer."""
-    seen = scripted(monkeypatch, PLAN_REPLY)
+
+def staged_harness(monkeypatch, tmp_path) -> Path:
+    """The main harness pointed at a two-item golden file in `tmp_path`, with a
+    recordings directory of its own. Returns that directory."""
     golden = tmp_path / "en-demo.yaml"
     golden.write_text(GOLDEN, encoding="utf-8")
     recordings = tmp_path / "recordings"
@@ -303,20 +466,15 @@ def test_record_plans_writes_the_recording_of_a_whole_run(monkeypatch, tmp_path)
     monkeypatch.setattr(harness, "build_graph", lambda: object())
     monkeypatch.setattr(harness, "run_facts", lambda repeat=1: {**FACTS, "repeat": repeat})
     monkeypatch.setattr(harness, "render_fingerprint", lambda facts: "code 1b88943 | single run")
+    return recordings
 
-    def fake_run_one(graph, item, attempt=1):
-        llm.ask_json(PLAN_RULES, f"<question>{item['question']}</question>", role="plan")
-        return {"id": item["id"], "type": item["type"], "question": item["question"],
-                "answer": "Moby Dick aboard the Pequod", "verification": "0/0",
-                "provenance": {}, "steps_taken": 1, "read_chapters": [], "evidence_items": 0,
-                "clarify_asked": False, "clarify_candidates": [], "clarify_unresolved": False,
-                "clarify_chosen": "", "plan_fallback": False, "stop_reason": "", "catalog": {},
-                "book_filter": "", "book_unresolved": "", "catalog_fallback": "", "seconds": 0,
-                "steps_log": [], "cost_usd": 0.0, "llm_calls": 1, "tokens_in": 1,
-                "tokens_out": 1,
-                "score": {"titles_mentioned": 1, "titles_expected": 1, "facts_found": 0,
-                          "facts_expected": 0, "facts_ok": True, "behavior_ok": True}}
 
+def test_record_plans_writes_the_recording_of_a_whole_run(monkeypatch, tmp_path):
+    """`--record-plans` on eval/run_agent_eval.py: one recording per golden set,
+    one line per item and attempt, written by the run that was happening
+    anyway."""
+    seen = scripted(monkeypatch, PLAN_REPLY)
+    recordings = staged_harness(monkeypatch, tmp_path)
     monkeypatch.setattr(harness, "run_one", fake_run_one)
     monkeypatch.setattr(sys, "argv", ["run_agent_eval.py", "--record-plans", "--repeat", "2"])
     harness.main()
@@ -334,16 +492,59 @@ def test_record_plans_writes_the_recording_of_a_whole_run(monkeypatch, tmp_path)
     assert "planner calls recorded into: en-demo.abcdef012345" in report
 
 
+def test_recording_refuses_to_replace_one_that_is_already_there(monkeypatch, tmp_path, capsys):
+    """That file is the artefact of a run somebody paid for. Refused BEFORE the
+    graph is built and before the first call, not after the money is spent."""
+    scripted(monkeypatch, PLAN_REPLY)
+    recordings = staged_harness(monkeypatch, tmp_path)
+    existing = recordings / "en-demo.abcdef012345.anthropic-claude-sonnet-4.6.jsonl"
+    existing.parent.mkdir(parents=True, exist_ok=True)
+    existing.write_text("the recording of a paid run\n", encoding="utf-8")
+
+    def never(graph, item, attempt=1):
+        raise AssertionError("the run started before the recording was refused")
+
+    monkeypatch.setattr(harness, "run_one", never)
+    monkeypatch.setattr(sys, "argv", ["run_agent_eval.py", "--record-plans"])
+    with pytest.raises(SystemExit) as raised:
+        harness.main()
+    assert raised.value.code == 2
+    assert "refusing to record over" in capsys.readouterr().err
+    assert existing.read_text(encoding="utf-8") == "the recording of a paid run\n"
+
+
+def test_overwrite_replaces_it_on_purpose(monkeypatch, tmp_path):
+    scripted(monkeypatch, PLAN_REPLY)
+    recordings = staged_harness(monkeypatch, tmp_path)
+    existing = recordings / "en-demo.abcdef012345.anthropic-claude-sonnet-4.6.jsonl"
+    existing.parent.mkdir(parents=True, exist_ok=True)
+    existing.write_text("the recording of a paid run\n", encoding="utf-8")
+    monkeypatch.setattr(harness, "run_one", fake_run_one)
+    monkeypatch.setattr(sys, "argv", ["run_agent_eval.py", "--record-plans", "--overwrite"])
+    harness.main()
+    assert lines_of(existing)[0]["kind"] == "header"
+
+
+def test_a_run_of_selected_ids_writes_a_subset_recording(monkeypatch, tmp_path):
+    """Three ids recorded under the name of the whole set would destroy the
+    complete recording and leave a file whose name still claims 42 items."""
+    scripted(monkeypatch, PLAN_REPLY)
+    recordings = staged_harness(monkeypatch, tmp_path)
+    monkeypatch.setattr(harness, "run_one", fake_run_one)
+    monkeypatch.setattr(sys, "argv", ["run_agent_eval.py", "--record-plans", "q02-drac"])
+    harness.main()
+    whole = recordings / "en-demo.abcdef012345.anthropic-claude-sonnet-4.6.jsonl"
+    subset = recordings / "en-demo.abcdef012345.anthropic-claude-sonnet-4.6.subset-1of2.jsonl"
+    assert subset.exists() and not whole.exists()
+    header = lines_of(subset)[0]
+    assert header["subset"] is True
+    assert (header["subset_items"], header["golden_items"]) == (1, 2)
+    assert header["requested_ids"] == ["q02-drac"]
+    assert [r["id"] for r in lines_of(subset)[1:]] == ["q02-drac"]
+
+
 def test_without_the_flag_nothing_is_recorded_and_no_observer_is_installed(monkeypatch, tmp_path):
-    golden = tmp_path / "en-demo.yaml"
-    golden.write_text(GOLDEN, encoding="utf-8")
-    recordings = tmp_path / "recordings"
-    monkeypatch.setenv("AYL_PLAN_RECORDINGS_DIR", str(recordings))
-    monkeypatch.setattr(harness, "GOLDEN_PATH", golden)
-    monkeypatch.setattr(harness, "RESULTS_DIR", tmp_path / "results")
-    monkeypatch.setattr(harness, "build_graph", lambda: object())
-    monkeypatch.setattr(harness, "run_facts", lambda repeat=1: {**FACTS, "repeat": repeat})
-    monkeypatch.setattr(harness, "render_fingerprint", lambda facts: "code 1b88943 | single run")
+    recordings = staged_harness(monkeypatch, tmp_path)
 
     def observed(graph, item, attempt=1):
         assert llm.JSON_CALL_OBSERVER is None

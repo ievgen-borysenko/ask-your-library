@@ -434,13 +434,40 @@ def _observe_json_call(call: dict) -> None:
                     type(error).__name__, error)
 
 
+# What the retry says, as a template rather than an inline f-string: a replay
+# has to rebuild the SECOND payload of a recorded call to check that the request
+# has not drifted, and rebuilding it from a copy of these words would be a
+# second thing that can be wrong. `retry_payload` is the only writer of it, here
+# and in eval/plan_recording.py.
+RETRY_RULE = ("\n\nYOUR PREVIOUS REPLY WAS INVALID JSON ({error}). "
+              "Return ONLY valid JSON. Escape every double quote inside string "
+              "values as \\\" — book quotes often contain dialogue in quotes.")
+
+
+def retry_payload(user: str, error) -> str:
+    """The user message of the retry: the original payload with the model's own
+    error appended. Byte for byte what `ask_json` has always sent."""
+    return user + RETRY_RULE.format(error=error)
+
+
 def ask_json(system: str, user: str, role: str) -> dict:
     """Ask the model for JSON. On malformed JSON (typically an unescaped quote
     inside a quoted string) retry once, showing the model its own error."""
     attempt_user = user
     last_error = None
     for attempt in range(2):
-        reply = llm_invoke(system, attempt_user, role).content
+        try:
+            reply = llm_invoke(system, attempt_user, role).content
+        except Exception as error:
+            # A call that never came back is still a call a recording owes an
+            # account of: without this line a timed-out planner leaves no record
+            # at all, and a replay cannot tell that from an item nobody ran. The
+            # bare `raise` re-raises the same exception object, so no frame above
+            # this one sees any difference.
+            _observe_json_call({"role": role, "attempt": attempt + 1, "system": system,
+                                "user": attempt_user, "raw": "",
+                                "error": f"{type(error).__name__}: {error}"})
+            raise
         parsed, why = json_object(reply)
         if why:
             last_error = why
@@ -451,10 +478,7 @@ def ask_json(system: str, user: str, role: str) -> dict:
                             "error": "" if parsed is not None else (why or NO_JSON_OBJECT)})
         if parsed is not None:
             return parsed
-        attempt_user = (user +
-            f"\n\nYOUR PREVIOUS REPLY WAS INVALID JSON ({last_error}). "
-            "Return ONLY valid JSON. Escape every double quote inside string "
-            "values as \\\" — book quotes often contain dialogue in quotes.")
+        attempt_user = retry_payload(user, last_error)
     raise ValueError(f"model failed to produce valid JSON twice: {last_error}")
 
 

@@ -264,8 +264,8 @@ the per-item verdict: drift says the *replay* is questionable, not that the plan
 **What it cannot measure: a change to `PLAN_RULES`.** The recorded reply answers the prompt that
 was in the tree when it was recorded; replaying it under a new prompt measures the post-processing
 of an answer to a question nobody asked. So the recording's header carries the checksum of the
-golden file **and** of `PLAN_RULES`, and the harness **refuses to run** when either has moved
-(exit 2). `--check` answers that question on its own and replays nothing; `--allow-stale` replays
+golden file **and** of `PLAN_RULES` (and of the retry wording, which is the second half of what a
+retried call was asked), and the harness **refuses to run** when any of them has moved (exit 2). `--check` answers that question on its own and replays nothing; `--allow-stale` replays
 anyway and stamps the report and the sidecar with a block saying that nothing in them measures this
 tree - there is no quiet way to do it. **A prompt change needs a new recording, and a new recording
 needs a paid run.** Nor does this harness see anything downstream of `plan`: retrieval, the answer,

@@ -22,7 +22,8 @@ A prompt change needs a NEW recording, which needs a paid run.
   uv run eval/run_agent_eval.py --record-plans        # once, paid: make the recording
   uv run eval/run_plan_eval.py                        # then, free, as often as you like
   uv run eval/run_plan_eval.py --recording eval/recordings/<file>.jsonl [id ...]
-      [--check] [--allow-missing] [--allow-stale] [--allow-drift] [--min-pass N] [--no-json]
+      [--check] [--allow-missing] [--allow-stale] [--allow-drift] [--allow-unreplayed]
+      [--min-pass N] [--no-json]
 
 Scored per item and per recorded attempt (every row is deterministic, and the
 mapping from a golden item to what the planner owes it is spelled out in
@@ -249,6 +250,13 @@ def replay_one(item: dict, replayer, attempt: int) -> dict:
     # exit code unless --allow-drift.
     drift = replayer.drift.get((item["id"], attempt), [])
     score["payload_drift"] = list(drift)
+    # How many planner calls this item recorded and how many were replayed. They
+    # differ exactly when a clarify sent the run back through plan(): that
+    # second decision is a function of graph state the observer never saw, so it
+    # is accounted for and not invented. See PlanReplayer.
+    account = replayer.accounting.get((item["id"], attempt), {"recorded": 0, "replayed": 0})
+    score["calls_recorded"] = account["recorded"]
+    score["calls_replayed"] = account["replayed"]
     return {"id": item["id"], "type": item["type"], "attempt": attempt,
             "question": item["question"],
             "queries": queries_of(update),
@@ -277,6 +285,9 @@ def render_row(record: dict) -> str:
         bits.append(f"catalogue fallback ({s['catalog_fallback']})")
     if s["plan_fallback"]:
         bits.append("planner fallback (raw question searched)")
+    if s.get("calls_recorded", 1) > s.get("calls_replayed", 1):
+        bits.append(f"calls replayed {s['calls_replayed']}/{s['calls_recorded']} "
+                    "(only the first planner call of an item is replayed)")
     for reason in s.get("payload_drift") or []:
         bits.append(f"PAYLOAD DRIFT: {reason}")
     if not s["mode_exact"]:
@@ -296,7 +307,13 @@ def render_report(out, facts: dict, recording, records: list, missing: list,
               "query filter, named-book resolution, fallbacks, routing) and nothing else. "
               "It CANNOT measure a change to `PLAN_RULES`: the recorded replies answer the "
               "prompt of the tree they were recorded on, and a prompt change needs a new "
-              "recording from a paid run.\n\n")
+              "recording from a paid run. Only the FIRST planner call of each item is replayed: "
+              "a second `plan()` happens after a clarify and is a function of graph state — the "
+              "evidence collected, the candidates offered, the reply — that the recording does "
+              "not hold, so replaying it would mean inventing that state. Recorded and replayed "
+              "call counts are reported per item.\n\n")
+    if recording.subset():
+        out.write(f"> **{recording.subset()}.** The rows below are that subset, not the set.\n\n")
     if stale:
         out.write("> **STALE RECORDING, replayed anyway under `--allow-stale`. Nothing below "
                   "is a measurement of this tree:**\n"
@@ -325,6 +342,14 @@ def render_summary(out, records: list, missing: list) -> str:
     lines = [f"\n---\n{total} attempts replayed from the recording, "
              f"{len(missing)} items not in it; no model was called, $0.0000 spent"]
     lines.append(f"- plan PASS {sum(r['score']['plan_ok'] for r in records)}/{total}")
+    unreplayed = {r["id"]: (r["score"]["calls_replayed"], r["score"]["calls_recorded"])
+                  for r in records if r["score"]["calls_replayed"] < r["score"]["calls_recorded"]}
+    if unreplayed:
+        lines.append("- **recorded planner calls not replayed on "
+                     f"{len(unreplayed)} of {total} attempts** ("
+                     + ", ".join(f"{i} {k}/{n}" for i, (k, n) in sorted(unreplayed.items()))
+                     + "): only the first call of an item is replayed, because a re-plan after a "
+                     "clarify depends on graph state the recording does not hold")
     drifted = [r["id"] for r in records if r["score"].get("payload_drift")]
     if drifted:
         lines.append(f"- **payload drift on {len(drifted)} of {total} attempts** "
@@ -365,6 +390,9 @@ def write_sidecar(path: Path, report_path: Path, facts: dict, recording, records
         "replayed": len(records), "missing": list(missing),
         "payload_drift": {r["id"]: r["score"]["payload_drift"] for r in records
                           if r["score"].get("payload_drift")},
+        "subset": recording.subset(),
+        "calls": {r["id"]: {"recorded": r["score"]["calls_recorded"],
+                            "replayed": r["score"]["calls_replayed"]} for r in records},
         "totals": {"plan_ok": sum(r["score"]["plan_ok"] for r in records),
                    "attempts": len(records),
                    **{row: {"ok": sum(r["score"][row] for r in records if row in r["score"]),
@@ -397,6 +425,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                         help="replay a recording whose golden or PLAN_RULES checksum no longer "
                              "matches. The report then opens with a block saying that nothing in "
                              "it measures this tree; there is no quiet way to do this")
+    parser.add_argument("--allow-unreplayed", action="store_true",
+                        help="report recorded planner calls that were not replayed instead of "
+                             "exiting 1. Only the first call of an item is replayed; a clarify "
+                             "item records two, and the second cannot be replayed from a "
+                             "recording alone")
     parser.add_argument("--allow-drift", action="store_true",
                         help="report a payload drift instead of exiting 1. Drift means the request "
                              "plan() builds today is not the one the recorded reply answered, so "
@@ -495,8 +528,11 @@ def main(argv: list[str] | None = None) -> None:
         print(f"Sidecar: {json_path}")
     passed = sum(r["score"]["plan_ok"] for r in records)
     drifted = sorted({r["id"] for r in records if r["score"].get("payload_drift")})
+    unreplayed = sorted({r["id"] for r in records
+                         if r["score"]["calls_replayed"] < r["score"]["calls_recorded"]})
     unmet = missing and not args.allow_missing
     undrifted = drifted and not args.allow_drift
+    unplayed = unreplayed and not args.allow_unreplayed
     if unmet:
         print(f"items the recording does not hold: {missing} (--allow-missing accepts this)",
               file=sys.stderr)
@@ -504,7 +540,12 @@ def main(argv: list[str] | None = None) -> None:
         print(f"payload drift on {drifted}: the request plan() builds now is not the one the "
               "recorded reply answered, so this replay does not measure what it looks like it "
               "measures (--allow-drift accepts this; a new recording removes it)", file=sys.stderr)
-    if unmet or undrifted or (args.min_pass is not None and passed < args.min_pass):
+    if unplayed:
+        print(f"recorded planner calls not replayed on {unreplayed}: only the first call of an "
+              "item is replayed, and these items recorded more (a clarify re-plans). The extra "
+              "calls are NOT measured by this report (--allow-unreplayed accepts this)",
+              file=sys.stderr)
+    if unmet or undrifted or unplayed or (args.min_pass is not None and passed < args.min_pass):
         sys.exit(1)
 
 
