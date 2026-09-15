@@ -74,8 +74,10 @@ itself is pinned by `tests/test_agent_eval_facts.py`, over every branch of `scor
 **A JSON sidecar per run, and `--repeat N` (2026-09-15).** Every run now writes two files side by
 side: the Markdown report a reader reads (`eval/results/answers-<ts>.md`, unchanged) and
 `answers-<ts>.json`, the same run as data. The sidecar carries the fingerprint as *fields* rather
-than as one line - the code stamp and whether it was a verified clean commit, the golden path and
-checksum, the manifest and TOC checksums, the backend, the model, the index stamps, every knob
+than as one line - the code stamp and whether it was a verified clean commit, the golden file's
+repo-relative path (never an absolute one: this file is meant to be committed beside a published
+number, and a home directory names the reader, not the measurement) and checksum, the manifest and
+TOC checksums, the backend, the model, the index stamps, every knob
 that changes an answer (hit budgets, step and streak limits, clarify candidates, the question
 deadline, strict hit ids, the configured prices), the repeat count and the wall-clock start and
 end - and then, per question, its group and *every attempt* exactly as the harness produced it:
@@ -87,13 +89,19 @@ a fixed key order, so two runs diff line by line; `--no-json` turns it off.
 `--repeat N` runs each golden item N times (default 1). Scoring stays per attempt - the scorer
 never sees more than one run - and the aggregation is reported beside it: each boolean row
 (`behavior_ok`, `facts_ok`, drill-down) as **how many attempts of N passed**, never as an average
-of true and false, and cost, seconds, tokens and calls as **min / median / max**. Under `--repeat`
-the totals block's headline reads `behavior PASS <min>–<max>/<items> over N attempts (mean ... per
-attempt)` instead of a sum that would look like a larger set, each aggregate gains its own spread
-line, and `--min-pass` becomes a floor on the *weakest* attempt rather than on the average. At
+of true and false, and cost, seconds, tokens and calls as **min / median / max**. At N > 1 the
+totals block is rewritten rather than extended, because **not one figure in it may be a sum across
+attempts**: two items run three times have six passes, and "behavior PASS 5/6" describes a
+six-question set nobody ran. Every line there is per attempt -
+`behavior PASS <min>–<max>/<items> over N attempts (mean ... per attempt)` and one such line per
+aggregate, with the per-group ranges beside the headline - and the single figure that *is* summed,
+the money the run actually spent, says so in words. `--min-pass` becomes a floor on the *weakest*
+attempt rather than on the average. At
 `--repeat 1` the Markdown report and its `---` tail are byte for byte what the harness has always
 written, which is pinned by a test: every artifact under [`eval-results/`](eval-results/) and
-`eval/summarize_report.py` read the same format they always did.
+`eval/summarize_report.py` read the same format they always did. (At N > 1
+`summarize_report.py` lists a failing id once per failing attempt; it reads the Markdown only, and
+teaching it to read the sidecar is a separate change.)
 
 Three golden sets, reported separately. **Core** (`eval/golden/en-demo.yaml`, 11 questions, the
 default `GOLDEN_PATH`): eight questions on books the golden author has read and a two-book

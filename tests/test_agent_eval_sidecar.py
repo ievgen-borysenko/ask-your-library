@@ -84,7 +84,7 @@ def test_the_sidecar_carries_the_run_and_every_attempt(monkeypatch, tmp_path):
 
     assert set(sidecar) == {"schema", "schema_version", "report", "fingerprint", "run", "started",
                             "ended", "seconds", "repeat", "requested_ids", "items", "totals",
-                            "per_group", "attempt_totals", "questions"}
+                            "per_group", "attempt_totals", "attempt_groups", "questions"}
     assert sidecar["report"] == only(out, ".md").name        # the two files name each other
     assert sidecar["run"] == {"code": "abc1234", "repeat": 1}
     assert sidecar["repeat"] == 1 and sidecar["items"] == 2
@@ -121,6 +121,94 @@ def test_the_sidecar_round_trips_and_keeps_its_text_as_text(monkeypatch, tmp_pat
     assert raw.startswith("{\n  \"schema\"") and raw.endswith("\n")
     first = json.loads(raw)
     assert json.loads(json.dumps(first, ensure_ascii=False, indent=2)) == first
+
+
+def test_the_sidecar_names_no_machine_and_no_person(monkeypatch, tmp_path):
+    """A record meant to be committed beside a published number must not carry
+    the home directory of whoever ran it. The golden file is identified by a
+    repo-relative path (or its bare name, for a set that lives elsewhere) plus
+    its checksum — the leading path identifies a machine and nothing else."""
+    repo = Path(__file__).resolve().parents[1]
+
+    def strings(value):
+        if isinstance(value, str):
+            yield value
+        elif isinstance(value, dict):
+            for item in value.values():
+                yield from strings(item)
+        elif isinstance(value, list):
+            for item in value:
+                yield from strings(item)
+
+    # the real run_facts over the repository's own golden set, read before
+    # prepared() installs its stub
+    monkeypatch.setattr(harness, "GOLDEN_PATH", repo / "eval" / "golden" / "en-demo.yaml")
+    assert harness.golden_location(repo) == "eval/golden/en-demo.yaml"
+    real_facts = harness.run_facts(1)
+
+    out = prepared(monkeypatch, tmp_path, [], lambda item, attempt: fake_result(item))
+    sidecar = json.loads(only(out, ".json").read_text(encoding="utf-8"))
+    sidecar["run"] = real_facts
+    home = str(Path.home())
+    for text in strings(sidecar):
+        assert not text.startswith("/Users/"), text
+        assert home not in text, text
+    assert sidecar["run"]["golden_path"] == "eval/golden/en-demo.yaml"
+
+    # a golden set that lives outside the repository keeps its name only
+    monkeypatch.setattr(harness, "GOLDEN_PATH", tmp_path / "private-set.yaml")
+    assert harness.golden_location(repo) == "private-set.yaml"
+
+
+def test_the_sidecar_keeps_the_per_attempt_group_tables(monkeypatch, tmp_path):
+    """A summed per_group cannot reproduce the report's per-group range, so the
+    tables are stored per attempt as well."""
+    def results(item, attempt):
+        return fake_result(item, behavior_ok=not (item["id"] == "q01-moby" and attempt == 2))
+
+    out = prepared(monkeypatch, tmp_path, ["--repeat", "3"], results)
+    sidecar = json.loads(only(out, ".json").read_text(encoding="utf-8"))
+    assert sidecar["per_group"] == {"answer": {"behavior_ok": 2, "of": 3},
+                                    "identify": {"behavior_ok": 3, "of": 3}}
+    assert len(sidecar["attempt_groups"]) == 3
+    assert [g["answer"]["behavior_ok"] for g in sidecar["attempt_groups"]] == [1, 0, 1]
+    # the report's own line is derivable from them, which the summed table is not
+    passes = [g["answer"]["behavior_ok"] for g in sidecar["attempt_groups"]]
+    of = max(g["answer"]["of"] for g in sidecar["attempt_groups"])
+    assert f"answer {min(passes)}–{max(passes)}/{of}" in only(out, ".md").read_text(encoding="utf-8")
+
+
+def test_a_sidecar_that_cannot_be_written_does_not_lose_the_run(monkeypatch, tmp_path):
+    """The questions were run and the report is on disk; a record that cannot
+    be serialised must not turn a measured run into a failed one, and must not
+    be silent about itself either."""
+    def boom(*args, **kwargs):
+        raise TypeError("Object of type object is not JSON serializable")
+
+    monkeypatch.setattr(harness, "write_sidecar", boom)
+    out = prepared(monkeypatch, tmp_path, [], lambda item, attempt: fake_result(item))
+    report = only(out, ".md").read_text(encoding="utf-8")
+    tail = report[report.rindex("\n---\n"):]
+    assert ("JSON sidecar NOT written: TypeError: Object of type object is not JSON "
+            "serializable") in tail                      # summarize_report copies this tail
+    assert tail.count("manual correctness: not scored") == 1
+    assert not list(out.glob("answers-*.json")) and not list(out.glob("*.json.tmp"))
+
+
+def test_the_sidecar_is_renamed_into_place_not_written_in_pieces(monkeypatch, tmp_path):
+    """Ctrl-C halfway through json.dumps must not leave a half file claiming to
+    be the record of this run: it is written to a neighbour and renamed."""
+    seen = []
+    real_replace = Path.replace
+
+    def watched(self, target):
+        seen.append((self.name, Path(target).name))
+        return real_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", watched)
+    out = prepared(monkeypatch, tmp_path, [], lambda item, attempt: fake_result(item))
+    assert seen and seen[0][0].endswith(".json.tmp") and seen[0][1].endswith(".json")
+    assert not list(out.glob("*.json.tmp"))
 
 
 def test_no_json_writes_the_report_alone(monkeypatch, tmp_path):
@@ -169,30 +257,46 @@ def test_repeat_counts_the_booleans_and_ranges_the_numbers(monkeypatch, tmp_path
     assert ", attempt 2/3) — FAIL" in report
 
 
-def test_the_headline_is_a_range_over_the_attempts_never_one_number(monkeypatch, tmp_path):
-    """A pass count summed over three attempts (5 of 6) reads like a set of six
-    questions. At N > 1 the headline states the range and the per-attempt mean,
-    and every aggregate in the block gains its own spread line naming N."""
+def test_no_figure_in_the_tail_is_a_sum_across_attempts(monkeypatch, tmp_path):
+    """Two items run three times have six passes and six titles, and
+    "behavior PASS 5/6, expected titles mentioned 6/6" describes a six-question
+    set nobody ran. At N > 1 every line in the tail is per attempt — min–max
+    with the mean — and the only summed figure, the money actually spent, says
+    in words that it is summed."""
     def results(item, attempt):
         return fake_result(item, behavior_ok=not (item["id"] == "q01-moby" and attempt == 2))
 
     out = prepared(monkeypatch, tmp_path, ["--repeat", "3"], results)
     report = only(out, ".md").read_text(encoding="utf-8")
     tail = report[report.rindex("\n---\n"):]
-    assert "behavior PASS 1–2/2 over 3 attempts (mean 1.67 per attempt; answer 0–1/1, identify 1–1/1)" in tail
-    assert "spread over 3 attempts per item (every line above sums all 3 attempts):" in tail
-    for line in ("- completed 2–2/2 over 3 attempts (mean 2.00 per attempt)",
+    assert ("run of 3 attempts per item, 2 items; every figure below is PER ATTEMPT "
+            "(min–max over the 3 attempts, with the mean), never a sum across them") in tail
+    for line in ("- behavior PASS 1–2/2 over 3 attempts (mean 1.67 per attempt) "
+                 "[answer 0–1/1, identify 1–1/1]",
+                 "- completed 2–2/2 over 3 attempts (mean 2.00 per attempt)",
                  "- errors 0–0 over 3 attempts (mean 0.00 per attempt)",
                  "- clarify interrupts 0–0 over 3 attempts (mean 0.00 per attempt)",
                  "- quotes confirmed 4–4/4 over 3 attempts (mean 4.00 per attempt)",
+                 "- quotes unattributed 0–0 over 3 attempts (mean 0.00 per attempt)",
+                 "- quotes broken 0–0 over 3 attempts (mean 0.00 per attempt)",
                  "- evidence items 6–6 over 3 attempts (mean 6.00 per attempt)",
-                 "- behavior PASS 1–2/2 over 3 attempts (mean 1.67 per attempt)",
                  "- expected titles mentioned 2–2/2 over 3 attempts (mean 2.00 per attempt)",
                  "- expected facts found 2–2/2 over 3 attempts (mean 2.00 per attempt)",
-                 "- answers carrying every expected fact 2–2/2 over 3 attempts (mean 2.00 per attempt)",
+                 "- answers carrying every expected fact 2–2/2 over 3 attempts (mean 2.00 per "
+                 "attempt) (substring presence, not correctness; not part of behaviour PASS)",
                  "- cost $0.0200–$0.0200 over 3 attempts (mean $0.0200 per attempt)",
-                 "- llm calls 6–6 over 3 attempts (mean 6.00 per attempt)"):
+                 "- llm calls 6–6 over 3 attempts (mean 6.00 per attempt)",
+                 "- tokens in 2000–2000 over 3 attempts (mean 2000.00 per attempt)",
+                 "- tokens out 200–200 over 3 attempts (mean 200.00 per attempt)",
+                 "- spent in total across all 3 attempts: $0.0600, 18 LLM calls, "
+                 "6000 in / 600 out tokens; configured rates "
+                 f"${harness.PRICE_IN_PER_MTOK}/M in, ${harness.PRICE_OUT_PER_MTOK}/M out, "
+                 "cache reads not discounted"):
         assert line in tail, line
+    # the shapes the single-run block uses for sums must not appear at all
+    for summed in ("behavior PASS 5/6", "expected titles mentioned 6/6", "6 completed",
+                   "mean per attempted question"):
+        assert summed not in tail, summed
     assert tail.endswith("manual correctness: not scored — tick the checkboxes above\n")
 
 
@@ -303,6 +407,18 @@ def test_the_old_flags_parse_to_what_they_always_meant():
     clean = harness.parse_args(["--require-clean", "q01", "q02"])
     assert clean.require_clean is True and clean.ids == ["q01", "q02"]
     assert harness.parse_args([]).require_clean is False
+
+    # ids INTERSPERSED with flags: the hand-rolled slicing cut each flag out
+    # wherever it stood and kept everything else as ids, so these two commands
+    # named two questions each. Plain argparse would stop the positional at the
+    # first flag and reject the rest as unrecognised.
+    split = harness.parse_args(["c01", "--min-pass", "11", "c02"])
+    assert split.ids == ["c01", "c02"] and split.min_pass == 11
+    flagged = harness.parse_args(["c01", "--require-clean", "c02"])
+    assert flagged.ids == ["c01", "c02"] and flagged.require_clean is True
+    everywhere = harness.parse_args(["c01", "--repeat", "2", "c02", "--no-json", "c03"])
+    assert everywhere.ids == ["c01", "c02", "c03"]
+    assert everywhere.repeat == 2 and everywhere.json is False
 
     defaults = harness.parse_args([])
     assert defaults.min_pass is None and defaults.clarify_pick is None

@@ -102,6 +102,18 @@ def git_code_stamp() -> str:
         return "unknown"
 
 
+def golden_location(repo: Path) -> str:
+    """Where the golden file is, said without naming the machine it is on.
+
+    `eval/golden/en-demo.yaml` inside the repository, the bare file name for a
+    GOLDEN_PATH that points anywhere else — a private set under someone's home
+    directory is a path that identifies the reader, not the measurement."""
+    try:
+        return str(GOLDEN_PATH.resolve().relative_to(repo))
+    except (OSError, ValueError):
+        return GOLDEN_PATH.name
+
+
 def run_facts(repeat: int = 1) -> dict:
     """The fingerprint as FIELDS: one reading of the code stamp, the checksums,
     the backend, the model, the index stamps and every knob that changes the
@@ -142,7 +154,11 @@ def run_facts(repeat: int = 1) -> dict:
         "code": sha,
         # a stamp is a verified clean commit only when it is a bare sha (see git_code_stamp)
         "code_clean": sha != "unknown" and "+dirty(" not in sha,
-        "golden_path": str(GOLDEN_PATH),
+        # repo-relative, never the absolute path: GOLDEN_PATH sits under a home
+        # directory that names whoever ran it, and this file is meant to be
+        # committed beside a published number. The name and the checksum below
+        # identify the file; the leading path identifies nothing but a machine.
+        "golden_path": golden_location(repo),
         "golden_name": GOLDEN_PATH.name,
         "golden_sha256_12": golden_sha,
         "manifest_sha256_12": corpus_sha,
@@ -622,11 +638,16 @@ NUMBER_ROWS = (("cost_usd", "cost", "${:.4f}"), ("seconds", "seconds", "{:g}"),
                ("tokens_out", "tokens out", "{:g}"))
 
 
-def spread_of(values: list) -> dict | None:
-    """min / median / max of one numeric column, or None when nothing completed."""
+def spread_of(values: list, digits: int | None = None) -> dict | None:
+    """min / median / max of one numeric column, or None when nothing completed.
+
+    `digits` rounds the three, for money: the median of an even number of
+    attempts is a mean of two floats, and a cost is four decimals everywhere
+    else in this harness."""
     if not values:
         return None
-    return {"min": min(values), "median": statistics.median(values), "max": max(values)}
+    measured = {"min": min(values), "median": statistics.median(values), "max": max(values)}
+    return measured if digits is None else {k: round(v, digits) for k, v in measured.items()}
 
 
 def item_spread(attempts: list[dict], repeat: int) -> dict:
@@ -644,7 +665,8 @@ def item_spread(attempts: list[dict], repeat: int) -> dict:
     if any("drilldown_ok" in a["score"] for a in done):
         out["drilldown_ok"] = sum(int(a["score"].get("drilldown_ok", False)) for a in done)
     for key, _label, _fmt in NUMBER_ROWS:
-        measured = spread_of([a[key] for a in done if key in a])
+        measured = spread_of([a[key] for a in done if key in a],
+                             digits=4 if key == "cost_usd" else None)
         if measured:
             out[key] = measured
     return out
@@ -692,79 +714,96 @@ def empty_totals() -> dict:
 
 def render_summary(totals: dict, per_group: dict, repeat: int,
                    attempt_totals: list[dict], attempt_groups: list[dict]) -> str:
-    """The `\\n---\\n` tail. At --repeat 1 this is byte for byte the block the
-    harness has always written; at N > 1 the headline is a range over the
-    attempts rather than a sum that reads like one run, and every aggregate
-    gains its own spread line under the block."""
+    """The `\\n---\\n` tail.
+
+    At --repeat 1 this is byte for byte the block the harness has always
+    written, and that is a contract: eval/summarize_report.py copies it into
+    every committed summary, and every artifact under docs/eval-results/ was
+    produced by it.
+
+    At N > 1 it is a different block on purpose. NOT ONE FIGURE IN IT IS A SUM
+    ACROSS ATTEMPTS: a set of two items run three times has six passes and six
+    titles, and "behavior PASS 5/6, expected titles mentioned 5/5" describes a
+    six-question set nobody ran. Every line is per attempt — min–max over the N
+    attempts with the mean beside it — and the one figure that IS summed, the
+    money actually spent, says so in words."""
     attempted = totals["run"] + totals["errors"]
     if repeat == 1:
-        headline = (f"behavior PASS {totals['behavior_ok']}/{totals['run']} ("
+        headline = ("behavior PASS "
+                    f"{totals['behavior_ok']}/{totals['run']} ("
                     + ", ".join(f"{g} {p}/{n}" for g, (p, n) in sorted(per_group.items())) + ")")
-    else:
-        passes = [t["behavior_ok"] for t in attempt_totals]
-        per_pass = [t["run"] + t["errors"] for t in attempt_totals]
+        return (f"\n---\n{totals['run']} completed, {totals['errors']} errors, "
+                f"{totals['clarify']} clarify interrupts; quotes verified "
+                f"{totals['confirmed']}/{totals['checked']} (confirmed / unattributed / broken = "
+                f"{totals['confirmed']} / {totals['unattributed']} / {totals['broken']}); "
+                f"evidence items {totals['evidence']}\n"
+                + headline
+                + f"; expected titles mentioned {totals['titles_mentioned']}/{totals['titles_expected']}"
+                + (f"; chapter drill-down {totals['drill_ok']}/{totals['drill_expected']}"
+                   if totals["drill_expected"] else "")
+                + (f"\nexpected facts found {totals['facts_found']}/{totals['facts_expected']}; "
+                   f"answers carrying every expected fact {totals['facts_items_ok']}/{totals['facts_items']} "
+                   f"(substring presence, not correctness; not part of behaviour PASS)"
+                   if totals["facts_expected"] else "")
+                + (f"\ncost ${totals['cost_usd']:.4f} total, ${totals['cost_usd'] / attempted:.4f} mean per "
+                   f"attempted question ({totals['llm_calls']} LLM calls, {totals['tokens_in']} in / "
+                   f"{totals['tokens_out']} out tokens; configured rates ${PRICE_IN_PER_MTOK}/M in, "
+                   f"${PRICE_OUT_PER_MTOK}/M out, cache reads not discounted)"
+                   if attempted else "")
+                + "\nmanual correctness: not scored — tick the checkboxes above\n")
 
-        def group_range(g: str) -> str:
-            rows = [a.get(g, [0, 0]) for a in attempt_groups]
-            return f"{g} {min(r[0] for r in rows)}–{max(r[0] for r in rows)}/{max(r[1] for r in rows)}"
+    def column(key: str) -> list:
+        return [t[key] for t in attempt_totals]
 
-        headline = (f"behavior PASS {min(passes)}–{max(passes)}/{max(per_pass)} over {repeat} "
-                    f"attempts (mean {sum(passes) / repeat:.2f} per attempt; "
-                    + ", ".join(group_range(g) for g in sorted(per_group)) + ")")
-    spread = ""
-    if repeat > 1:
-        def column(key: str) -> list:
-            return [t[key] for t in attempt_totals]
+    # every attempt runs the same items, so one attempt's item count is the
+    # denominator of them all (max over the attempts, not a sum of maxima)
+    per_pass = max(t["run"] + t["errors"] for t in attempt_totals)
 
-        # every attempt runs the same items, so one attempt's item count is the
-        # denominator of them all (max over the attempts, not a sum of maxima)
-        per_pass = max(t["run"] + t["errors"] for t in attempt_totals)
-        lines = [f"\nspread over {repeat} attempts per item "
-                 f"(every line above sums all {repeat} attempts):",
-                 spread_line("completed", column("run"), of=per_pass),
-                 spread_line("errors", column("errors")),
-                 spread_line("clarify interrupts", column("clarify")),
-                 spread_line("quotes confirmed", column("confirmed"), of=max(column("checked"))),
-                 spread_line("evidence items", column("evidence")),
-                 spread_line("behavior PASS", column("behavior_ok"), of=per_pass),
-                 spread_line("expected titles mentioned", column("titles_mentioned"),
-                             of=max(column("titles_expected")))]
-        if totals["drill_expected"]:
-            lines.append(spread_line("chapter drill-down", column("drill_ok"),
-                                     of=max(column("drill_expected"))))
-        if totals["facts_expected"]:
-            lines.append(spread_line("expected facts found", column("facts_found"),
-                                     of=max(column("facts_expected"))))
-            lines.append(spread_line("answers carrying every expected fact", column("facts_items_ok"),
-                                     of=max(column("facts_items"))))
-        lines.append(spread_line("cost", column("cost_usd"), fmt="${:.4f}"))
-        lines.append(spread_line("llm calls", column("llm_calls")))
-        spread = "\n".join(lines)
-    return (f"\n---\n{totals['run']} completed, {totals['errors']} errors, "
-            f"{totals['clarify']} clarify interrupts; quotes verified "
-            f"{totals['confirmed']}/{totals['checked']} (confirmed / unattributed / broken = "
-            f"{totals['confirmed']} / {totals['unattributed']} / {totals['broken']}); "
-            f"evidence items {totals['evidence']}\n"
-            + headline
-            + f"; expected titles mentioned {totals['titles_mentioned']}/{totals['titles_expected']}"
-            + (f"; chapter drill-down {totals['drill_ok']}/{totals['drill_expected']}"
-               if totals["drill_expected"] else "")
-            + (f"\nexpected facts found {totals['facts_found']}/{totals['facts_expected']}; "
-               f"answers carrying every expected fact {totals['facts_items_ok']}/{totals['facts_items']} "
-               f"(substring presence, not correctness; not part of behaviour PASS)"
-               if totals["facts_expected"] else "")
-            + (f"\ncost ${totals['cost_usd']:.4f} total, ${totals['cost_usd'] / attempted:.4f} mean per "
-               f"attempted question ({totals['llm_calls']} LLM calls, {totals['tokens_in']} in / "
-               f"{totals['tokens_out']} out tokens; configured rates ${PRICE_IN_PER_MTOK}/M in, "
-               f"${PRICE_OUT_PER_MTOK}/M out, cache reads not discounted)"
-               if attempted else "")
-            + spread
-            + "\nmanual correctness: not scored — tick the checkboxes above\n")
+    def group_range(g: str) -> str:
+        rows = [a.get(g, [0, 0]) for a in attempt_groups]
+        return f"{g} {min(r[0] for r in rows)}–{max(r[0] for r in rows)}/{max(r[1] for r in rows)}"
+
+    lines = [f"\n---\nrun of {repeat} attempts per item, {per_pass} items; every figure below is "
+             f"PER ATTEMPT (min–max over the {repeat} attempts, with the mean), never a sum "
+             f"across them",
+             spread_line("behavior PASS", column("behavior_ok"), of=per_pass)
+             + " [" + ", ".join(group_range(g) for g in sorted(per_group)) + "]",
+             spread_line("completed", column("run"), of=per_pass),
+             spread_line("errors", column("errors")),
+             spread_line("clarify interrupts", column("clarify")),
+             spread_line("quotes confirmed", column("confirmed"), of=max(column("checked"))),
+             spread_line("quotes unattributed", column("unattributed")),
+             spread_line("quotes broken", column("broken")),
+             spread_line("evidence items", column("evidence")),
+             spread_line("expected titles mentioned", column("titles_mentioned"),
+                         of=max(column("titles_expected")))]
+    if totals["drill_expected"]:
+        lines.append(spread_line("chapter drill-down", column("drill_ok"),
+                                 of=max(column("drill_expected"))))
+    if totals["facts_expected"]:
+        lines.append(spread_line("expected facts found", column("facts_found"),
+                                 of=max(column("facts_expected"))))
+        lines.append(spread_line("answers carrying every expected fact", column("facts_items_ok"),
+                                 of=max(column("facts_items")))
+                     + " (substring presence, not correctness; not part of behaviour PASS)")
+    lines.append(spread_line("cost", column("cost_usd"), fmt="${:.4f}"))
+    lines.append(spread_line("llm calls", column("llm_calls")))
+    lines.append(spread_line("tokens in", column("tokens_in")))
+    lines.append(spread_line("tokens out", column("tokens_out")))
+    if attempted:
+        # the one honest sum: what the whole run actually cost, labelled as such
+        lines.append(f"- spent in total across all {repeat} attempts: ${totals['cost_usd']:.4f}, "
+                     f"{totals['llm_calls']} LLM calls, {totals['tokens_in']} in / "
+                     f"{totals['tokens_out']} out tokens; configured rates "
+                     f"${PRICE_IN_PER_MTOK}/M in, ${PRICE_OUT_PER_MTOK}/M out, cache reads not "
+                     f"discounted")
+    return "\n".join(lines) + "\nmanual correctness: not scored — tick the checkboxes above\n"
 
 
 def write_sidecar(path: Path, report_path: Path, facts: dict, fingerprint: str, repeat: int,
                   requested_ids: list[str], started: float, ended: float, totals: dict,
-                  per_group: dict, attempt_totals: list[dict], records: list[dict]) -> None:
+                  per_group: dict, attempt_totals: list[dict], attempt_groups: list[dict],
+                  records: list[dict]) -> None:
     """The same run as data, beside the Markdown a reader reads.
 
     The report's shape is a contract with eval/summarize_report.py, so nothing
@@ -796,9 +835,20 @@ def write_sidecar(path: Path, report_path: Path, facts: dict, fingerprint: str, 
         "per_group": {group: {"behavior_ok": passed, "of": of}
                       for group, (passed, of) in sorted(per_group.items())},
         "attempt_totals": attempt_totals,
+        # the per-attempt group tables, not only their sum: without them the
+        # report's own per-group range ("identify 1–2/3") cannot be reproduced
+        # from this file, and a summed 4/9 does not carry it
+        "attempt_groups": [{group: {"behavior_ok": passed, "of": of}
+                            for group, (passed, of) in sorted(groups.items())}
+                           for groups in attempt_groups],
         "questions": records,
     }
-    path.write_text(json.dumps(sidecar, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    # written to a neighbour and renamed: json.dumps walks the whole record
+    # after the Markdown is already closed, and a Ctrl-C or a full disk halfway
+    # through must leave no half file claiming to be the record of this run
+    scratch = path.with_suffix(".json.tmp")
+    scratch.write_text(json.dumps(sidecar, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    scratch.replace(path)
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -825,7 +875,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                              "and min/median/max of cost, seconds and tokens")
     parser.add_argument("--json", action=argparse.BooleanOptionalAction, default=True,
                         help="write the JSON sidecar answers-<ts>.json beside the report (default: on)")
-    args = parser.parse_args(argv)
+    # parse_intermixed_args, not parse_args: the hand-rolled slicing this
+    # replaced cut the flags out wherever they stood and kept everything else as
+    # ids, so `c01 --min-pass 11 c02` meant two ids. Plain argparse stops
+    # collecting the positional at the first flag and rejects `c02` as
+    # unrecognised — a silent change of meaning for anyone with that command in
+    # their shell history.
+    args = parser.parse_intermixed_args(argv)
     if args.repeat < 1:
         # zero attempts is not a run, and a negative one is a typo that would
         # otherwise produce an empty report with a green exit code
@@ -992,14 +1048,28 @@ def main(argv: list[str] | None = None) -> None:
                 row[0] += passed; row[1] += of
         summary = render_summary(totals, per_group, repeat, attempt_totals, attempt_groups)
         out.write(summary)
-    ended = time.time()
-    if args.json:
-        write_sidecar(json_path, out_path, facts_of_run, fingerprint, repeat, wanted_ids,
-                      started, ended, totals, per_group, attempt_totals, records)
+        ended = time.time()
+        sidecar_written = False
+        if args.json:
+            try:
+                write_sidecar(json_path, out_path, facts_of_run, fingerprint, repeat, wanted_ids,
+                              started, ended, totals, per_group, attempt_totals, attempt_groups,
+                              records)
+                sidecar_written = True
+            except Exception as error:
+                # The questions were run and the report is on disk: a record
+                # that could not be serialised must not turn a measured run into
+                # a failed one, and must not be silent about itself either. The
+                # note goes into the tail, which is what summarize_report.py
+                # copies into the committed summary.
+                note = f"JSON sidecar NOT written: {type(error).__name__}: {error}"
+                out.write(f"{note}\n")
+                summary += f"{note}\n"
+                print(note, file=sys.stderr)
     print(summary)
     print(f"run: {fingerprint}")
     print(f"Report: {out_path}")
-    if args.json:
+    if sidecar_written:
         print(f"Sidecar: {json_path}")
     # Under --repeat the threshold is a floor on every attempt, not on their sum:
     # a set that passes 11/11 twice and 7/11 once has not met a --min-pass of 11.
