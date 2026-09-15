@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **The workflow files are linted in CI.** The backlog's release-status entry named this the one
+  item left from the visibility-switch list ("a workflow linter, free on a public repository"); a
+  `workflows` job in `ci.yml` now runs actionlint over every file under `.github/workflows/` on
+  push and pull request, with shellcheck checked in too since it ships on `ubuntu-latest` and
+  actionlint finds it with no extra install (pyflakes stays off — not installed on the runner).
+  actionlint itself is a release tarball checked against its published SHA-256, not the third-party
+  action wrapper, for the same reason `security.yml` fetches gitleaks that way: one hop to the
+  binary instead of two. The first run, over `ci.yml`, `security.yml` and `corpus.yml`, found
+  nothing — zero errors, and all three pre-existing workflow files needed no fixes.
 - **The accuracy caveat on the local default is back on the front page.** 0.3.0's entry below says
   "the warning that a small local model is less reliable than the hosted default stands unchanged".
   It did not: the README rewrite had already removed it, and after the default flip the front page

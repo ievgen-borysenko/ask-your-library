@@ -31,8 +31,7 @@ open ones often refer to them.
   `install-script`, `secrets` and `dependencies`, keeps branches up to date, and allows no
   force-push, no deletion and no bypass; a code scanning rule blocks on CodeQL security alerts of
   high or higher and on other alerts at error level; Dependabot alerts, secret scanning with push
-  protection, and private vulnerability reporting are on. Still open from that list: a workflow
-  linter, free on a public repository.
+  protection, and private vulnerability reporting are on.
 
 ## Agent behaviour
 
@@ -208,3 +207,8 @@ open ones often refer to them.
   JSON; eval validates requested ids and records per-question cost and tokens.
 - Non-goals documented in `docs/known-limits.md`: re-ingest per corpus change (and the staged
   rebuild of `ayl-add`), `get_chapter` caps, EN/UA-only injection patterns.
+- Workflow linter: a `workflows` job in `ci.yml` runs actionlint (release tarball, SHA-256
+  verified, no third-party action) over every file under `.github/workflows/`, shellcheck included
+  since it ships on `ubuntu-latest`, pyflakes not installed so it stays off; first run found
+  nothing to fix in the three existing workflows. The ruleset's seven required checks (above) are
+  unchanged; `workflows` is not among them.
