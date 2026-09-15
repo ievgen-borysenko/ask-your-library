@@ -4,7 +4,9 @@ import asyncio
 import importlib
 import json
 import logging
+import os
 import stat
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -831,6 +833,49 @@ def test_the_clarify_timeout_is_five_minutes_unless_a_test_shortens_it(tmp_path)
     # Blank is absent, as everywhere else in this project (a copied .env.example
     # line): the default stands rather than the server refusing to start.
     assert _out(code, **environment, AYL_CLARIFY_TIMEOUT_S="  ") == "300"
-    for bad in ("0", "-1", "soon", "1_0", "+5", "2.5", "25s"):
+    # "²" is isdigit() and not int()-able: the parser matches ASCII digits.
+    for bad in ("0", "-1", "soon", "1_0", "+5", "2.5", "25s", "²", "٢٥"):
         result = _run(code, check=False, **environment, AYL_CLARIFY_TIMEOUT_S=bad)
         assert result.returncode != 0 and "AYL_CLARIFY_TIMEOUT_S" in result.stderr
+
+
+# --- the browser smoke run's own gate, without a browser ----------------------
+
+def _pytest_on_the_smoke_directory(browsers_dir, **environment) -> subprocess.CompletedProcess:
+    """Collect tests/ui in a child, with the browser made unfindable. Nothing is
+    launched: the module's own probe answers at collection time."""
+    base = {k: v for k, v in os.environ.items() if k != "AYL_UI_SMOKE_REQUIRED"}
+    base["PLAYWRIGHT_BROWSERS_PATH"] = str(browsers_dir)
+    return subprocess.run([sys.executable, "-m", "pytest", "-q", "tests/ui", "-rs",
+                           "-p", "no:cacheprovider"],
+                          cwd=REPO, env={**base, **environment},
+                          capture_output=True, text=True)
+
+
+def test_the_smoke_run_skips_by_default_and_is_an_error_where_ci_requires_it(tmp_path):
+    """tests/ui skips itself wherever chromium is missing, which is what keeps
+    `uv run pytest -q` green and fast on a clone that never ran `playwright
+    install` — and is exactly the wrong answer in the job whose only purpose is
+    that file, where it would turn a release check that stopped running into a
+    green tick. AYL_UI_SMOKE_REQUIRED=1, set in the `ui-smoke` job and nowhere
+    else, makes the missing browser a collection error instead.
+
+    Both halves are asserted in a child interpreter with the browser path
+    pointed at an empty directory, so the test needs no browser itself."""
+    pytest.importorskip("playwright", reason="the smoke directory's own gate needs the library")
+    empty = tmp_path / "no-browsers-here"
+    empty.mkdir()
+
+    skipped = _pytest_on_the_smoke_directory(empty)
+    # 5 is pytest's "no tests ran": this child collects nothing else. In the real
+    # `uv run pytest -q` the rest of the suite runs and the status is 0 — what
+    # matters here is that a missing browser is not a failure.
+    assert skipped.returncode == 5, skipped.stdout[-2000:]
+    assert "chromium is not installed" in skipped.stdout          # -rs prints the reason
+    assert "1 skipped" in skipped.stdout
+
+    required = _pytest_on_the_smoke_directory(empty, AYL_UI_SMOKE_REQUIRED="1")
+    assert required.returncode != 0, required.stdout[-2000:]
+    output = required.stdout + required.stderr
+    assert "AYL_UI_SMOKE_REQUIRED=1" in output and "chromium is not installed" in output
+    assert "skipped" not in required.stdout.splitlines()[-1]

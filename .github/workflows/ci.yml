@@ -115,9 +115,35 @@ jobs:
         # ubuntu image. Chromium only — no other engine is driven here.
         run: uv run playwright install --with-deps chromium
       - name: The UI smoke run (desktop and phone viewports)
+        # AYL_UI_SMOKE_REQUIRED: in this job a missing browser is a collection
+        # error, not a skip — everything under tests/ui skips itself where the
+        # binary is absent, and a job of nothing but skips is green.
         # --basetemp so the screenshots the failure hook writes land somewhere
-        # the upload step below can name.
-        run: uv run pytest -q tests/ui -rs --basetemp=ui-smoke-artifacts
+        # the upload step below can name; --junitxml so the next step can count
+        # what actually ran rather than trust the exit status.
+        env:
+          AYL_UI_SMOKE_REQUIRED: "1"
+        run: |
+          uv run pytest -q tests/ui -rs --basetemp=ui-smoke-artifacts \
+            --junitxml=ui-smoke-results.xml
+      - name: Both viewports really ran
+        # The belt to the flag's braces: a file that collects nothing, or a
+        # parametrisation that lost a case, still exits 0. Two executed,
+        # non-skipped cases is what this job is for.
+        run: |
+          uv run python - <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          cases = list(ET.parse("ui-smoke-results.xml").getroot().iter("testcase"))
+          ran = [c for c in cases if c.find("skipped") is None]
+          print(f"{len(ran)} of {len(cases)} test cases ran:")
+          for case in cases:
+              print(f"  {case.get('name')}: "
+                    f"{'skipped' if case.find('skipped') is not None else 'ran'}")
+          if len(ran) < 2:
+              sys.exit("the UI smoke run did not execute both viewports")
+          PY
       - name: Screenshots of the failing pages
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

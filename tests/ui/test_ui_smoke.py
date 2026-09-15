@@ -76,8 +76,19 @@ def _browser_problem() -> str:
     return ""
 
 
+# CI sets this in the ui-smoke job and nowhere else. A skip is the right answer
+# on a developer's machine that never ran `playwright install`; in the job whose
+# whole purpose is this file, it is the wrong answer twice over — a green run
+# that checked nothing, and a release check that quietly stopped running. There
+# the missing browser is a collection ERROR, which no summary can be mistaken for
+# a pass.
+REQUIRED_VAR = "AYL_UI_SMOKE_REQUIRED"
+
 _PROBLEM = _browser_problem()
 if _PROBLEM:
+    if os.environ.get(REQUIRED_VAR) == "1":
+        raise RuntimeError(
+            f"{REQUIRED_VAR}=1, so this file must RUN, and it cannot: {_PROBLEM}")
     pytest.skip(_PROBLEM, allow_module_level=True)
 
 from playwright.sync_api import expect, sync_playwright   # noqa: E402  (after the skip)
@@ -120,6 +131,10 @@ CLARIFY_QUESTION = ("which gothic novel was it where a monster gets hunted acros
 BADGE = "Quote provenance"
 CATALOGUE_BADGE = "Catalogue answer"
 CANDIDATES = "Candidates in the library"
+# The metrics footer's own <details>, sent after everything else a question
+# produces: on the page it means "this run is over", and it is the one
+# <details> that is never an evidence passage.
+METRICS_SUMMARY = "run details"
 
 COMPOSER = "textarea#chat-input"
 
@@ -292,15 +307,25 @@ def thread_address(page, timeout_ms: int) -> str:
     raise AssertionError(f"the conversation never got an address of its own: {page.url}")
 
 
+def wait_for_the_run_to_finish(page, timeout_ms: int) -> None:
+    """The metrics footer is the last message of a question, so its presence is
+    "this run has stopped adding messages". Waited for before anything is
+    clicked in the thread: a message list still growing re-renders under the
+    click, and a locator resolved a moment earlier is then attached to nothing
+    (seen once, as `Element is not attached to the DOM`, under full-suite load)."""
+    expect(body(page)).to_contain_text(METRICS_SUMMARY, timeout=timeout_ms)
+
+
 def open_details(page, summary_text: str):
     """Open the <details> whose summary carries `summary_text` and return it.
     The metrics footer is a <details> too; naming the summary keeps them apart."""
     summary = page.locator("details summary").filter(has_text=summary_text).first
     expect(summary).to_be_visible(timeout=RENDER_MS)
-    summary.scroll_into_view_if_needed(timeout=RENDER_MS)
-    # The composer floats over the last ~120 px of the thread on a phone, and a
-    # summary scrolled to the bottom edge lands under it; a nudge puts it clear.
-    page.mouse.wheel(0, 180)
+    # Centred, not merely in view: the composer floats over the last ~120 px of
+    # the thread on a phone, and the minimal scroll a click does for itself
+    # leaves an element at the bottom edge underneath it. `click` then retries
+    # through a re-render on its own, which is why nothing here holds a handle.
+    summary.evaluate("element => element.scrollIntoView({block: 'center'})")
     summary.click(timeout=RENDER_MS)
     return page.locator("details").filter(has_text=summary_text).first
 
@@ -357,6 +382,7 @@ def walk_through_the_release_check(page, chainlit_server) -> None:
 
     # --- an evidence passage: OPENED and readable, not merely sent. (2.12
     # rendered these as code snippets and dropped the text inside them.)
+    wait_for_the_run_to_finish(page, ANSWER_MS)
     passage = open_details(page, "s1h1")
     expect(passage).to_contain_text("Moby Dick — Herman Melville — Summary", timeout=RENDER_MS)
     # A sentence that is only in the passage, never in the answer or the quote:
