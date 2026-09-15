@@ -121,6 +121,27 @@ def test_both_attempts_of_a_retry_are_recorded(monkeypatch, tmp_path):
     assert calls[1]["raw"] == PLAN_REPLY
 
 
+def test_a_reply_with_no_json_at_all_is_recorded_with_a_reason(monkeypatch, tmp_path):
+    """An empty `error` on a line whose reply parsed to nothing reads like a
+    success. `ask_json`'s own remembered error stays untouched — its retry
+    prompt is a contract, pinned elsewhere — so the record says it instead."""
+    scripted(monkeypatch, "no braces here", PLAN_REPLY)
+    with plan_recording.PlanRecorder(tmp_path / "r.jsonl", FACTS) as recorder:
+        with recorder.item("c01"):
+            llm.ask_json(PLAN_RULES, "payload", role="plan")
+    first, second = lines_of(recorder.path)[1:]
+    assert first["error"] == llm.NO_JSON_OBJECT == "no JSON object in reply"
+    assert second["error"] == ""
+
+
+def test_a_malformed_reply_is_recorded_with_the_parser_s_own_reason(monkeypatch, tmp_path):
+    scripted(monkeypatch, '{"mode": "answer", }', PLAN_REPLY)
+    with plan_recording.PlanRecorder(tmp_path / "r.jsonl", FACTS) as recorder:
+        with recorder.item("c01"):
+            llm.ask_json(PLAN_RULES, "payload", role="plan")
+    assert "Expecting property name" in lines_of(recorder.path)[1]["error"]
+
+
 def test_two_plan_calls_of_one_item_are_numbered(monkeypatch, tmp_path):
     """A clarify sends the run back through `plan`; the second decision is a
     second line of the same item, not a replacement for the first."""
@@ -168,6 +189,54 @@ def test_absolute_paths_are_redacted_from_the_payload_and_the_reply(monkeypatch,
     call = lines_of(recorder.path)[1]
     assert call["user"] == "<question>~/private/library/notes.txt</question>"
     assert "<repo>/eval/golden/en-demo.yaml" in call["raw"]
+
+
+# --- what a call cost ---------------------------------------------------------
+def billed(monkeypatch, *replies, tokens_in=1000, tokens_out=100):
+    """`llm_invoke` that also moves the run accumulator, the way the real one
+    does: what a recorded line's cost and tokens are read off."""
+    replies = list(replies)
+
+    def invoke(system, user, role):
+        usage = llm._usage()
+        usage.llm_calls += 1
+        usage.input_tokens += tokens_in
+        usage.output_tokens += tokens_out
+        return Reply(replies[min(usage.llm_calls - 1, len(replies) - 1)])
+
+    monkeypatch.setattr(llm, "llm_invoke", invoke)
+
+
+def test_every_call_of_every_item_records_what_that_call_spent(monkeypatch, tmp_path):
+    """The accumulator is reset INSIDE run_one, i.e. after the recorder's item
+    block is already open. A "before" reading taken when the block opens is
+    therefore the PREVIOUS item's totals, and from the second item on every
+    line would carry a negative cost and negative tokens — which is what this
+    pins: two items, each with its own reset, and both read forwards."""
+    billed(monkeypatch, PLAN_REPLY, tokens_in=1000, tokens_out=100)
+    with plan_recording.PlanRecorder(tmp_path / "r.jsonl", FACTS) as recorder:
+        for item_id in ("q01", "q02"):
+            with recorder.item(item_id):
+                llm.reset_usage()          # exactly where run_one does it
+                llm.ask_json(PLAN_RULES, "payload", role="plan")
+    calls = lines_of(recorder.path)[1:]
+    assert [c["id"] for c in calls] == ["q01", "q02"]
+    for call in calls:
+        assert (call["llm_calls"], call["tokens_in"], call["tokens_out"]) == (1, 1000, 100)
+        assert call["cost_usd"] >= 0
+
+
+def test_the_second_call_of_an_item_is_the_difference_not_the_running_total(monkeypatch, tmp_path):
+    """Two plan calls in one question (a clarify re-plans): each line is what
+    that call added, not what the question had spent by then."""
+    billed(monkeypatch, PLAN_REPLY, tokens_in=700, tokens_out=40)
+    with plan_recording.PlanRecorder(tmp_path / "r.jsonl", FACTS) as recorder:
+        with recorder.item("c09"):
+            llm.reset_usage()
+            llm.ask_json(PLAN_RULES, "first", role="plan")
+            llm.ask_json(PLAN_RULES, "after the clarify", role="plan")
+    for call in lines_of(recorder.path)[1:]:
+        assert (call["llm_calls"], call["tokens_in"], call["tokens_out"]) == (1, 700, 40)
 
 
 # --- the seam cannot hurt the run ---------------------------------------------

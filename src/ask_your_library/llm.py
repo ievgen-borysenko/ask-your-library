@@ -410,7 +410,17 @@ def json_object(reply: str) -> tuple[dict | None, str]:
 # and it cannot change what a call returns: it is handed a finished record and
 # its own failure is logged rather than raised — a recorder must never turn a
 # paid run into a failed one.
+#
+# A plain module global and not a ContextVar: the only caller is an eval harness,
+# which runs one question at a time in one thread. The web UI serves concurrent
+# sessions and never installs one.
 JSON_CALL_OBSERVER = None
+
+# What the record says about a reply that held no JSON object at all. `ask_json`
+# itself keeps its own `last_error` unchanged for that case — an empty reason
+# tells the model nothing, and its retry prompt is a contract — so the record
+# needs a word of its own rather than an empty string that reads like success.
+NO_JSON_OBJECT = "no JSON object in reply"
 
 
 def _observe_json_call(call: dict) -> None:
@@ -438,7 +448,7 @@ def ask_json(system: str, user: str, role: str) -> dict:
         # first reply would replay a retry that never happened
         _observe_json_call({"role": role, "attempt": attempt + 1, "system": system,
                             "user": attempt_user, "raw": reply,
-                            "error": "" if parsed is not None else f"{last_error or ''}"})
+                            "error": "" if parsed is not None else (why or NO_JSON_OBJECT)})
         if parsed is not None:
             return parsed
         attempt_user = (user +

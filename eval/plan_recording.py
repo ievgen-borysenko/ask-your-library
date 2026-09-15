@@ -263,7 +263,10 @@ class PlanRecorder:
         """The next plan calls belong to this golden id and this attempt."""
         self._current = (item_id, attempt)
         self._call_index = 0
-        self._usage_mark = self._usage()
+        # NOT a reading of the accumulator: see _spent. The block opens BEFORE
+        # run_one resets it, so a mark taken here would be the previous item's
+        # totals and every delta from the second item on would be negative.
+        self._usage_mark = None
         try:
             yield self
         finally:
@@ -279,9 +282,18 @@ class PlanRecorder:
         """What THIS call cost, as the difference between two readings of the
         run accumulator. The accumulator is per question (the harness resets it
         in `run_one`), so a difference is the only honest per-call figure
-        available without a second accounting path."""
+        available without a second accounting path.
+
+        The FIRST reading of an item is taken at its first observed call, not
+        when the item block opens, and it is zero rather than a snapshot: the
+        harness enters the block and only then calls `run_one`, which resets the
+        accumulator — so a snapshot taken at the block would be the PREVIOUS
+        item's totals, and from the second item on every recorded call would
+        carry a negative cost and negative tokens. After the reset the
+        accumulator holds this item's spend only, which at its first call is
+        that call's."""
         now = self._usage()
-        before, self._usage_mark = self._usage_mark, now
+        before, self._usage_mark = self._usage_mark or (0.0, 0, 0, 0), now
         return {"cost_usd": round(now[0] - before[0], 6), "llm_calls": now[1] - before[1],
                 "tokens_in": now[2] - before[2], "tokens_out": now[3] - before[3]}
 
@@ -339,10 +351,12 @@ class PlanReplayer:
     raises the same `ValueError` here and `plan()` degrades to its fallback
     exactly as it did on the paid run."""
 
-    def __init__(self, recording: Recording):
+    def __init__(self, recording: Recording, redact=lambda text: text):
         self.recording = recording
+        self.redact = redact
         self.calls = 0
         self.missing: list = []
+        self.drift: dict = {}          # (id, attempt) -> [reason, ...]
         self._queue = None
         self._key = None
 
@@ -356,6 +370,30 @@ class PlanReplayer:
         finally:
             self._queue = self._key = None
 
+    def _check_request(self, system: str, user: str, record: dict) -> None:
+        """Is this the call that was recorded, or only the call in its place?
+
+        The reply is replayed whatever the question was, so a change to how the
+        payload is BUILT — a new data block, a different history window, a
+        rewording of the clarification note — would be measured against a reply
+        the planner gave to the old payload, and the run would look clean. That
+        is the one silent failure of a replay, so the request is compared as
+        well as the response: the user payload verbatim (redacted the same way
+        it was written), and the system prompt by its hash, which catches a
+        prompt swapped under a header that still matches.
+
+        Recorded, not raised: the item still replays, and the harness decides
+        what a drifted item does to its exit code."""
+        reasons = []
+        recorded_user = record.get("user", "")
+        if self.redact(user) != recorded_user:
+            reasons.append("the user payload plan() builds now is not the one that was recorded")
+        recorded_system = record.get("system_sha256_12", "")
+        if recorded_system and sha12(system) != recorded_system:
+            reasons.append(f"system prompt {sha12(system)}, recorded {recorded_system}")
+        if reasons:
+            self.drift.setdefault(self._key, []).extend(reasons)
+
     def __call__(self, system: str, user: str, role: str) -> dict:
         if role != PLAN_ROLE:
             # Only the planner is recorded. A replay that silently answered
@@ -367,6 +405,7 @@ class PlanReplayer:
             raise MissingRecording(f"no recorded plan call left for {self._key}")
         record = self._queue.pop(0)
         self.calls += 1
+        self._check_request(system, user, record)
         last_error = None
         # one recorded ask_json CALL is one line; its retry is the next line
         for attempt_record in [record, *self._same_call(record)]:

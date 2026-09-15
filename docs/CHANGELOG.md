@@ -35,6 +35,12 @@
   question, not the planner's reading of it. A Markdown report and a JSON sidecar are written side
   by side in the shape family of the main harness.
 
+  The request is checked too, not only the reply: each replayed call compares the payload the node
+  builds now with the recorded one and the system prompt by its hash, and a mismatch is reported as
+  `payload_drift` and exits 1 unless `--allow-drift` — otherwise a change to how the payload is
+  *assembled* would be graded against a reply to a payload this tree no longer sends, and the run
+  would look clean.
+
   **What it cannot measure, said in the harness, the report and the sidecar: a change to
   `PLAN_RULES`.** A recorded reply answers the prompt that was in the tree when it was recorded, so
   the recording's header carries that prompt's checksum next to the golden file's and the harness

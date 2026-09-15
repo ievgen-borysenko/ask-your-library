@@ -238,7 +238,11 @@ owes it written out in the harness rather than inferred: `mode_ok` is the **rout
 actually pins - the catalogue path for a `catalog` item, the research loop for every other type,
 which is exactly where `score()` in the main harness already fails a run (`catalog_misroute`) -
 plus, for an `expected_behavior: research` control, that the planner routed it there itself rather
-than being rescued by a `catalog_fallback`. Then `op_ok` (the catalogue operation is the item's
+than being rescued by a `catalog_fallback`. A `plan_fallback` fails this row too, whatever route
+the state ended on: the planner produced nothing usable and code searched the raw question, so
+"not the catalogue path" is true of it only because there was no path to take, and a green
+`mode_ok` on it would mark every failed planner correct on the row a reader looks at first. Then
+`op_ok` (the catalogue operation is the item's
 `expected_op`), `book_filter_ok` (the named book resolved to the item's `expected_book_filter`),
 `fallback_ok` (no `plan_fallback`), `queries_ok` (a non-blank query survived the filter) and
 `queries_range` (as many queries as `PLAN_RULES` asks for, 2-4). Whether the planner said
@@ -247,6 +251,15 @@ golden `type` labels the question, not the planner's reading of it, and an `iden
 whose book is obvious is legitimately answered. A Markdown report and a JSON sidecar are written
 side by side in the shape family of the main harness (`eval/results/plan-replay-<ts>.{md,json}`),
 with the run fingerprint as fields and the recording's identity beside it.
+
+**The request is checked, not only the reply.** A recorded reply is replayed whatever question it
+answered, so a change to how `plan()` *assembles* its payload - a new data block, a different
+history window, a reworded clarification note - would be graded against a reply to a payload this
+tree no longer sends, and the run would look clean. Each replayed call therefore compares the
+payload the node builds now with the recorded one (redacted the same way it was written) and the
+system prompt by its hash; a mismatch is reported per item as `payload_drift`, in the report line,
+the totals and the sidecar, and exits 1 unless `--allow-drift`. It is deliberately **not** part of
+the per-item verdict: drift says the *replay* is questionable, not that the planner decided wrongly.
 
 **What it cannot measure: a change to `PLAN_RULES`.** The recorded reply answers the prompt that
 was in the tree when it was recorded; replaying it under a new prompt measures the post-processing
@@ -257,9 +270,13 @@ anyway and stamps the report and the sidecar with a block saying that nothing in
 tree - there is no quiet way to do it. **A prompt change needs a new recording, and a new recording
 needs a paid run.** Nor does this harness see anything downstream of `plan`: retrieval, the answer,
 quote provenance and cost are the full harness's business, and the replay report's tail says so.
-An item the recording does not hold exits 1 unless `--allow-missing`; a planner call that timed out
+An item the recording does not hold exits 1 unless `--allow-missing`. A planner call that timed out
 on the paid run left no record and reads as missing here, which is the one case where the two
-cannot be told apart.
+cannot be told apart - and if the timeout came on the *retry*, after a first malformed reply was
+already recorded, the item is not missing at all: it replays as the one recorded line, which parses
+to nothing, so `plan()` degrades to its fallback where the paid run took the call-timeout branch.
+The two are different states of the node and the replay cannot tell them apart, so a `plan_fallback`
+in a replay report is "no usable plan", not necessarily "no plan for want of JSON".
 
 The mechanism is proved on fixture recordings (`tests/test_plan_recording.py`,
 `tests/test_plan_replay.py`, with the synthetic pair under `tests/fixtures/`), including that a

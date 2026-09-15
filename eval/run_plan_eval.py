@@ -22,14 +22,16 @@ A prompt change needs a NEW recording, which needs a paid run.
   uv run eval/run_agent_eval.py --record-plans        # once, paid: make the recording
   uv run eval/run_plan_eval.py                        # then, free, as often as you like
   uv run eval/run_plan_eval.py --recording eval/recordings/<file>.jsonl [id ...]
-      [--check] [--allow-missing] [--allow-stale] [--min-pass N] [--no-json]
+      [--check] [--allow-missing] [--allow-stale] [--allow-drift] [--min-pass N] [--no-json]
 
 Scored per item and per recorded attempt (every row is deterministic, and the
 mapping from a golden item to what the planner owes it is spelled out in
 `PLAN_SCORES` below):
 
   mode_ok         the ROUTE the golden set actually pins — the catalogue path
-                  for a `catalog` item, the research loop for every other type
+                  for a `catalog` item, the research loop for every other type —
+                  AND a planner that made that choice: a `plan_fallback` decided
+                  nothing and is not a correct route
   op_ok           `catalog_request.op` is the item's `expected_op`
   book_filter_ok  the named book resolved to the item's `expected_book_filter`
   fallback_ok     `plan_fallback` is false: the planner produced a usable plan
@@ -209,6 +211,11 @@ def score_plan(item: dict, update: dict, route: str) -> dict:
             # not rescued by the catalogue gate (the `research` branch of score())
             out["mode_ok"] = out["mode_ok"] and not update.get("catalog_fallback")
     out["fallback_ok"] = not out["plan_fallback"]
+    # A fallback made NO routing decision: the planner produced nothing usable
+    # and code searched the raw question. "not the catalogue path" is true of it
+    # only because there was no path to take, and counting that as a correct
+    # route would mark every failed planner green on the row that matters most.
+    out["mode_ok"] = out["mode_ok"] and out["fallback_ok"]
     if not took_catalog:
         # A catalogue decision carries no queries by contract, so these two rows
         # do not exist for it — an absent row is not a failed one.
@@ -233,11 +240,20 @@ def replay_one(item: dict, replayer, attempt: int) -> dict:
     with replayer.item(item["id"], attempt):
         update = nodes.plan(state)
     route = route_after_plan({**state, **update})
+    score = score_plan(item, update, route)
+    # The request the node built this time against the one that was recorded:
+    # a reply is replayed whatever it answers, so a change to how the payload is
+    # assembled would otherwise be graded against a reply to the old payload.
+    # Reported per item and never part of plan_ok — it says the REPLAY is
+    # questionable, not that the planner decided wrongly — and it decides the
+    # exit code unless --allow-drift.
+    drift = replayer.drift.get((item["id"], attempt), [])
+    score["payload_drift"] = list(drift)
     return {"id": item["id"], "type": item["type"], "attempt": attempt,
             "question": item["question"],
             "queries": queries_of(update),
             "seconds": round(time.time() - started, 3),
-            "score": score_plan(item, update, route)}
+            "score": score}
 
 
 # --- the report ---------------------------------------------------------------
@@ -261,6 +277,8 @@ def render_row(record: dict) -> str:
         bits.append(f"catalogue fallback ({s['catalog_fallback']})")
     if s["plan_fallback"]:
         bits.append("planner fallback (raw question searched)")
+    for reason in s.get("payload_drift") or []:
+        bits.append(f"PAYLOAD DRIFT: {reason}")
     if not s["mode_exact"]:
         bits.append(f"mode not the type's own reading ({MODE_BY_TYPE[record['type']]}) — diagnostic")
     return ("PASS" if s["plan_ok"] else "FAIL") + ": " + ", ".join(bits)
@@ -307,6 +325,12 @@ def render_summary(out, records: list, missing: list) -> str:
     lines = [f"\n---\n{total} attempts replayed from the recording, "
              f"{len(missing)} items not in it; no model was called, $0.0000 spent"]
     lines.append(f"- plan PASS {sum(r['score']['plan_ok'] for r in records)}/{total}")
+    drifted = [r["id"] for r in records if r["score"].get("payload_drift")]
+    if drifted:
+        lines.append(f"- **payload drift on {len(drifted)} of {total} attempts** "
+                     f"({', '.join(sorted(set(drifted)))}): the request plan() builds now is not "
+                     "the one that was recorded, so these replies answer a payload this tree no "
+                     "longer sends. Not part of PASS, and not a number to publish.")
     for row in (*PLAN_SCORES, "mode_exact"):
         measured = [r for r in records if row in r["score"]]
         if measured:
@@ -339,6 +363,8 @@ def write_sidecar(path: Path, report_path: Path, facts: dict, recording, records
         "ended": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(ended)),
         "seconds": round(ended - started, 3),
         "replayed": len(records), "missing": list(missing),
+        "payload_drift": {r["id"]: r["score"]["payload_drift"] for r in records
+                          if r["score"].get("payload_drift")},
         "totals": {"plan_ok": sum(r["score"]["plan_ok"] for r in records),
                    "attempts": len(records),
                    **{row: {"ok": sum(r["score"][row] for r in records if row in r["score"]),
@@ -371,6 +397,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                         help="replay a recording whose golden or PLAN_RULES checksum no longer "
                              "matches. The report then opens with a block saying that nothing in "
                              "it measures this tree; there is no quiet way to do this")
+    parser.add_argument("--allow-drift", action="store_true",
+                        help="report a payload drift instead of exiting 1. Drift means the request "
+                             "plan() builds today is not the one the recorded reply answered, so "
+                             "the replay is measuring a question that is no longer asked")
     parser.add_argument("--min-pass", type=int, default=None, metavar="N",
                         help="exit 1 when fewer than N replayed attempts pass")
     parser.add_argument("--json", action=argparse.BooleanOptionalAction, default=True,
@@ -436,7 +466,7 @@ def main(argv: list[str] | None = None) -> None:
     out_path = RESULTS_DIR / f"plan-replay-{stamp}.md"
     json_path = RESULTS_DIR / f"plan-replay-{stamp}.json"
 
-    replayer = plan_recording.PlanReplayer(recording)
+    replayer = plan_recording.PlanReplayer(recording, redact=harness.redact_paths)
     records, missing = [], []
     started = time.time()
     with catalogue(entries), plan_recording.replaying(replayer):
@@ -464,11 +494,17 @@ def main(argv: list[str] | None = None) -> None:
     if args.json:
         print(f"Sidecar: {json_path}")
     passed = sum(r["score"]["plan_ok"] for r in records)
-    if (missing and not args.allow_missing) or (args.min_pass is not None
-                                                and passed < args.min_pass):
-        if missing and not args.allow_missing:
-            print(f"items the recording does not hold: {missing} (--allow-missing accepts this)",
-                  file=sys.stderr)
+    drifted = sorted({r["id"] for r in records if r["score"].get("payload_drift")})
+    unmet = missing and not args.allow_missing
+    undrifted = drifted and not args.allow_drift
+    if unmet:
+        print(f"items the recording does not hold: {missing} (--allow-missing accepts this)",
+              file=sys.stderr)
+    if undrifted:
+        print(f"payload drift on {drifted}: the request plan() builds now is not the one the "
+              "recorded reply answered, so this replay does not measure what it looks like it "
+              "measures (--allow-drift accepts this; a new recording removes it)", file=sys.stderr)
+    if unmet or undrifted or (args.min_pass is not None and passed < args.min_pass):
         sys.exit(1)
 
 

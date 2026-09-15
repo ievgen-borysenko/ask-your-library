@@ -45,12 +45,20 @@ EXPECTED = {"f01-count": True, "f02-named-book": True, "f03-research-control": T
             "f04-planner-gave-nothing": False}
 
 
-def staged(tmp_path, *, golden_sha=None, prompt_sha=None, drop=()) -> Path:
+def staged(tmp_path, *, golden_sha=None, prompt_sha=None, drop=(), repayload=(),
+           resystem=()) -> Path:
     """The fixture recording in `tmp_path`, stamped current unless a test asks
-    for a stamp that is wrong."""
+    for a stamp that is wrong. `repayload` / `resystem` spoil the recorded
+    REQUEST of the named items, which is what a change to how plan() builds its
+    payload would look like from here."""
     lines = [json.loads(line) for line in RECORDING.read_text(encoding="utf-8").splitlines()
              if line.strip()]
     header, calls = lines[0], [line for line in lines[1:] if line["id"] not in drop]
+    for call in calls:
+        if call["id"] in repayload:
+            call["user"] = call["user"] + "\n<an older payload>"
+        if call["id"] in resystem:
+            call["system_sha256_12"] = "000000000000"
     header["golden_sha256_12"] = golden_sha or plan_recording.sha12(
         GOLDEN.read_text(encoding="utf-8"))
     header["plan_rules_sha256_12"] = prompt_sha or plan_recording.prompt_hash()
@@ -107,6 +115,10 @@ def test_the_recorded_planner_is_replayed_through_the_real_node(replayed):
     assert by_id["f02-named-book"]["book_filter"] == "Dracula — Bram Stoker"
     assert by_id["f03-research-control"]["route"] == "act"
     assert by_id["f04-planner-gave-nothing"]["plan_fallback"] is True
+    # ... and a fallback is not a routing decision, so it is not a correct route
+    assert by_id["f04-planner-gave-nothing"]["mode_ok"] is False
+    assert result["sidecar"]["totals"]["mode_ok"] == {"ok": 3, "of": 4}
+    assert result["sidecar"]["payload_drift"] == {}
 
 
 def test_the_report_says_no_model_was_called_and_what_it_cannot_measure(replayed):
@@ -115,6 +127,7 @@ def test_the_report_says_no_model_was_called_and_what_it_cannot_measure(replayed
     assert "plan-replay-recording.jsonl" in report        # the recording it came from
     assert "CANNOT measure a change to `PLAN_RULES`" in report
     assert "plan PASS 3/4" in report
+    assert "mode_ok 3/4" in report
     assert "corpus/manifest.yaml" in report               # which catalogue answered
 
 
@@ -140,6 +153,28 @@ def test_the_replay_makes_no_network_attempt(replayed):
 
 
 # --- staleness ----------------------------------------------------------------
+def test_a_fresh_recording_is_not_stale():
+    """The committed fixture pair, exactly as committed — no re-stamping.
+
+    Every other test in this file stamps the header current so that editing
+    `PLAN_RULES` does not fail a test about post-processing. This one does not,
+    which is what keeps the two files in step: edit the fixture golden or the
+    planner's prompt without regenerating the recording beside it and this fails
+    here, where the message is about the fixtures, instead of somewhere the
+    stamping would have hidden it. At the commit that added them the two
+    checksums are `e7d21ec4bd9b` (golden) and `acd673f471d3` (PLAN_RULES);
+    regenerate the recording if they have moved for a good reason."""
+    recording = plan_recording.load_recording(RECORDING)
+    golden_sha = plan_recording.sha12(GOLDEN.read_text(encoding="utf-8"))
+    assert recording.header["golden_sha256_12"] == golden_sha
+    assert recording.header["plan_rules_sha256_12"] == plan_recording.prompt_hash()
+    assert recording.stale_against(golden_sha) == []
+    # and every call in it carries the same prompt's hash as the header
+    for calls in recording.calls.values():
+        for call in calls:
+            assert call["system_sha256_12"] == recording.header["plan_rules_sha256_12"]
+
+
 def test_a_golden_checksum_that_moved_refuses(replayed):
     result = replayed(golden_sha="000000000000")
     assert result["code"] == 2
@@ -278,9 +313,17 @@ def test_the_query_rows_read_the_range_the_prompt_asks_for():
     assert replay.score_plan(item(), five, "act")["queries_ok"] is True
 
 
-def test_a_planner_fallback_fails_the_item():
+def test_a_planner_fallback_fails_the_item_and_its_route():
+    """A fallback decided nothing. "Not the catalogue path" is true of it only
+    because there was no path to take, so `mode_ok` must not be green on the
+    one row a reader looks at first."""
     fell_back = replay.score_plan(item(), update(plan_fallback=True, queries=[]), "act")
     assert fell_back["fallback_ok"] is False and fell_back["plan_ok"] is False
+    assert fell_back["mode_ok"] is False
+    # and on a catalogue item, where it was already false for want of a request
+    catalogue = replay.score_plan(item("catalog", expected_op="count"),
+                                  update(plan_fallback=True, queries=[]), "act")
+    assert catalogue["mode_ok"] is False
 
 
 def test_the_identify_or_answer_reading_is_reported_and_never_part_of_the_verdict():
@@ -289,6 +332,40 @@ def test_the_identify_or_answer_reading_is_reported_and_never_part_of_the_verdic
     answered = replay.score_plan(item("identify"), update(mode="answer"), "act")
     assert answered["mode_exact"] is False
     assert answered["plan_ok"] is True
+
+
+# --- payload drift ------------------------------------------------------------
+def test_a_payload_the_node_no_longer_builds_is_reported_and_exits_one(replayed):
+    """The reply is replayed whatever the question was. A change to how plan()
+    ASSEMBLES its payload — a new data block, a different history window —
+    would otherwise be graded against a reply to the payload of a year ago, and
+    the run would look clean."""
+    result = replayed(repayload={"f02-named-book"})
+    assert result["code"] == 1
+    assert "payload drift" in result["err"] and "f02-named-book" in result["err"]
+    assert list(result["sidecar"]["payload_drift"]) == ["f02-named-book"]
+    assert "PAYLOAD DRIFT" in result["report"]
+    # the item still replayed and still scored: drift says the replay is
+    # questionable, not that the planner decided wrongly
+    assert result["sidecar"]["replayed"] == 4
+    assert {a["id"]: a["score"]["plan_ok"] for a in result["sidecar"]["attempts"]} == EXPECTED
+
+
+def test_a_system_prompt_that_does_not_match_the_recorded_call_is_drift(replayed):
+    """The header's hash is checked once for the file; this is the same question
+    per call, so a recording whose header was stamped by hand cannot hide it."""
+    result = replayed(resystem={"f01-count"})
+    assert result["code"] == 1
+    assert "f01-count" in result["err"]
+    assert any("system prompt" in reason
+               for reason in result["sidecar"]["payload_drift"]["f01-count"])
+
+
+def test_allow_drift_accepts_it_and_still_says_so(replayed):
+    result = replayed("--allow-drift", repayload={"f02-named-book"})
+    assert result["code"] == 0
+    assert "payload drift on 1 of 4 attempts" in result["report"]
+    assert list(result["sidecar"]["payload_drift"]) == ["f02-named-book"]
 
 
 # --- the catalogue the replay resolves against --------------------------------
