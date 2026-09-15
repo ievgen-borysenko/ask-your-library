@@ -30,6 +30,19 @@ LangSmith); everything else stays local. **In the shipped configuration none of 
 `LLM_BACKEND=ollama` and `EMBED_BACKEND=ollama` are the defaults, tracing is off unless you set a
 key, and the diagram's yellow describes what the hosted alternative would send.
 
+That sentence is asserted, and only for what the assertion covers — read it as: *in the process
+that answers your question (`runner.run_question` with the real preflight, embedder and graph),
+every network call made through Python's socket module goes to the local Ollama endpoint*. It is
+not a claim about the whole machine. **Ollama** is a separate process and decides for itself what
+it does with a prompt. **Chainlit** is not exercised by the test at all (the `ui` extra is not
+installed in the legs that run it), and its dependency tree carries `grpcio` and an OTLP gRPC
+exporter, which network from C. **The browser** and Chainlit's JavaScript bundle are not sockets
+of this process. And **native code** in general is the guard's blind spot: a C extension with its
+own sockets, or a `ctypes` call straight into libc, never passes through the socket module where
+the audit events are raised. The test environment is checked to contain no such package, and the
+blind spot itself is pinned by a deliberately-failing control, so the limit is recorded rather
+than assumed away. Details below.
+
 - The question **and retrieved corpus fragments** stay on this machine by default: the
   orchestrator LLM is a local model served by Ollama. Set `LLM_BACKEND=openrouter` and both go to
   OpenRouter, and on to the model vendor; `OPENROUTER_BASE_URL` points that elsewhere if you have
@@ -72,7 +85,25 @@ calls `connect` at all, and anything a background thread does. On top of it sits
 transport layer (in both installed httpx distributions), so a hosted call is refused while its URL
 is still intact and before any name lookup. Everything is recorded, loopback included; everything
 that is not loopback is refused. A bind is recorded and never refused — it is the other direction —
-so the test can also say no listening socket was opened on a public interface.
+so the test can also say no listening socket was opened on a public interface. Records are
+streamed to a file as each attempt happens, and a refusal is written before it is raised, so an
+`except` inside the application cannot erase the fact that it tried.
+
+**What the guard sees is every network call made through Python's socket module** — the standard
+library, `requests`, urllib3, httpx, httpcore, asyncio and the model client's SDK, which is every
+client this project has. **What it does not see is a call that reaches libc without passing
+through CPython**: a native extension with its own C sockets, or a `ctypes` call into
+`getaddrinfo` or `connect`. Two tests keep that from being a hole in the claim.
+`test_a_ctypes_call_into_libc_is_the_known_blind_spot` performs the bypass and is marked
+`xfail(strict)`, so the limit is pinned: if some future interpreter or sandbox closes the door,
+that test starts passing and forces this paragraph to be rewritten.
+`test_no_native_networking_in_the_environment` closes the practical half — no
+`grpcio`, `pycurl`, `pycares`, `aiodns`, `uvloop`, `pyzmq`, `psycopg`, `pymongo` or `redis` is
+installed in the interpreter that runs these tests, and none is in the application's own locked
+runtime closure. `uvloop` is the sharpest of those: it replaces asyncio's event loop wholesale, so
+every asyncio socket in the process would stop passing through the socket module. None arrives
+with the application; `grpcio` and an OTLP gRPC exporter do arrive with the **`ui` extra**, which
+is why the Chainlit process is excluded from the claim rather than merely untested.
 
 On the reference run the guard recorded 14 attempts, all to loopback on the configured Ollama
 port: preflight's `/api/tags`, the embedder's `/api/embed`, and the planner's call with its two
@@ -94,7 +125,12 @@ can be started:
 
 - **Chainlit is not exercised.** The `ui` extra is not installed in the CI legs that run this
   file, so `ui.py`, its server, its SQLite persistence and its own HTTP stack are outside these
-  assertions.
+  assertions — and that extra's tree brings `grpcio` and an OTLP gRPC exporter, which network from
+  C, so a Chainlit process is one this guard could not speak for even if it ran there.
+- **Native code is the blind spot.** Only calls through Python's socket module raise the audit
+  events; a C extension with its own sockets, or `ctypes` into libc, does not. Pinned by an
+  `xfail(strict)` control, and bounded by a test that asserts no known native-networking package
+  is installed here or in the application's locked runtime closure.
 - **Ollama is a separate process.** What it does with a prompt once it has it — a model pulled on
   demand, a telemetry ping, a remote inference backend someone configured — is outside the test.
 - **The browser is not in it.** Chainlit ships a JavaScript bundle; what a page fetches is not a

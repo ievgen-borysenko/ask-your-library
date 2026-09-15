@@ -29,6 +29,28 @@
   hosted call is refused with its URL intact and before any lookup. Loopback is recorded too,
   which is what makes the allow-list an assertion rather than a silence. The hook is installed
   once per interpreter at import and armed through a flag, since CPython cannot remove one.
+  Records are also streamed — one JSON line per attempt, written to an unbuffered descriptor as it
+  happens and, for a refusal, before the refusal is raised — so the evidence does not depend on
+  the process living long enough to summarise itself, and an `except` inside the application
+  cannot erase the fact that something tried. The parent derives its assertions from that stream
+  and requires the child's own end-of-life summary to be a prefix of it.
+
+  **What this sees and what it does not**, stated in the test, the guard, the README and the
+  privacy page rather than left to a reader: every network call made through Python's socket
+  module — the standard library, `requests`, urllib3, httpx, httpcore, asyncio and the model
+  client's SDK, which is every client this project has. It does NOT see a call that reaches libc
+  without passing through CPython: a native extension with its own C sockets, or a `ctypes` call
+  into `getaddrinfo` / `connect`. The limit is pinned rather than only written:
+  `test_a_ctypes_call_into_libc_is_the_known_blind_spot` performs the bypass and is
+  `xfail(strict)`, so if a future interpreter or sandbox ever closes that door the test passes,
+  the strict marker turns the pass into a failure, and the scope paragraphs have to be rewritten.
+  `test_no_native_networking_in_the_environment` bounds it in practice: no `grpcio`, `pycurl`,
+  `pycares`, `aiodns`, `uvloop`, `pyzmq`, `psycopg`, `pymongo` or `redis` in the interpreter that
+  runs these tests, and none in the application's locked runtime closure read from `uv export
+  --no-dev`. `uvloop` is the sharpest of them — it would move every asyncio socket in the process
+  out of the hook's sight — and `grpcio` plus an OTLP gRPC exporter arrive with the **`ui`
+  extra**, which is why the Chainlit process is excluded from the claim rather than merely
+  untested, and why that test fails if the extra is ever installed into a leg that runs this file.
 
   The test then runs the real thing in the shipped local configuration with Ollama not running:
   the real preflight, the real `embeddings`, the real compiled graph through

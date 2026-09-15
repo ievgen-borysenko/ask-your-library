@@ -113,6 +113,23 @@ open ones often refer to them.
   for the first variant already found the book under another section, is future work. The row
   cap (1,000) still truncates a single section longer than that (logged) and, on the bare-title
   fallback, is refused as `ambiguous` because candidate books may have been cut.
+- **The egress test's "Ollama is not running" port is reserved on UDP, which is not the same as
+  owning it.** `tests/egress_guard.py`'s `reserved_loopback_port` needs two things at once: a port
+  nothing else can take for the length of the run, and a connection to it that fails *fast* and as
+  ECONNREFUSED, because that is what "Ollama is not running" looks like. Holding a bound,
+  non-listening TCP socket gives the first and not the second — measured on macOS (Darwin 25.6,
+  CPython 3.12): a connect to such a port TIMES OUT, the SYN is dropped, 4.00 s against a 4 s
+  deadline, while the same port after the socket closes refuses in 0.00 s (Linux answers RST in
+  both cases). Beyond the seconds, the stall changes what is under test: every connect waits out
+  its whole connect timeout, the run stops failing on an unreachable endpoint and starts degrading
+  into an answer. So the port is held on UDP and left free on TCP — separate port spaces, so the
+  kernel will not hand the number out as an ephemeral port while TCP still refuses at once. What
+  remains is not a race but a deliberate collision: something choosing to bind this exact TCP port
+  in the ephemeral range. Two ways to close it properly, neither done: a held TCP **listener**
+  that accepts and immediately closes, with the tests' failure-class assertions loosened from
+  "refused" to "no usable reply" (it owns the port outright, at the cost of a fuzzier assertion);
+  or a controlled local stub that owns the port and answers a documented 4xx, which is precise but
+  is a second server to maintain and a second thing that can be wrong.
 - Typed evidence/hit models instead of dicts.
 - Sentence splitter consumes closing quotes/brackets into the separator; very long
   punctuation-free sentences exceed the chunk target.

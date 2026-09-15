@@ -153,8 +153,10 @@ themselves are in [`docs/eval-results/`](docs/eval-results/).
   Ollama, and with tracing off there is no other path out **of the Python process that answers
   your question** — which is the part that is tested (`tests/test_egress_local.py` records every
   connection attempt of a real run and asserts they all go to loopback on the configured Ollama
-  port). It is not a claim about Ollama, which is a separate process, nor about the browser or the
-  Chainlit server, which the test does not exercise; the scope is spelled out in
+  port). It sees every network call made through Python's socket module; a native extension or a
+  `ctypes` call that talks to libc directly is its blind spot, and a test asserts no such package
+  is installed. It is not a claim about Ollama, which is a separate process, nor about the browser
+  or the Chainlit server, which the test does not exercise; the scope is spelled out in
   [`docs/privacy-and-threat-model.md`](docs/privacy-and-threat-model.md). Set
   `LLM_BACKEND=openrouter` and the question **and the retrieved corpus fragments** go to that
   provider, and on to the model vendor.

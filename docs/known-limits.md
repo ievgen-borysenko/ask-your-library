@@ -48,7 +48,16 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   Python process makes — through CPython's socket audit events, which cover every socket whatever
   its class or import path, plus an httpx transport layer above them — and asserts that in the
   shipped local configuration every one of them goes to loopback on the configured Ollama port,
-  with no hosted provider and no tracing endpoint contacted or even looked up. The path is
+  with no hosted provider and no tracing endpoint contacted or even looked up. What it sees is
+  every network call made **through Python's socket module**: the standard library, `requests`,
+  urllib3, httpx, httpcore, asyncio and the model client's SDK. What it does **not** see is a call
+  that reaches libc without passing through CPython — a native extension with its own C sockets,
+  or a `ctypes` call into `getaddrinfo` / `connect`. That blind spot is pinned by a deliberately
+  failing control test and bounded by another that asserts no known native-networking package
+  (`grpcio`, `pycurl`, `pycares`, `aiodns`, `uvloop`, `pyzmq`, `psycopg`, `pymongo`, `redis`) is
+  installed in that interpreter or in the application's locked runtime closure; `uvloop` in
+  particular would move every asyncio socket out of the hook's sight, and `grpcio` arrives with
+  the `ui` extra, which is one more reason the Chainlit process is outside the claim. The path is
   `runner.run_question` over the compiled graph, with the real preflight and the real embedder:
   what the CLI and the eval harness run, and what the web UI's Python half calls into. It is **not**
   Chainlit, which the test does not exercise (the `ui` extra is not installed in those CI legs);
