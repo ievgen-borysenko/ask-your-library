@@ -261,7 +261,7 @@ def test_the_report_the_harness_writes_is_the_report_the_summary_reads(tmp_path,
                       "- id: partial\n  type: answer\n  question: q2\n  expected_books:\n  - Ivanhoe\n"
                       "  expected_facts:\n  - Cedric\n  - Saturday\n", encoding="utf-8")
 
-    def fake_run_one(graph, item):
+    def fake_run_one(graph, item, attempt=1):   # the harness passes the attempt since --repeat
         answer = ("Ivanhoe: Cedric disinherited him." if item["id"] == "full"
                   else "Ivanhoe: Cedric, and then Monday.")
         result = {"id": item["id"], "type": item["type"], "question": item["question"], "answer": answer,

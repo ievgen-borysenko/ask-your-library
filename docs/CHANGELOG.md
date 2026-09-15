@@ -2,6 +2,58 @@
 
 ## Unreleased
 
+- **A JSON sidecar per run, and `--repeat N`, so a reported number can carry its spread.** Every
+  run wrote one Markdown report and nothing else: a reader's document whose shape is a contract
+  with `summarize_report.py`, where every number has to be scraped back out of prose, and one
+  sample of a system that does not answer the same way twice. Both halves are addressed.
+  `eval/results/answers-<ts>.json` is now written beside `answers-<ts>.md` — the fingerprint as
+  fields instead of one line (code stamp and whether it was a verified clean commit, the golden
+  file's **repo-relative** path and checksum — an absolute one would name the home directory of
+  whoever ran it, and this file is meant to be committed beside a published number — manifest and
+  TOC checksums, backend, model, index stamps, every knob that changes
+  an answer, the configured prices, the repeat count, wall-clock start and end) and, per question,
+  its group and every attempt as the harness produced it: the full answer, the provenance triple,
+  steps, chapters read, clarify state, stop reason, planner and catalogue fallbacks, cost, calls,
+  tokens, seconds and the `score()` dict computed from that attempt. The report's line and the
+  sidecar's fields are rendered from the same dict, so one run cannot describe itself two ways;
+  `--no-json` turns the file off. `--repeat N` (default 1) runs each golden item N times. Scoring
+  stays per attempt — the scorer never sees more than one run — and the aggregation is reported
+  beside it: each boolean row (`behavior_ok`, `facts_ok`, drill-down) as **how many attempts of N
+  passed**, never as an average of true and false, and cost, seconds, tokens and calls as **min /
+  median / max**. At N > 1 the totals block is rewritten rather than extended, because not one
+  figure in it may be a sum across attempts: two items run three times have six passes, and
+  "behavior PASS 5/6" describes a six-question set nobody ran. Every line there is per attempt
+  (`<min>–<max>/<items> over N attempts (mean ... per attempt)`, one per aggregate, with the
+  per-group ranges beside the headline), and the one figure that *is* summed — the money the run
+  actually spent — says so in words. The fingerprint ends `N attempts per item` instead of
+  `single run`, and `--min-pass` becomes a floor on the **weakest** attempt. **At `--repeat 1`
+  the Markdown report and its `---` tail are byte for byte what the harness has always written**,
+  pinned by a test that renders both from the same fake results, so every artifact under
+  [`eval-results/`](eval-results/) and `summarize_report.py` are untouched. The hand-rolled
+  `sys.argv` slicing in `main()` is argparse now (`parse_intermixed_args`, so ids interspersed
+  with flags — `c01 --min-pass 11 c02` — still mean two ids, as the slicer's own semantics did),
+  with `--min-pass`, `--clarify-pick`, `--require-clean` and the positional ids behaving exactly
+  as before, `--repeat 0` refused
+  instead of writing an empty report with a green exit code, and `--help` finally listing them.
+  A sidecar that cannot be serialised writes its error into the report tail and leaves the run's
+  own exit code alone, and the file is written to a neighbour and renamed, so an interrupted run
+  leaves no half record. Nothing in the sidecar is summed across attempts either, at any N:
+  `totals.per_attempt.<aggregate>` is `{values, min, median, max}`, `totals.expected_per_attempt`
+  holds the denominators read off the golden items, `per_group.<type>` is
+  `{of, behavior_ok_per_attempt}`, and only `totals.spent_total` is a sum — money, calls and
+  tokens, spent once each. Denominators come from the golden file rather than from the results
+  throughout, in both files: counted up from what completed, an item that errored drops out of its
+  group and out of the facts and drill-down rows, and an item that errored on every attempt takes
+  its rows with it. Error text is stored with any path under the home directory or the repository
+  root replaced by `~` or `<repo>` — a `FileNotFoundError` names a file, and under a home
+  directory that name is the reader's login, and `summarize_report.py` copies the report's ERROR
+  lines into the committed summary. The byte-compatible single run is pinned against a committed
+  fixture rendered by the pre-sidecar harness from the same fake results, whole report against
+  whole report.
+  `eval/run_ablation.py` imports the same harness and keeps running at one attempt per condition.
+  `tests/test_agent_eval_sidecar.py` covers the sidecar schema and its round trip, the repeat
+  aggregation, the byte-compatible single run and the flags (ADR-010, amended). No run was made
+  here: no published number changed, and none carries a spread yet.
 - **The golden items say which facts an answer must carry, and the report says which are
   missing.** Behavioural compliance, quote provenance and the manual correctness read were the
   three rows, and only the third could tell whether c06's answer reaches Passepartout's "to-day is

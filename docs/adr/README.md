@@ -208,6 +208,23 @@ read from the top — at the cost of a check that cannot tell a fact in a right 
 same fact in a wrong one, which is why it decides nothing. The shape of the golden files is pinned
 by a schema test from the same change (`tests/test_golden_schema.py`).
 
+Amended 2026-09-15: a run may be repeated, and the report carries the spread. Every run also
+writes a JSON sidecar beside the Markdown one (`answers-<ts>.json`): the fingerprint as fields
+rather than as one line, and every attempt of every question with its full answer and the score
+dict computed from it — the machine-readable record this decision always implied and never had, so
+comparing two runs no longer means scraping numbers back out of prose. `--repeat N` runs each item
+N times; scoring stays per attempt, and the aggregation counts the boolean rows (how many attempts
+of N passed, never an average of true and false) and ranges the numbers (min / median / max of
+cost, seconds and tokens). The "runs are single" position above is therefore **superseded for any
+number that gets published**: such a run states its N in the fingerprint (`N attempts per item`
+rather than `single run`), its headline is a range with the per-attempt mean beside it, and
+`--min-pass` is a floor on the weakest attempt. What is not superseded is everything else in this
+record — the three rows that cannot be confused, the fourth deterministic row beside them, no LLM
+judge, `--require-clean` for published numbers. A run at `--repeat 1` writes the Markdown report
+byte for byte as before (pinned by a test), so every artifact committed under
+`docs/eval-results/` and the summary tool that reads them are unaffected. No repeated run has been
+made yet and no published number changed here.
+
 ## ADR-011: Publishing by allowlist into a fresh repository, fail-closed tooling
 
 Status: accepted.

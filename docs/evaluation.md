@@ -48,7 +48,9 @@ string - derived from that item's own `notes` and, where the notes were vague, f
 in `corpus/cards/`. The harness reports `facts_found/facts_expected` on the question's report line
 and `facts_ok` when every one of them occurs in the answer text: folded and whitespace-normalised
 substring presence, no stemming, no synonyms, no edit distance, so a red row means exactly "this
-string is not in the answer". Both counts are summed in the totals block, and
+string is not in the answer". Both counts are summed in the totals block **of a `--repeat 1`
+run** - a repeated run reports them per attempt instead, as a range (see the sidecar section
+below) - and
 `eval/summarize_report.py` carries them into the committed summary together with every behaviour
 PASS whose answer is missing a fact. It is a **fourth deterministic row, not a fourth term in the
 behaviour verdict** (ADR-010: rows that cannot be confused, no composite score). Ten of the 42
@@ -70,6 +72,54 @@ plus `expected_total` on a catalogue item. `tests/test_golden_schema.py` runs th
 the three files in the repository and adds what only holds across a set - ids unique across the
 files, no question asked twice, no fact its own question already contains; the facts scoring
 itself is pinned by `tests/test_agent_eval_facts.py`, over every branch of `score()`.
+
+**A JSON sidecar per run, and `--repeat N` (2026-09-15).** Every run now writes two files side by
+side: the Markdown report a reader reads (`eval/results/answers-<ts>.md`, unchanged) and
+`answers-<ts>.json`, the same run as data. The sidecar carries the fingerprint as *fields* rather
+than as one line - the code stamp and whether it was a verified clean commit, the golden file's
+repo-relative path (never an absolute one: this file is meant to be committed beside a published
+number, and a home directory names the reader, not the measurement) and checksum, the manifest and
+TOC checksums, the backend, the model, the index stamps, every knob
+that changes an answer (hit budgets, step and streak limits, clarify candidates, the question
+deadline, strict hit ids, the configured prices), the repeat count and the wall-clock start and
+end - and then, per question, its group and *every attempt* exactly as the harness produced it:
+the full answer, the provenance triple, steps, chapters read, clarify state, stop reason, planner
+and catalogue fallbacks, cost, calls, tokens, seconds, and the `score()` dict computed from that
+attempt. The line in the report and the fields in the sidecar are rendered from the same dict, so
+they cannot say different things about one run. Written with `ensure_ascii=False` and indent 2 in
+a fixed key order, so two runs diff line by line; `--no-json` turns it off.
+**The sidecar's shape does not change with N**, so a consumer written against one run reads a
+repeated one, and nothing in it is summed across attempts: `totals.per_attempt.<aggregate>` is
+`{values: [one per attempt], min, median, max}` (at `--repeat 1` a list of one),
+`totals.expected_per_attempt` holds the denominators read off the golden items themselves
+(`items`, `titles`, `facts`, `facts_items`, `drill_items`, `groups`) rather than counted up from
+the results, `per_group.<type>` is `{of, behavior_ok_per_attempt: [...]}`, and the only summed
+figures live under `totals.spent_total` - money, calls and tokens, each spent once. Denominators
+come from the golden file for a reason: counted from the results, an item that errored drops out
+of the row it belongs to, and an item that errored on every attempt takes its whole row with it.
+The same rule governs the per-question `spread` block: which rows exist (`facts_ok`,
+`drilldown_ok`) follows the golden item, so an item that never completed reports 0 of N instead of
+disappearing. Error text is stored with any path under the home directory or the repository root
+replaced by `~` or `<repo>`, in the report as well as here: a `FileNotFoundError` names a file,
+and under a home directory that name is the reader's login.
+`--repeat N` runs each golden item N times (default 1). Scoring stays per attempt - the scorer
+never sees more than one run - and the aggregation is reported beside it: each boolean row
+(`behavior_ok`, `facts_ok`, drill-down) as **how many attempts of N passed**, never as an average
+of true and false, and cost, seconds, tokens and calls as **min / median / max**. At N > 1 the
+totals block is rewritten rather than extended, because **not one figure in it may be a sum across
+attempts**: two items run three times have six passes, and "behavior PASS 5/6" describes a
+six-question set nobody ran. Every line there is per attempt -
+`behavior PASS <min>–<max>/<items> over N attempts (mean ... per attempt)` and one such line per
+aggregate, with the per-group ranges beside the headline - and the single figure that *is* summed,
+the money the run actually spent, says so in words. `--min-pass` becomes a floor on the *weakest*
+attempt rather than on the average. At
+`--repeat 1` the Markdown report is byte for byte what the harness has always written, pinned by a
+test that compares the *whole* report against one rendered by the pre-sidecar harness (`a6c4ccd`)
+from the same fake results and committed as a fixture: every artifact under
+[`eval-results/`](eval-results/) and `eval/summarize_report.py` read the same format they always
+did. (At N > 1
+`summarize_report.py` lists a failing id once per failing attempt; it reads the Markdown only, and
+teaching it to read the sidecar is a separate change.)
 
 Three golden sets, reported separately. **Core** (`eval/golden/en-demo.yaml`, 11 questions, the
 default `GOLDEN_PATH`): eight questions on books the golden author has read and a two-book
@@ -100,6 +150,16 @@ Re-measured on `466fc82` (10.09, this repository's `main` at the merge of `#18`,
 four research items — one evidence item fewer on the London question — and $0.1762 for the set, of
 which the six catalogue items again cost $0.0136
 ([`eval-results/2026-09-10-catalogue-set.md`](eval-results/2026-09-10-catalogue-set.md)).
+
+Every number on this page was measured **once**, and a single sample of a system whose output
+varies is not a number with a spread: on any of these rows a difference of one or two questions
+between two runs is not a measured effect, which is why the ablation table below says so in its own
+limits and why the reports state the count of runs in their fingerprints. From this release that is
+a choice rather than a missing capability - `uv run eval/run_agent_eval.py --repeat 5` reports
+every row as "how many attempts of 5 passed" with min / median / max cost and seconds, and the
+fingerprint of such a run reads `5 attempts per item` instead of `single run`, so the two kinds
+cannot be confused. No repeated run has been made yet: nothing below has been re-measured, and the
+numbers in the tables are what they always were.
 
 Two measured trees, both single runs, clean tree (`--require-clean`), strict hit-id mode, the same
 bge-m3 index: **v0.1.0**, 2026-09-05 on code `88881ee` (the last code commit before tag `v0.1.0`;
