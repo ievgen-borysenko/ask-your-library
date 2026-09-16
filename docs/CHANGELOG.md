@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Seven decisions the code had made without a record; four of them written.** ADR-017 (one passive observer of every JSON model call), ADR-020 (`_index_meta` fingerprints the embedder and nothing else), ADR-021 (the action channel is a reserved string marker in `current_query`) and ADR-022 (conversation memory and the scratchpad are free text) join the index in `docs/adr/`; ADR-018, ADR-019 and ADR-023 are reserved there as one-sentence stubs. Documentation only — no code changed.
+
 - **The runner returns a result, the eval harness consumes it, and a failed question is still
   measured.** `runner.run_question` handed back the answer string and every caller reached into
   the graph's state for the rest; `eval/run_agent_eval.py` did not even call it — it re-implemented
