@@ -182,6 +182,17 @@ open ones often refer to them.
   both distributions' transports for the same reason (`tests/egress_guard.py`). Recorded, not
   fixed: the fix is in `src/` and belongs to a change of its own.
 
+- **`ui-smoke` flakes on the phone leg, waiting for a link that may not be in the DOM.** Twice on
+  16.09, on the 390x844 leg of `test_the_release_walkthrough_of_the_web_ui`: a Playwright timeout
+  on `Locator.get_attribute` waiting for `a[href*='/thread/']` after the reload, both times on a
+  re-run-green SHA (seen on #62 and on #63). Likely cause to check first: at that width the thread
+  history is off-canvas and is not in the DOM until the drawer is opened, so `thread_address()` can
+  be polling for a link that does not exist yet — its own toggle click may be racing the drawer's
+  animation, or landing before the history has rendered into it. Two candidate fixes, both in the
+  test: wait for the drawer's content rather than for the link, or stop needing the link at all and
+  read the thread id off the URL or the page's own state. Not fixed in the change that recorded
+  this: a flaky release check is worth a change of its own, with the failure reproduced first.
+
 ## Product / spec decisions
 
 - Language: answer in the language of the question in BOTH locales; the locale should only drive
@@ -194,8 +205,13 @@ open ones often refer to them.
   configurable.
 - `get_chapter` section-name variants ("Chapter 59" vs "59") are a heuristic; store a normalized
   section key at ingest time instead.
-- Evidence block in the UI: show the source type (text / card / transcript) and whether the
-  passage was cut; keep the passages for restored chats.
+- Evidence block in the UI: **whether the passage was cut**, and keeping the passages for restored
+  chats. The source-type half of this item closed on 16.09 — every passage now says "book text" or
+  "book card (a model-written summary)", and a quote that matched only a card is counted apart from
+  the traced ones (`provenance.validate`, `card_only`). The rest is not done: an opened passage
+  still does not say that it is the first 1,200 characters of a longer chunk, and a resumed chat
+  has no passages at all, because `RunView` lives for one question and nothing persists the
+  `hits_log` beside the message.
 - **On a phone, the answer after a clarify is gone before it can be read.** Measured on a screen
   recording of the gothic-novel question (two candidates, one clarify) at 390x844 on 15.09, whose
   phase log reads: question sent +13.3 s, the agent asks back +35.4 s, the reply goes in +38.5 s,
@@ -229,6 +245,26 @@ open ones often refer to them.
   not one command away either (same item as above).
 
 ## Resolved (kept because the open items refer to them)
+
+- **A book card counted as a quote from the book, and nothing on the screen said which was which.**
+  The badge read "n/n traced to their source" over an evidence list whose passages could be a
+  chapter or a per-book summary one model call wrote at ingest time, and only the section name
+  ("Summary", "Key Takeaways") hinted at the difference — ADR-002's recorded consequence,
+  "interfaces still do not label evidence by source type". Closed on 16.09 in `provenance.validate`,
+  so the CLI, the web chat and the eval harness see one split: `confirmed / unattributed / broken`
+  are about the books' own text alone, a quote whose only verbatim match is a card is `card_only`
+  and never in the traced count, the denominator is `checked_book_text`, and every item carries
+  `source_kind`. Reports published before that date counted card matches inside the triple
+  (`docs/evaluation.md`).
+- **The first screen of the web chat taught nothing.** One sentence naming four node names, then
+  ~1,100 px of nothing and an empty composer: the four behaviours the README claims were on no
+  screen that could show them. Closed on 16.09 with `@cl.set_starters` — identify, the catalogue
+  count, a question between two books of the shelf, and one the shelf cannot answer — written from
+  the loaded index rather than from a hardcoded shelf, and an empty index gets none. The welcome
+  message went with it: Chainlit draws its welcome screen only while the thread holds no message.
+- **The quote was not located inside the passage it was checked against.** It was printed above
+  the passage and the reader was left to find it. Closed on 16.09: `provenance.match_span` locates
+  the run over the same normalization the check uses, and the web UI marks it.
 
 - **A question that failed was measured by nothing, and the eval harness was a second execution
   path.** The metrics event was emitted after the `try` in `runner.run_question`, so a run that

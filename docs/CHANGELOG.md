@@ -2,6 +2,65 @@
 
 ## Unreleased
 
+- **A book card is never a quote from the book, the first screen teaches, and the front page shows
+  the work before it explains it.** From the design critique of 16.09, §1 and §2.
+
+  The badge said "4/4 traced to their source" over an evidence list in which two of the four
+  passages were book cards — per-book summaries a model wrote, one call each, at ingest time. On a
+  product whose whole claim is code-checked quoting, a model's own sentence was counting as the
+  book's, and nothing on the screen said so. The split now lives in `provenance.validate`, not in
+  an interface, so the CLI, the web chat and the eval harness see the same numbers:
+  `confirmed / unattributed / broken` keep exactly the meaning they had, over the books' own text
+  alone; a quote whose only verbatim match is a card is counted apart as `card_only` and is never
+  in the traced count; the denominator every interface shows is `checked_book_text`
+  (= `checked - card_only`); and every evidence item carries `source_kind` ("book_text" / "card"),
+  which is the corpus of the passage it is pinned to. The web UI labels each opened passage, names
+  the card matches under the badge, and turns amber with a sentence of its own when every quote
+  matched only a card, rather than showing "0/0". The eval harness's report line adds its card
+  clause only where there was one, so a run with no cards writes the line it has always written and
+  the byte-compat fixture is untouched; a sidecar written before the split reads back as a run with
+  no card matches rather than as a run with nothing traced. **Every report under
+  `docs/eval-results/` predates this and counts card matches inside the triple** — said in
+  `docs/evaluation.md` and `docs/known-limits.md`, and nothing was re-run to change a published
+  number. A hit with no `corpus` recorded reads as book text, which is what an index built before
+  cards existed holds.
+
+  The empty chat screen was one sentence naming four node names and then ~1,100 px of nothing.
+  `@cl.set_starters` now offers the four behaviours the README claims — identify, the catalogue
+  count, a question between two books of the shelf, one the shelf cannot answer — built from the
+  index that is actually loaded, so a clone with its own books gets its own first screen and an
+  empty index gets no starters at all. The welcome message went with them, because it was what hid
+  the screen: Chainlit draws its welcome screen (this project's `chainlit.md`, and the starters
+  under it) only while the thread holds no message. A failed preflight still writes its message
+  instead.
+
+  Three smaller things in the same interface. The matched run is marked inside the passage
+  (`provenance.match_span`, the same normalization the check uses, the chunk joiner a barrier), so
+  the proof is pointed at rather than left for the reader to find. `plan` and the last `reflect`
+  open by themselves, and the step labels are sentences in the product's voice — "searched the
+  library #1", not "Used act #1" — which needed two more values of the vendored
+  `.chainlit/translations/en-US.json`: `chat.messages.status.used` and `.using`, emptied, so the
+  name `ui.py` writes is the whole label. A third value, `chat.watermark`, now reads "Quotes are
+  checked in code. The reasoning is not." instead of a stock line that contradicted the badge
+  above it. `NOTICE`, `.chainlit/translations/README.md` and the test that pins them name all four
+  changed keys; only `en-US` is forked, so the Ukrainian interface still carries upstream's step
+  prefix. The metrics footer's gray went from `#6b7280` (~3.4:1 on the dark ground, below AA) to
+  `#9ca3af` (~6.6:1) at the same visual rank.
+
+  The README front page: the plain-language first line, the GIFs directly under "See it work" with
+  the diagram after them under its own heading, "Quick start" with the Mac script as the fast path
+  and one line for every other system, "Status and licence" opening with what this is (a reference
+  implementation you can run and read, not a daily tool), and "Privacy and cost" bullet 2 recut as
+  a verdict, three one-number bullets and the links, with the hosted-egress sentence lifted into a
+  bullet of its own. The Measured table and every number on the page are untouched.
+
+  `docs/diagrams/` is deleted, both Excalidraw sources and the README that corrected them: GitHub
+  renders them as raw JSON, no export was ever committed, and two more divergences had gone
+  unrecorded since the last pass. What was worth keeping is a paragraph in `docs/architecture.md`,
+  beside the diagrams that are current. The whole-system diagram's legend is prose there now,
+  which retires the `subgraph` + `~~~` construction that 0.3.1 named as a suspect for a rendering
+  failure whose cause was never established.
+
 - **Seven decisions the code had made without a record; four of them written.** ADR-017 (one passive observer of every JSON model call), ADR-020 (`_index_meta` fingerprints the embedder and nothing else), ADR-021 (the action channel is a reserved string marker in `current_query`) and ADR-022 (conversation memory and the scratchpad are free text) join the index in `docs/adr/`; ADR-018, ADR-019 and ADR-023 are reserved there as one-sentence stubs. Documentation only — no code changed.
 
 - **The runner returns a result, the eval harness consumes it, and a failed question is still
