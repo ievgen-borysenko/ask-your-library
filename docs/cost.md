@@ -68,7 +68,10 @@ dominated by input tokens from the distillation prompts. `validate` is free - it
 Output is capped by `MAX_OUTPUT_TOKENS` (2048), which matters: without a cap the provider
 pre-authorizes the model maximum on every call. Prices come from `PRICE_IN_PER_MTOK` /
 `PRICE_OUT_PER_MTOK`. The CLI prints a per-node breakdown after each question (calls, tokens,
-USD per role), plus the stop reason, retrieval selectivity and redaction counts.
+USD per role), plus the stop reason, retrieval selectivity and redaction counts. Its session line
+counts every question that was *attempted*, not every one that was answered: since 2026-09-16 a
+question that fails mid-run reports what it spent too, and money spent on a failed question is
+still money spent.
 
 The metrics also carry a cache-read counter, and it stays at zero by construction: the client
 never marks a prompt prefix for caching (no `cache_control` is sent), and even if it did, the

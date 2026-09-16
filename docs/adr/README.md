@@ -162,7 +162,7 @@ Coverage is one injection, not a suite, and live resistance is measured for `obs
 
 ## ADR-009: One runner, three interfaces, events as the contract
 
-Status: accepted, with a correction recorded on 2026-09-07.
+Status: accepted; corrected 2026-09-07, amended 2026-09-16 (the correction is closed).
 
 `runner.run_question(...)` is the execution path of the CLI and the web UI: it emits events and
 calls back for a clarify reply, and per-question metrics accumulate in a `ContextVar` that is reset
@@ -175,6 +175,29 @@ One behaviour in every interface, and UI features cost nothing in the agent. The
 the event contract lived in a docstring and drifted twice in one week; it is pinned by tests now —
 a fake graph for the events, and end-to-end scenarios of the compiled graph driven by a scripted
 model.
+
+Amended 2026-09-16: **one execution path, and a result instead of the state.** The correction above
+is closed. `run_question` returns a `RunResult` — the answer, the evidence and its provenance, the
+clarify and catalogue fields, the usage snapshot, the wall clock and the failure if there was one —
+and the CLI, the web UI and the eval harness read that instead of reaching into the graph's state.
+The harness (`eval/run_agent_eval.py:run_one`) no longer drives `graph.stream`: it passes an event
+collector and its own `--clarify-pick` reply policy into the runner, which owns the stream loop, the
+interrupt, the per-question usage reset and the scratchpad. What is measured and what is shipped are
+now the same code, which is the point: every behaviour number this project publishes is produced
+through the interface a reader uses.
+
+Two consequences of the same change. **A question that fails is still accounted for:** the metrics
+event was emitted after the `try`, so a run that raised reported nothing at all and the calls it had
+already paid for were invisible; it is emitted in a `finally` now, and the failure comes back on the
+result (exception class and a message with local paths redacted) rather than as an exception through
+every interface. The event contract itself is unchanged — same events, same order, same payloads —
+except that `by_role` gained `seconds`. Delivery is the consumer's business and stays there: an
+`on_event` that raises on the final metrics event is recorded on the result (`metrics_failure`) and
+neither replaces the run's own outcome nor turns an answered question into an exception. **Wall clock per node role** is accumulated where tokens are
+not: in a `finally` around the model call, so a call that timed out or exhausted its retries still
+reports the time the question spent on it. Locally the cost of a question is $0, and a latency
+budget that is not measured per node cannot be argued at all (#32); the harness report line and the
+JSON sidecar carry it per question.
 
 ## ADR-010: Evaluation as a first-class deliverable, correctness kept separate
 

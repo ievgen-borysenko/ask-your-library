@@ -609,9 +609,10 @@ def test_a_fragment_of_a_held_title_sets_no_filter_and_claims_nothing(monkeypatc
 
 
 def test_an_index_plan_cannot_read_leaves_the_question_to_the_loop(monkeypatch, caplog):
-    """plan is on the critical path of every question that names a book, and
-    run_question has no `except`: a catalogue read that fails must cost the
-    filter, not the answer, and must claim nothing about a list nobody read."""
+    """plan is on the critical path of every question that names a book, and an
+    exception here ends the question — run_question turns it into a failed run
+    with no answer: a catalogue read that fails must cost the filter, not the
+    answer, and must claim nothing about a list nobody read."""
     def unreadable():
         raise RuntimeError("the catalogue cannot list a library without the full-text table")
     monkeypatch.setattr(nodes, "list_books", unreadable)

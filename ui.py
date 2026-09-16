@@ -54,7 +54,7 @@ install_fake_backend()
 from ask_your_library.graph import build_graph                      # noqa: E402
 from ask_your_library.i18n import LANG, set_lang, status_word, t    # noqa: E402
 from ask_your_library.preflight import check_api_key, check_environment  # noqa: E402
-from ask_your_library.runner import history_entry, run_question     # noqa: E402
+from ask_your_library.runner import failed_result, history_entry, run_question  # noqa: E402
 from ask_your_library.sanitize import LINE_BREAK_RE                 # noqa: E402
 
 # A single-user local app never needs the login cookie on a cross-site request;
@@ -398,9 +398,6 @@ class RunView:
 
     def __init__(self):
         self.passages: dict[str, str] = {}
-        # the catalogue result when the question took that path: the conversation
-        # memory keeps its shape, never the list of titles (runner.history_entry)
-        self.catalog: dict | None = None
 
 
 def safe_markdown(text: str) -> str:
@@ -562,7 +559,6 @@ def render_event(node_name: str, update: dict, view: RunView | None = None) -> N
 
     elif node_name == "catalog":
         listing = update["catalog"]
-        view.catalog = listing
         cl.run_sync(show_step("catalog", t("ui_catalog_step", op=listing["op"], n=listing["count"],
                                            total=listing["total"])))
         # Titles are index metadata, i.e. data: rendered as text like a model answer.
@@ -728,20 +724,27 @@ async def on_message(message: cl.Message) -> None:
     history = cl.user_session.get("history")
     view = RunView()
     try:
-        answer = await cl.make_async(run_question)(
+        result = await cl.make_async(run_question)(
             GRAPH, message.content, history, SCRATCH_DIR,
             on_event=functools.partial(render_event, view=view), on_clarify=ask_user_in_chat)
     except Exception as error:
+        # A failure inside the run is reported ON the result (the runner keeps
+        # the metrics of what it spent); anything raised around it — the
+        # scratchpad, mostly — becomes one here, so the reader sees one shape.
+        result = failed_result(message.content, error)
+    if result.failure is not None:
         # Class + short message only: a raw exception can leak paths and
-        # provider details into the chat.
-        short = f"{type(error).__name__}: {str(error)[:200]}"
+        # provider details into the chat (the runner has already replaced this
+        # machine's paths; the length cap is this interface's own rule).
+        short = f"{result.failure.type}: {result.failure.message[:200]}"
         # Same treatment as every other message: an exception message can carry
         # corpus text (a book title in a lookup error). Plain markdown, not an
         # HTML block, so the escape and the image neutralization are the whole
         # job and the line breaks stay line breaks.
         await cl.Message(content=safe_markdown(t("ui_error", e=short))).send()
         return
+    answer = result.answer
 
     # Conversation memory: the question plus a truncated answer; a catalogue
     # answer only as its shape, never the list of titles.
-    history.append(history_entry(message.content, answer, view.catalog))
+    history.append(history_entry(message.content, answer, result.catalog or None))

@@ -533,6 +533,20 @@ def test_a_single_run_writes_the_markdown_the_pre_sidecar_harness_wrote(monkeypa
     assert ", attempt " not in report and "### " not in report and "spread" not in report
 
 
+def test_per_role_seconds_reach_the_report_line_and_the_sidecar(monkeypatch, tmp_path):
+    """Where the backend is local the cost of a question is $0 and the only
+    currency is seconds, so the record carries them per node (#32). A result
+    that has none — every fake above, and any run that spent no call — writes
+    the line it always wrote, which is what keeps the byte-compat fixture
+    below honest."""
+    out = prepared(monkeypatch, tmp_path, [],
+                   lambda item, attempt: fake_result(item, by_role_seconds={"plan": 1.2,
+                                                                            "observe": 8.5}))
+    assert "- seconds by role: plan 1.2, observe 8.5\n" in only(out, ".md").read_text(encoding="utf-8")
+    sidecar = json.loads(only(out, ".json").read_text(encoding="utf-8"))
+    assert sidecar["questions"][0]["attempts"][0]["by_role_seconds"] == {"plan": 1.2, "observe": 8.5}
+
+
 def test_the_same_fake_results_render_the_same_report_with_and_without_the_sidecar(
         monkeypatch, tmp_path):
     """The sidecar is written from the same records, not by a second pass over

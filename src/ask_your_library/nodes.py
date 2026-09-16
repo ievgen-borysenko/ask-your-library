@@ -93,8 +93,9 @@ def _call_timeout_reason() -> str:
 def _catalogue() -> tuple[list[BookEntry], bool]:
     """The book list plan needs (the gate's scope and the retrieval filter), and
     whether it could be read at all. Before ADR-016 plan never touched LanceDB,
-    and run_question has no `except` of its own: an index this node cannot read
-    must not end a question the research loop could still answer. On a failure
+    and an exception here ends the question — run_question turns it into a
+    failed run with no answer: an index this node cannot read must not end a
+    question the research loop could still answer. On a failure
     the question is planned as if no book had been named: no filter, and no
     "not in the catalogue" note, which would be a claim about a list nobody
     read."""

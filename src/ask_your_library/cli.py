@@ -28,19 +28,24 @@ from .config import QUESTION_DEADLINE_S, SUPPORTED_LANGS
 from .graph import build_graph
 from .i18n import set_lang, status_word, t
 from .preflight import check_environment, exit_code
-from .runner import history_entry, run_question
+from .runner import RunResult, failed_result, history_entry, run_question
 from .sanitize import LINE_BREAK_RE, strip_control_chars
 
 EXIT_WORDS = {"exit", "quit", "q", "вихід"}
 SCRATCH_DIR = Path(os.environ.get("ASK_SCRATCH_DIR", ".scratch"))
 
-# Session totals live in the interface: the metrics event is always about one question.
+# Session totals live in the interface: the metrics event is always about one
+# question. A question that FAILED emits that event too (since 16.09, so the
+# calls it paid for are not lost), so it counts here as well: the session line
+# is what the session spent and how many questions were attempted, not how many
+# were answered. That is what a cost line should say.
 SESSION = {"questions": 0, "cost_usd": 0.0}
 # Per-question memory of the CLI: the passages of this run by hit_id (from the act
 # events), so --verbose can print each evidence item on the text it was checked
-# against. The CLI answers one question at a time; _run resets it.
-RUN = {"passages": {}, "verbose": False,
-       "catalog": None}     # this question's catalogue result, if it took that path: the history keeps its shape only
+# against. The CLI answers one question at a time; _run resets it. The catalogue
+# result is NOT kept here any more — it comes back on the result object, so the
+# conversation memory reads it from the one record of the run.
+RUN = {"passages": {}, "verbose": False}
 
 
 def terminal_safe(text: str) -> str:
@@ -111,7 +116,6 @@ def print_event(node_name: str, update: dict) -> None:
         say(t("ev_clarify", a=update["clarification"]))
     elif node_name == "catalog":
         listing = update["catalog"]
-        RUN["catalog"] = listing
         say(t("ev_catalog", op=listing["op"], n=listing["count"], total=listing["total"]))
         say(t("ev_answer_header", a=update["answer"]))
     elif node_name == "synthesize":
@@ -162,21 +166,30 @@ def ask_in_terminal(question_to_user: str) -> str:
     return input(t("cli_your_answer")).strip()
 
 
-def _run(graph, question: str, history: list[str], deadline_s: float | None = None) -> str:
+def _run(graph, question: str, history: list[str], deadline_s: float | None = None) -> RunResult:
     """One question with human-readable failure instead of a traceback
-    (ASK_DEBUG=1 re-raises)."""
+    (ASK_DEBUG=1 re-raises).
+
+    The runner reports a failure INSIDE the run on the result rather than by
+    raising, so that the calls it spent are still accounted for; anything that
+    goes wrong around the run (the scratchpad, mostly) still arrives as an
+    exception. Both end the same way for the reader: one line, an empty answer,
+    and exit 1 in single-question mode."""
     RUN["passages"] = {}
-    RUN["catalog"] = None
     try:
-        return run_question(graph, question, history, SCRATCH_DIR,
-                            on_event=print_event, on_clarify=ask_in_terminal,
-                            deadline_s=deadline_s)
+        result = run_question(graph, question, history, SCRATCH_DIR,
+                              on_event=print_event, on_clarify=ask_in_terminal,
+                              deadline_s=deadline_s)
     except Exception as error:
         if os.environ.get("ASK_DEBUG"):
             raise
+        result = failed_result(question, error)
+    if result.failure is not None:
+        if os.environ.get("ASK_DEBUG") and result.failure.error is not None:
+            raise result.failure.error
         # The message can carry index text (a book named in a lookup failure).
-        say(t("cli_run_error", e=f"{type(error).__name__}: {error}"), error=True)
-        return ""
+        say(t("cli_run_error", e=str(result.failure)), error=True)
+    return result
 
 
 def package_version() -> str:
@@ -257,8 +270,12 @@ def main(argv: list[str] | None = None) -> None:
         # Single-question mode is what scripts and evals call: a failed run has
         # to be visible in the exit code, not only in the message _run printed.
         # (The interactive loop keeps going instead — a bad question there is
-        # not a failed session.)
-        if not _run(graph, question, history=[], deadline_s=args.deadline):
+        # not a failed session.) `ok` is asked FIRST and separately from the
+        # answer: a run that died after synthesize carries the text it had
+        # written, and a caller that reads exit 0 would take that half-finished
+        # answer for a complete one.
+        result = _run(graph, question, history=[], deadline_s=args.deadline)
+        if not result.ok or not result.answer:
             raise SystemExit(1)
         return
 
@@ -272,12 +289,16 @@ def main(argv: list[str] | None = None) -> None:
         if not question or question.lower() in EXIT_WORDS:
             break
 
-        answer = _run(graph, question, history, deadline_s=args.deadline)
-        if not answer:
+        result = _run(graph, question, history, deadline_s=args.deadline)
+        if not result.ok or not result.answer:
+            # The session goes on, the memory does not take it: an answer from a
+            # run that failed is whatever had been written when it died, and the
+            # next planner and synthesize prompt would read it as a turn that
+            # happened. The failure was already printed by _run.
             continue
         # Conversation memory: the question plus a truncated answer; a catalogue
         # answer only as its shape, never the list of titles.
-        history.append(history_entry(question, answer, RUN["catalog"]))
+        history.append(history_entry(question, result.answer, result.catalog or None))
 
     say(t("cli_bye"))
 

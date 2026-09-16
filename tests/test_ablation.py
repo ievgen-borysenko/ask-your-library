@@ -234,16 +234,18 @@ def test_run_item_resets_usage_for_the_loop_free_conditions(captured_llm, monkey
 
 
 def test_run_item_does_not_reset_usage_around_the_harness_run(monkeypatch, tmp_path):
-    """harness.run_one resets per question itself; run_item must not reset again
-    (a second reset would drop what run_one already accounted for)."""
+    """The runner resets per question, once, inside the run harness.run_one
+    drives; run_item must not reset again (a second reset would drop what the
+    question already accounted for)."""
     monkeypatch.setattr(ablation.harness, "RESULTS_DIR", tmp_path)
     resets = []
     monkeypatch.setattr(llm, "reset_usage", lambda: resets.append(1))
-    monkeypatch.setattr(ablation.harness, "reset_usage", lambda: resets.append("harness"))
+    monkeypatch.setattr("ask_your_library.runner.reset_usage",
+                        lambda deadline_s=None: resets.append("runner"))
     graph = FakeGraph({"answer": "Adventures of Huckleberry Finn.", "verification": "OK",
                        "provenance": {}, "steps_taken": 1, "read_chapters": [], "evidence": []})
     ablation.run_item("agent", ITEM, graph)
-    assert resets == ["harness"]
+    assert resets == ["runner"]
 
 
 def test_run_item_keeps_the_score_the_harness_already_computed(monkeypatch, tmp_path):
