@@ -1,6 +1,11 @@
 """runner.run_question emits a partial metrics event when the graph pauses at
 a clarify interrupt (the reader sees what the run has cost so far), and the
-final metrics event still covers the whole run once."""
+final metrics event still covers the whole run once — a run that FAILED
+included, which is the only account of what that question spent.
+
+The run comes back as a RunResult: the answer and the end state as fields,
+so no interface reads the graph's state.
+"""
 from pathlib import Path
 
 
@@ -45,9 +50,13 @@ def test_partial_metrics_at_the_interrupt_and_final_metrics_once(tmp_path):
 
     events = []
     graph = FakeGraph()
-    answer = runner.run_question(graph, "q", [], Path(tmp_path), lambda n, u: events.append((n, u)),
+    result = runner.run_question(graph, "q", [], Path(tmp_path), lambda n, u: events.append((n, u)),
                                  lambda question: "the first one")
-    assert answer == "the answer" and graph.resumed_with == "the first one"
+    assert result.answer == "the answer" and graph.resumed_with == "the first one"
+    assert result.failure is None and result.ok
+    assert result.stop_reason == "enough" and result.steps_taken == 2
+    assert result.clarify_asked is True          # the runner knows; the resumed state does not say it
+    assert result.question == "q" and result.scratchpad.name.startswith("run-")
     metrics = [u for n, u in events if n == "metrics"]
     assert len(metrics) == 2
     assert metrics[0]["partial"] is True and metrics[0]["steps_taken"] == 1
@@ -55,6 +64,136 @@ def test_partial_metrics_at_the_interrupt_and_final_metrics_once(tmp_path):
     # the partial event comes before the reader is asked
     names = [n for n, _ in events]
     assert names.index("metrics") < len(names) - 1
+
+
+class BrokenGraph:
+    """Answers the first node, then raises — a question that dies mid-run."""
+    checkpointer = None
+
+    def __init__(self, error=None):
+        self.error = error or RuntimeError("the index is gone")
+
+    def stream(self, run_input, config):
+        from ask_your_library import llm
+        yield {"plan": {"mode": "answer"}}
+        spent = llm._usage()                       # a model call was made and billed
+        spent.llm_calls += 1
+        spent.input_tokens += 120
+        llm._by_role(spent, "plan")["calls"] += 1
+        raise self.error
+
+    def get_state(self, config):
+        raise RuntimeError("no state for a thread that never finished")
+
+
+def test_a_question_that_fails_mid_run_still_reports_its_metrics(tmp_path):
+    """Before, the metrics event was emitted after the `try`, so a question
+    that raised reported nothing at all — the calls it had already paid for
+    were invisible to every interface and to the eval report. The event is the
+    run's account, and a failed run has one too."""
+    from ask_your_library import runner
+
+    events = []
+    result = runner.run_question(BrokenGraph(), "q", [], Path(tmp_path),
+                                 lambda n, u: events.append((n, u)), lambda question: "")
+
+    metrics = [u for n, u in events if n == "metrics"]
+    assert len(metrics) == 1 and "partial" not in metrics[0]
+    assert metrics[0]["llm_calls"] == 1 and metrics[0]["input_tokens"] == 120
+    assert metrics[0]["by_role"]["plan"]["calls"] == 1
+    # the failure is the result's, not an exception: the answer is empty, the
+    # partial usage is there, and the caller decides what to say about it
+    assert result.failure is not None and not result.ok
+    assert result.failure.type == "RuntimeError" and result.failure.message == "the index is gone"
+    assert str(result.failure) == "RuntimeError: the index is gone"
+    assert result.answer == "" and result.steps_taken == 0
+    assert result.usage["llm_calls"] == 1 and result.usage["input_tokens"] == 120
+
+
+class PlainGraph:
+    """Answers in one node, with a state to read at the end."""
+    checkpointer = None
+
+    def __init__(self, state_error=None):
+        self.state_error = state_error
+
+    def stream(self, run_input, config):
+        yield {"synthesize": {"answer": "the answer"}}
+
+    def get_state(self, config):
+        if self.state_error is not None:
+            raise self.state_error
+        return type("S", (), {"values": {"answer": "the answer", "steps_taken": 1,
+                                         "stop_reason": "enough"}})()
+
+
+def test_exactly_one_metrics_event_on_a_run_that_answers(tmp_path):
+    """The other half of the count: the event that reports the whole run is
+    emitted once, never twice, when nothing goes wrong."""
+    from ask_your_library import runner
+
+    events = []
+    result = runner.run_question(PlainGraph(), "q", [], Path(tmp_path),
+                                 lambda n, u: events.append((n, u)), lambda question: "")
+    assert [n for n, _ in events] == ["synthesize", "metrics"]
+    assert result.answer == "the answer" and result.failure is None
+
+
+def test_a_state_that_cannot_be_read_after_a_good_stream_is_a_failed_run(tmp_path):
+    """The read of the final state IS the run on that path: swallowing it would
+    hand the caller a successful question with an empty answer, which is a
+    failure told as a success. (Where a failure is already in hand — the
+    `except`, and the partial metrics at a clarify — the same read stays
+    guarded: it must not raise a second time over what really happened.)"""
+    from ask_your_library import runner
+
+    events = []
+    result = runner.run_question(PlainGraph(state_error=RuntimeError("no checkpoint")),
+                                 "q", [], Path(tmp_path),
+                                 lambda n, u: events.append((n, u)), lambda question: "")
+    assert not result.ok and result.answer == ""
+    assert result.failure.type == "RuntimeError" and result.failure.message == "no checkpoint"
+    assert len([u for n, u in events if n == "metrics"]) == 1      # still accounted for
+
+
+def test_a_consumer_that_raises_on_the_metrics_event_does_not_become_the_runs_outcome(tmp_path):
+    """The event is delivered from a `finally`, and the web UI renders it inside
+    Chainlit: an exception there used to leave `run_question` raising instead of
+    returning — an answered question reported as a crash, and on the failure
+    path the renderer's error REPLACING the run's own. Delivery is the
+    consumer's business and is recorded as such."""
+    from ask_your_library import runner
+
+    def explode_on_metrics(node_name, update):
+        if node_name == "metrics":
+            raise RuntimeError("the renderer is gone")
+
+    answered = runner.run_question(PlainGraph(), "q", [], Path(tmp_path),
+                                   explode_on_metrics, lambda question: "")
+    assert answered.ok and answered.answer == "the answer"      # the run is untouched
+    assert not answered.metrics_delivered
+    assert answered.metrics_failure.type == "RuntimeError"
+    assert answered.metrics_failure.message == "the renderer is gone"
+
+    failed = runner.run_question(BrokenGraph(), "q", [], Path(tmp_path),
+                                 explode_on_metrics, lambda question: "")
+    # the run's own failure survives; the consumer's sits beside it
+    assert failed.failure.message == "the index is gone"
+    assert failed.metrics_failure.message == "the renderer is gone"
+    assert failed.usage["llm_calls"] == 1          # and the account was still taken
+
+
+def test_a_failure_message_names_no_machine(tmp_path):
+    """The message travels into a chat, a report and a committed summary: a
+    FileNotFoundError names the file it could not open, and under a home
+    directory that file name is the reader's login."""
+    from ask_your_library import runner
+
+    secret = Path.home() / "books" / "private.md"
+    result = runner.run_question(BrokenGraph(FileNotFoundError(f"cannot open {secret}")),
+                                 "q", [], Path(tmp_path), lambda n, u: None, lambda question: "")
+    assert result.failure.message == "cannot open ~/books/private.md"
+    assert str(Path.home()) not in result.failure.message
 
 
 def test_the_clarify_pause_is_reported_to_the_deadline_clock(tmp_path, monkeypatch):

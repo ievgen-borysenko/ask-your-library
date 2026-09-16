@@ -43,7 +43,7 @@ class RunUsage:
     output_tokens: int = 0
     cache_read_tokens: int = 0
     model: str = ORCHESTRATOR_MODEL
-    by_role: dict = field(default_factory=dict)   # role -> calls/input_tokens/output_tokens
+    by_role: dict = field(default_factory=dict)   # role -> calls/input_tokens/output_tokens/seconds
     hits_seen: int = 0            # raw hits observe has looked at
     evidence_distilled: int = 0   # how many of those it kept as evidence
     evidence_dropped_no_hit: int = 0   # evidence items without a resolvable hit_id (dropped)
@@ -101,6 +101,14 @@ def deadline_remaining_s() -> float | None:
     return max(0.0, u.deadline_s - (time.monotonic() - u.started - u.paused))
 
 
+def _by_role(usage: RunUsage, role: str) -> dict:
+    """This role's accumulator, created on first use. One place, because the
+    seconds of a call are recorded even when the call raises and its tokens are
+    not, so two code paths reach it."""
+    return usage.by_role.setdefault(
+        role, {"calls": 0, "input_tokens": 0, "output_tokens": 0, "seconds": 0.0})
+
+
 def _cost(input_tokens: int, output_tokens: int) -> float:
     return round((input_tokens * PRICE_IN_PER_MTOK
                   + output_tokens * PRICE_OUT_PER_MTOK) / 1_000_000, 4)
@@ -108,7 +116,11 @@ def _cost(input_tokens: int, output_tokens: int) -> float:
 
 def usage_snapshot() -> dict:
     u = _usage()
-    by_role = {role: {**r, "cost_usd": _cost(r["input_tokens"], r["output_tokens"])}
+    # `seconds` is wall clock per role, rounded where it is read rather than
+    # where it is accumulated, so a run of many short calls does not lose a
+    # tenth of a second per call to rounding.
+    by_role = {role: {**r, "seconds": round(r["seconds"], 1),
+                      "cost_usd": _cost(r["input_tokens"], r["output_tokens"])}
                for role, r in u.by_role.items()}
     return {"llm_calls": u.llm_calls, "input_tokens": u.input_tokens,
             "output_tokens": u.output_tokens, "cache_read_tokens": u.cache_read_tokens,
@@ -177,25 +189,38 @@ def llm_invoke(system: str, user: str, role: str):
     Usage is accounted exactly where it was: once, on the reply that came back.
     A failed attempt reports no tokens, so `llm_calls` keeps counting what it
     counted before — calls that produced a reply — and every number in a run
-    report keeps its meaning."""
+    report keeps its meaning. Wall clock per role is the one figure recorded
+    for a call that raised too (see the `finally` below): where the backend is
+    local and the cost is $0, seconds are the only currency a latency budget
+    can be argued in."""
     messages = [SystemMessage(content=f"{system}\n\n{DATA_RULE}"),
                 HumanMessage(content=user)]
     capped = deadline_caps(role)
-    for attempt in range(1 + LLM_MAX_RETRIES):
-        try:
-            reply = llm(role, capped=capped).invoke(messages)
-            break
-        except Exception as error:
-            if attempt >= LLM_MAX_RETRIES or not retryable(error):
-                raise
-            delay = retry_delay_s(attempt, error)
-            left = deadline_remaining_s()
-            if capped and (left is None or left - delay <= MIN_CALL_TIMEOUT_S):
-                # Waiting out the backoff would leave the next attempt the floor
-                # and nothing else; the answer still has to be written out of the
-                # evidence already collected, so this call gives up now.
-                raise
-            time.sleep(delay)
+    call_started = time.monotonic()
+    try:
+        for attempt in range(1 + LLM_MAX_RETRIES):
+            try:
+                reply = llm(role, capped=capped).invoke(messages)
+                break
+            except Exception as error:
+                if attempt >= LLM_MAX_RETRIES or not retryable(error):
+                    raise
+                delay = retry_delay_s(attempt, error)
+                left = deadline_remaining_s()
+                if capped and (left is None or left - delay <= MIN_CALL_TIMEOUT_S):
+                    # Waiting out the backoff would leave the next attempt the floor
+                    # and nothing else; the answer still has to be written out of the
+                    # evidence already collected, so this call gives up now.
+                    raise
+                time.sleep(delay)
+    finally:
+        # Seconds are accounted where tokens are NOT: in a `finally`, so a call
+        # that ended by timing out or by exhausting its retries still reports
+        # the time the question really spent on it. A role can therefore carry
+        # seconds with `calls` 0 — that is the honest reading of a call that
+        # produced no reply. Retries and their backoff are inside the span on
+        # purpose: they are part of what that call cost the question.
+        _by_role(_usage(), role)["seconds"] += time.monotonic() - call_started
     meta = getattr(reply, "usage_metadata", None) or {}
     tokens_in = meta.get("input_tokens", 0)
     tokens_out = meta.get("output_tokens", 0)
@@ -207,7 +232,7 @@ def llm_invoke(system: str, user: str, role: str):
     # stable prompt prefix >=1024 tokens) — tracked already so we notice when it
     # starts working
     usage.cache_read_tokens += (meta.get("input_token_details") or {}).get("cache_read", 0)
-    role_usage = usage.by_role.setdefault(role, {"calls": 0, "input_tokens": 0, "output_tokens": 0})
+    role_usage = _by_role(usage, role)
     role_usage["calls"] += 1
     role_usage["input_tokens"] += tokens_in
     role_usage["output_tokens"] += tokens_out
@@ -250,10 +275,10 @@ def deadline_caps(role: str = "") -> bool:
     deadline is a budget for CONTINUING the search and never a cut mid-call:
     the final `synthesize`, and any call issued once `deadline_passed` is
     already true. Capping those would spend the budget searching and then time
-    the answer out at the floor — `run_question` has no `except` around the
-    stream, so the CLI and the web UI would turn that APITimeoutError into an
-    error string and a deadline-stopped run would return nothing at all,
-    instead of the degraded answer the deadline exists to produce.
+    the answer out at the floor — that APITimeoutError ends the run, and a run
+    that ends in a failure gives the CLI and the web UI an error line and no
+    answer, so a deadline-stopped question would return nothing at all instead
+    of the degraded answer the deadline exists to produce.
 
     `llm_invoke` asks this ONCE per call and passes the answer into every
     attempt of it, so a retry cannot change regime mid-call."""

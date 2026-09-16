@@ -136,6 +136,25 @@ did. (At N > 1
 `summarize_report.py` lists a failing id once per failing attempt; it reads the Markdown only, and
 teaching it to read the sidecar is a separate change.)
 
+**The harness runs the shipped runner, and the report carries seconds per node (2026-09-16).**
+`run_one` no longer drives the graph itself: it calls `runner.run_question` — the same entry point
+the CLI and the web UI call — with an event collector and its own `--clarify-pick` reply policy as
+the clarify callback, and reads the run off the `RunResult` the runner returns. The per-question
+usage reset, the stream loop, the clarify interrupt and the scratchpad
+(`eval/results/scratch-<id>.md`, one per attempt under `--repeat`) belong to the runner now, so what
+is measured here is what a reader runs, not a second implementation of it (ADR-009, amended). Two
+things follow in the record. A question that fails is still accounted for: the runner reports the
+failure on the result and emits its metrics anyway, so the calls a dead question made are in the
+ERROR row's "spent before the error" as they always claimed to be. And every attempt carries
+`by_role_seconds`, printed under the steps log as `- seconds by role: plan 1.2, observe 8.5` and
+stored in the sidecar. A role is a node that calls the model — `plan`, `observe`, `reflect`,
+`synthesize` — and the figure is the wall clock of those calls only, retries and a call that timed
+out included: `act` issues no model call and appears nowhere in it, and neither does the model
+residency a first local question pays before any call (see ADR-009 and `docs/backlog.md`). It is the number a local latency budget needs: hosted, a question is priced in
+dollars and the cost line says so; locally it costs $0, and seconds are the only currency there is.
+A run that spent no model call writes no such line, which is why the byte-compat fixture above is
+unchanged by this.
+
 Three golden sets, reported separately. **Core** (`eval/golden/en-demo.yaml`, 11 questions, the
 default `GOLDEN_PATH`): eight questions on books the golden author has read and a two-book
 comparison of two of them (Ivanhoe and Don Quixote), all nine reader-verified; h06, one of the two
