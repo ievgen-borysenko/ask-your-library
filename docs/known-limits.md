@@ -35,10 +35,11 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   a *different* book is dropped rather than re-attributed: the book on an evidence item is the book
   the answer cites, and moving a quote across works would replace a wrong citation with a confident
   wrong one. So a model that names the wrong book beside a real quote loses that quote instead of
-  having it corrected, and the count is published (`dropped_cross_book`). The same goes for a quote
-  under four normalized words that is not in the passage it cited: too short to re-pin without
-  guessing, so dropped. Both are the conservative direction — fewer citations, none of them invented
-  by the check.
+  having it corrected, and the count is published (`dropped_by_reason.cross_book`). The same goes
+  for a quote under four normalized words that is not in the passage it cited, and — where
+  `AYL_STRICT_HIT_ID=0` lets a quote arrive with no passage named at all — for one whose stated book
+  matches no retrieved book, matches two, or is held by two passages of the right book. All of them
+  are the conservative direction: fewer citations, none of them invented by the check.
 
   What the hosted configuration does on the nearest sets, and how near they are. The catalogue set
   is the same golden file at the same checksum (`en-demo-catalog.yaml@14b001e26f5e`): hosted

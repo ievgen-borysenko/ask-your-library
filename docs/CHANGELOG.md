@@ -17,12 +17,15 @@
   the check, and `validate` stays the report it was — with `confirmed == checked_book_text` and
   `broken == 0` true by construction on evidence, which is asserted as a test.
 
-  **A re-pin corrects a citation; it never writes a new one.** A quote whose only holder belongs to
-  another work is dropped rather than moved — re-attributing it would replace a wrong citation with
-  a confident wrong one — and that share is counted as `dropped_cross_book` inside
-  `dropped_unverified`. Inside the cited book the nearest section wins, and a quote that has to find
-  its passage must be at least four normalized words long, because a three-word match is inside
-  almost any book. A quote that is in the passage it cited answers to neither limit.
+  **A re-pin corrects a citation; it never writes a new one.** The search runs book before corpus —
+  the cited passage, then that book's own text, then that book's cards, and only then anything else
+  — so a quote's own book always outranks a coincidence in another one. A quote whose only holder
+  really does belong to another work is dropped rather than moved, because re-attributing it would
+  replace a wrong citation with a confident wrong one. Inside the cited book the nearest section
+  wins; a quote that has to find its passage must be at least four normalized words long; and where
+  `AYL_STRICT_HIT_ID=0` lets an item arrive with no passage named, the model's own `book` field is
+  resolved canonically by the catalogue's resolver and the quote must sit in exactly one passage of
+  exactly that one book. A quote that is in the passage it cited answers to none of this.
 
   Both gates run **one** function over one index of the run's passages (`classify_quote`,
   `passage_index`): a second implementation of "is this quote inside that passage" is how the entry
@@ -44,7 +47,9 @@
   model that quotes badly now runs to `MAX_STEPS` where the gate used to stop it at two, which is
   four more model calls on the questions that produce the least.
 
-  `dropped_unverified`, `dropped_cross_book` and `repinned` travel on the state, on the `observe`
+  `dropped_unverified` — every well-formed quote the gate refused, whichever rule refused it — with
+  `dropped_by_reason` splitting it into `no_hit`, `cross_book`, `short` and `not_found`, and
+  `repinned` beside them, travel on the state, on the `observe`
   event (only on a step that spent one of them, so a run where every quote checks out emits the
   event it always did), on `RunResult`, in the provenance report, in the badge and the CLI line
   ("N quotes dropped before the answer: not found in the passages they cited"), and in the harness

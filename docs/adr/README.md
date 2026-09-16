@@ -120,20 +120,31 @@ read. The same check now runs inside `_valid_evidence`, at the `observe` gate, o
 passages cut exactly as the prompt cut them: **confirmed** is kept, **card_only** is kept and stays
 outside every traced count, **unattributed** is re-pinned to the passage that holds the quote (so
 the citation stops naming the wrong one), and **broken** is dropped and never reaches `synthesize`.
-Counters travel with the run — `dropped_unverified`, `repinned`, and `dropped_cross_book` inside the
-first — through the `observe` event, `RunResult`, the provenance report, the badge, the CLI line and
-the harness.
+Counters travel with the run — `dropped_unverified`, the same number split by the rule that refused
+each quote (`dropped_by_reason`: `no_hit`, `cross_book`, `short`, `not_found`), and `repinned` —
+through the `observe` event, `RunResult`, the provenance report, the badge, the CLI line and the
+harness. **Every** refusal of a well-formed quote is in the headline number, whichever rule made it;
+the breakdown sums to it and is telemetry under it, never an outcome beside it. One quote that did
+not reach the answer is one quote that did not reach the answer.
 
-**A re-pin may correct a citation; it may not write a new one.** Two limits, both because the book
+**A re-pin may correct a citation; it may not write a new one.** Three limits, all because the book
 on an evidence item is the book the ANSWER cites. A quote is re-pinned only inside the cited hit's
-own book — the same book's nearest section first, then the rest of that book — and a quote whose
-only holder belongs to another work is **dropped**, counted in `dropped_unverified` and again in
-`dropped_cross_book`. Moving it would have replaced a wrong citation with a confident wrong
-citation, which is worse than refusing it, and picking the first holder in retrieval order did
-exactly that. The second limit is length: a quote that has to FIND its passage must be at least
-`MIN_REPIN_TOKENS` (4) normalized words, because "the sea" or "he said" is inside almost any book
-and a match that short is a coincidence, not a provenance. A quote that is in the passage it cited
-is never measured against either limit; nothing is being invented there.
+own book — and the search is ordered **book before corpus**: the cited passage, then that book's
+other text, then that book's cards, and only then anything else, whose holders exist to classify a
+drop and never to receive a re-pin. Corpus-before-book was the first version of this and it was
+wrong twice over: it let a transcript of an unrelated work outrank the cited book's own card, so
+valid same-book evidence was dropped as cross-book. A quote whose only holder really does belong to
+another work IS dropped, counted in `dropped_unverified` under `cross_book`: moving it would replace
+a wrong citation with a confident wrong one, which is worse than refusing it, and taking the first
+holder in retrieval order did exactly that. The second limit is length: a quote that has to FIND its
+passage must be at least `MIN_REPIN_TOKENS` (4) normalized words, because "the sea" or "he said" is
+inside almost any book and a match that short is a coincidence, not a provenance. The third governs
+`AYL_STRICT_HIT_ID=0`, where an item may carry no usable hit id at all: the model's own `book` field
+is then the one thing narrowing the search, resolved canonically by `catalog.resolve_title` — the
+resolver that answers "do I have X" — and the quote must sit in exactly one passage of exactly that
+one retrieved book. A name matching nothing, a name matching two books and a quote two passages hold
+are all citations nobody could write down, and are dropped rather than guessed at. A quote that is
+in the passage it cited is measured against none of this; nothing is being invented there.
 
 **The cited passage is read before the rest of the run, and that changed one verdict.** A quote
 inside the book card it cites is `card_only`, even where a chapter also holds those words; before
@@ -187,7 +198,7 @@ effect**, and the gate's run is to report the coverage-probe firing count beside
 ([`../evaluation.md`](../evaluation.md)).
 
 **Not measured yet:** the acceptance is a confirmed ratio of 1.0 by construction on evidence, a
-published drop rate (with the cross-book share and the re-pin count), the coverage-probe firing
+published drop rate (with its breakdown by reason and the re-pin count), the coverage-probe firing
 count, and behaviour at `--repeat` not below the baseline being produced on the three local models.
 Nothing here was re-run against it.
 

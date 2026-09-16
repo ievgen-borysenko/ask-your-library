@@ -158,14 +158,16 @@ in [`adr/README.md`](adr/README.md), each with the measurement that settled it.
 
 **The check runs twice, and the first time is before the answer exists (16.09, #29).** `observe`
 runs it as the evidence gate: a quote confirmed in the passage it cites is kept, one found in
-another passage **of the same book** is **re-pinned** to the passage that holds it, one whose only
-match is a book card is kept and pinned to the card, and one that is in no retrieved passage of its
-step — or whose only holder is a different work, where re-pinning would swap a wrong citation for a
-confident one — is **dropped** and never reaches `synthesize`. So the answer is written from evidence that has
+another passage **of the same book** is **re-pinned** to the passage that holds it (searched book
+before corpus, so that book's own card outranks another work's chapter), one whose only match is a
+book card is kept and pinned to the card, and one that is in no retrieved passage of its step — or
+whose only holder is a different work, where re-pinning would swap a wrong citation for a confident
+one — is **dropped** and never reaches `synthesize`. So the answer is written from evidence that has
 already passed, and `validate` — which still runs last — is the report on it rather than the first
 look at it: on a run made after this, `confirmed == checked_book_text` and `broken == 0` by
 construction. What the gate spent travels with the run as `dropped_unverified` (with
-`dropped_cross_book` inside it) and `repinned`, and every interface shows it. Both run the same
+`dropped_by_reason` splitting it into `no_hit`, `cross_book`, `short` and `not_found`) and
+`repinned`, and every interface shows it. Both run the same
 function over the same passages, so they cannot disagree about one quote. The description below is
 that one check, stated once.
 
