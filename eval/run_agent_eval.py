@@ -1,7 +1,12 @@
 """Agent eval: run golden questions through the FULL agentic loop and score
 the observable behaviour against the golden set.
 
-Clarify interrupts are answered automatically, so the run is non-interactive.
+The loop is the shipped one and nothing here re-implements it: every question
+goes through `runner.run_question`, the entry point the CLI and the web UI call
+(ADR-009, amended 16.09). This file supplies the two callbacks — an event
+collector for the steps log, and the automatic clarify reply — and reads the run
+off the RunResult it gets back. Clarify interrupts are answered automatically,
+so the run is non-interactive.
 Scored per question (no LLM judge; heuristics, not proof):
   titles_mentioned  every expected book title occurs in the answer text (type catalog:
                     the expected KEYS "Title — Author" the code listed; strict set equality
@@ -59,7 +64,6 @@ import unicodedata
 from pathlib import Path
 
 import yaml
-from langgraph.types import Command
 
 from ask_your_library.catalog import CATALOG_OPS
 from ask_your_library.graph import build_graph
@@ -67,9 +71,9 @@ from ask_your_library.library import title_of
 from ask_your_library.i18n import t
 from ask_your_library.config import (CHAPTER_HIT_CHARS, MAX_CLARIFY_CANDIDATES, MAX_EMPTY_STREAK, MAX_STEPS,
                                      PRICE_IN_PER_MTOK, PRICE_OUT_PER_MTOK, QUESTION_DEADLINE_S, SEARCH_HIT_CHARS)
-from ask_your_library.llm import reset_usage, usage_snapshot
+from ask_your_library.llm import usage_snapshot
 from ask_your_library.provenance import HIT_ID_STRICT
-from ask_your_library.runner import initial_state
+from ask_your_library.runner import run_question
 
 GOLDEN_PATH = Path(os.environ.get("GOLDEN_PATH", Path(__file__).parent / "golden" / "en-demo.yaml"))
 
@@ -268,90 +272,108 @@ def auto_clarify_reply(item: dict) -> str:
     return t("eval_auto_clarify_reply")
 
 
-def usage_fields() -> dict:
-    """Cost, calls and tokens of the current question (the accumulator reset
-    at the start of run_one)."""
-    usage = usage_snapshot()
+def usage_fields(usage: dict | None = None) -> dict:
+    """Cost, calls and tokens of one question, flat, as the report and the
+    sidecar carry them.
+
+    `usage` is the snapshot the runner took at the end of the run (the one the
+    metrics event reported). Without it the current accumulator is read
+    instead — the two conditions in eval/run_ablation.py that answer without
+    the graph, and the error path in main(), have no result to read."""
+    usage = usage_snapshot() if usage is None else usage
     return {"cost_usd": round(usage.get("cost_usd", 0.0), 4), "llm_calls": usage.get("llm_calls", 0),
             "tokens_in": usage.get("input_tokens", 0), "tokens_out": usage.get("output_tokens", 0)}
 
 
+def role_seconds(usage: dict) -> dict:
+    """Wall clock per node role, rounded as the metrics event carries it.
+
+    Locally the cost of a question is $0 and the only currency is seconds, so
+    a latency budget can only be argued per node (#32). Empty for a run whose
+    usage carries no roles — the fake results the harness's own tests feed it,
+    and any run that spent no call at all — which is what keeps the report of
+    such a run byte-identical to the reports written before this existed."""
+    return {role: r["seconds"] for role, r in (usage.get("by_role") or {}).items()
+            if "seconds" in r}
+
+
 def run_one(graph, item: dict, attempt: int = 1) -> dict:
+    """One question through the same runner the CLI and the web UI use.
+
+    The harness is a consumer of `runner.run_question` and not a second
+    execution path (ADR-009, amended 16.09.2026): the stream loop, the clarify
+    interrupt, the per-question usage reset and the scratchpad all belong to
+    the runner, and what this function keeps is what is its own — the
+    auto-reply policy (--clarify-pick), the steps log the report prints, and
+    the flat fields `score()` and the report row read.
+
+    A run that failed comes back as a result with a `failure` rather than as an
+    exception, because the calls it spent still have to be accounted for; the
+    exception is re-raised here so that main() writes the ERROR row and the
+    spend exactly as it did before.
+    """
     # Under --repeat every attempt of an item would otherwise write the same
     # scratchpad and only the last one's window would survive the run; the first
     # attempt keeps the name it has always had.
     suffix = "" if attempt == 1 else f"-{attempt}"
-    scratchpad = RESULTS_DIR / f"scratch-{item['id']}{suffix}.md"
-    scratchpad.write_text("")
-    config = {"configurable": {"thread_id": item["id"]}}
-
-    started = time.time()
-    reset_usage()               # cost and tokens are per question, as in the runner
     steps_log = []
-    clarify_asked = False
-    run_input = initial_state(item["question"], history=[], scratchpad=scratchpad)
-    try:
-        while True:
-            interrupted = False
-            for step in graph.stream(run_input, config):
-                if "__interrupt__" in step:
-                    clarify_asked = True
-                    steps_log.append(f"clarify: {step['__interrupt__'][0].value}")
-                    run_input = Command(resume=auto_clarify_reply(item))
-                    interrupted = True
-                    break
-                for node_name, update in step.items():
-                    if node_name == "reflect" and update.get("current_query"):
-                        steps_log.append(f"reflect -> {update['current_query'][:80]}")
-                    elif node_name == "reflect" and update.get("stop_reason"):
-                        # a stop is a step too: deadline, CRAG gate and "enough"
-                        # must be tellable apart in the report
-                        steps_log.append(f"reflect -> stop: {update['stop_reason']}")
-            if not interrupted:
-                break
-        final = graph.get_state(config).values
-    finally:
-        # Every item is a thread in the in-memory checkpointer; drop it (also
-        # when the item errored), or a 42-item run keeps every passage of every
-        # question until the process exits.
-        checkpointer = getattr(graph, "checkpointer", None)
-        if checkpointer is not None and hasattr(checkpointer, "delete_thread"):
-            checkpointer.delete_thread(config["configurable"]["thread_id"])
-    result = {
+
+    def on_event(node_name: str, update: dict) -> None:
+        if node_name == "reflect" and update.get("current_query"):
+            steps_log.append(f"reflect -> {update['current_query'][:80]}")
+        elif node_name == "reflect" and update.get("stop_reason"):
+            # a stop is a step too: deadline, CRAG gate and "enough"
+            # must be tellable apart in the report
+            steps_log.append(f"reflect -> stop: {update['stop_reason']}")
+
+    def on_clarify(question_to_user: str) -> str:
+        # The harness's own clarify policy, as the runner's reply callback.
+        steps_log.append(f"clarify: {question_to_user}")
+        return auto_clarify_reply(item)
+
+    result = run_question(graph, item["question"], history=[], scratch_dir=RESULTS_DIR,
+                          on_event=on_event, on_clarify=on_clarify,
+                          scratchpad_name=f"scratch-{item['id']}{suffix}.md")
+    if result.failure is not None:
+        raise result.failure.error or RuntimeError(str(result.failure))
+    record = {
         "id": item["id"], "type": item["type"],
         "question": item["question"],
-        "answer": final.get("answer", ""),
-        "verification": final.get("verification", ""),
-        "provenance": final.get("provenance", {}),
-        "steps_taken": final.get("steps_taken", 0),
-        "read_chapters": final.get("read_chapters", []),
-        "evidence_items": len(final.get("evidence") or []),
-        "clarify_asked": clarify_asked,
-        "clarify_candidates": final.get("clarify_candidates") or [],
-        "clarify_unresolved": bool(final.get("clarify_unresolved")),
-        "clarify_chosen": final.get("clarify_chosen") or "",
+        "answer": result.answer,
+        "verification": result.verification,
+        "provenance": result.provenance,
+        "steps_taken": result.steps_taken,
+        "read_chapters": result.read_chapters,
+        "evidence_items": len(result.evidence),
+        "clarify_asked": result.clarify_asked,
+        "clarify_candidates": result.clarify_candidates,
+        "clarify_unresolved": result.clarify_unresolved,
+        "clarify_chosen": result.clarify_chosen,
         # the planner gave no usable plan and the raw question was searched: the
         # run completes as an ordinary row, so the report must say it (local models)
-        "plan_fallback": bool(final.get("plan_fallback")),
+        "plan_fallback": result.plan_fallback,
         # why the loop stopped (enough / CRAG gate / step limit / deadline / fallback):
         # an answer cut by the deadline and one written after "enough" must not
         # read the same in the report
-        "stop_reason": final.get("stop_reason", "") or "",
+        "stop_reason": result.stop_reason,
         # the catalogue path (ADR-016): op, count (= len(books)), total, books, resolved;
         # empty for every run that went through the research loop
-        "catalog": final.get("catalog") or {},
+        "catalog": result.catalog,
         # the hybrid and its fallbacks (ADR-016): a book the question named, resolved to
         # a retrieval filter; a name that matched nothing; a catalogue request that
         # took the research loop — each visible in the report row
-        "book_filter": final.get("book_filter") or "",
-        "book_unresolved": final.get("book_unresolved") or "",
-        "catalog_fallback": final.get("catalog_fallback") or "",
-        "seconds": round(time.time() - started),
+        "book_filter": result.book_filter,
+        "book_unresolved": result.book_unresolved,
+        "catalog_fallback": result.catalog_fallback,
+        "seconds": round(result.seconds),
         "steps_log": steps_log,
+        # wall clock per node role: the report line and the sidecar carry it so a
+        # local latency budget can be argued per node (#32)
+        "by_role_seconds": role_seconds(result.usage),
     }
-    result.update(usage_fields())
-    result["score"] = score(item, result)
-    return result
+    record.update(usage_fields(result.usage))
+    record["score"] = score(item, record)
+    return record
 
 
 def group_of(item: dict) -> str:
@@ -1186,6 +1208,11 @@ def main(argv: list[str] | None = None) -> None:
                 out.write(f"**Question:** {r['question']}\n\n")
                 for line in r["steps_log"]:
                     out.write(f"- {line}\n")
+                if r.get("by_role_seconds"):
+                    # only when the run really spent calls: a run that spent none
+                    # writes the line it always wrote
+                    out.write("- seconds by role: " + ", ".join(
+                        f"{role} {seconds:g}" for role, seconds in r["by_role_seconds"].items()) + "\n")
                 out.write(f"\n{r['answer']}\n\n> quote provenance: {r['verification']}\n")
                 out.flush()
                 print(f"    {r['steps_taken']} steps, {r['seconds']}s — {verdict}", flush=True)
