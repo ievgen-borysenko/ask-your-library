@@ -58,9 +58,21 @@ _T = {
         "ua": " ({n} доказів для книг, яких відповідь не називає, перевірено теж)",
         "en": " ({n} pieces of evidence for books the answer does not name were checked too)",
     },
+    "verif_cards_only": {
+        "ua": "ЛИШЕ КАРТКИ: жодну з {n} цитат не знайдено в тексті книжки — всі вони збіглися "
+              "тільки з карткою книжки, а картку написала модель{unused}",
+        "en": "BOOK CARDS ONLY: none of the {n} quotes was found in the book text — every one "
+              "matched only a book card, and a card is written by a model{unused}",
+    },
     "unattributed_note": {
         "ua": " ({n} цитат знайдено в іншому уривку, ніж той, на який вони посилаються — не зараховано)",
         "en": " ({n} quotes found in a retrieved passage other than the one cited — not counted as confirmed)",
+    },
+    "card_note": {
+        "ua": " ({n} цитат збіглися тільки з карткою книжки — це переказ, який написала модель, "
+              "а не цитата з книжки, тому не зараховано)",
+        "en": " ({n} quotes matched only a book card — a model-written summary, not a quote from "
+              "the book, so not counted as traced)",
     },
     # ---- stop reasons: the value of state["stop_reason"], and nothing more.
     # Every line that shows one already says that the run stopped — the CLI's
@@ -344,13 +356,15 @@ _T = {
                                  "(цитата має лежати всередині одного чанка; [...] розділяє чанки):",
                            "en": "[evidence] {n} evidence item(s), each with the passage it was checked against "
                                  "(a quote must sit inside one chunk; [...] separates chunks):"},
-    "ev_evidence_item": {"ua": "  - {status}: {book} — {section} [{hit_id}]: \"{quote}\"",
-                         "en": "  - {status}: {book} — {section} [{hit_id}]: \"{quote}\""},
+    "ev_evidence_item": {"ua": "  - {status}{source}: {book} — {section} [{hit_id}]: \"{quote}\"",
+                         "en": "  - {status}{source}: {book} — {section} [{hit_id}]: \"{quote}\""},
     "ev_passage_missing": {"ua": "    (уривок не в цьому прогоні: hit_id не знайдено)",
                            "en": "    (passage not in this run: hit_id not found)"},
     "ev_status_confirmed": {"ua": "підтверджено", "en": "confirmed"},
     "ev_status_unattributed": {"ua": "знайдено в іншому уривку", "en": "found in another passage"},
     "ev_status_broken": {"ua": "не знайдено дослівно", "en": "not found verbatim"},
+    "ev_status_card_only": {"ua": "з картки книжки, а не цитата з книжки",
+                            "en": "from a book card, not a quote from the book"},
     "m_line1": {
         "ua": "[метрики] {model}: {calls} LLM-викликів, {tin} in / {tout} out токенів, "
               "~${cost:.4f}, {sec}s, пошукових кроків: {steps}",
@@ -370,15 +384,33 @@ _T = {
     "m_session": {"ua": "  сесія разом: {q} питань, ~${cost:.4f}",
                   "en": "  session total: {q} questions, ~${cost:.4f}"},
 
-    # ---- web ui: chat header, agent-step trace, and metrics footer
-    "ui_welcome": {
-        "ua": "Ask Your Library — питай про свою бібліотеку. Кроки агента "
-              "(plan / act / observe / reflect, або catalog, коли питання про склад "
-              "бібліотеки) розгортаються над відповіддю.",
-        "en": "Ask Your Library — ask about your library. Agent steps "
-              "(plan / act / observe / reflect, or catalog for a question about what "
-              "the library holds) expand above the answer.",
+    # ---- web ui: the four starters on the empty chat screen. Three of them
+    # name no book and read the same on any shelf; the ask-back one is a
+    # template over two titles the loaded index really holds (ui.starter_questions).
+    "starter_identify_label": {"ua": "Впізнати книжку за описом", "en": "Name a book from a description"},
+    "starter_identify": {
+        "ua": "Пригадую книжку про людину далеко від дому, яка не могла повернутись. Що це за книжка?",
+        "en": "I remember a book about someone far from home who could not get back. Which one is it?",
     },
+    "starter_catalog_label": {"ua": "Порахувати бібліотеку", "en": "Count my library"},
+    "starter_catalog": {"ua": "Скільки в мене книжок?", "en": "How many books do I have?"},
+    "starter_clarify_label": {"ua": "Питання між двома книжками", "en": "A question between two books"},
+    "starter_clarify": {"ua": "Чим воно закінчується — у «{a}» чи в «{b}»?",
+                        "en": "How does it end — in {a}, or in {b}?"},
+    "starter_refusal_label": {"ua": "Спитати те, чого на полиці немає",
+                              "en": "Ask what the shelf cannot answer"},
+    "starter_refusal": {"ua": "Що мої книжки кажуть про новини минулого тижня?",
+                        "en": "What do my books say about the news from last week?"},
+    # ---- web ui: the label of an agent step. It is the WHOLE label the reader
+    # sees — the project's en-US.json empties Chainlit's "Used" prefix — so each
+    # one is a sentence in the product's voice, not a node name.
+    "ui_step_plan": {"ua": "спланував пошук", "en": "planned the search"},
+    "ui_step_act": {"ua": "шукав у бібліотеці #{n}", "en": "searched the library #{n}"},
+    "ui_step_observe": {"ua": "відібрав цитати", "en": "picked out the quotes"},
+    "ui_step_reflect": {"ua": "вирішив, що робити далі", "en": "decided what to do next"},
+    "ui_step_clarify": {"ua": "врахував вашу відповідь", "en": "took your answer"},
+    "ui_step_catalog": {"ua": "прочитав каталог", "en": "read the catalogue"},
+    # ---- web ui: agent-step trace and metrics footer
     "ui_mode": {"ua": "режим: {mode}", "en": "mode: {mode}"},
     "ui_plan_catalog": {"ua": "режим: catalog, операція: {op}", "en": "mode: catalog, operation: {op}"},
     "ui_catalog_fallback_invalid_op": {"ua": "планер назвав операцію каталогу, якої нема: шукаю в текстах",
@@ -426,6 +458,24 @@ _T = {
     "ui_badge_warn": {"ua": "{broken}/{all} цитат не дослівні",
                       "en": "{broken}/{all} quotes not verbatim"},
     "ui_badge_which": {"ua": "які саме", "en": "which ones"},
+    "ui_badge_cards": {"ua": " (+{n} збіглися тільки з карткою книжки — переказ від моделі, не цитата з книжки)",
+                       "en": " (+{n} matched only a book card — a model-written summary, "
+                             "not a quote from the book)"},
+    "ui_badge_cards_only": {"ua": "жодної цитати з тексту книжки: усі {n} збіглися лише з карткою книжки, "
+                                  "яку написала модель",
+                            "en": "nothing traced to the book text: all {n} matched only a book card, "
+                                  "which a model wrote"},
+    # The summary line of an evidence passage counts with this, not with the
+    # per-quote verdict sentence: "from a book card, not a quote from the book 2"
+    # is not a sentence, and the reader needs to know what the 2 counts.
+    "ui_verdict_card_only": {"ua": "збіглися з карткою книжки, а не з текстом книжки",
+                             "en": "matched a book card, not the book text"},
+    # What KIND of passage a quote is pinned to. One pair of strings for every
+    # interface (source_word below): the CLI's verbose list and the web UI's
+    # evidence block are answering the same question for the same reader.
+    "ev_source_book_text": {"ua": "текст книжки", "en": "book text"},
+    "ev_source_card": {"ua": "картка книжки (переказ від моделі)",
+                       "en": "book card (a model-written summary)"},
     "ui_badge_unused": {"ua": " (+{n} доказів для книг, яких відповідь не називає)",
                         "en": " (+{n} evidence items for books the answer does not name)"},
     "ui_m_summary": {
@@ -457,11 +507,26 @@ _T = {
 }
 
 
+def source_word(source_kind: str) -> str:
+    """The reader's words for the kind of passage a quote is pinned to —
+    "book text" or "book card (a model-written summary)".
+
+    "" for a record that does not say (a hit this run never logged, or one
+    logged before `corpus` was recorded): an interface prints what the record
+    holds and must not print a kind nobody wrote down. An unknown value is shown
+    as it is, so a third kind cannot pass unnoticed in one interface only."""
+    if not source_kind:
+        return ""
+    return (t(f"ev_source_{source_kind}")
+            if source_kind in ("book_text", "card") else source_kind)
+
+
 def status_word(status: str) -> str:
     """The reader's word for a provenance verdict (confirmed / unattributed /
-    broken); an unknown value is shown as is, so a fourth status cannot pass
-    unnoticed in one interface only."""
-    return t(f"ev_status_{status}") if status in ("confirmed", "unattributed", "broken") else status
+    card_only / broken); an unknown value is shown as is, so a fifth status
+    cannot pass unnoticed in one interface only."""
+    return (t(f"ev_status_{status}")
+            if status in ("confirmed", "unattributed", "card_only", "broken") else status)
 
 
 def t(key: str, **kw) -> str:

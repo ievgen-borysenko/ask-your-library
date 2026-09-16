@@ -331,6 +331,43 @@ def test_verbose_prints_every_evidence_item_on_the_passage_it_was_checked_agains
     assert t("ev_evidence_header", n=3) not in capsys.readouterr().out
 
 
+def test_verbose_says_which_evidence_is_pinned_to_a_book_card(capsys, monkeypatch):
+    """"not found verbatim" against a book CARD and the same verdict against a
+    chapter are different facts — one says a model's summary does not contain
+    the quote, the other says the book does not — and a reader of a verbose run
+    could not tell them apart. Every item carries `source_kind`; the line says
+    it, in the reader's language, and says nothing when the record does not."""
+    from ask_your_library.i18n import source_word, status_word, t
+    monkeypatch.setitem(cli.RUN, "verbose", True)
+    monkeypatch.setitem(cli.RUN, "passages", {})
+    items = [{"hit_id": "s1h1", "book": "Dracula — Bram Stoker", "section": "Key Takeaways",
+              "quote": "The hunters chase the count", "status": "card_only", "source_kind": "card"},
+             {"hit_id": "s1h2", "book": "Dracula — Bram Stoker", "section": "Chapter 27",
+              "quote": "crumbled into dust", "status": "confirmed", "source_kind": "book_text"},
+             {"hit_id": "s1h3", "book": "Dracula — Bram Stoker", "section": "Summary",
+              "quote": "nowhere at all", "status": "broken", "source_kind": "card"},
+             # a record from before source_kind existed claims nothing
+             {"hit_id": "s1h4", "book": "B — A", "section": "s", "quote": "old", "status": "broken"}]
+    cli.print_event("validate", {"verification": "OK", "provenance": {"items": items}})
+    out = capsys.readouterr().out
+    card, text = source_word("card"), source_word("book_text")
+    assert f'{status_word("card_only")} ({card}): Dracula — Bram Stoker — Key Takeaways' in out
+    assert f'{status_word("confirmed")} ({text}): Dracula — Bram Stoker — Chapter 27' in out
+    # the point of the item: a broken quote pinned to a card says so
+    assert f'{status_word("broken")} ({card}): Dracula — Bram Stoker — Summary' in out
+    assert f'{status_word("broken")}: B — A' in out          # no empty parentheses
+    assert "()" not in out
+    # and it speaks the session's language
+    import ask_your_library.i18n as i18n
+    before = i18n.get_lang()
+    try:
+        i18n.set_lang("ua")
+        cli.print_event("validate", {"verification": "OK", "provenance": {"items": items[:1]}})
+        assert source_word("card") in capsys.readouterr().out
+    finally:
+        i18n.set_lang(before)
+
+
 def test_no_line_of_a_run_carries_an_escape_sequence(capsys, monkeypatch):
     """Book keys, queries, the answer, the provenance line and the clarify
     question all come from the corpus or from a model that read it. The verbose

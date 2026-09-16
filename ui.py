@@ -5,6 +5,13 @@
 Login: env CHAINLIT_USERNAME / CHAINLIT_PASSWORD (defaults admin / change-me;
 override them for anything beyond local use).
 
+First screen: four starters built from the index that is loaded
+(@cl.set_starters, starter_questions). It is Chainlit's welcome screen, drawn
+only while the thread holds no message, so nothing is sent into an empty chat
+except what a broken environment has to say. chainlit.md is NOT on that screen —
+Chainlit 2.12 puts it behind the header's "Readme" button — so the four starter
+labels are the whole of what a first-time reader gets without clicking.
+
 Language switch: chat profile at the top of the chat (English / Ukrainian).
 Language is a property of the conversation, not the process: picking a profile
 starts a new chat, and resumed threads keep the language they were created
@@ -22,10 +29,12 @@ checked at startup (before anyone can log in); the rest is checked per session,
 because a login page for a server that cannot answer anything is worse than a
 refusal in the terminal.
 """
+import asyncio
 import functools
 import hmac
 import html
 import json
+import logging
 import os
 import re
 import secrets
@@ -51,9 +60,12 @@ from ask_your_library.fake_backend import install_fake_backend
 # anything, and the module below is the module that always ran.
 install_fake_backend()
 
+from ask_your_library import nodes                                  # noqa: E402
 from ask_your_library.graph import build_graph                      # noqa: E402
-from ask_your_library.i18n import LANG, set_lang, status_word, t    # noqa: E402
+from ask_your_library.i18n import (LANG, get_lang, set_lang, source_word,  # noqa: E402
+                                   status_word, t)
 from ask_your_library.preflight import check_api_key, check_environment  # noqa: E402
+from ask_your_library.provenance import match_span                  # noqa: E402
 from ask_your_library.runner import failed_result, history_entry, run_question  # noqa: E402
 from ask_your_library.sanitize import LINE_BREAK_RE                 # noqa: E402
 
@@ -122,7 +134,12 @@ CLARIFY_TIMEOUT_SECONDS = _clarify_timeout_seconds()
 
 GREEN = "#16a34a"
 YELLOW = "#ca8a04"
-GRAY = "#6b7280"
+# The metrics footer carries the cost, the seconds and the real stop reason at
+# 0.85em. #6b7280 on the dark ground is about 3.4:1 and fails WCAG AA; this is
+# about 6.6:1 and keeps the same visual rank (design critique 16.09 §1.7).
+GRAY = "#9ca3af"
+
+log = logging.getLogger("ask_your_library.ui")
 
 # Registered on Chainlit's own Starlette app, at import time: the middleware
 # stack is built when the server starts, and adding one afterwards is too late.
@@ -316,12 +333,23 @@ def neutralize_markdown(text: str) -> str:
     return text.replace("![", "[")
 
 
-async def show_step(step_name: str, step_output: str) -> None:
-    # Step text mixes our labels with corpus/model-derived strings (book
-    # titles, queries); with unsafe_allow_html enabled for our own badges,
-    # everything third-party must be neutralized. A step is plain markdown, so
-    # safe_markdown, not safe_html: its line breaks are the list it prints.
-    async with cl.Step(name=step_name, type="tool") as step:
+async def show_step(step_name: str, step_output: str, default_open: bool = False) -> None:
+    """One agent step in the thread.
+
+    The name is the whole label the reader sees: Chainlit prints
+    `chat.messages.status.used` in front of it, and this project's en-US.json
+    sets that to nothing, so "Used act #1" — a framework log line — reads
+    "searched the library #1" instead (design critique 16.09 §1.6). The names
+    come from i18n, like every other word the interface speaks.
+
+    `default_open` is for the two steps that are the reader's own question, not
+    the machinery: what the agent decided to look for, and why it stopped.
+
+    Step text mixes our labels with corpus/model-derived strings (book titles,
+    queries); with unsafe_allow_html enabled for our own badges, everything
+    third-party must be neutralized. A step is plain markdown, so safe_markdown,
+    not safe_html: its line breaks are the list it prints."""
+    async with cl.Step(name=step_name, type="tool", default_open=default_open) as step:
         step.output = safe_markdown(step_output)
 
 
@@ -340,6 +368,14 @@ def verification_badge(update: dict) -> str:
     # LF. A <br> inside a title attribute would be shown literally.
     tooltip = LINE_BREAK_RE.sub(" ", neutralize_markdown(html.escape(verification, quote=True)))
     title = t("ui_badge_title")
+    # The headline counts quotes traced to the BOOK's own text and nothing else:
+    # a quote whose only match is a book card is verbatim in a model's summary,
+    # not in the book, and is reported under the count, never inside it
+    # (provenance.validate). The fallback keeps a record written before 16.09 —
+    # and any interface reading one — meaning what it meant then.
+    card_only = numbers.get("card_only", 0)
+    book_checked = numbers.get("checked_book_text", numbers.get("checked", 0))
+    card_note = t("ui_badge_cards", n=card_only) if card_only else ""
 
     if numbers.get("catalog"):
         # The catalogue path (ADR-016): a list computed by code from the index
@@ -360,19 +396,27 @@ def verification_badge(update: dict) -> str:
         color = GRAY
         headline = safe_html(verification)
         details = ""
+    elif book_checked == 0:
+        # Every quote matched a book card and nothing else. A card is a
+        # model-written summary, so there is no quote from a book here at all —
+        # amber, and it says which, rather than a green "0/0 traced".
+        color = YELLOW
+        headline = t("ui_badge_cards_only", n=card_only)
+        card_note = ""          # the headline already IS the card sentence
+        details = ""
     elif numbers.get("broken", 0) == 0 and numbers.get("unattributed", 0) == 0:
         color = GREEN
-        headline = t("ui_badge_ok", ok=numbers["confirmed"], all=numbers["checked"])
+        headline = t("ui_badge_ok", ok=numbers["confirmed"], all=book_checked)
         details = ""
     elif numbers.get("broken", 0) == 0:
         # Text found, book not: honest amber, not green.
         color = YELLOW
-        headline = t("ui_badge_unattributed", ok=numbers["confirmed"], all=numbers["checked"],
+        headline = t("ui_badge_unattributed", ok=numbers["confirmed"], all=book_checked,
                      n=numbers["unattributed"])
         details = ""
     else:
         color = YELLOW
-        headline = t("ui_badge_warn", broken=numbers["broken"], all=numbers["checked"])
+        headline = t("ui_badge_warn", broken=numbers["broken"], all=book_checked)
         items_html = ""
         for item in numbers.get("broken_items", []):
             quote_preview = item.get("quote", "")[:160]
@@ -387,7 +431,7 @@ def verification_badge(update: dict) -> str:
 
     return (f'<div title="{tooltip}" style="border-left: 4px solid {color}; '
             f'background: {color}1a; padding: 8px 12px; border-radius: 4px;">'
-            f'<b>{title}</b><br>{headline}{unused_note}{details}</div>')
+            f'<b>{title}</b><br>{headline}{card_note}{unused_note}{details}</div>')
 
 
 class RunView:
@@ -419,11 +463,67 @@ def safe_html(text: str) -> str:
     return LINE_BREAK_RE.sub("<br>", safe_markdown(text))
 
 
+def verdict_word(status: str) -> str:
+    """The word the passage summary counts with.
+
+    Three of the four are the reader's own verdict word, the same one the
+    per-quote line uses. `card_only` gets a different one: its verdict sentence
+    ("from a book card, not a quote from the book") is a judgement on ONE quote
+    and reads as nonsense with a number after it, so the summary says what the
+    count is a count of instead."""
+    return t("ui_verdict_card_only") if status == "card_only" else status_word(status)
+
+
+def marked_passage(passage: str, items: list[dict]) -> str:
+    """The passage as HTML for our own block, with every quote that really is
+    inside it wrapped in <mark>.
+
+    The quote was printed above the passage and the reader was left to find it,
+    so the proof was on screen and unproven to the eye (design critique 16.09
+    §1.3). `provenance.match_span` says where each one sits, over the same
+    normalization `validate` used, so nothing is marked that validate would not
+    have confirmed against this passage.
+
+    ESCAPING. The passage is cut into slices and every slice goes through
+    safe_html, exactly as the whole of it used to: escaped, image-free, line
+    breaks as <br>. A slice boundary can only fall at whitespace (match_span
+    returns whole non-space chunks), so "![" — the construct neutralize_markdown
+    demotes — is never split across two slices and cannot survive the cut. A
+    markdown image whose alt text contains a space could have its full inline
+    form split, and then the "!" of that half is still dropped: it renders as a
+    link, never as a fetch. The <mark> tags are ours and are the only markup
+    added; an inline style carries the highlight because the corpus text around
+    it is styled the same way."""
+    spans: list[tuple[int, int]] = []
+    for item in items:
+        span = match_span(passage, item.get("quote", ""))
+        # Two quotes of one passage can overlap (one is inside the other, or
+        # they share a sentence); the first one wins, and nothing is nested.
+        if span and not any(start < span[1] and span[0] < end for start, end in spans):
+            spans.append(span)
+    rendered, cursor = [], 0
+    for start, end in sorted(spans):
+        rendered.append(safe_html(passage[cursor:start]))
+        rendered.append(f'<mark style="background: #fde68a; color: #000;">'
+                        f'{safe_html(passage[start:end])}</mark>')
+        cursor = end
+    rendered.append(safe_html(passage[cursor:]))
+    return "".join(rendered)
+
+
 def evidence_passages(items: list[dict], passages: dict[str, str]) -> str:
     """One <details> per PASSAGE (hit id), in evidence order: book, section, hit
-    id and the verdict count in the summary; inside, every quote checked against
-    that passage with its verdict, then the passage as observe saw it. Several
-    items often share one hit, so the passage is rendered once, not per item."""
+    id, WHAT KIND OF SOURCE this passage is, and the verdict count in the
+    summary; inside, every quote checked against that passage with its verdict,
+    then the passage as observe saw it. Several items often share one hit, so
+    the passage is rendered once, not per item.
+
+    The source kind is not decoration: "book text" and "book card (a
+    model-written summary)" are different claims about where a sentence came
+    from, and a reader opening a bulleted distillate had no way to tell which
+    they were reading (design critique 16.09 §1.1). It comes from the provenance
+    record's `source_kind`, which is the corpus of the hit the quote is pinned
+    to; an item from a record written before that field existed shows none."""
     by_hit: dict[str, list[dict]] = {}
     for item in items:
         by_hit.setdefault(item.get("hit_id", ""), []).append(item)
@@ -437,16 +537,22 @@ def evidence_passages(items: list[dict], passages: dict[str, str]) -> str:
         # browser. The style keeps the monospaced, wrapped look a pre gave it;
         # safe_html already turns the line breaks into <br>.
         body = (f'<div style="white-space: pre-wrap; font-family: monospace; '
-                f'font-size: 0.85em;">{safe_html(passage)}</div>'
+                f'font-size: 0.85em;">{marked_passage(passage, group)}</div>'
                 if passage is not None else f"<i>{t('ui_passage_missing')}</i>")
-        verdicts = " · ".join(f"{safe_html(status_word(s))} {sum(1 for i in group if i.get('status') == s)}"
-                              for s in ("confirmed", "unattributed", "broken")
+        # All FOUR verdicts, in the order validate partitions them. Leaving
+        # card_only out left a card-only passage with an empty count and a
+        # dangling separator, and a mixed passage silently short of its card
+        # item — the summary would say "confirmed 1" over a passage holding two
+        # quotes, which is the exact arithmetic this change exists to stop.
+        verdicts = " · ".join(f"{safe_html(verdict_word(s))} {sum(1 for i in group if i.get('status') == s)}"
+                              for s in ("confirmed", "unattributed", "card_only", "broken")
                               if any(i.get("status") == s for i in group))
         quotes = "".join(f"<li><b>{safe_html(status_word(i.get('status', '')))}</b>: "
                          f"<q>{safe_html(i.get('quote', ''))}</q></li>" for i in group)
+        kind = source_word(first.get("source_kind", ""))
         blocks.append(
             f"<details><summary>{safe_html(first.get('book', '?'))} — {safe_html(first.get('section', '?'))} · "
-            f"<code>{safe_html(hit_id)}</code> · {verdicts}</summary>"
+            f"<code>{safe_html(hit_id)}</code> · {kind + ' · ' if kind else ''}{verdicts}</summary>"
             f"<ul>{quotes}</ul>{body}</details>")
     return (f'<div style="font-size: 0.9em;"><b>{t("ui_evidence_title", n=len(items), p=len(by_hit))}</b>'
             f'{"".join(blocks)}</div>')
@@ -517,7 +623,9 @@ def render_event(node_name: str, update: dict, view: RunView | None = None) -> N
             lines.append(t("ui_clarify_unresolved"))
         if update.get("plan_fallback"):
             lines.append(t("ui_plan_fallback"))
-        cl.run_sync(show_step("plan", "\n".join(lines)))
+        # plan opens by itself: what the agent decided to look for is the
+        # reader's own question restated, not machinery.
+        cl.run_sync(show_step(t("ui_step_plan"), "\n".join(lines), default_open=True))
 
     elif node_name == "act":
         lines = [t("ui_hits", n=len(update["hits"]))]
@@ -525,13 +633,13 @@ def render_event(node_name: str, update: dict, view: RunView | None = None) -> N
             lines.append(f"- [{hit['corpus']}] {hit['book']} — {hit['section']}")
         for h in update.get("hits_log", []):
             view.passages[h["hit_id"]] = h["text"]
-        cl.run_sync(show_step(f"act #{update['steps_taken']}", "\n".join(lines)))
+        cl.run_sync(show_step(t("ui_step_act", n=update["steps_taken"]), "\n".join(lines)))
 
     elif node_name == "observe":
         text = t("ui_evidence", n=len(update["evidence"]))
         if update["empty_streak"]:
             text += t("ui_streak", n=update["empty_streak"])
-        cl.run_sync(show_step("observe", text))
+        cl.run_sync(show_step(t("ui_step_observe"), text))
 
     elif node_name == "reflect":
         next_query = update.get("current_query")
@@ -551,15 +659,18 @@ def render_event(node_name: str, update: dict, view: RunView | None = None) -> N
             text = t("ui_stopped", r=update["stop_reason"])
         else:
             text = t("ui_enough")
-        cl.run_sync(show_step("reflect", text))
+        # The LAST reflect is the one that says why the search stopped, and
+        # that is the sentence a reader judges the answer by; the ones that
+        # only queue another query stay collapsed.
+        cl.run_sync(show_step(t("ui_step_reflect"), text, default_open=not next_query))
 
     elif node_name == "clarify":
-        cl.run_sync(show_step("clarify",
+        cl.run_sync(show_step(t("ui_step_clarify"),
                               t("ui_user_clarified", a=update["clarification"])))
 
     elif node_name == "catalog":
         listing = update["catalog"]
-        cl.run_sync(show_step("catalog", t("ui_catalog_step", op=listing["op"], n=listing["count"],
+        cl.run_sync(show_step(t("ui_step_catalog"), t("ui_catalog_step", op=listing["op"], n=listing["count"],
                                            total=listing["total"])))
         # Titles are index metadata, i.e. data: rendered as text like a model answer.
         # The shape of the result travels with the persisted message, so a resumed
@@ -614,6 +725,105 @@ async def chat_profiles():
     ]
 
 
+# --- starters: the first screen ---------------------------------------------
+def starter_language(interface_language: str | None) -> str:
+    """The language the four starter questions are written in.
+
+    `set_starters` is answered by an HTTP endpoint (`/project/settings`) before
+    a chat session exists, so the chat profile that carries the session language
+    has not been picked yet and `cl.user_session` is not this request's. Chainlit
+    hands over the INTERFACE language instead ("en-US", "uk-UA"); anything this
+    project does not speak falls back to the process default."""
+    tag = (interface_language or "").lower()
+    if tag.startswith("uk"):
+        return "ua"
+    if tag.startswith("en"):
+        return "en"
+    return LANG
+
+
+def starter_questions(books: list) -> list[tuple[str, str]]:
+    """(label, question) for the four behaviours the README claims — identify,
+    the catalogue, the ask-back, and an honest refusal — written FROM THE INDEX
+    that is actually loaded rather than from a hardcoded shelf, so a clone with
+    its own books gets its own first screen (and so does the second index of
+    #58). Three of the four name no book at all and are the same question on any
+    shelf; the ask-back one is a template over two titles the catalogue holds.
+
+    An empty index gets no starters: a first screen offering questions about
+    books nobody has is worse than an empty one. A shelf of one gets three — the
+    ask-back question needs two books to sit between."""
+    if not books:
+        return []
+    rows = [(t("starter_identify_label"), t("starter_identify")),
+            (t("starter_catalog_label"), t("starter_catalog"))]
+    # Books with text first: a catalogue-only entry (a card and no transcript)
+    # has no passage for the loop to quote, which is the wrong book to send a
+    # reader's first question at.
+    with_text = [book for book in books if getattr(book, "has_text", True)]
+    pair = (with_text if len(with_text) >= 2 else books)[:2]
+    if len(pair) == 2:
+        first, second = pair
+        # Two books of the same title are told apart by their index key, which
+        # is what the ask-back would offer the reader anyway.
+        names = ((first.key, second.key) if first.title == second.title
+                 else (first.title, second.title))
+        # Corpus text, like every other title this interface prints, and it
+        # arrives from a file name: a book called "![x](http://evil/x.png)" or
+        # "<img src=x onerror=...>" is one `ayl-add` away. A starter's message
+        # becomes a user message and is rendered as Markdown — with
+        # unsafe_allow_html on, which this app needs for its own badges — so
+        # without this the FIRST screen carries a third-party fetch and a tag.
+        # Same helper as the catalogue answer and the steps.
+        #
+        # The cost is real and narrow: the message is also the question that is
+        # sent, so a title containing & < > reaches the planner escaped and the
+        # catalogue resolver may not match it. A title that needs escaping is
+        # already a title this starter cannot usefully ask about, and the demo
+        # corpus has none; rendering it safely matters more than asking about it.
+        rows.append((t("starter_clarify_label"),
+                     t("starter_clarify", a=safe_markdown(names[0]), b=safe_markdown(names[1]))))
+    rows.append((t("starter_refusal_label"), t("starter_refusal")))
+    return rows
+
+
+@cl.set_starters
+async def chat_starters(user=None, language=None) -> list:
+    """The four questions on the empty chat screen.
+
+    The screen used to be one sentence naming four node names and then nothing:
+    a reader arriving at it had no way of knowing which question exercises the
+    loop (design critique 16.09 §1.2). Chainlit only draws it while the thread
+    has no message at all, which is why `on_chat_start` no longer sends a
+    welcome line. It does not draw `chainlit.md` there either — that is behind
+    the header's "Readme" button — so these four labels are the only thing a
+    first-time reader is shown, and each one has to say what it will do.
+
+    Reading the index is blocking work (LanceDB) in an HTTP handler, so it runs
+    in a thread. An index that cannot be read is not an error here: the reader
+    gets the empty screen they would have got anyway, and the preflight in
+    `on_chat_start` is what tells them what is wrong."""
+    previous = get_lang()
+    set_lang(starter_language(language))
+    try:
+        try:
+            books = await asyncio.to_thread(nodes.list_books)
+        except Exception as error:
+            log.warning("no starters: the catalogue could not be read (%s: %s)",
+                        type(error).__name__, error)
+            books = []
+        # Titles are index metadata, i.e. data. They are the label of a button
+        # and the text of a message the reader sends, never HTML: Chainlit
+        # renders both as text, and nothing here builds markup around them.
+        return [cl.Starter(label=label, message=question)
+                for label, question in starter_questions(books)]
+    finally:
+        # The questions are formatted before the language goes back: this
+        # coroutine has its own context copy, but the restore keeps the process
+        # default honest for anything sharing it.
+        set_lang(previous)
+
+
 def session_lang(chat_profile: str | None) -> str:
     """Session language from the chat profile name, falling back to the
     process default (ASK_LANG) when no profile is set."""
@@ -651,7 +861,13 @@ async def on_chat_start() -> None:
     if notices:
         text = t("pf_notice_header") + "\n" + "\n".join(f"- {n}" for n in notices)
         await cl.Message(content=safe_markdown(text)).send()
-    await cl.Message(content=t("ui_welcome")).send()
+    # No welcome MESSAGE any more. Chainlit draws its welcome screen — this
+    # project's chainlit.md, and under it the four starters — only while the
+    # thread holds no message at all, so the one sentence that used to be sent
+    # here was the thing that stopped the first screen from teaching anything
+    # (design critique 16.09 §1.2). A session whose preflight failed returns
+    # above and keeps its message: a reader whose environment is broken should
+    # read why, not be offered four questions it cannot answer.
 
 
 @cl.on_chat_resume
@@ -683,7 +899,10 @@ async def on_chat_resume(thread) -> None:
         if step.get("type") == "user_message":
             last_question = step_output
         elif step.get("type") == "assistant_message":
-            # badges/metrics (HTML) and the welcome message are not agent answers
+            # badges/metrics (HTML) are not agent answers, and neither is the
+            # welcome line threads created before 2026-09-16 still carry (it is
+            # not sent any more: the welcome screen and its starters need an
+            # empty thread to be drawn at all)
             if step_output.startswith("<div") or step_output.startswith("Ask Your Library —"):
                 continue
             if last_question:

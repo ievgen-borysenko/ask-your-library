@@ -1,10 +1,10 @@
 """The release check of the web UI, in a browser, as a test.
 
 Until now this path was walked by hand before every release (docs/backlog.md,
-"Release status"): first start, login, a question, the live agent steps, the
-quote-provenance badge, an evidence passage readable in the browser, the
-catalogue answer, a reload that restores the conversation, and a clarify nobody
-answers. That is what this file does, against a real `chainlit run ui.py
+"Release status"): first start, login, the starters on the empty chat screen, a
+question, the live agent steps, the quote-provenance badge, an evidence passage
+readable in the browser, the catalogue answer, a reload that restores the
+conversation, and a clarify nobody answers. That is what this file does, against a real `chainlit run ui.py
 --headless` — the real server, the real graph, the real rendering — with the
 model and the index replaced by `scripted_backend.py` (see
 `ask_your_library.fake_backend`). Nothing here needs Ollama, a key or an index,
@@ -91,7 +91,7 @@ if _PROBLEM:
             f"{REQUIRED_VAR}=1, so this file must RUN, and it cannot: {_PROBLEM}")
     pytest.skip(_PROBLEM, allow_module_level=True)
 
-from playwright.sync_api import expect, sync_playwright   # noqa: E402  (after the skip)
+from playwright.sync_api import Error as PlaywrightError, expect, sync_playwright  # noqa: E402
 
 
 @pytest.fixture
@@ -137,6 +137,9 @@ CANDIDATES = "Candidates in the library"
 METRICS_SUMMARY = "run details"
 
 COMPOSER = "textarea#chat-input"
+# The thread list inside the sidebar. Its presence is how the test knows the
+# drawer is open at phone width, where the sidebar is a modal.
+THREAD_HISTORY = "#thread-history"
 
 
 # --- the server under test ---------------------------------------------------
@@ -259,8 +262,9 @@ def body(page):
 
 
 def step(page, name: str):
-    """One agent step's collapse trigger. Chainlit ids them `step-<name>`, so
-    the act step is `step-act #1` — a space and a hash in an id, hence the
+    """One agent step's collapse trigger. Chainlit ids them `step-<name>`, and
+    the name is the label ui.py writes, so the second step is
+    `step-searched the library #1` — spaces and a hash in an id, hence the
     attribute selector."""
     return page.locator(f'[id="step-{name}"]')
 
@@ -275,10 +279,60 @@ def log_in(page, server) -> None:
 
 
 def ask(page, question: str) -> None:
+    """Type a question and send it — and prove it was sent, not merely typed.
+
+    The wait in the middle is load-bearing. Chainlit keeps the composer's submit
+    disabled until the session is ready, and `fill` writes into the textarea
+    anyway, so an Enter pressed a moment too early is swallowed and the question
+    sits in the box. This file used to have an accidental barrier against that:
+    `on_chat_start` sent a welcome message and the first assertion waited for it,
+    which meant the socket was up before anything was typed. Nothing is sent into
+    an empty chat any more (the welcome screen and its starters need the thread
+    empty), so the barrier is explicit — with text in the composer, `#chat-submit`
+    is disabled for exactly one remaining reason.
+
+    The assertion afterwards is the composer going empty, then the text on the
+    page. "The question is somewhere on the page" alone is true of a question
+    still sitting in the textarea, which is how a swallowed Enter passed this
+    line and failed sixty seconds later on a step that never ran."""
     page.click(COMPOSER)
     page.fill(COMPOSER, question)
+    expect(page.locator("#chat-submit")).to_be_enabled(timeout=RENDER_MS)
     page.keyboard.press("Enter")
+    expect(page.locator(COMPOSER)).to_have_value("", timeout=RENDER_MS)
     expect(body(page)).to_contain_text(question, timeout=RENDER_MS)
+
+
+def thread_link_in_the_drawer(page) -> str:
+    """The href of this conversation's entry in the thread list, or "" while
+    there is not one to read.
+
+    At 390 px the thread history is a modal drawer: `#thread-history` is not in
+    the DOM at all until the sidebar toggle is pressed, and a re-render can take
+    it away again. That is how a link `count()` had just seen timed out thirty
+    seconds later inside `get_attribute` — three times on this branch, phone leg
+    only, never on the desktop one.
+
+    So: the toggle is pressed only when the list is absent, because it is a
+    TOGGLE and a second press closes the drawer the first one opened; and the
+    read is allowed to fail, because a detached link is something to look up
+    again on the next poll, not something to wait thirty seconds for. Nothing
+    here waits: the caller owns the deadline.
+    """
+    if not page.locator(THREAD_HISTORY).count():
+        toggle = page.locator("#sidebar-trigger-button")
+        if not toggle.count() or not toggle.is_visible():
+            return ""
+        toggle.click(timeout=RENDER_MS)
+        page.wait_for_timeout(250)          # the drawer animates in
+        return ""                           # read it on the next poll, once it has settled
+    link = page.locator("a[href*='/thread/']").first
+    if not link.count():
+        return ""                           # the drawer is open and the thread is not in it yet
+    try:
+        return link.get_attribute("href", timeout=2_000) or ""
+    except PlaywrightError:
+        return ""                           # the list re-rendered under the read; try again
 
 
 def thread_address(page, timeout_ms: int) -> str:
@@ -288,21 +342,16 @@ def thread_address(page, timeout_ms: int) -> str:
     Two shapes, and the difference is the phone trap: in a wide window Chainlit
     moves the browser onto /thread/<id> itself, a beat after the answer renders
     (a history push inside the running app, polled rather than awaited as a
-    navigation). At 390 px the thread history is off-canvas and is not in the
-    DOM at all until the sidebar toggle is pressed, and the address is only ever
-    a link inside it.
+    navigation). At 390 px it never does, and the address is only ever a link
+    inside the off-canvas drawer — see thread_link_in_the_drawer.
     """
-    if "/thread/" not in page.url:
-        toggle = page.locator("#sidebar-trigger-button")
-        expect(toggle).to_be_visible(timeout=RENDER_MS)
-        toggle.click(timeout=RENDER_MS)
     deadline = time.monotonic() + timeout_ms / 1000
     while time.monotonic() < deadline:
         if "/thread/" in page.url:
             return page.url
-        link = page.locator("a[href*='/thread/']").first
-        if link.count():
-            return urljoin(page.url, link.get_attribute("href"))
+        href = thread_link_in_the_drawer(page)
+        if href:
+            return urljoin(page.url, href)
         page.wait_for_timeout(250)
     raise AssertionError(f"the conversation never got an address of its own: {page.url}")
 
@@ -357,27 +406,45 @@ def walk_through_the_release_check(page, chainlit_server) -> None:
     expect(page.locator("input#email")).to_be_visible(timeout=LOAD_MS)
     expect(page.locator(COMPOSER)).to_have_count(0)        # no chat before a login
 
-    # --- login
+    # --- login, and the first screen: four starters built from the scripted
+    # backend's own five-book catalogue, not from a hardcoded shelf. They are
+    # Chainlit's welcome screen, which it draws only while the thread holds no
+    # message — so this also asserts that nothing is sent into an empty chat.
     log_in(page, chainlit_server)
-    expect(body(page)).to_contain_text("Ask Your Library — ask about your library",
-                                       timeout=RENDER_MS)
+    starters = page.locator("#starters")
+    expect(starters).to_be_visible(timeout=RENDER_MS)
+    expect(starters).to_contain_text("Count my library", timeout=RENDER_MS)
+    expect(starters).to_contain_text("A question between two books", timeout=RENDER_MS)
+    expect(starters).to_contain_text("Ask what the shelf cannot answer", timeout=RENDER_MS)
+    # chainlit.md is NOT on this screen: Chainlit 2.12 puts it behind the header's
+    # "Readme" button, so the starters are the whole of what a first-time reader
+    # sees without clicking. This asserts that, because it is the thing that
+    # decides how much the four labels have to carry.
+    expect(page.get_by_role("button", name="Readme")).to_be_visible(timeout=RENDER_MS)
+    expect(body(page)).not_to_contain_text("counts the quotes traced", timeout=RENDER_MS)
 
-    # --- a research question: the live steps, then the answer
+    # --- a research question: the live steps, then the answer. The step labels
+    # are the product's own words, not "Used act #1": the name ui.py writes is
+    # the whole label, because the project's en-US.json empties Chainlit's
+    # prefix (design critique 16.09 §1.6).
     ask(page, RESEARCH_QUESTION)
-    for name in ("plan", "act #1", "observe"):
+    for name in ("planned the search", "searched the library #1", "picked out the quotes"):
         expect(step(page, name)).to_be_visible(timeout=ANSWER_MS)
-    # Every step renders collapsed, whatever `cot` says: what the agent did is
-    # one click away, and that click is part of the path being checked.
-    step(page, "plan").click(timeout=RENDER_MS)
+    expect(body(page)).not_to_contain_text("Used planned the search", timeout=RENDER_MS)
+    # `plan` opens by itself; the rest stay one click away.
     expect(body(page)).to_contain_text("mode: answer", timeout=RENDER_MS)
     expect(body(page)).to_contain_text("who narrates the Pequod voyage", timeout=RENDER_MS)
     expect(body(page)).to_contain_text("retrieval limited to it", timeout=RENDER_MS)
     expect(body(page)).to_contain_text("Ishmael narrates Moby Dick", timeout=ANSWER_MS)
 
-    # --- the badge, with its numbers
+    # --- the badge, with its numbers. Two quotes, and only ONE of them is a
+    # quote from the book: the other is verbatim inside the book card, which a
+    # model wrote. The headline counts the book text alone and the card says so
+    # under it (design critique 16.09 §1.1).
     expect(body(page)).to_contain_text(BADGE, timeout=ANSWER_MS)
-    expect(body(page)).to_contain_text("evidence passages 2/2 traced to their source",
+    expect(body(page)).to_contain_text("evidence passages 1/1 traced to their source",
                                        timeout=RENDER_MS)
+    expect(body(page)).to_contain_text("+1 matched only a book card", timeout=RENDER_MS)
     expect(body(page)).to_contain_text("Evidence items (2, in 2 passage(s))", timeout=RENDER_MS)
 
     # --- an evidence passage: OPENED and readable, not merely sent. (2.12
@@ -385,6 +452,10 @@ def walk_through_the_release_check(page, chainlit_server) -> None:
     wait_for_the_run_to_finish(page, ANSWER_MS)
     passage = open_details(page, "s1h1")
     expect(passage).to_contain_text("Moby Dick — Herman Melville — Summary", timeout=RENDER_MS)
+    # and the reader can see WHAT they opened: this one is the card
+    expect(passage).to_contain_text("book card (a model-written summary)", timeout=RENDER_MS)
+    expect(passage).to_contain_text("from a book card, not a quote from the book",
+                                    timeout=RENDER_MS)
     # A sentence that is only in the passage, never in the answer or the quote:
     # seeing it proves the passage body itself is on the screen.
     expect(passage.get_by_text("The voyage ends in ruin", exact=False)).to_be_visible(
@@ -438,8 +509,10 @@ def walk_through_the_release_check(page, chainlit_server) -> None:
     # The ask-back expiring, plus the run that follows it.
     expect(body(page)).to_contain_text("The one hunted across Europe is Dracula",
                                        timeout=chainlit_server.clarify_timeout_s * 1000 + ANSWER_MS)
-    expect(body(page)).to_contain_text("evidence passages 3/3 traced to their source",
+    # Three quotes, two of them off book cards: one quote from a book.
+    expect(body(page)).to_contain_text("evidence passages 1/1 traced to their source",
                                        timeout=RENDER_MS)
+    expect(body(page)).to_contain_text("+2 matched only a book card", timeout=RENDER_MS)
     # Still a working chat: the composer takes the next question.
     expect(page.locator(COMPOSER)).to_be_editable(timeout=RENDER_MS)
     page.fill(COMPOSER, "and who wrote it?")

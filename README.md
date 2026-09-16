@@ -2,9 +2,8 @@
 
 [![ci](https://github.com/ievgen-borysenko/ask-your-library/actions/workflows/ci.yml/badge.svg)](https://github.com/ievgen-borysenko/ask-your-library/actions/workflows/ci.yml) [![security](https://github.com/ievgen-borysenko/ask-your-library/actions/workflows/security.yml/badge.svg)](https://github.com/ievgen-borysenko/ask-your-library/actions/workflows/security.yml) [![licence: Apache-2.0](https://img.shields.io/badge/licence-Apache--2.0-blue.svg)](LICENSE)
 
-Agentic RAG over a personal book library: you ask in your own words, a LangGraph agent answers
-from the books you own with `[book, chapter]` citations, and plain code re-checks every quote it
-used against the passage it was copied from.
+Answers questions across all the books you own, and tells you which book and chapter the answer
+comes from.
 
 - You remember the idea, not the book.
 - The agent finds the passage in the books you own and quotes it verbatim — checked by code, not
@@ -13,6 +12,31 @@ used against the passage it was copied from.
   instead of inventing.
 
 ## See it work
+
+![The CLI naming Robinson Crusoe from a half-remembered description, over the demo corpus with a local model](docs/img/ask-library-demo.gif)
+
+*"I remember a book in which a man happened to end up on an island and came across cannibals.
+What is the name of the book, and why did that happen?" — the default local model (qwen2.5:14b) on
+the demo corpus, no API key. 147.7 s by the CLI's own metrics line in the last frame — a cold first
+ask, the same band as the 160.8 s a different first question takes from a clean clone
+([`docs/eval-results/2026-09-10-first-question-local.md`](docs/eval-results/2026-09-10-first-question-local.md)).
+Recorded before 16.09 — the badge and the evidence labels have since changed: a quote matched only
+inside a book card is still retrieved, still checked and still counted, but it is counted
+separately and no longer as a traced quote from the book's text. The counts in these frames are
+not the counts a run shows today.*
+
+![The web UI answering what d'Artagnan said before fighting three men at once: the answer, the quote-provenance badge, and one evidence passage opened under it](docs/img/ask-library-ui.gif)
+
+*"What exactly did Dartangnan say before the fight with not 1 but 3 people? And why?" — the same
+library in the web UI, this run on a hosted model (`LLM_BACKEND=openrouter` with Sonnet 4.6, which
+is not the default and is what the $0.0724 on its metrics line paid for): the verified-quotes
+badge, and the evidence passage under it. Recorded before 16.09 — the badge counts book-card matches
+apart from traced book-text quotes now (they are still checked, and still counted), the evidence
+passages say which kind they are, the watermark under the composer is different, and the first
+frame is the login page rather than the chat. Both GIFs are due a re-record
+([`docs/backlog.md`](docs/backlog.md)).*
+
+## One question, end to end
 
 ```mermaid
 flowchart TB
@@ -25,7 +49,7 @@ flowchart TB
     R -->|"fits several books"| C["ask back: Robinson Crusoe or Gulliver's Travels?"]:::human
     C --> P
     R -->|"yes, or the budget is spent"| S["answer with [book, chapter] citations,<br/>or 'your books do not cover this'"]:::ai
-    S --> V["validate: plain code, no model<br/>confirmed / unattributed / broken"]:::code
+    S --> V["validate: plain code, no model<br/>confirmed / unattributed / card-only / broken"]:::code
     V --> OUT(["answer + provenance badge"]):::code
     classDef code fill:#dbeafe,stroke:#1d4ed8,color:#000
     classDef ai fill:#fed7aa,stroke:#c2410c,color:#000
@@ -36,26 +60,20 @@ Blue = no answering-model call · orange = a call to the answering model you con
 human in the loop. Search is blue because the search step itself calls no answering model: it is
 plain code apart from embedding your query, which the default runs on your own machine. The
 passages it finds do reach the answering model, one step later, at `observe`. Nothing is verbatim
-until `validate` says so — that is what `validate` is for. The rest of the control flow, including
+until `validate` says so — that is what `validate` is for.
+
+**A book card is not the book, and `validate` has four outcomes because of it.** Some of what a
+search returns is a *book card*: a per-book summary written by one model call when the index was
+built. A quote found verbatim only inside a card is verbatim in a model's words, so it is
+**card-only** — still retrieved, still checked, counted and shown, and never counted as traced to
+the book. **Confirmed**, **unattributed** and **broken** are about the books' own text alone, and
+the count under the badge is out of that text, not out of everything checked. The rest of the control flow, including
 the catalogue path and the deterministic gate behind the ask-back, is in
 [`docs/architecture.md`](docs/architecture.md).
 
-![The CLI naming Robinson Crusoe from a half-remembered description, over the demo corpus with a local model](docs/img/ask-library-demo.gif)
+## Quick start
 
-*"I remember a book in which a man happened to end up on an island and came across cannibals.
-What is the name of the book, and why did that happen?" — the default local model (qwen2.5:14b) on
-the demo corpus, no API key. 147.7 s by the CLI's own metrics line in the last frame — a cold first
-ask, the same band as the 160.8 s a different first question takes from a clean clone
-([`docs/eval-results/2026-09-10-first-question-local.md`](docs/eval-results/2026-09-10-first-question-local.md)).*
-
-![The web UI answering what d'Artagnan said before fighting three men at once: the answer, the quote-provenance badge, and one evidence passage opened under it](docs/img/ask-library-ui.gif)
-
-*"What exactly did Dartangnan say before the fight with not 1 but 3 people? And why?" — the same
-library in the web UI, this run on a hosted model (`LLM_BACKEND=openrouter` with Sonnet 4.6, which
-is not the default and is what the $0.0724 on its metrics line paid for): the verified-quotes
-badge, and the evidence passage under it.*
-
-## Quick start on a Mac
+The fast path is a Mac:
 
 ```bash
 git clone https://github.com/ievgen-borysenko/ask-your-library.git && cd ask-your-library
@@ -82,7 +100,9 @@ research questions of the core eval set — for about $0.002 and $0.05 respectiv
 Every figure here is a measured single run, over the rows of that one kind of question, and
 [`docs/cost.md`](docs/cost.md) names which run and which rows each one comes from.
 
-Every other system, the manual steps, your own books, the web UI and the eval commands:
+**On every other system the script is the only thing missing: five commands do the same work** —
+`uv sync`, two `ollama pull`s, a copied `.env`, and the demo-corpus ingest — and they are written
+out, with your own books, the web UI and the eval commands, in
 [`docs/quick-start.md`](docs/quick-start.md).
 
 ## How it works
@@ -133,33 +153,39 @@ themselves are in [`docs/eval-results/`](docs/eval-results/).
   A hosted answering model (`LLM_BACKEND=openrouter`) is an option, not a requirement; choose it
   and it needs a key and costs what [`docs/cost.md`](docs/cost.md) works out —
   [`docs/configuration.md`](docs/configuration.md).
-- **Is that default as accurate as the hosted model?** No — with the caveat that nobody has read
-  the local answers against the golden notes, so this is what the project measures rather than a
-  verdict on correctness. Two different things, and the harder one first. **Quote provenance is
-  plain code**: on 2026-09-10 the default `qwen2.5:14b` left 1 unattributed and 2 broken quotes
-  among the 61 it was checked on, where the tagged hosted runs in the table above left none of
-  either. **Behavioural compliance is the harness's own heuristic** (titles, refusal, clarify):
-  10/10 on the catalogue set, 8/10 on the research set, 18/20 together — against 19/20 for the
-  smaller `qwen2.5:7b`, which is not the default because 14b grounds more heavily, 61 quotes
-  checked against 39. The report's verdict is quoted rather than softened: "Neither model is good
-  enough to advertise as a strong default: 19/20 and 18/20 with genuine unattributed and broken
-  quotes in both." Single runs, nobody graded the answers, and 14b's numbers describe the prompt as
-  it stood before the last change to it. No hosted run is paired with these; the nearest ones, and
-  what separates them, are in [`docs/known-limits.md`](docs/known-limits.md). The report itself:
+- **Is that free default as accurate as the hosted model? No** — and this project's own check is
+  what caught it: on 2026-09-10 the shipped local default left **1 unattributed and 2 broken
+  quotes of the 61** it was checked on, where the tagged hosted runs in the table above left none
+  of either. The three are named in the report, which is published. Three numbers under that
+  verdict:
+  - **3 bad quotes of 61.** Quote provenance is plain code, so this number is not a model's
+    opinion of a model.
+  - **18/20 behavioural compliance** for the default `qwen2.5:14b` (10/10 on the catalogue set,
+    8/10 on the research set) against **19/20** for the smaller `qwen2.5:7b`, which is not the
+    default because 14b grounds more heavily: 61 quotes checked against 39. Behavioural compliance
+    is the harness's own heuristic — titles, refusal, clarify — not answer quality.
+  - **0 local answers graded for correctness.** Nobody has read them against the golden notes, so
+    everything above is what the project measures, not a verdict on whether the answers are right.
+
+  The report's verdict is quoted rather than softened: "Neither model is good enough to advertise
+  as a strong default: 19/20 and 18/20 with genuine unattributed and broken quotes in both."
+  Single runs, and 14b's numbers describe the prompt as it stood before the last change to it. No
+  hosted run is paired with these; the nearest ones, and what separates them, are in
+  [`docs/known-limits.md`](docs/known-limits.md). The report itself:
   [`docs/eval-results/2026-09-10-local-models.md`](docs/eval-results/2026-09-10-local-models.md);
   the hosted path is `LLM_BACKEND=openrouter` ([`docs/configuration.md`](docs/configuration.md)).
 - Run this on your own machine, over books you legally own.
-- By default nothing leaves the machine: the answering model and the embeddings both run on this
-  Ollama, and with tracing off there is no other path out **of the Python process that answers
+- **By default nothing leaves the machine**: the answering model and the embeddings both run on
+  this Ollama, and with tracing off there is no other path out **of the Python process that answers
   your question** — which is the part that is tested (`tests/test_egress_local.py` records every
   connection attempt of a real run and asserts they all go to loopback on the configured Ollama
   port). It sees every network call made through Python's socket module; a native extension or a
   `ctypes` call that talks to libc directly is its blind spot, and a test asserts no such package
   is installed. It is not a claim about Ollama, which is a separate process, nor about the browser
   or the Chainlit server, which the test does not exercise; the scope is spelled out in
-  [`docs/privacy-and-threat-model.md`](docs/privacy-and-threat-model.md). Set
-  `LLM_BACKEND=openrouter` and the question **and the retrieved corpus fragments** go to that
-  provider, and on to the model vendor.
+  [`docs/privacy-and-threat-model.md`](docs/privacy-and-threat-model.md).
+- **Choose the hosted model and it does leave.** With `LLM_BACKEND=openrouter` the question **and
+  the retrieved corpus fragments** go to that provider, and on to the model vendor.
 - A question on the default local model costs **nothing**. On the hosted one it costs roughly
   **$0.04-0.05 on the demo set** at v0.2.0-rc1; `validate` is free in both, it is plain code.
 - Designed for **localhost, single user**, not for internet exposure — the full text, the four injection layers and their limits: [`docs/privacy-and-threat-model.md`](docs/privacy-and-threat-model.md), [`docs/cost.md`](docs/cost.md).
@@ -177,9 +203,15 @@ themselves are in [`docs/eval-results/`](docs/eval-results/).
 
 Everything else is under [`docs/`](docs/): the architecture and its decision records, what a
 question costs, the known limits, two end-to-end example traces, every eval report verbatim, the
-diagram sources, the backlog and the changelog.
+backlog and the changelog.
 
 ## Status and licence
+
+**This is a reference implementation you can run and read, not a daily tool.** It answers real
+questions over real books and every number on this page was measured, but it is a single-user
+localhost demo with a published list of what it does not do
+([`docs/known-limits.md`](docs/known-limits.md)) — read it the way you would read a worked
+example, not the way you would adopt a product.
 
 `v0.3.1`, a documentation and CI patch over `v0.3.0`, the minor release where the shipped default
 changed: a clone now answers on a local model through Ollama, with no account and nothing to pay,
@@ -189,7 +221,7 @@ and the open gaps in [`docs/backlog.md`](docs/backlog.md).
 
 The code and the project's own files are under Apache-2.0 (`LICENSE`, attribution in
 [`NOTICE`](NOTICE)); one file in the tree is somebody else's — Chainlit's own
-`.chainlit/translations/en-US.json`, Apache-2.0, copied here with a single string changed, which
+`.chainlit/translations/en-US.json`, Apache-2.0, copied here with four strings changed, which
 [`NOTICE`](NOTICE) and [`.chainlit/translations/README.md`](.chainlit/translations/README.md)
 record.
 

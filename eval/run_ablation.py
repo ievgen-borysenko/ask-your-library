@@ -228,7 +228,8 @@ def run_item(condition: str, item: dict, graph) -> dict:
 def empty_totals() -> dict:
     return {"run": 0, "errors": 0, "clarify": 0, "behavior_ok": 0, "behavior_ok_no_clarify": 0,
             "no_clarify_items": 0, "titles_mentioned": 0, "titles_expected": 0,
-            "checked": 0, "confirmed": 0, "unattributed": 0, "broken": 0,
+            "checked": 0, "checked_book_text": 0, "confirmed": 0, "unattributed": 0,
+            "broken": 0, "card_only": 0,
             "llm_calls": 0, "tokens_in": 0, "tokens_out": 0,
             "cost_usd": 0.0, "seconds": 0}
 
@@ -246,8 +247,13 @@ def accumulate(totals: dict, item: dict, r: dict) -> None:
         totals["behavior_ok_no_clarify"] += int(sc["behavior_ok"])
     totals["titles_mentioned"] += sc["titles_mentioned"]
     totals["titles_expected"] += sc["titles_expected"]
-    for key in ("checked", "confirmed", "unattributed", "broken"):
+    for key in ("checked", "confirmed", "unattributed", "broken", "card_only"):
         totals[key] += prov.get(key, 0)
+    # The triple is about the books' own text since 16.09, so the denominator
+    # beside it is the book text checked, not everything checked: a quote that
+    # matched only a book card is a model's summary and is counted apart. The
+    # default keeps a record written before the split meaning what it meant.
+    totals["checked_book_text"] += prov.get("checked_book_text", prov.get("checked", 0))
     for key in ("llm_calls", "tokens_in", "tokens_out"):
         totals[key] += r.get(key, 0)
     totals["cost_usd"] = round(totals["cost_usd"] + r.get("cost_usd", 0.0), 4)
@@ -299,7 +305,10 @@ def write_condition_report(path: Path, condition: str, fingerprint: str,
                   f"behaviour PASS {totals['behavior_ok']}/{totals['run']}; "
                   f"titles {totals['titles_mentioned']}/{totals['titles_expected']}; "
                   f"provenance {totals['confirmed']}/{totals['unattributed']}/{totals['broken']} "
-                  f"of {totals['checked']} checked; ${totals['cost_usd']:.4f} total, "
+                  f"of {totals['checked_book_text']} checked"
+                  + (f" (+{totals['card_only']} matched only a book card)"
+                     if totals["card_only"] else "")
+                  + f"; ${totals['cost_usd']:.4f} total, "
                   f"${totals['cost_usd'] / max(attempted, 1):.4f} mean per attempted question; "
                   f"{totals['llm_calls']} llm calls, {totals['tokens_in']} in / "
                   f"{totals['tokens_out']} out tokens, {totals['seconds']}s\n")
@@ -325,7 +334,8 @@ def fmt_provenance(condition: str, totals: dict) -> str:
     if condition in ("no-context", "retrieve-answer"):
         return "n/a"
     return (f"{totals['confirmed']} / {totals['unattributed']} / {totals['broken']} "
-            f"of {totals['checked']}")
+            f"of {totals['checked_book_text']}"
+            + (f" (+{totals['card_only']} card-only)" if totals["card_only"] else ""))
 
 
 def render_artifact(fingerprint: str, order: list[str], results: dict,

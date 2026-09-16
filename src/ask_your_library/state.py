@@ -46,7 +46,9 @@ class AgentState(TypedDict):
     scratchpad_path: str   # file the raw hits are written to (kept out of the LLM context)
     answer: str            # the final answer
     verification: str      # quote-provenance report on quotes (text, for humans)
-    provenance: dict       # the same report as numbers: checked/confirmed/broken/unused/broken_items
+    # the same report as numbers: checked/checked_book_text/confirmed/unattributed/
+    # broken/card_only/unused/broken_items/items (a card match is never traced)
+    provenance: dict
     call_timed_out: bool   # a loop call (plan / observe / reflect) hit its own timeout: the loop
                            # is over, the evidence collected stands, synthesize writes the answer
     stop_reason: str       # why the loop stopped (enough / CRAG gate / step limit / fallback /

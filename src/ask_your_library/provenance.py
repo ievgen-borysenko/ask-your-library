@@ -5,8 +5,16 @@ is pinned to (ADR-004). No LLM anywhere in this module.
 `_valid_evidence` is the entry gate (observe): malformed items are dropped and
 every kept item is pinned to the hit it was copied from (book and section come
 from the hit record, never from the model). `validate` is the exit gate (the
-last graph node): confirmed / unattributed / broken partition every checked
-item, and nothing that is not a retrieved passage can confirm a quote.
+last graph node): confirmed / unattributed / card-only / broken partition every
+checked item, and nothing that is not a retrieved passage can confirm a quote.
+
+A book card is not the book. `act` records which corpus each passage came from,
+and a quote that is verbatim only inside a card is verbatim in a MODEL's words —
+one call per book at ingest time — not in the author's. It is reported as its
+own outcome and never counted as traced to the book (design critique 16.09 §1.1;
+ADR-002's recorded consequence, "interfaces still do not label evidence by
+source type"). The three older counts keep exactly the meaning they had, now
+over the book text alone.
 """
 import os
 import re
@@ -20,6 +28,13 @@ from .sanitize import LINE_BREAK_RE, strip_control_chars
 from .state import AgentState
 
 MAX_QUOTE_CHARS = SEARCH_HIT_CHARS   # a quote cannot exceed the hit it was copied from
+
+# The value `library.search` writes into a hit's "corpus" for the per-book
+# summaries, as opposed to "transcripts", the book's own text. A hit whose
+# corpus is missing or unknown is read as book text: that is what an index built
+# before cards existed holds, and the conservative reading is the one that does
+# not invent a card under a quote.
+CARD_CORPUS = "cards"
 
 
 # Strict: an evidence item must name the hit_id it was copied from, or it is
@@ -136,16 +151,74 @@ def _segments(hit_text: str) -> list[str]:
     return [_normalize(part) for part in body.split(CHUNK_JOINER)]
 
 
+def match_span(passage: str, quote: str) -> tuple[int, int] | None:
+    """WHERE the quote sits inside the passage — (start, end) character offsets
+    into `passage`, or None when it is not there.
+
+    `validate` answers whether a quote is a contiguous run of a passage; this
+    answers where, so an interface can point at the proof instead of printing it
+    above six lines of text and leaving the reader to find it (design critique
+    16.09 §1.3). It runs the same `_normalize` over both sides, so the two agree:
+    what validate confirmed against this passage is found here, and a quote it
+    did not confirm is not.
+
+    The span covers whole whitespace-separated chunks of the RAW text. That is
+    the finest boundary offsets survive: inside a chunk, NFKC composition, the
+    dropped control characters and the punctuation rules all change lengths, so
+    a normalized offset is not a raw one. The practical effect is that a
+    trailing comma or a closing quotation mark is inside the span although the
+    matched token run stops before it — which is what a reader wants marked
+    anyway. The chunk joiner of a chapter read is a barrier, exactly as it is in
+    `_segments`: a run that straddles it is not contiguous in the book and is
+    not a match here either."""
+    needle = _normalize(quote).split()
+    if not needle:
+        return None
+    body = CUT_MARKER_RE.sub("", passage)
+    chunks: list[tuple[int, int] | None] = []
+    tokens: list[str | None] = []
+    where: list[int] = []
+    offset = 0
+    for index, part in enumerate(body.split(CHUNK_JOINER)):
+        if index:
+            # a barrier chunk: it holds a token no quote can carry, so no match
+            # is allowed to run across the [...] that separates two chunks
+            chunks.append(None)
+            tokens.append(None)
+            where.append(len(chunks) - 1)
+        for word in re.finditer(r"\S+", part):
+            chunks.append((offset + word.start(), offset + word.end()))
+            for token in _normalize(word.group()).split():
+                tokens.append(token)
+                where.append(len(chunks) - 1)
+        offset += len(part) + len(CHUNK_JOINER)
+    for start in range(len(tokens) - len(needle) + 1):
+        if tokens[start:start + len(needle)] == needle:
+            first, last = chunks[where[start]], chunks[where[start + len(needle) - 1]]
+            if first is not None and last is not None:
+                return first[0], last[1]
+    return None
+
+
 def validate(state: AgentState) -> dict:
     """Quote-provenance guard (plain CODE, no LLM). Every evidence item names the
     hit it was copied from (hit_id, assigned by act; book/section taken from the
     hit record). The WHOLE quote, as a normalized word sequence, must be a
     contiguous substring of that hit's text as observe saw it:
-      confirmed    found in the cited hit
-      unattributed not in the cited hit, but found in another retrieved hit
-      broken       found in no retrieved hit
-    The three are a partition of `checked`. No scratchpad parsing, no section
-    or title substring matching, no fallback that counts as confirmed.
+      confirmed    found in the cited hit, and that hit is the book's own text
+      unattributed not in the cited hit, but found in another retrieved book text
+      card_only    found in no retrieved book text, but found in a book card
+      broken       found in no retrieved passage at all
+    The four are a partition of `checked`; the first three are a partition of
+    `checked_book_text` (= checked - card_only), which is the denominator of
+    every "traced" count an interface shows. A card is a model-written summary,
+    so a quote whose only match is a card is not a quote from the book and is
+    never counted as traced — it is reported as what it is. No scratchpad
+    parsing, no section or title substring matching, no fallback that confirms.
+
+    Every item also carries `source_kind` — "book_text", "card", or "" when the
+    cited hit is not in this run's log — so the CLI, the web UI and the eval
+    harness label evidence by source type off the same record.
 
     Checks EVERY evidence item, whether or not the answer names its book: the
     answer may cite a book by a short title ("Dracula" for "Dracula — Bram
@@ -156,8 +229,8 @@ def validate(state: AgentState) -> dict:
 
     Proves retrieval provenance, not that the answer's reasoning is sound: a
     character's lie quoted verbatim from the right chapter is confirmed."""
-    empty = {"checked": 0, "confirmed": 0, "unattributed": 0, "broken": 0,
-             "unused": 0, "broken_items": [], "items": []}
+    empty = {"checked": 0, "checked_book_text": 0, "confirmed": 0, "unattributed": 0,
+             "broken": 0, "card_only": 0, "unused": 0, "broken_items": [], "items": []}
     if state.get("catalog"):
         # The catalogue path (ADR-016): the answer is a list computed by code
         # from the index tables, with no quotes to check; the report says so,
@@ -176,43 +249,86 @@ def validate(state: AgentState) -> dict:
     unused = sum(1 for e in evidence_to_check if _normalize(title_of(e["book"])) not in answer_norm)
     unused_note = t("unused_note", n=unused) if unused else ""
 
+    corpus_of = {h["hit_id"]: h.get("corpus", "") for h in state.get("hits_log", [])
+                 if h.get("hit_id")}
     hits = {h["hit_id"]: _segments(h["text"]) for h in state.get("hits_log", [])}
+    # Two haystacks, because a match in one of them means something a match in
+    # the other does not. Only the book text can confirm a quote FROM THE BOOK;
+    # the cards are searched afterwards, to tell "the model wrote this summary
+    # line" apart from "nobody wrote this at all".
+    book_text = {hit_id: segs for hit_id, segs in hits.items()
+                 if corpus_of.get(hit_id, "") != CARD_CORPUS}
+    cards = {hit_id: segs for hit_id, segs in hits.items()
+             if corpus_of.get(hit_id, "") == CARD_CORPUS}
+
+    def source_kind(hit_id: str) -> str:
+        """What a reader opens when they open the cited passage — the label the
+        interfaces put on the evidence item.
+
+        "" means NO CLAIM, and there are two ways to get it: a hit this run
+        never logged (an id the model invented, or a legacy caller with no
+        hits_log), and a hit logged without a `corpus` — an index or a recording
+        from before cards existed. The second is deliberately not "book_text":
+        the classification above counts such a hit as book text, because that is
+        the conservative reading and the only one that cannot invent a card, but
+        that is an assumption the code makes and not a fact the record carries.
+        An interface prints a label it is given; it must not print one this
+        function guessed."""
+        corpus = corpus_of.get(hit_id, "")
+        if not corpus:
+            return ""
+        return "card" if corpus == CARD_CORPUS else "book_text"
 
     def found_in(quote_norm: str, segments: list[str]) -> bool:
         return bool(quote_norm) and any(_contains_tokens(seg, quote_norm) for seg in segments)
 
     confirmed = 0
     unattributed = 0
+    card_only = 0
     broken = []
     items = []      # every evidence item with its verdict, in evidence order: what the interfaces open
     for e in evidence_to_check:
         quote_norm = _normalize(e["quote"])
-        if found_in(quote_norm, hits.get(e.get("hit_id", ""), [])):
+        hit_id = e.get("hit_id", "")
+        if found_in(quote_norm, book_text.get(hit_id, [])):
             confirmed += 1
             status = "confirmed"
-        elif any(found_in(quote_norm, segs) for segs in hits.values()):
+        elif any(found_in(quote_norm, segs) for segs in book_text.values()):
             unattributed += 1
             status = "unattributed"
+        elif any(found_in(quote_norm, segs) for segs in cards.values()):
+            # Real text, really retrieved — and written by a model, so the
+            # headline count must not say the book says it.
+            card_only += 1
+            status = "card_only"
         else:
             status = "broken"
-            broken.append({"hit_id": e.get("hit_id", ""), "book": e["book"],
+            broken.append({"hit_id": hit_id, "book": e["book"],
                            "section": e.get("section", ""), "quote": e["quote"][:120]})
-        items.append({"hit_id": e.get("hit_id", ""), "book": e["book"], "section": e.get("section", ""),
-                      "quote": e["quote"], "status": status})
+        items.append({"hit_id": hit_id, "book": e["book"], "section": e.get("section", ""),
+                      "quote": e["quote"], "status": status, "source_kind": source_kind(hit_id)})
 
-    stats = {"checked": len(evidence_to_check), "confirmed": confirmed,
-             "unattributed": unattributed, "broken": len(broken), "unused": unused,
-             "broken_items": broken, "items": items}
+    checked = len(evidence_to_check)
+    stats = {"checked": checked, "checked_book_text": checked - card_only,
+             "confirmed": confirmed, "unattributed": unattributed, "broken": len(broken),
+             "card_only": card_only, "unused": unused, "broken_items": broken, "items": items}
+    if not broken and not unattributed and not confirmed and card_only:
+        # Nothing at all was traced to the book: saying "OK: all 0 quotes" would
+        # be the green sentence for the one case that most needs a different one.
+        return {"verification": t("verif_cards_only", n=card_only, unused=unused_note),
+                "provenance": stats}
     if unattributed:
         unused_note += t("unattributed_note", n=unattributed)
+    if card_only:
+        unused_note += t("card_note", n=card_only)
     if not broken and not unattributed:
         return {"verification": t("verif_ok", n=confirmed, unused=unused_note),
                 "provenance": stats}
     if not broken:
-        return {"verification": t("verif_partial", ok=confirmed, checked=len(evidence_to_check),
+        return {"verification": t("verif_partial", ok=confirmed, checked=stats["checked_book_text"],
                                   unused=unused_note),
                 "provenance": stats}
     items = "\n  - ".join(f"{b['book']}: \"{b['quote'][:80]}...\"" for b in broken)
-    return {"verification": t("verif_warn", broken=len(broken), checked=len(evidence_to_check),
+    return {"verification": t("verif_warn", broken=len(broken), checked=stats["checked_book_text"],
                               unused=unused_note, items=items),
             "provenance": stats}

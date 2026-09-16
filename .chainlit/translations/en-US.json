@@ -99,8 +99,8 @@
     },
     "messages": {
       "status": {
-        "using": "Using",
-        "used": "Used"
+        "using": "",
+        "used": ""
       },
       "actions": {
         "copy": {
@@ -132,7 +132,7 @@
       "title": "Settings panel",
       "customize": "Customize your chat settings here"
     },
-    "watermark": "LLMs can make mistakes. Check important info."
+    "watermark": "Evidence provenance is checked in code. The reasoning is not."
   },
   "threadHistory": {
     "sidebar": {

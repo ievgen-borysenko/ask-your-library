@@ -299,10 +299,15 @@ def test_a_failed_question_still_counts_its_spend():
 
 def test_provenance_is_na_for_the_two_retrieval_free_conditions():
     totals = ablation.empty_totals()
-    totals.update({"confirmed": 3, "unattributed": 1, "broken": 0, "checked": 4})
+    totals.update({"confirmed": 3, "unattributed": 1, "broken": 0, "checked": 4,
+                   "checked_book_text": 4})
     assert ablation.fmt_provenance("no-context", totals) == "n/a"
     assert ablation.fmt_provenance("retrieve-answer", totals) == "n/a"
     assert ablation.fmt_provenance("agent", totals) == "3 / 1 / 0 of 4"
+    # the denominator is the book text checked, and a card match is named apart:
+    # the triple has been about the books' own words since 16.09
+    totals.update({"checked": 6, "checked_book_text": 4, "card_only": 2})
+    assert ablation.fmt_provenance("agent", totals) == "3 / 1 / 0 of 4 (+2 card-only)"
 
 
 # ---------------------------------------------------------------- artifact

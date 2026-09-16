@@ -26,7 +26,7 @@ from pathlib import Path
 
 from .config import QUESTION_DEADLINE_S, SUPPORTED_LANGS
 from .graph import build_graph
-from .i18n import set_lang, status_word, t
+from .i18n import set_lang, source_word, status_word, t
 from .preflight import check_environment, exit_code
 from .runner import RunResult, failed_result, history_entry, run_question
 from .sanitize import LINE_BREAK_RE, strip_control_chars
@@ -127,7 +127,15 @@ def print_event(node_name: str, update: dict) -> None:
             say(t("ev_evidence_header", n=len(items)))
             shown: set[str] = set()
             for item in items:
-                say(t("ev_evidence_item", status=status_word(item["status"]), book=item["book"],
+                # What kind of passage the quote is pinned to, beside the
+                # verdict: "unattributed" or "not found verbatim" against a book
+                # CARD is a different fact from the same verdict against a
+                # chapter, and the reader of a verbose run could not tell them
+                # apart. Empty when the record does not say, which is the only
+                # case where nothing is claimed.
+                source = source_word(item.get("source_kind", ""))
+                say(t("ev_evidence_item", status=status_word(item["status"]),
+                      source=f" ({source})" if source else "", book=item["book"],
                       section=item["section"], hit_id=item["hit_id"], quote=item["quote"]))
                 if item["hit_id"] in shown:
                     continue                      # the passage is printed once, under its first quote

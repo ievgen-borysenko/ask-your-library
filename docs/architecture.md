@@ -38,16 +38,19 @@ flowchart TB
         CAT --> VAL
         VAL --> OUT(["answer with citations and a provenance badge,<br/>or an honest 'not found'"]):::code
     end
-    subgraph legend["CODE = no model call, with one exception: act embeds its query · AI = a model call: the answering model you configure, and offline the embedding model and the card distiller · HUMAN = human in the loop"]
-        direction LR
-        L1["CODE"]:::code ~~~ L2["AI"]:::ai ~~~ L3["HUMAN"]:::human
-    end
     DB --> ACT
     DB --> CAT
     classDef code fill:#dbeafe,stroke:#1d4ed8,color:#000
     classDef ai fill:#fed7aa,stroke:#c2410c,color:#000
     classDef human fill:#bbf7d0,stroke:#15803d,color:#000
 ```
+
+Blue = no model call, with one exception: `act` embeds its query. Orange = a model call — the
+answering model you configure online, and offline the embedding model and the card distiller.
+Green = human in the loop. (This legend used to be a `subgraph` wired with `~~~`, which the 0.3.1
+entry named as one of two suspects for a rendering failure whose cause was never established. The
+other two diagrams carry their legend as prose, the form known to survive, and now so does this
+one; the diagram itself loses nothing.)
 
 ## The loop, step by step
 
@@ -87,6 +90,22 @@ question -> the 2-4 English queries the planner is asked for
          -> observe distills candidate quotes -> synthesize answers with citations
          -> validate checks every collected evidence quote against the passage it was copied from
 ```
+
+The three Mermaid diagrams in this repository — the one path through the loop on the
+[README](../README.md) front page, and the two above — are the drawings to trust: they are
+reconciled against the code, in the tree, and they diff. The author's Excalidraw originals from
+the September 2026 course demo were kept here until 2026-09-16 and are now deleted: GitHub renders
+them as raw JSON, no image export was ever committed, and they had drifted from the product in
+ways that cost a correction per change to the loop. Three claims in them were the demo's, not this
+project's, and are recorded here so a reader who has seen those slides is not misled — the demo
+called the quote check a **faithfulness guard** (it is not one: it verifies quote provenance and
+says nothing about whether an answer is faithful or correct); it named one hosted model,
+`OpenRouter: Sonnet 4.6`, where the product lets you configure the answering model and runs fully
+locally with no account ([`configuration.md`](configuration.md)); and it priced a question at
+`~$0.02-0.08` against the author's private 169-book library, where the figure measured on the demo
+corpus is $0.04-0.05 at v0.2.0-rc1 ([`cost.md`](cost.md)). Its canvas also named an `MCP server
+(future)`, which `.chainlit/config.toml` declines by policy, and wrote `CODE = deterministic
+code`, the phrasing 0.3.1 replaced with "no answering-model call" because `act` embeds its query.
 
 The decisions behind this shape, and the alternative each one replaced, are recorded as ADRs
 in [`adr/README.md`](adr/README.md), each with the measurement that settled it.
@@ -141,16 +160,29 @@ book and section on an evidence item are then taken from that passage's record, 
 model's own words. `validate` checks that the WHOLE quote, as a normalized token sequence
 (punctuation and case folded, so honest typographic changes pass while paraphrase fails; signs,
 range dashes and separators inside numbers are kept, with "1,200" and "1.200" treated as the
-same number), is a contiguous whole-token run of the cited passage exactly as the model saw it. Three outcomes, a
-partition of the evidence checked: **confirmed** (found in the cited passage), **unattributed**
-(not in the cited passage, but found in another retrieved passage - reported, never counted as
-confirmed) and **broken** (found in no retrieved passage). Every evidence item is checked, whether or
+same number), is a contiguous whole-token run of the cited passage exactly as the model saw it. Four
+outcomes, a partition of the evidence checked: **confirmed** (found in the cited passage, and that
+passage is the book's own text), **unattributed** (not in the cited passage, but found in another
+retrieved book text - reported, never counted as confirmed), **card_only** (found in no retrieved
+book text, but found in a **book card**) and **broken** (found in no retrieved passage at all).
+Every evidence item is checked, whether or
 not the answer names its book (an answer may cite "Dracula" for the index key "Dracula — Bram Stoker");
 items for books the answer does not name are counted separately for information. There is no section or
 title substring matching and no fallback that confirms; the human-readable scratchpad is a log, not
-an input to the check. The UI badge is green only when both unattributed and broken are zero, and
-under it every evidence item opens to the passage it was checked against (verdict, book, section,
-hit id, the quote, the retrieved text); `ask-library --verbose` prints the same list.
+an input to the check.
+
+**A card is never a quote (16.09).** A book card is one model call per book at ingest time, so a
+sentence that is verbatim only inside a card is verbatim in a model's summary, not in the book.
+`card_only` is therefore outside the traced count: the denominator every interface shows is
+`checked_book_text` (= `checked - card_only`), and the three older counts keep exactly the meaning
+they had, now over the book text alone. Each evidence item also carries `source_kind` ("book_text"
+or "card"), which is the corpus of the passage it is pinned to. The UI badge is green only when
+both unattributed and broken are zero, it names the card matches under the count, and a run whose
+every quote matched only a card is amber and says so instead of showing "0/0". Under the badge every
+evidence item opens to the passage it was checked against (verdict, book, section, hit id, **what
+kind of source that passage is**, the quote, the retrieved text); `ask-library --verbose` prints the
+same list. Reports written before 16.09 counted card matches inside the triple
+([`evaluation.md`](evaluation.md)).
 
 What this rules out: a fabricated sentence appended to a real one, two distant sentences
 spliced into one "quote", a quote filed under the wrong passage, and service text from the

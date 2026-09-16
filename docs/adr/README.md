@@ -73,7 +73,7 @@ agent queries and in what it sees of a hit, not in the ranking, which is why no 
 
 ## ADR-004: Quote provenance checked in code against the passage the quote was pinned to
 
-Status: accepted (rewritten in the release pass of 2026-09-05).
+Status: accepted (rewritten in the release pass of 2026-09-05; amended 2026-09-16, see below).
 
 `act` gives every retrieved passage a stable id (`s<step>h<n>`) and stores it in `state.hits_log`
 exactly as `observe` will see it; `observe` must name the id a quote was copied from; the book and
@@ -91,6 +91,25 @@ broken on the v0.1.0 core run ([`2026-09-05-v0.1.0-core.md`][v010-core]) and 47/
 guarantee is narrow, and [`architecture.md`](../architecture.md) states it as such: this is the
 provenance of the evidence, not
 the correctness of the answer.
+
+**Amended 2026-09-16: the triple is about the books' own text, and a book card is not the book.**
+A retrieved passage is either a book's own text or a **book card** — a per-book summary written by
+one model call at ingest time — and until this amendment `validate` treated the two alike, so a
+quote copied verbatim out of a model's summary counted as `confirmed` and the badge said it was
+traced to its source. That was ADR-002's recorded consequence ("interfaces still do not label
+evidence by source type") showing up in the arithmetic rather than only in the labels.
+`confirmed / unattributed / broken` now partition the retrieved **book text** alone; a quote whose
+only verbatim match is a card is a fourth outcome, `card_only`, which is never counted as traced;
+the denominator every interface and the eval harness show is `checked_book_text`
+(= `checked - card_only`); and each evidence item carries `source_kind` ("book_text" / "card"), the
+corpus of the passage it is pinned to, so the CLI, the web chat and the harness label evidence off
+one record. A hit logged without a `corpus` is counted as book text — the conservative reading, the
+only one that cannot invent a card — but is labelled with nothing, because that is what its record
+says. **The totals quoted in the paragraph above, and every report under
+[`../eval-results/`](../eval-results/), were produced before this amendment and count card matches
+inside the triple.** They are correct for what they measured and are not comparable, quote for
+quote, with a run made after it; nothing was re-run to change a published number
+([`../evaluation.md`](../evaluation.md), [`../known-limits.md`](../known-limits.md)).
 
 ## ADR-005: `observe` sees a fixed budget of each hit; the rest of the loop sees only evidence
 
