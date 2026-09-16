@@ -489,8 +489,11 @@ def test_a_question_that_fails_is_raised_with_its_spend_still_readable(monkeypat
     item = {"id": "x", "type": "answer", "question": "q", "expected_books": ["Dracula"]}
     with pytest.raises(RuntimeError, match="the index is gone"):
         harness.run_one(BrokenGraph(), item)
-    assert harness.usage_fields() == {"cost_usd": 0.0, "llm_calls": 2,
-                                      "tokens_in": 300, "tokens_out": 0}
+    # cost is not asserted here: the prices come from the environment's backend
+    # (the CI leg with LLM_BACKEND=openrouter prices these tokens), and what this
+    # test is about is that the spend survived the failure at all
+    spent = harness.usage_fields()
+    assert (spent["llm_calls"], spent["tokens_in"], spent["tokens_out"]) == (2, 300, 0)
 
 
 def test_the_report_row_and_line_carry_the_stop_reason(monkeypatch, tmp_path):
