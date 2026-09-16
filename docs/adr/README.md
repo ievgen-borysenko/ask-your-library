@@ -452,10 +452,13 @@ decision to take then, not a shape to build now.
 Status: reserved, 2026-09-16 — to be written when the code is next touched.
 
 The web UI's test seam installs a scripted backend only when a script path and a spelled-out
-confirmation are both set, refuses when either name is a key in a `.env` file Chainlit has already
-loaded, exits rather than half-installing, and prints a banner to stderr when it is armed
-(`fake_backend.py`, called at `ui.py:52` before the imports it replaces): a server that answers from
-a script must be impossible to arm by inheritance.
+confirmation are both set, refuses outright when either name is a key in a `.env` file Chainlit has
+already loaded, exits rather than half-installing, and prints a banner to stderr when it is armed
+(`fake_backend.py`, called at `ui.py:52` before the imports it replaces): two variables reduce
+accidental activation and the dotenv check rejects the one activation path nobody chose, but the
+gate reads `os.environ` and cannot tell an exported variable from an inherited one — a process that
+inherits both is armed (the environment is read at `fake_backend.py:123`), and anything able to set
+them in the server's environment can already run code as the server (`:26-28`).
 
 ## ADR-019: The egress claim is enforced by an audit hook in the test process
 
@@ -471,15 +474,21 @@ loopback included (`tests/egress_guard.py`), which keeps `src/` exactly as it sh
 Status: accepted; recorded 2026-09-16, after the fact (the stamp is as old as ADR-002, the refusal
 came with ADR-015).
 
-`_index_meta` holds one row per index table with four fields — `backend`, `model`, `dims`, `created`
-(`index_meta.py:21-29`) — written by ingest and checked the first time a table is opened in a
-process. `check_index` (`:46-63`) compares the configured embedder against the vector width first
-and the stamped model second. A table with no stamp is tolerated by readers — the dims match, a line
-is logged, the search proceeds (`:55-59`) — because indexes built before fingerprints existed must
-keep working. `ayl-add` refuses the same table (`add_folder.py:348-378`): an unstamped table would
-let a partial write mix two embedding models and then stamp the whole of it with the model that
-wrote only some of it, and the refusal names the three ways out (stamp it, rebuild it, or point
-`LIBRARY_DB_PATH` elsewhere). Warn on read, refuse on write.
+`_index_meta` holds one row per index table with five fields — `table`, `backend`, `model`, `dims`,
+`created` (`index_meta.py:21-29`), the first of them the key the row is looked up and replaced by —
+written by ingest and checked the first time a table is opened in a process. `check_index`
+(`:46-63`) compares the configured embedder against the vector width first and the stamped model
+second, and the two cases it distinguishes are not treated alike.
+
+A **stamp that is absent** is accepted: the dims match, an info-level line is logged, the search
+proceeds (`:55-59`), because indexes built before fingerprints existed must keep working. A
+**stamped model or a width that disagrees** with the configured embedder is fatal on read, not a
+warning: `library.open_table` raises on it, once per table per process (`library.py:57-65`), and
+preflight reports the same string as an `index_mismatch` problem before an interface starts
+(`preflight.py:214-216`). On the write side `ayl-add` refuses both — the mismatch and the missing
+stamp (`add_folder.py:348-378`) — because an unstamped table would let a partial write mix two
+embedding models and then stamp the whole of it with the model that wrote only some of it; the
+refusal names the three ways out (stamp it, rebuild it, or point `LIBRARY_DB_PATH` elsewhere).
 
 No fingerprint at all was the state before ADR-002 and is the failure this exists to prevent:
 another model of the same width degrades retrieval silently, with nothing to see. Checking dims
@@ -490,11 +499,13 @@ more than could be kept truthful at the time, and it is still the direction.
 So the row answers exactly one question, "which embedder built this table", and answers it before a
 search rather than after a bad answer. It cannot answer which chunker or which schema: after a
 re-chunk (#28) a half-rebuilt index is a mixed index nothing can detect, and nothing records which
-files were requested at all. #27 extends the row with `chunker` and `schema_version`, and it
-inherits the split decided here — **a mismatch warns on read and refuses on write** — because a
-refusal on read invalidates an index that took about half an hour to build, while a write that mixes
-two chunkers cannot be undone at all. `created` is there for a human reading the table; no code
-routes on it.
+files were requested at all. #27 is to extend the row with `chunker` and `schema_version`; **none of
+that is implemented yet**, and the policy decided for it when it is — recorded here so the change
+starts from it — is *warn on read, refuse on write*: a chunker or schema that disagrees degrades
+retrieval rather than breaking it, and refusing on read would invalidate an index that took about
+half an hour to build, while a write that mixes two chunkers cannot be undone at all. That is
+deliberately **not** the embedder's rule above, which is fatal on read and stays so. `created` is
+there for a human reading the table; no code routes on it.
 
 ## ADR-021: The action channel is a reserved string marker in `current_query`
 
@@ -507,10 +518,14 @@ dispatches on them by prefix and arity: `is_loop_marker` is "starts with `__`" (
 the marker is split into exactly three parts, and one with fewer is acted on by nobody — no hits, a
 note in the scratchpad, and the dry step counted (`nodes.py:321-371`). The same strings are read by
 the router (`route_after_reflect`, `:601`) and rendered as steps by the CLI (`cli.py:101-107`), and
-the contract is written out in the runner's docstring (`runner.py:29-30`). Only `reflect` may write
-one: the planner's queries are filtered through `is_loop_marker` (`nodes.py:210`) and the fallback
-strips leading underscores from the reader's own question (`:213`), so neither model output nor user
-text can drive `act` as an action.
+the contract is written out in the runner's docstring (`runner.py:29-30`). Only `reflect` writes
+one, and it does so from a decision read against a schema — `read_chapter` with a `book` and a
+`section` that are both strings, or the read is downgraded to "enough" (`nodes.py:523-547`): model
+output driving an action is the design, not a leak. What the guard prevents is narrower and worth
+stating exactly: a *planner query* that looks like a marker is dropped before it can be run
+(`is_loop_marker`, `nodes.py:210`), and the fallback strips leading underscores from the reader's
+own question (`:213`), so no marker string can be injected into the channel by planner output or by
+raw user text.
 
 A typed channel — a second state field holding `{"kind": ..., "book": ..., "section": ...}`, or an
 enum beside the query — was the alternative, and the reason it was not taken is that the marker was
