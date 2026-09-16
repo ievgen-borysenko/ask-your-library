@@ -73,7 +73,8 @@ agent queries and in what it sees of a hit, not in the ranking, which is why no 
 
 ## ADR-004: Quote provenance checked in code against the passage the quote was pinned to
 
-Status: accepted (rewritten in the release pass of 2026-09-05; amended 2026-09-16, see below).
+Status: accepted (rewritten in the release pass of 2026-09-05; amended twice on 2026-09-16, see
+below: the card split, then the move of the check to the evidence gate).
 
 `act` gives every retrieved passage a stable id (`s<step>h<n>`) and stores it in `state.hits_log`
 exactly as `observe` will see it; `observe` must name the id a quote was copied from; the book and
@@ -111,9 +112,49 @@ inside the triple.** They are correct for what they measured and are not compara
 quote, with a run made after it; nothing was re-run to change a published number
 ([`../evaluation.md`](../evaluation.md), [`../known-limits.md`](../known-limits.md)).
 
+**Amended 2026-09-16 (second amendment of the day): the check runs at the evidence gate, before the
+answer is written; the post-synthesis check stays as the report (#29).** Until this amendment
+`validate` was the last node of the graph, so a quote in no retrieved passage reached the reader
+inside the answer and was counted underneath it — a warning about a sentence the reader had already
+read. The same check now runs inside `_valid_evidence`, at the `observe` gate, over the step's own
+passages cut exactly as the prompt cut them: **confirmed** is kept, **unattributed** is re-pinned to
+the passage that holds the quote (so the citation stops naming the wrong one), **card_only** is kept
+and pinned to the card and stays outside every traced count, and **broken** is dropped and never
+reaches `synthesize`. Two counters travel with the run — `dropped_unverified` and `repinned` —
+through the `observe` event, `RunResult`, the provenance report, the badge, the CLI line and the
+harness.
+
+The two gates run **one** function over one index of the run's passages (`classify_quote`,
+`passage_index`), and `validate`'s own classification was rewritten onto it. That is the decision,
+not an implementation detail: a second reading of "is this quote inside that passage" is exactly how
+the entry check and the badge would come to disagree about the same quote, and a report that can
+disagree with the gate it reports on is worth less than either. The consequence is an invariant
+rather than a hope — on evidence that went through the gate, `confirmed == checked_book_text` and
+`broken == 0` **by construction** — so the published triple stops being a measurement of the model's
+quoting honesty and becomes a proof that the gate held. What it still does not cover is unchanged
+and stated in the same words as before: the quotations the ANSWER writes are not evidence and
+nothing checks them. #29's second half — citation by evidence id, checked against the answer's
+sentences — is not built.
+
+The cost is one normalization pass per step instead of one per run, on a loop whose cheapest node is
+about seven seconds, and no model call. The risk was never cost: it was **control flow**, and the
+system design review of 16.09 §3(a) is the only document that named it. A step whose every item is
+dropped would have become a dry step, and two dry steps end a run at the CRAG gate — #29 would have
+improved provenance by shortening the search. The owner's decision of the same day settles it and
+the code implements it: "dropped" is counted apart and is never a dry step. Such a step neither
+advances the empty streak (its passages *were* retrieved, so the library is not silent on the
+question) nor resets it (it proved nothing about the library either); the loop goes on to the next
+query, and `reflect` is told how many quotes were dropped, in a line added to its context only when
+there is one to add. No new stop reason was needed, because a dropped step never ends the loop by
+that rule; when the loop ends by another one the reason names that rule and the counters say what
+the gate spent, the honest refusal included. **Not measured yet:** the acceptance is a confirmed
+ratio of 1.0 by construction on evidence, a published drop rate, and behaviour at `--repeat` not
+below the baseline being produced on the three local models. Nothing here was re-run against it.
+
 ## ADR-005: `observe` sees a fixed budget of each hit; the rest of the loop sees only evidence
 
-Status: accepted; the size of the budget was revised by ADR-012.
+Status: accepted; the size of the budget was revised by ADR-012, and 2026-09-16 added one number to
+what `reflect` sees (see below). The budget itself is unchanged.
 
 Raw hits never reach `plan`, `reflect` or `synthesize`. `observe` receives one `<result>` block
 per hit, carrying that hit's id, book and section, with the text cut to `SEARCH_HIT_CHARS`
@@ -128,6 +169,14 @@ passage is not in the window at any size — a retrieval problem, traced in
 [`docs/examples/c06-fogg-missing-day.md`][c06-trace]. That `reflect` decides on a thin summary,
 with no quotes and no candidate set, is the mechanism behind "identify rarely clarifies", which
 ADR-013 addressed.
+
+Amended 2026-09-16 (#29): the budget is the same and no passage text moved, but `reflect` now sees
+one more thing — **a count**, how many quotes the provenance gate dropped before they became
+evidence. It is a number the code produced, not corpus text, so the blast radius this ADR buys is
+unchanged; the reason it is there is that without it "evidence so far: (none)" after a step that
+retrieved plenty reads to the planner as a silent library, and the next query would be chosen on
+that misreading. The line is added only when the count is non-zero, so a run that drops nothing
+sends the prompt it has always sent.
 
 ## ADR-006: Clarify as an interrupt with a candidate list and a code resolver
 
