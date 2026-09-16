@@ -153,10 +153,11 @@ def run(monkeypatch, tmp_path):
             clarify_questions.append(q)
             return reply_to_clarify
 
-        answer = run_question(build_graph(), question, history or [], Path(tmp_path),
+        result = run_question(build_graph(), question, history or [], Path(tmp_path),
                               on_event=lambda name, update: events.append((name, update)),
                               on_clarify=on_clarify)
-        return answer, events, clarify_questions
+        assert result.failure is None, result.failure
+        return result.answer, events, clarify_questions
     return _run
 
 
@@ -205,8 +206,11 @@ def test_one_search_enough_answer_and_confirmed_provenance(run, tmp_path):
     assert metrics["llm_calls"] == 4 and set(metrics["by_role"]) == {"plan", "observe", "reflect", "synthesize"}
     assert metrics["input_tokens"] == 400 and metrics["output_tokens"] == 40
     assert metrics["cost_usd"] == llm._cost(400, 40)
-    assert metrics["by_role"]["observe"] == {"calls": 1, "input_tokens": 100, "output_tokens": 10,
-                                             "cost_usd": llm._cost(100, 10)}
+    observe_role = metrics["by_role"]["observe"]
+    assert {k: v for k, v in observe_role.items() if k != "seconds"} == {
+        "calls": 1, "input_tokens": 100, "output_tokens": 10, "cost_usd": llm._cost(100, 10)}
+    # wall clock of the call: measured, so the shape is what a test can pin
+    assert isinstance(observe_role["seconds"], float) and observe_role["seconds"] >= 0.0
     assert metrics["hits_seen"] == 2 and metrics["evidence_distilled"] == 1 and metrics["redacted_lines"] == 0
     assert metrics["model"] == "fake-model" and metrics["steps_taken"] == 1
     assert metrics["stop_reason"] == t("stop_enough") and "partial" not in metrics
@@ -549,10 +553,15 @@ def test_deadline_spent_after_a_step_answers_from_what_was_found(monkeypatch, tm
         llm._usage().started -= 60          # the run "already" used a minute when it starts
     monkeypatch.setattr("ask_your_library.runner.reset_usage", reset_in_the_past)
     events = []
-    answer = run_question(build_graph(), "Who narrates Moby Dick?", [], Path(tmp_path),
+    result = run_question(build_graph(), "Who narrates Moby Dick?", [], Path(tmp_path),
                           on_event=lambda n, u: events.append((n, u)), on_clarify=lambda q: "", deadline_s=30)
+    answer = result.answer
 
     assert names(events) == ["plan", "act", "observe", "reflect", "synthesize", "validate", "metrics"]
+    # the result says what the state said: the stop reason, the steps and the
+    # evidence the answer was written from, without anyone reading the state
+    assert result.stop_reason == t("stop_deadline", s=30) and result.steps_taken == 1
+    assert result.evidence and result.usage["llm_calls"] == 3 and result.seconds >= 0
     assert model.roles() == ["plan", "observe", "synthesize"]              # reflect spent no call
     assert by_name(events, "reflect")[0]["stop_reason"] == t("stop_deadline", s=30)
     assert by_name(events, "metrics")[0]["stop_reason"] == t("stop_deadline", s=30)
@@ -564,9 +573,10 @@ def test_a_spent_deadline_does_not_time_the_final_synthesize_out(monkeypatch, tm
     next decision, never mid-call, so the step in flight and the synthesis
     still complete. A per-call timeout capped by the seconds LEFT breaks that
     at the worst moment — when the budget runs out, the call being bounded is
-    the final `synthesize`; `run_question` has no `except` around the stream
-    and both interfaces turn the resulting APITimeoutError into an error
-    string, so the run would return nothing at all instead of the answer.
+    the final `synthesize`; the APITimeoutError would end the run, and a run
+    that ends in a failure has no answer for either interface to show, so the
+    question would come back with nothing at all instead of the degraded
+    answer the deadline exists to produce.
 
     Fake clock, and the stub sits at ChatOpenAI rather than at `llm.llm`, so
     the timeout each call is really built with is the thing under test."""
@@ -604,7 +614,7 @@ def test_a_spent_deadline_does_not_time_the_final_synthesize_out(monkeypatch, tm
     events = []
     answer = run_question(build_graph(), "Who narrates Moby Dick?", [], Path(tmp_path),
                           on_event=lambda n, u: events.append((n, u)), on_clarify=lambda q: "",
-                          deadline_s=30)
+                          deadline_s=30).answer
 
     assert model.roles() == ["plan", "observe", "synthesize"]          # reflect spent no call
     assert by_name(events, "reflect")[0]["stop_reason"] == t("stop_deadline", s=30)
@@ -882,9 +892,9 @@ def run_on_a_fake_clock(monkeypatch, tmp_path):
             # of the answer, which is exactly the failure under test.
             cli.print_event(node_name, update)
 
-        answer = run_question(build_graph(), question, [], Path(tmp_path),
+        result = run_question(build_graph(), question, [], Path(tmp_path),
                               on_event=record, on_clarify=lambda q: "", deadline_s=deadline_s)
-        return answer, events
+        return result, events
     return _run
 
 
@@ -904,7 +914,7 @@ def test_a_loop_call_that_times_out_ends_the_loop_and_not_the_run(run_on_a_fake_
         plan=[{"mode": "answer", "queries": ["Ishmael sails", "Pequod voyage"]}],
         observe=[{"evidence": [evidence(MOBY, "transcripts", "s1h2")]}],
     )
-    answer, events = run_on_a_fake_clock(model, FakeLibrary(lambda q: [MOBY]),
+    result, events = run_on_a_fake_clock(model, FakeLibrary(lambda q: [MOBY]),
                                          "Who narrates Moby Dick?")
 
     assert names(events) == ["plan", "act", "observe", "reflect", "synthesize", "validate", "metrics"]
@@ -912,7 +922,7 @@ def test_a_loop_call_that_times_out_ends_the_loop_and_not_the_run(run_on_a_fake_
     # `ask_json` retries invalid JSON and `llm_invoke` retries a timeout, so the
     # one observe call is several attempts; every one of them timed out.
     assert model.timed_out and set(model.timed_out) == {"observe"}
-    assert answer == t("refusal_answer")                   # an answer, not an error string
+    assert result.answer == t("refusal_answer")                   # an answer, not an error string
     observe = by_name(events, "observe")[0]
     assert observe["stop_reason"] == t("stop_deadline_call", s=30)
     # reflect restates it rather than printing "enough, synthesizing", a
@@ -934,12 +944,12 @@ def test_a_reflect_call_that_times_out_still_answers_from_the_evidence_found(run
         observe=[{"evidence": [evidence(MOBY, "transcripts", "s1h2")]}],
         synthesize=["Ishmael, so far [Moby Dick, Chapter 1]."],
     )
-    answer, events = run_on_a_fake_clock(model, FakeLibrary(lambda q: [MOBY]),
+    result, events = run_on_a_fake_clock(model, FakeLibrary(lambda q: [MOBY]),
                                          "Who narrates Moby Dick?")
 
     assert model.roles() == ["plan", "observe", "synthesize"]   # reflect produced no reply
     assert set(model.timed_out) == {"reflect"}
-    assert answer == "Ishmael, so far [Moby Dick, Chapter 1]."
+    assert result.answer == "Ishmael, so far [Moby Dick, Chapter 1]."
     assert by_name(events, "reflect")[0]["stop_reason"] == t("stop_deadline_call", s=30)
     assert by_name(events, "validate")[0]["provenance"]["confirmed"] == 1
     assert by_name(events, "metrics")[0]["stop_reason"] == t("stop_deadline_call", s=30)
@@ -952,10 +962,10 @@ def test_a_plan_call_that_times_out_ends_the_run_in_an_answer_too(run_on_a_fake_
     model = TimingOutModel(times_out_on="plan",
                            plan=[{"mode": "answer", "queries": ["Ishmael sails"]}])
     library = FakeLibrary(lambda q: [MOBY])
-    answer, events = run_on_a_fake_clock(model, library, "Who narrates Moby Dick?")
+    result, events = run_on_a_fake_clock(model, library, "Who narrates Moby Dick?")
 
     assert names(events) == ["plan", "synthesize", "validate", "metrics"]
-    assert library.searches == [] and answer == t("refusal_answer")
+    assert library.searches == [] and result.answer == t("refusal_answer")
     assert by_name(events, "metrics")[0]["stop_reason"] == t("stop_deadline_call", s=30)
 
 
@@ -969,20 +979,25 @@ def test_without_a_deadline_a_timed_out_loop_call_names_the_per_call_timeout(run
         observe=[{"evidence": [evidence(MOBY, "transcripts", "s1h2")]}],
         synthesize=["Ishmael, so far [Moby Dick, Chapter 1]."],
     )
-    answer, events = run_on_a_fake_clock(model, FakeLibrary(lambda q: [MOBY]),
+    result, events = run_on_a_fake_clock(model, FakeLibrary(lambda q: [MOBY]),
                                          "Who narrates Moby Dick?", deadline_s=0)
-    assert answer == "Ishmael, so far [Moby Dick, Chapter 1]."
+    assert result.answer == "Ishmael, so far [Moby Dick, Chapter 1]."
     assert by_name(events, "metrics")[0]["stop_reason"] == t("stop_call_timeout",
                                                              s=int(config.LLM_TIMEOUT_S))
 
 
 def test_a_loop_call_that_fails_for_another_reason_still_fails_the_run(run_on_a_fake_clock):
     """Only a timeout ends the loop quietly. Every other failure of a model
-    call — a bad request, an auth error, a bug in a node — is raised as it
-    always was, so it cannot hide behind a deadline that was never reached."""
+    call — a bad request, an auth error, a bug in a node — still ends the run:
+    it cannot hide behind a deadline that was never reached, and it cannot come
+    back as an answer. The runner reports it on the result (with the metrics of
+    what was spent) instead of raising through the interfaces."""
     class BrokenModel(ScriptedModel):
         def invoke(self, messages):
             raise RuntimeError("provider said no")
 
-    with pytest.raises(RuntimeError, match="provider said no"):
-        run_on_a_fake_clock(BrokenModel(), FakeLibrary(lambda q: [MOBY]), "Who narrates Moby Dick?")
+    result, events = run_on_a_fake_clock(BrokenModel(), FakeLibrary(lambda q: [MOBY]),
+                                         "Who narrates Moby Dick?")
+    assert result.answer == "" and result.failure is not None
+    assert result.failure.type == "RuntimeError" and result.failure.message == "provider said no"
+    assert len(by_name(events, "metrics")) == 1          # the run is still accounted for

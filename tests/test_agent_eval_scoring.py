@@ -385,6 +385,57 @@ def test_fingerprint_names_the_observe_window(monkeypatch):
     assert f"deadline={config.QUESTION_DEADLINE_S}s" in fp        # a run cut by the deadline is another run
 
 
+def test_a_state_the_graph_cannot_produce_is_an_error_row_not_an_empty_answer(monkeypatch, tmp_path):
+    """The stream finished and the final state could not be read: that is a
+    failed question, and the report must say so. Scored as an empty answer it
+    would be a silent FAIL with no reason beside it."""
+    import pytest
+
+    class NoStateGraph:
+        checkpointer = None
+
+        def stream(self, run_input, config):
+            yield {"synthesize": {"answer": "Dracula."}}
+
+        def get_state(self, config):
+            raise RuntimeError("no checkpoint for this thread")
+
+    monkeypatch.setattr(harness, "RESULTS_DIR", tmp_path)
+    item = {"id": "x", "type": "answer", "question": "q", "expected_books": ["Dracula"]}
+    with pytest.raises(RuntimeError, match="no checkpoint for this thread"):
+        harness.run_one(NoStateGraph(), item)
+
+
+def test_the_exception_re_raised_is_the_one_that_happened(monkeypatch, tmp_path):
+    """run_one re-raises the runner's failure so that main() writes the ERROR
+    row. An exception class is free to define __bool__ — a falsy one must still
+    be re-raised as ITSELF, or the report names a stand-in for an error nobody
+    got."""
+    import pytest
+
+    class FalsyError(RuntimeError):
+        def __bool__(self):
+            return False
+
+    raised = FalsyError("the index is gone")
+
+    class BrokenGraph:
+        checkpointer = None
+
+        def stream(self, run_input, config):
+            raise raised
+            yield  # pragma: no cover - makes stream a generator
+
+        def get_state(self, config):
+            raise RuntimeError("no state")
+
+    monkeypatch.setattr(harness, "RESULTS_DIR", tmp_path)
+    item = {"id": "x", "type": "answer", "question": "q", "expected_books": ["Dracula"]}
+    with pytest.raises(FalsyError) as caught:
+        harness.run_one(BrokenGraph(), item)
+    assert caught.value is raised
+
+
 def test_the_report_row_and_line_carry_the_planner_fallback(monkeypatch, tmp_path):
     """A planner that never produced a plan completes as an ordinary row since
     0.2; the eval must still show it (that is how a local model is judged)."""
@@ -402,6 +453,98 @@ def test_the_report_row_and_line_carry_the_planner_fallback(monkeypatch, tmp_pat
     item = {"id": "x", "type": "answer", "question": "q", "expected_books": ["Dracula"]}
     r = harness.run_one(FinalGraph(), item)
     assert r["plan_fallback"] is True
+
+
+class ClarifyingGraph:
+    """Interrupts once, then finishes on the reader's reply — and spends a
+    model call, so the run has usage to account for."""
+    checkpointer = None
+
+    def __init__(self):
+        self.resumed_with = None
+
+    def stream(self, run_input, config):
+        from ask_your_library import llm
+        if self.resumed_with is None and not hasattr(run_input, "resume"):
+            yield {"plan": {"mode": "identify", "current_query": "which"}}
+            yield {"__interrupt__": [type("I", (), {"value": "Crusoe or Gulliver?"})()]}
+            return
+        self.resumed_with = getattr(run_input, "resume", None)
+        spent = llm._usage()
+        spent.llm_calls += 1
+        role = llm._by_role(spent, "plan")
+        role["calls"] += 1
+        role["seconds"] += 2.25
+        yield {"reflect": {"current_query": "", "stop_reason": "enough evidence"}}
+        yield {"synthesize": {"answer": "Gulliver's Travels."}}
+
+    def get_state(self, config):
+        return type("S", (), {"values": {"answer": "Gulliver's Travels.", "verification": "OK",
+                                         "provenance": {"checked": 1}, "steps_taken": 1,
+                                         "read_chapters": [], "evidence": [{}],
+                                         "clarify_candidates": ["Robinson Crusoe — Daniel Defoe",
+                                                                "Gulliver's Travels — Jonathan Swift"],
+                                         "clarify_chosen": "Gulliver's Travels — Jonathan Swift",
+                                         "stop_reason": "enough evidence"}})()
+
+
+def test_run_one_drives_the_question_through_the_runner(monkeypatch, tmp_path):
+    """The harness is a consumer of the runner, not a second execution path:
+    the stream loop, the interrupt and the usage reset are the runner's, and
+    what stays here is the harness's own — the --clarify-pick reply policy, the
+    steps log, and the flat fields the report row reads."""
+    monkeypatch.setattr(harness, "RESULTS_DIR", tmp_path)
+    monkeypatch.setattr(harness, "CLARIFY_PICK", "second")
+    item = {"id": "x", "type": "identify", "question": "Which?", "expected_behavior": "clarify",
+            "expected_books": ["Robinson Crusoe", "Gulliver's Travels"]}
+    graph = ClarifyingGraph()
+    r = harness.run_one(graph, item)
+
+    # the harness's clarify policy reached the runner's interrupt as the reply
+    assert graph.resumed_with == "Gulliver's Travels"
+    assert r["clarify_asked"] is True
+    assert r["steps_log"] == ["clarify: Crusoe or Gulliver?", "reflect -> stop: enough evidence"]
+    assert r["answer"] == "Gulliver's Travels." and r["stop_reason"] == "enough evidence"
+    assert r["clarify_chosen"] == "Gulliver's Travels — Jonathan Swift"
+    assert r["evidence_items"] == 1 and r["steps_taken"] == 1
+    # the usage the runner reset and accounted for, flat, plus seconds per role
+    assert r["llm_calls"] == 1 and r["by_role_seconds"] == {"plan": 2.2}
+    # the scratchpad keeps the documented name (eval/results/scratch-<id>.md)
+    assert (tmp_path / "scratch-x.md").exists()
+    assert (tmp_path / "scratch-x-2.md").exists() is False
+    harness.run_one(ClarifyingGraph(), item, attempt=2)      # --repeat: one file per attempt
+    assert (tmp_path / "scratch-x-2.md").exists()
+
+
+def test_a_question_that_fails_is_raised_with_its_spend_still_readable(monkeypatch, tmp_path):
+    """The runner reports a failure on the result; run_one re-raises it so that
+    main() writes the ERROR row exactly as before — and the calls the question
+    made before it died are still in the accumulator that row reads."""
+    import pytest
+
+    class BrokenGraph:
+        checkpointer = None
+
+        def stream(self, run_input, config):
+            from ask_your_library import llm
+            spent = llm._usage()
+            spent.llm_calls += 2
+            spent.input_tokens += 300
+            raise RuntimeError("the index is gone")
+            yield  # pragma: no cover - makes stream a generator
+
+        def get_state(self, config):
+            raise RuntimeError("no state")
+
+    monkeypatch.setattr(harness, "RESULTS_DIR", tmp_path)
+    item = {"id": "x", "type": "answer", "question": "q", "expected_books": ["Dracula"]}
+    with pytest.raises(RuntimeError, match="the index is gone"):
+        harness.run_one(BrokenGraph(), item)
+    # cost is not asserted here: the prices come from the environment's backend
+    # (the CI leg with LLM_BACKEND=openrouter prices these tokens), and what this
+    # test is about is that the spend survived the failure at all
+    spent = harness.usage_fields()
+    assert (spent["llm_calls"], spent["tokens_in"], spent["tokens_out"]) == (2, 300, 0)
 
 
 def test_the_report_row_and_line_carry_the_stop_reason(monkeypatch, tmp_path):

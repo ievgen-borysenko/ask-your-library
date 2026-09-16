@@ -5,10 +5,15 @@ what it was measured to buy. They were written from the code rather than ahead o
 describe the system as built; where a variant was tried and dropped, the rejected variant is part
 of the record, because it is usually the more useful half.
 
-Sixteen decisions, in the order they were taken. ADR-016 is written out as a file of its own
+Twenty-three decisions, in the order they were taken. ADR-016 is written out as a file of its own
 because it changed the planner's contract and added a node to the graph; the rest are summarised
-here. The measurements are not repeated in full: the reports under [`docs/eval-results/`][reports]
-are the primary record, and each entry below names the one that carries its numbers. Reports of
+here. ADR-017 to ADR-023 were recorded on 2026-09-16, after the fact: a review of this tree found
+seven decisions the code had made and no record named. The four that constrain what may be built
+next are written out below; the other three are reserved as stubs — number, title, one sentence —
+to be written when the code they describe is next touched, so that the numbering is taken and the
+decision is not forgotten. The measurements are not repeated in full: the reports under
+[`docs/eval-results/`][reports] are the primary record, and each entry below names the one that
+carries its numbers. Reports of
 intermediate development runs were not exported with this repository; where a decision was measured
 only by such a run, the entry says so.
 
@@ -162,7 +167,7 @@ Coverage is one injection, not a suite, and live resistance is measured for `obs
 
 ## ADR-009: One runner, three interfaces, events as the contract
 
-Status: accepted, with a correction recorded on 2026-09-07.
+Status: accepted; corrected 2026-09-07, amended 2026-09-16 (the correction is closed).
 
 `runner.run_question(...)` is the execution path of the CLI and the web UI: it emits events and
 calls back for a clarify reply, and per-question metrics accumulate in a `ContextVar` that is reset
@@ -175,6 +180,29 @@ One behaviour in every interface, and UI features cost nothing in the agent. The
 the event contract lived in a docstring and drifted twice in one week; it is pinned by tests now —
 a fake graph for the events, and end-to-end scenarios of the compiled graph driven by a scripted
 model.
+
+Amended 2026-09-16: **one execution path, and a result instead of the state.** The correction above
+is closed. `run_question` returns a `RunResult` — the answer, the evidence and its provenance, the
+clarify and catalogue fields, the usage snapshot, the wall clock and the failure if there was one —
+and the CLI, the web UI and the eval harness read that instead of reaching into the graph's state.
+The harness (`eval/run_agent_eval.py:run_one`) no longer drives `graph.stream`: it passes an event
+collector and its own `--clarify-pick` reply policy into the runner, which owns the stream loop, the
+interrupt, the per-question usage reset and the scratchpad. What is measured and what is shipped are
+now the same code, which is the point: every behaviour number this project publishes is produced
+through the interface a reader uses.
+
+Two consequences of the same change. **A question that fails is still accounted for:** the metrics
+event was emitted after the `try`, so a run that raised reported nothing at all and the calls it had
+already paid for were invisible; it is emitted in a `finally` now, and the failure comes back on the
+result (exception class and a message with local paths redacted) rather than as an exception through
+every interface. The event contract itself is unchanged — same events, same order, same payloads —
+except that `by_role` gained `seconds`. Delivery is the consumer's business and stays there: an
+`on_event` that raises on the final metrics event is recorded on the result (`metrics_failure`) and
+neither replaces the run's own outcome nor turns an answered question into an exception. **Wall clock per node role** is accumulated where tokens are
+not: in a `finally` around the model call, so a call that timed out or exhausted its retries still
+reports the time the question spent on it. Locally the cost of a question is $0, and a latency
+budget that is not measured per node cannot be argued at all (#32); the harness report line and the
+JSON sidecar carry it per question.
 
 ## ADR-010: Evaluation as a first-class deliverable, correctness kept separate
 
@@ -384,6 +412,176 @@ same commit leaves the research loop where it was: 11/11 behaviour, 48/0/0 quote
 question against $0.0488 on `v0.2.0-rc1` ([`2026-09-09-catalogue-branch-core.md`][catalogue-core]).
 Exhaustive content questions ("which of my books mention London?") are explicitly not covered by
 this path and stay best-effort in the research loop.
+
+## ADR-017: One passive observer of every JSON model call
+
+Status: accepted; recorded 2026-09-16, after the fact (the seam itself landed on 2026-09-15 with the
+plan-replay harness, ADR-010's fourth amendment).
+
+`llm.JSON_CALL_OBSERVER` (`llm.py:442`) is one optional module-level hook that `ask_json` hands a
+finished record of every attempt: the role, the attempt number, the system and user messages, the
+raw reply, and the reason it was not JSON. Every attempt, not every successful one — the malformed
+first reply of a retry is recorded (`llm.py:501-503`), and so is a call that never came back at all,
+from the exception path before the bare `raise` (`:492`), because a timed-out planner that leaves no
+record cannot be told from an item nobody ran. It cannot change what a call returns: it is given a
+dict and nothing reads what it gives back, and `_observe_json_call` (`:451-459`) logs its own
+failure instead of raising, since a recorder must never turn a paid run into a failed one. Nothing
+in the application installs one; only the eval harness does, saving and restoring the previous value
+around a run (`eval/plan_recording.py:381-382`, `:399`). A plain global rather than a `ContextVar`:
+the only installer runs one question at a time in one thread, and the web UI, which serves
+concurrent sessions, never installs one.
+
+The alternatives were to thread a recorder argument through the nodes, which stops the measured code
+from being the shipped code — the one thing the replay harness exists to guarantee; to keep a copy
+of the node under `eval/`, which is a hundred lines of post-processing drifting away from the
+original; and to monkeypatch `llm.ask_json` from the harness, which works but leaves the patch
+re-implementing the parse, so a replayed reply would be read by code the live run never ran.
+`json_object` (`llm.py:408-426`) is split out of `ask_json` for that same reason: a replay parses a
+recorded reply with exactly the function that parsed it live.
+
+What it buys is observing shipped code without forking it — the seam the free plan replay rests on.
+What it costs is a rule that is easy to break silently: **a model call is recordable only if it goes
+through `ask_json`**. `plan`, `observe` and `reflect` do (`nodes.py:147, 443, 506`); `synthesize`
+calls `llm_invoke` directly (`:641`) and is in no recording, and any node added later that reaches
+the model another way will be missing from every recording without anything saying so. One observer,
+one installer, no chain: a second consumer needs a registry or a `ContextVar`, and that is a
+decision to take then, not a shape to build now.
+
+## ADR-018: A scripted backend behind a two-variable, refuse-loudly gate
+
+Status: reserved, 2026-09-16 — to be written when the code is next touched.
+
+The web UI's test seam installs a scripted backend only when a script path and a spelled-out
+confirmation are both set, refuses outright when either name is a key in a `.env` file Chainlit has
+already loaded, exits rather than half-installing, and prints a banner to stderr when it is armed
+(`fake_backend.py`, called at `ui.py:52` before the imports it replaces): two variables reduce
+accidental activation and the dotenv check rejects the one activation path nobody chose, but the
+gate reads `os.environ` and cannot tell an exported variable from an inherited one — a process that
+inherits both is armed (the environment is read at `fake_backend.py:123`), and anything able to set
+them in the server's environment can already run code as the server (`:26-28`).
+
+## ADR-019: The egress claim is enforced by an audit hook in the test process
+
+Status: reserved, 2026-09-16 — to be written when the code is next touched.
+
+"Nothing leaves the machine" is a claim about connection attempts, so the test process installs
+`sys.addaudithook` as its floor — patches on `socket` miss `_socket`, by-value imports and UDP —
+with one transport layer above it on both installed httpx distributions and every attempt recorded,
+loopback included (`tests/egress_guard.py`), which keeps `src/` exactly as it ships.
+
+## ADR-020: `_index_meta` fingerprints the embedder and nothing else
+
+Status: accepted; recorded 2026-09-16, after the fact (the stamp is as old as ADR-002, the refusal
+came with ADR-015).
+
+`_index_meta` holds one row per index table with five fields — `table`, `backend`, `model`, `dims`,
+`created` (`index_meta.py:21-29`), the first of them the key the row is looked up and replaced by —
+written by ingest and checked the first time a table is opened in a process. `check_index`
+(`:46-63`) compares the configured embedder against the vector width first and the stamped model
+second, and the two cases it distinguishes are not treated alike.
+
+A **stamp that is absent** is accepted: the dims match, an info-level line is logged, the search
+proceeds (`:55-59`), because indexes built before fingerprints existed must keep working. A
+**stamped model or a width that disagrees** with the configured embedder is fatal on read, not a
+warning: `library.open_table` raises on it, once per table per process (`library.py:57-65`), and
+preflight reports the same string as an `index_mismatch` problem before an interface starts
+(`preflight.py:214-216`). On the write side `ayl-add` refuses both — the mismatch and the missing
+stamp (`add_folder.py:348-378`) — because an unstamped table would let a partial write mix two
+embedding models and then stamp the whole of it with the model that wrote only some of it; the
+refusal names the three ways out (stamp it, rebuild it, or point `LIBRARY_DB_PATH` elsewhere).
+
+No fingerprint at all was the state before ADR-002 and is the failure this exists to prevent:
+another model of the same width degrades retrieval silently, with nothing to see. Checking dims
+alone is the cheap half of that — 1024 is bge-m3 and several other models. A full manifest of
+everything that shaped a table — chunker, splitter version, schema, source digests — was rejected as
+more than could be kept truthful at the time, and it is still the direction.
+
+So the row answers exactly one question, "which embedder built this table", and answers it before a
+search rather than after a bad answer. It cannot answer which chunker or which schema: after a
+re-chunk (#28) a half-rebuilt index is a mixed index nothing can detect, and nothing records which
+files were requested at all. #27 is to extend the row with `chunker` and `schema_version`; **none of
+that is implemented yet**, and the policy decided for it when it is — recorded here so the change
+starts from it — is *warn on read, refuse on write*: a chunker or schema that disagrees degrades
+retrieval rather than breaking it, and refusing on read would invalidate an index that took about
+half an hour to build, while a write that mixes two chunkers cannot be undone at all. That is
+deliberately **not** the embedder's rule above, which is fatal on read and stays so. `created` is
+there for a human reading the table; no code routes on it.
+
+## ADR-021: The action channel is a reserved string marker in `current_query`
+
+Status: accepted; recorded 2026-09-16, after the fact. The typed channel is deferred (#25).
+
+One state field carries both "search this" and "do this". `reflect` may write three reserved markers
+into `current_query` — `__chapter__|book|section` (`nodes.py:547`), `__book__|key|query`, the
+coverage probe of ADR-013 (`coverage.py:70`), and `__clarify__` (`nodes.py:564`) — and `act`
+dispatches on them by prefix and arity: `is_loop_marker` is "starts with `__`" (`state.py:6-11`),
+the marker is split into exactly three parts, and one with fewer is acted on by nobody — no hits, a
+note in the scratchpad, and the dry step counted (`nodes.py:321-371`). The same strings are read by
+the router (`route_after_reflect`, `:601`) and rendered as steps by the CLI (`cli.py:101-107`), and
+the contract is written out in the runner's docstring (`runner.py:29-30`). Only `reflect` writes
+one, and it does so from a decision read against a schema — `read_chapter` with a `book` and a
+`section` that are both strings, or the read is downgraded to "enough" (`nodes.py:523-547`): model
+output driving an action is the design, not a leak. What the guard prevents is narrower and worth
+stating exactly: a *planner query* that looks like a marker is dropped before it can be run
+(`is_loop_marker`, `nodes.py:210`), and the fallback strips leading underscores from the reader's
+own question (`:213`), so no marker string can be injected into the channel by planner output or by
+raw user text.
+
+A typed channel — a second state field holding `{"kind": ..., "book": ..., "section": ...}`, or an
+enum beside the query — was the alternative, and the reason it was not taken is that the marker was
+the cheapest way to add an action to a loop whose one conditional edge already routed on this field
+and whose every consumer (the graph, the runner, both interfaces, the eval harness) already read it.
+Keeping the string but validating it against an enum of prefixes was considered and is half a
+decision: it catches a typo, not the arity.
+
+The cost is a lexical convention doing a type system's work. The guard in `plan` exists only because
+the channel is untyped; the parse is a `split("|", 2)` in one node and a `startswith` in four files;
+a fourth action means one more prefix and one more arity to remember in all of them; and a question
+that genuinely begins with `__` is quietly rewritten before it is searched for. None of that buys or
+costs behaviour, which is why the change is deferred rather than scheduled: the typed channel goes
+in with the next change to `reflect`, and this record exists so that change starts from a decision
+instead of a discovery.
+
+## ADR-022: Conversation memory and the scratchpad are free text
+
+Status: accepted; recorded 2026-09-16, after the fact. Deliberate for the scratchpad, accidental for
+`history` and kept.
+
+`history` is a `list[str]`, one string per turn, `"Q: … A: …"` with the answer cut at 500 characters
+(`runner.py:88-99`); it enters the state as text (`state.py:16`, `runner.py:72-86`) and the planner
+and `synthesize` read it as text. The one exception is the shape ADR-016 forced: a catalogue answer
+is kept as its operation and counts, never as the titles. The web UI does not hold that list across
+a restart — `on_chat_resume` rebuilds it from Chainlit's persisted chat steps (`ui.py:658-706`),
+pairing a user message with the assistant message after it, skipping badge HTML by its `<div` prefix
+and the welcome message by its first words, un-escaping what was escaped for rendering, and reading
+the catalogue shape from the message's metadata. The scratchpad is a Markdown log written per step
+(`nodes.py:412`) that no code parses, stated where it is written (`:400`): ADR-004 removed the
+parser that used to confirm quote badges by substring-matching this file.
+
+Records for both — a turn object for the memory, JSONL for the scratchpad — is the obvious
+alternative, and it is right for one half and wrong for the other. For the scratchpad, free text
+*is* the decision: a log a human reads and no code may depend on is exactly what ADR-004 bought by
+taking the parser away, and a parsable scratchpad invites the coupling back. For `history` it is
+worth doing and unbuilt. Persisting the runner's own history beside the chat thread was the other
+candidate for the resume path and adds a second store to keep consistent with the one Chainlit
+already keeps.
+
+What the scratchpad decision buys is that nothing can quietly start depending on a debug log again.
+What the `history` one costs: memory whose only structure is a prefix cannot be filtered, counted or
+redacted by code, and the resume path reconstructs meaning from rendered output, so it is coupled to
+how answers are drawn — a new message type that looks like an assistant answer joins the memory, and
+the two exclusions are prefix rules a change in rendering breaks silently. Records for `history` are
+deferred to the next change of the web resume, because that reconstruction is the reader that would
+have to change with them. The 500-character truncation is a chosen number, not a measured one.
+
+## ADR-023: Retry and timeout policy belongs to the application, not the SDK
+
+Status: reserved, 2026-09-16 — to be written when the code is next touched.
+
+The model client is built with `max_retries=0` and one client per attempt, so a deadline cap is
+recomputed rather than sampled once and reused by every retry; what is retryable, how long the wait
+is, and which regime a call runs under are decided once per call in `llm.py`, and `synthesize` is
+never capped — dense reasoning that today is recorded only in docstrings.
 
 [reports]: ../eval-results/
 [backlog]: ../backlog.md
