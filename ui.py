@@ -462,6 +462,17 @@ def safe_html(text: str) -> str:
     return LINE_BREAK_RE.sub("<br>", safe_markdown(text))
 
 
+def verdict_word(status: str) -> str:
+    """The word the passage summary counts with.
+
+    Three of the four are the reader's own verdict word, the same one the
+    per-quote line uses. `card_only` gets a different one: its verdict sentence
+    ("from a book card, not a quote from the book") is a judgement on ONE quote
+    and reads as nonsense with a number after it, so the summary says what the
+    count is a count of instead."""
+    return t("ui_verdict_card_only") if status == "card_only" else status_word(status)
+
+
 def marked_passage(passage: str, items: list[dict]) -> str:
     """The passage as HTML for our own block, with every quote that really is
     inside it wrapped in <mark>.
@@ -527,8 +538,13 @@ def evidence_passages(items: list[dict], passages: dict[str, str]) -> str:
         body = (f'<div style="white-space: pre-wrap; font-family: monospace; '
                 f'font-size: 0.85em;">{marked_passage(passage, group)}</div>'
                 if passage is not None else f"<i>{t('ui_passage_missing')}</i>")
-        verdicts = " · ".join(f"{safe_html(status_word(s))} {sum(1 for i in group if i.get('status') == s)}"
-                              for s in ("confirmed", "unattributed", "broken")
+        # All FOUR verdicts, in the order validate partitions them. Leaving
+        # card_only out left a card-only passage with an empty count and a
+        # dangling separator, and a mixed passage silently short of its card
+        # item — the summary would say "confirmed 1" over a passage holding two
+        # quotes, which is the exact arithmetic this change exists to stop.
+        verdicts = " · ".join(f"{safe_html(verdict_word(s))} {sum(1 for i in group if i.get('status') == s)}"
+                              for s in ("confirmed", "unattributed", "card_only", "broken")
                               if any(i.get("status") == s for i in group))
         quotes = "".join(f"<li><b>{safe_html(status_word(i.get('status', '')))}</b>: "
                          f"<q>{safe_html(i.get('quote', ''))}</q></li>" for i in group)
@@ -752,7 +768,21 @@ def starter_questions(books: list) -> list[tuple[str, str]]:
         # is what the ask-back would offer the reader anyway.
         names = ((first.key, second.key) if first.title == second.title
                  else (first.title, second.title))
-        rows.append((t("starter_clarify_label"), t("starter_clarify", a=names[0], b=names[1])))
+        # Corpus text, like every other title this interface prints, and it
+        # arrives from a file name: a book called "![x](http://evil/x.png)" or
+        # "<img src=x onerror=...>" is one `ayl-add` away. A starter's message
+        # becomes a user message and is rendered as Markdown — with
+        # unsafe_allow_html on, which this app needs for its own badges — so
+        # without this the FIRST screen carries a third-party fetch and a tag.
+        # Same helper as the catalogue answer and the steps.
+        #
+        # The cost is real and narrow: the message is also the question that is
+        # sent, so a title containing & < > reaches the planner escaped and the
+        # catalogue resolver may not match it. A title that needs escaping is
+        # already a title this starter cannot usefully ask about, and the demo
+        # corpus has none; rendering it safely matters more than asking about it.
+        rows.append((t("starter_clarify_label"),
+                     t("starter_clarify", a=safe_markdown(names[0]), b=safe_markdown(names[1]))))
     rows.append((t("starter_refusal_label"), t("starter_refusal")))
     return rows
 

@@ -263,11 +263,21 @@ def validate(state: AgentState) -> dict:
 
     def source_kind(hit_id: str) -> str:
         """What a reader opens when they open the cited passage — the label the
-        interfaces put on the evidence item. "" for a hit this run never logged
-        (an id the model invented, or a legacy caller with no hits_log)."""
-        if hit_id not in corpus_of:
+        interfaces put on the evidence item.
+
+        "" means NO CLAIM, and there are two ways to get it: a hit this run
+        never logged (an id the model invented, or a legacy caller with no
+        hits_log), and a hit logged without a `corpus` — an index or a recording
+        from before cards existed. The second is deliberately not "book_text":
+        the classification above counts such a hit as book text, because that is
+        the conservative reading and the only one that cannot invent a card, but
+        that is an assumption the code makes and not a fact the record carries.
+        An interface prints a label it is given; it must not print one this
+        function guessed."""
+        corpus = corpus_of.get(hit_id, "")
+        if not corpus:
             return ""
-        return "card" if corpus_of[hit_id] == CARD_CORPUS else "book_text"
+        return "card" if corpus == CARD_CORPUS else "book_text"
 
     def found_in(quote_norm: str, segments: list[str]) -> bool:
         return bool(quote_norm) and any(_contains_tokens(seg, quote_norm) for seg in segments)

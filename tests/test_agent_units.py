@@ -291,15 +291,22 @@ def test_match_span_will_not_run_across_a_chunk_joiner():
     assert passage[start:end] == "gamma delta"
 
 
-def test_validate_reads_a_hit_without_a_corpus_as_book_text():
+def test_validate_counts_a_hit_without_a_corpus_as_book_text_and_labels_it_nothing():
     """An index and a recorded run from before cards existed carry no `corpus`
-    on the hit; guessing "card" there would demote quotes that are the book's
-    own text. The conservative default is the one that does not invent a card."""
+    on the hit. Guessing "card" there would demote quotes that are the book's
+    own text, so the COUNT takes the conservative reading — the only one that
+    cannot invent a card. The LABEL does not follow it: an interface prints what
+    the record says, and this record says nothing, so `source_kind` is empty
+    rather than a claim the code made up."""
     hits = [{"hit_id": "s1h1", "step": 1, "book": "Moby Dick — Herman Melville",
              "section": "Chapter 1", "text": "Call me Ishmael."}]
     p = _validate([_item("s1h1", "Call me Ishmael.")], hits=hits)["provenance"]
     assert (p["confirmed"], p["card_only"]) == (1, 0)
-    assert p["items"][0]["source_kind"] == "book_text"
+    assert p["items"][0]["source_kind"] == ""
+    # an empty corpus string is the same silence as a missing key
+    blank = [{**hits[0], "corpus": ""}]
+    assert _validate([_item("s1h1", "Call me Ishmael.")], hits=blank)["provenance"]["items"][0][
+        "source_kind"] == ""
 
 
 def test_validate_quote_in_another_hit_than_cited_is_unattributed_not_confirmed():

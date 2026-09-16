@@ -495,6 +495,37 @@ def test_marking_a_passage_does_not_open_a_hole_in_the_escaping(ui):
     assert "\n" not in block and "<br><br>" in block
 
 
+def _summary(block: str, hit_id: str) -> str:
+    """The <summary> line of one passage's <details> — the citation and the
+    verdict counts, which is what a reader sees before opening anything."""
+    piece = block.split(f"<code>{hit_id}</code>", 1)[1]
+    return piece.split("</summary>", 1)[0]
+
+
+def test_the_passage_summary_counts_card_matches_too(ui):
+    """The verdict counts in a passage's summary are a partition of the quotes
+    inside it. `card_only` was missing from the list they are built from, so a
+    card-only passage showed no count at all after a dangling separator, and a
+    mixed one counted one of its two quotes."""
+    from ask_your_library.i18n import t
+
+    def block(*statuses):
+        items = [{"hit_id": "s1h1", "book": "Dracula — Bram Stoker", "section": "Key Takeaways",
+                  "source_kind": "card", "status": status, "quote": f"quote {n}"}
+                 for n, status in enumerate(statuses)]
+        return ui.evidence_passages(items, {"s1h1": "quote 0 quote 1"})
+
+    card_only = _summary(block("card_only", "card_only"), "s1h1")
+    assert f"{t('ui_verdict_card_only')} 2" in card_only
+    assert not card_only.rstrip().endswith("·")          # no separator with nothing after it
+    assert t("ui_source_card") in card_only
+
+    mixed = _summary(block("confirmed", "card_only"), "s1h1")
+    assert f"{t('ev_status_confirmed')} 1" in mixed and f"{t('ui_verdict_card_only')} 1" in mixed
+    # the counts still add up to the quotes in the passage
+    assert sum(int(part.rsplit(" ", 1)[1]) for part in mixed.split(" · ")[-2:]) == 2
+
+
 def test_the_evidence_list_says_which_passages_are_book_cards(ui):
     """A reader who opens a bulleted distillate under a green badge had no way
     to tell it from a chapter. Each passage now names its kind, and a quote whose
@@ -876,6 +907,20 @@ def test_four_starters_come_from_the_index_that_is_loaded(ui, monkeypatch):
     identify, refusal = questions[0], questions[3]
     for question in (identify, refusal):
         assert "Dracula" not in question and "Frankenstein" not in question
+
+
+def test_a_crafted_book_title_cannot_load_an_image_from_the_first_screen(ui, monkeypatch):
+    """The ask-back starter names two books, and a title comes from a file name:
+    "![x](http://evil/x.png)" is one `ayl-add` away. A starter's message becomes
+    a user message and is rendered as Markdown with unsafe_allow_html on, so an
+    unneutralized title would fetch a third-party URL and plant a tag on the
+    first screen a reader ever sees, with no click at all."""
+    evil = "![x](http://evil/x.png)<img src=y onerror=alert(1)> — Nobody"
+    starters = _starters(ui, monkeypatch, _books(evil, "Dracula — Bram Stoker"))
+    message = next(message for _, message in starters if "or in" in message)
+    assert "http://evil" not in message and "![" not in message
+    assert "[image removed]" in message
+    assert "<img" not in message and "&lt;img src=y onerror=alert(1)&gt;" in message
 
 
 def test_an_empty_index_gets_no_starters_and_one_book_gets_no_ask_back(ui, monkeypatch):

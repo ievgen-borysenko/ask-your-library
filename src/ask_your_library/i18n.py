@@ -465,6 +465,11 @@ _T = {
                                   "яку написала модель",
                             "en": "nothing traced to the book text: all {n} matched only a book card, "
                                   "which a model wrote"},
+    # The summary line of an evidence passage counts with this, not with the
+    # per-quote verdict sentence: "from a book card, not a quote from the book 2"
+    # is not a sentence, and the reader needs to know what the 2 counts.
+    "ui_verdict_card_only": {"ua": "збіглися з карткою книжки, а не з текстом книжки",
+                             "en": "matched a book card, not the book text"},
     "ui_source_text": {"ua": "текст книжки", "en": "book text"},
     "ui_source_card": {"ua": "картка книжки (переказ від моделі)",
                        "en": "book card (a model-written summary)"},
