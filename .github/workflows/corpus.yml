@@ -40,7 +40,7 @@ jobs:
           # The job fetches from the open internet and pushes nothing back, so
           # the checkout token has no work here and is not left in the config.
           persist-credentials: false
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           # The uv the lockfile is maintained with, as in ci.yml.
           version: "0.12.10"
