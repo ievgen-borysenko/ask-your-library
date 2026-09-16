@@ -62,7 +62,8 @@ install_fake_backend()
 
 from ask_your_library import nodes                                  # noqa: E402
 from ask_your_library.graph import build_graph                      # noqa: E402
-from ask_your_library.i18n import LANG, get_lang, set_lang, status_word, t  # noqa: E402
+from ask_your_library.i18n import (LANG, get_lang, set_lang, source_word,  # noqa: E402
+                                   status_word, t)
 from ask_your_library.preflight import check_api_key, check_environment  # noqa: E402
 from ask_your_library.provenance import match_span                  # noqa: E402
 from ask_your_library.runner import failed_result, history_entry, run_question  # noqa: E402
@@ -548,8 +549,7 @@ def evidence_passages(items: list[dict], passages: dict[str, str]) -> str:
                               if any(i.get("status") == s for i in group))
         quotes = "".join(f"<li><b>{safe_html(status_word(i.get('status', '')))}</b>: "
                          f"<q>{safe_html(i.get('quote', ''))}</q></li>" for i in group)
-        kind = {"book_text": t("ui_source_text"), "card": t("ui_source_card")}.get(
-            first.get("source_kind", ""), "")
+        kind = source_word(first.get("source_kind", ""))
         blocks.append(
             f"<details><summary>{safe_html(first.get('book', '?'))} — {safe_html(first.get('section', '?'))} · "
             f"<code>{safe_html(hit_id)}</code> · {kind + ' · ' if kind else ''}{verdicts}</summary>"

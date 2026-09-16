@@ -507,7 +507,7 @@ def test_the_passage_summary_counts_card_matches_too(ui):
     inside it. `card_only` was missing from the list they are built from, so a
     card-only passage showed no count at all after a dangling separator, and a
     mixed one counted one of its two quotes."""
-    from ask_your_library.i18n import t
+    from ask_your_library.i18n import source_word, t
 
     def block(*statuses):
         items = [{"hit_id": "s1h1", "book": "Dracula — Bram Stoker", "section": "Key Takeaways",
@@ -518,7 +518,7 @@ def test_the_passage_summary_counts_card_matches_too(ui):
     card_only = _summary(block("card_only", "card_only"), "s1h1")
     assert f"{t('ui_verdict_card_only')} 2" in card_only
     assert not card_only.rstrip().endswith("·")          # no separator with nothing after it
-    assert t("ui_source_card") in card_only
+    assert source_word("card") in card_only
 
     mixed = _summary(block("confirmed", "card_only"), "s1h1")
     assert f"{t('ev_status_confirmed')} 1" in mixed and f"{t('ui_verdict_card_only')} 1" in mixed
@@ -530,19 +530,19 @@ def test_the_evidence_list_says_which_passages_are_book_cards(ui):
     """A reader who opens a bulleted distillate under a green badge had no way
     to tell it from a chapter. Each passage now names its kind, and a quote whose
     only match was a card says what that means in its own words."""
-    from ask_your_library.i18n import t
+    from ask_your_library.i18n import source_word, t
 
     items = [{"hit_id": "s1h1", "book": "Dracula — Bram Stoker", "section": "Chapter 27",
               "quote": "crumbled into dust", "status": "confirmed", "source_kind": "book_text"},
              {"hit_id": "s1h2", "book": "Dracula — Bram Stoker", "section": "Key Takeaways",
               "quote": "The hunters chase the count", "status": "card_only", "source_kind": "card"}]
     block = ui.evidence_passages(items, {"s1h1": "crumbled into dust", "s1h2": "The hunters chase the count"})
-    assert t("ui_source_text") in block and t("ui_source_card") in block
+    assert source_word("book_text") in block and source_word("card") in block
     assert t("ev_status_card_only") in block
     # an item from a record written before source_kind existed shows no label
     plain = ui.evidence_passages([{"hit_id": "s1h1", "book": "b", "section": "s", "quote": "q",
                                    "status": "confirmed"}], {"s1h1": "q"})
-    assert t("ui_source_text") not in plain and t("ui_source_card") not in plain
+    assert source_word("book_text") not in plain and source_word("card") not in plain
     assert "<code>s1h1</code> · " in plain               # and no empty separator is left behind
 
 
@@ -745,7 +745,7 @@ WATERMARK = "chat.watermark"
 OUR_VALUES = {NEW_CHAT_DESCRIPTION: OUR_WORDING,
               "chat.messages.status.used": "",
               "chat.messages.status.using": "",
-              WATERMARK: "Quotes are checked in code. The reasoning is not."}
+              WATERMARK: "Evidence provenance is checked in code. The reasoning is not."}
 
 
 def _leaves(node, path=""):
@@ -788,7 +788,10 @@ def test_exactly_four_values_are_ours_and_the_rest_stays_upstreams():
       name, and "Used act #1" is a framework log line, not the product's voice.
       Emptied, the name ui.py writes is the whole label;
     - the watermark: "LLMs can make mistakes. Check important info." sits under
-      a badge that says a quote was checked in code, and contradicts it.
+      a badge reporting a code-only check and says less than this app knows.
+      The replacement claims exactly what `validate` does: the provenance of
+      the distilled EVIDENCE is checked, not the quotation marks inside the
+      answer the model wrote around it.
 
     The rest has to stay upstream's, or the file is a fork nobody re-reads on a
     bump. en-US only: every other locale falls back to Chainlit's own copy."""
@@ -797,9 +800,13 @@ def test_exactly_four_values_are_ours_and_the_rest_stays_upstreams():
     assert {path for path, text in ours.items() if theirs[path] != text} == set(OUR_VALUES)
     assert {path: ours[path] for path in OUR_VALUES} == OUR_VALUES
     assert "clear" not in ours[NEW_CHAT_DESCRIPTION].lower()
-    # the watermark must not promise more than validate does: the quotes are
-    # checked, the reasoning is not, and neither half may go missing
-    assert "checked in code" in ours[WATERMARK] and "reasoning is not" in ours[WATERMARK]
+    # The watermark must not promise more than validate delivers. It checks the
+    # provenance of the evidence items, so the line says "evidence provenance"
+    # and not "quotes": a quotation mark inside the written answer is checked by
+    # nothing. Both halves are pinned — the claim and its limit.
+    assert "Evidence provenance is checked in code" in ours[WATERMARK]
+    assert "reasoning is not" in ours[WATERMARK]
+    assert "Quotes are checked" not in ours[WATERMARK]
 
 
 def test_startup_seeds_the_other_languages_and_leaves_ours_alone(tmp_path, monkeypatch):

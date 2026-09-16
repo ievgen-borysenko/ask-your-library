@@ -29,10 +29,13 @@ from the application.
   the label read "Used act #1" — the framework's log, not what the application
   did. With the prefix gone, the name `ui.py` writes is the whole label:
   "searched the library #1", "decided what to do next".
-- `chat.watermark`, replaced with "Quotes are checked in code. The reasoning is
-  not." The stock line, "LLMs can make mistakes. Check important info.", sits
-  directly under a badge reporting a code-only check of every quote in the
-  answer, and says both less and something else than this application knows.
+- `chat.watermark`, replaced with "Evidence provenance is checked in code. The
+  reasoning is not." The stock line, "LLMs can make mistakes. Check important
+  info.", sits directly under a badge reporting a code-only check and says both
+  less and something else than this application knows. The replacement claims
+  exactly what `validate` does and no more: it checks the provenance of the
+  distilled EVIDENCE items against the passages they were copied from, not the
+  quotation marks inside the answer the model then wrote.
 
 Only `en-US` is forked. Every other locale falls back to Chainlit's own copy, so
 the Ukrainian interface still prints upstream's step prefix in front of the

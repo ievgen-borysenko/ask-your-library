@@ -20,18 +20,21 @@ What is the name of the book, and why did that happen?" — the default local mo
 the demo corpus, no API key. 147.7 s by the CLI's own metrics line in the last frame — a cold first
 ask, the same band as the 160.8 s a different first question takes from a clean clone
 ([`docs/eval-results/2026-09-10-first-question-local.md`](docs/eval-results/2026-09-10-first-question-local.md)).
-Recorded before 16.09 — the badge and the evidence labels have since changed (book cards are no
-longer counted as quotes), so the counts in these frames are not the counts a run shows today.*
+Recorded before 16.09 — the badge and the evidence labels have since changed: a quote matched only
+inside a book card is still retrieved, still checked and still counted, but it is counted
+separately and no longer as a traced quote from the book's text. The counts in these frames are
+not the counts a run shows today.*
 
 ![The web UI answering what d'Artagnan said before fighting three men at once: the answer, the quote-provenance badge, and one evidence passage opened under it](docs/img/ask-library-ui.gif)
 
 *"What exactly did Dartangnan say before the fight with not 1 but 3 people? And why?" — the same
 library in the web UI, this run on a hosted model (`LLM_BACKEND=openrouter` with Sonnet 4.6, which
 is not the default and is what the $0.0724 on its metrics line paid for): the verified-quotes
-badge, and the evidence passage under it. Recorded before 16.09 — the badge and the evidence labels
-have since changed (book cards are no longer counted as quotes), the watermark under the composer
-is different, and the first frame is the login page rather than the chat. Both GIFs are due a
-re-record ([`docs/backlog.md`](docs/backlog.md)).*
+badge, and the evidence passage under it. Recorded before 16.09 — the badge counts book-card matches
+apart from traced book-text quotes now (they are still checked, and still counted), the evidence
+passages say which kind they are, the watermark under the composer is different, and the first
+frame is the login page rather than the chat. Both GIFs are due a re-record
+([`docs/backlog.md`](docs/backlog.md)).*
 
 ## One question, end to end
 
@@ -46,7 +49,7 @@ flowchart TB
     R -->|"fits several books"| C["ask back: Robinson Crusoe or Gulliver's Travels?"]:::human
     C --> P
     R -->|"yes, or the budget is spent"| S["answer with [book, chapter] citations,<br/>or 'your books do not cover this'"]:::ai
-    S --> V["validate: plain code, no model<br/>confirmed / unattributed / broken"]:::code
+    S --> V["validate: plain code, no model<br/>confirmed / unattributed / card-only / broken"]:::code
     V --> OUT(["answer + provenance badge"]):::code
     classDef code fill:#dbeafe,stroke:#1d4ed8,color:#000
     classDef ai fill:#fed7aa,stroke:#c2410c,color:#000
@@ -57,7 +60,14 @@ Blue = no answering-model call · orange = a call to the answering model you con
 human in the loop. Search is blue because the search step itself calls no answering model: it is
 plain code apart from embedding your query, which the default runs on your own machine. The
 passages it finds do reach the answering model, one step later, at `observe`. Nothing is verbatim
-until `validate` says so — that is what `validate` is for. The rest of the control flow, including
+until `validate` says so — that is what `validate` is for.
+
+**A book card is not the book, and `validate` has four outcomes because of it.** Some of what a
+search returns is a *book card*: a per-book summary written by one model call when the index was
+built. A quote found verbatim only inside a card is verbatim in a model's words, so it is
+**card-only** — still retrieved, still checked, counted and shown, and never counted as traced to
+the book. **Confirmed**, **unattributed** and **broken** are about the books' own text alone, and
+the count under the badge is out of that text, not out of everything checked. The rest of the control flow, including
 the catalogue path and the deterministic gate behind the ask-back, is in
 [`docs/architecture.md`](docs/architecture.md).
 

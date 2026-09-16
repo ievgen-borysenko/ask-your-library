@@ -42,9 +42,10 @@
   open by themselves, and the step labels are sentences in the product's voice — "searched the
   library #1", not "Used act #1" — which needed two more values of the vendored
   `.chainlit/translations/en-US.json`: `chat.messages.status.used` and `.using`, emptied, so the
-  name `ui.py` writes is the whole label. A third value, `chat.watermark`, now reads "Quotes are
-  checked in code. The reasoning is not." instead of a stock line that contradicted the badge
-  above it. `NOTICE`, `.chainlit/translations/README.md` and the test that pins them name all four
+  name `ui.py` writes is the whole label. A third value, `chat.watermark`, now reads "Evidence
+  provenance is checked in code. The reasoning is not." instead of a stock line that said less than
+  this application knows — and it says *evidence provenance*, not *quotes*, because `validate`
+  checks the distilled evidence items, not the quotation marks inside the written answer. `NOTICE`, `.chainlit/translations/README.md` and the test that pins them name all four
   changed keys; only `en-US` is forked, so the Ukrainian interface still carries upstream's step
   prefix. The metrics footer's gray went from `#6b7280` (~3.4:1 on the dark ground, below AA) to
   `#9ca3af` (~6.6:1) at the same visual rank.

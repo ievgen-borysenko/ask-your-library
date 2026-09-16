@@ -356,8 +356,8 @@ _T = {
                                  "(цитата має лежати всередині одного чанка; [...] розділяє чанки):",
                            "en": "[evidence] {n} evidence item(s), each with the passage it was checked against "
                                  "(a quote must sit inside one chunk; [...] separates chunks):"},
-    "ev_evidence_item": {"ua": "  - {status}: {book} — {section} [{hit_id}]: \"{quote}\"",
-                         "en": "  - {status}: {book} — {section} [{hit_id}]: \"{quote}\""},
+    "ev_evidence_item": {"ua": "  - {status}{source}: {book} — {section} [{hit_id}]: \"{quote}\"",
+                         "en": "  - {status}{source}: {book} — {section} [{hit_id}]: \"{quote}\""},
     "ev_passage_missing": {"ua": "    (уривок не в цьому прогоні: hit_id не знайдено)",
                            "en": "    (passage not in this run: hit_id not found)"},
     "ev_status_confirmed": {"ua": "підтверджено", "en": "confirmed"},
@@ -470,8 +470,11 @@ _T = {
     # is not a sentence, and the reader needs to know what the 2 counts.
     "ui_verdict_card_only": {"ua": "збіглися з карткою книжки, а не з текстом книжки",
                              "en": "matched a book card, not the book text"},
-    "ui_source_text": {"ua": "текст книжки", "en": "book text"},
-    "ui_source_card": {"ua": "картка книжки (переказ від моделі)",
+    # What KIND of passage a quote is pinned to. One pair of strings for every
+    # interface (source_word below): the CLI's verbose list and the web UI's
+    # evidence block are answering the same question for the same reader.
+    "ev_source_book_text": {"ua": "текст книжки", "en": "book text"},
+    "ev_source_card": {"ua": "картка книжки (переказ від моделі)",
                        "en": "book card (a model-written summary)"},
     "ui_badge_unused": {"ua": " (+{n} доказів для книг, яких відповідь не називає)",
                         "en": " (+{n} evidence items for books the answer does not name)"},
@@ -502,6 +505,20 @@ _T = {
                        "en": "injection filter: {n} lines redacted"},
     "ui_error": {"ua": "Помилка прогону агента: {e}", "en": "Agent run failed: {e}"},
 }
+
+
+def source_word(source_kind: str) -> str:
+    """The reader's words for the kind of passage a quote is pinned to —
+    "book text" or "book card (a model-written summary)".
+
+    "" for a record that does not say (a hit this run never logged, or one
+    logged before `corpus` was recorded): an interface prints what the record
+    holds and must not print a kind nobody wrote down. An unknown value is shown
+    as it is, so a third kind cannot pass unnoticed in one interface only."""
+    if not source_kind:
+        return ""
+    return (t(f"ev_source_{source_kind}")
+            if source_kind in ("book_text", "card") else source_kind)
 
 
 def status_word(status: str) -> str:
