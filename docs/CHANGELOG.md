@@ -2,6 +2,71 @@
 
 ## Unreleased
 
+- **Quotes are checked before the answer is written, not after it.** #29, step 2 of the sequencing
+  in the system design review of 16.09.
+
+  `validate` ran last, after `synthesize`: a quote that was in no retrieved passage reached the
+  reader inside the answer and was counted underneath it, by a report the reader had already read
+  past (1 unattributed and 2 broken of 61 on the shipped local default). The same check now runs at
+  the `observe` gate, inside `_valid_evidence`, before an item becomes evidence at all. A quote
+  confirmed in the passage it cites is kept; one found in another passage **of the same book** is
+  **re-pinned** to the passage that holds it, so the citation stops naming the wrong one; one whose
+  only match is a book card is kept, pinned to the card, and still never counted as traced to the
+  book (the 16.09 card split); one that is in no retrieved passage of its step is **dropped** and
+  never reaches `synthesize`. The answer is therefore written from evidence that has already passed
+  the check, and `validate` stays the report it was — with `confirmed == checked_book_text` and
+  `broken == 0` true by construction on evidence, which is asserted as a test.
+
+  **A re-pin corrects a citation; it never writes a new one.** The search runs book before corpus —
+  the cited passage, then that book's own text, then that book's cards, and only then anything else
+  — so a quote's own book always outranks a coincidence in another one. A quote whose only holder
+  really does belong to another work is dropped rather than moved, because re-attributing it would
+  replace a wrong citation with a confident wrong one. Inside the cited book the nearest section
+  wins; a quote that has to find its passage must be at least four normalized words long; and where
+  `AYL_STRICT_HIT_ID=0` lets an item arrive with no passage named, the model's own `book` field is
+  resolved canonically by the catalogue's resolver and the quote must sit in exactly one passage of
+  exactly that one book. A quote that is in the passage it cited answers to none of this.
+
+  Both gates run **one** function over one index of the run's passages (`classify_quote`,
+  `passage_index`): a second implementation of "is this quote inside that passage" is how the entry
+  check and the report would come to disagree about the same quote, and there is no second
+  implementation. One `validate` verdict changed, and it is the change that makes the invariant
+  exact: the **cited passage is read first**, so a quote inside the book card it cites is
+  `card_only` even where a chapter also holds those words. It used to be reported `unattributed` —
+  "not in the cited passage, found in another" — about a quote that is in the passage it cites, and
+  the gate (which sees one step) and the report (which sees the run) would otherwise give one quote
+  two verdicts.
+
+  **The CRAG gate keeps its meaning.** A step whose quotes were all dropped is not a dry step: the
+  passages were retrieved, so the library is not silent on the question. It neither advances the
+  empty streak nor resets it, two such steps in a row do not end a run, and `reflect` is told how
+  many quotes were dropped so the next query is chosen with that in hand — a line added to its
+  context only when there is something to say, so a clean run's prompt is the prompt every earlier
+  run was decided on. This was the one way #29 could have bought provenance with behaviour, and it
+  is the owner's decision of 16.09 rather than a reading of the code. Its price, said plainly: a
+  model that quotes badly now runs to `MAX_STEPS` where the gate used to stop it at two, which is
+  four more model calls on the questions that produce the least.
+
+  `dropped_unverified` — every well-formed quote the gate refused, whichever rule refused it — with
+  `dropped_by_reason` splitting it into `no_hit`, `cross_book`, `short` and `not_found`, and
+  `repinned` beside them, travel on the state, on the `observe`
+  event (only on a step that spent one of them, so a run where every quote checks out emits the
+  event it always did), on `RunResult`, in the provenance report, in the badge and the CLI line
+  ("N quotes dropped before the answer: not found in the passages they cited"), and in the harness
+  report line, the ablation table and the sidecar per question and in totals — each clause written
+  only where it happened, so the byte-compat fixture and every report under `docs/eval-results/`
+  keep their shape.
+
+  **What this does not do, and is not measured for.** The quotations the answer itself writes are
+  not evidence and nothing checks them; citation by evidence id against the answer's sentences is
+  the other half of #29 and is not here. A broken quote still does not fail the behavioural
+  evaluation. And the behavioural effect of the gate is **unmeasured**: the baseline it will be
+  compared against (three local models, `--repeat 3`) is being produced now, the gate's own run
+  comes after it, and the acceptance is a confirmed ratio of 1.0 by construction, a published drop
+  rate, and behaviour at repeat not below that baseline — read beside two figures that follow from
+  the gate rather than from the models, the coverage-probe firing count (thinner evidence makes
+  ADR-013's one probe fire more often) and the steps per question.
+
 - **A book card is never a quote from the book, the first screen teaches, and the front page shows
   the work before it explains it.** From the design critique of 16.09, §1 and §2.
 

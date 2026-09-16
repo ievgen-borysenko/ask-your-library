@@ -20,6 +20,27 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   from the one the answer cites) and a broken one (in no retrieved passage at all), and it does not
   stop the answer from carrying either.
 
+  **That last sentence describes the run, not the code as it stands since 2026-09-16.** The check
+  runs at the evidence gate now (#29): a quote in no retrieved passage of its step is dropped before
+  `synthesize` sees it, one found in another passage is re-pinned to the passage that holds it, and
+  the report after the answer reports on evidence that already passed the same check. The numbers
+  above were produced before that and are what they are — the 1 unattributed and 2 broken of 61 are
+  quotes that reached a reader. **What the gate does to behaviour is not measured yet**: the paired
+  baseline (three local models, repeated runs) is being produced, the gate's own run comes after it,
+  and until then this page has no number for the new code. What the gate does NOT reach is
+  unchanged: it checks the evidence the answer is written from, never the sentences the answer
+  writes around it.
+
+  **The gate throws away some true evidence, on purpose.** A quote whose only holder is a passage of
+  a *different* book is dropped rather than re-attributed: the book on an evidence item is the book
+  the answer cites, and moving a quote across works would replace a wrong citation with a confident
+  wrong one. So a model that names the wrong book beside a real quote loses that quote instead of
+  having it corrected, and the count is published (`dropped_by_reason.cross_book`). The same goes
+  for a quote under four normalized words that is not in the passage it cited, and — where
+  `AYL_STRICT_HIT_ID=0` lets a quote arrive with no passage named at all — for one whose stated book
+  matches no retrieved book, matches two, or is held by two passages of the right book. All of them
+  are the conservative direction: fewer citations, none of them invented by the check.
+
   What the hosted configuration does on the nearest sets, and how near they are. The catalogue set
   is the same golden file at the same checksum (`en-demo-catalog.yaml@14b001e26f5e`): hosted
   Sonnet 4.6 scored 10/10 with 21 / 0 / 0 on 2026-09-10

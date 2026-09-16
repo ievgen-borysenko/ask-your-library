@@ -68,6 +68,13 @@ _T = {
         "ua": " ({n} цитат знайдено в іншому уривку, ніж той, на який вони посилаються — не зараховано)",
         "en": " ({n} quotes found in a retrieved passage other than the one cited — not counted as confirmed)",
     },
+    # The observe gate (#29): quotes that never became evidence because no
+    # retrieved passage of their step held them. Written only when there were
+    # any, so a clean run's report line is the line it has always been.
+    "dropped_note": {
+        "ua": " ({n} цитат відкинуто ще до відповіді: їх не знайдено в уривках, на які вони посилалися)",
+        "en": " ({n} quotes dropped before the answer: not found in the passages they cited)",
+    },
     "card_note": {
         "ua": " ({n} цитат збіглися тільки з карткою книжки — це переказ, який написала модель, "
               "а не цитата з книжки, тому не зараховано)",
@@ -458,6 +465,13 @@ _T = {
     "ui_badge_warn": {"ua": "{broken}/{all} цитат не дослівні",
                       "en": "{broken}/{all} quotes not verbatim"},
     "ui_badge_which": {"ua": "які саме", "en": "which ones"},
+    # The observe gate (#29): what this answer was NOT allowed to rest on.
+    # Shown under any headline, including the grey "no evidence" one, where the
+    # dropped quotes are the whole reason the answer is a refusal.
+    "ui_badge_dropped": {"ua": "<br>{n} цитат відкинуто ще до відповіді: їх не знайдено в уривках, "
+                               "на які вони посилалися",
+                         "en": "<br>{n} quotes dropped before the answer: not found in the "
+                               "passages they cited"},
     "ui_badge_cards": {"ua": " (+{n} збіглися тільки з карткою книжки — переказ від моделі, не цитата з книжки)",
                        "en": " (+{n} matched only a book card — a model-written summary, "
                              "not a quote from the book)"},

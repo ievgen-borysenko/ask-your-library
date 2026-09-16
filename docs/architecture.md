@@ -25,7 +25,7 @@ flowchart TB
         PLAN -->|"catalogue<br/>question"| CAT["catalog: list_books over the index tables,<br/>count = length of that list, no search"]:::code
         PLAN -->|"steps left"| ACT["act: search_both, hybrid + RRF,<br/>or read_chapter; sanitized, stable hit ids"]:::code
         PLAN -->|"no query left"| SYN
-        ACT --> OBS["observe: evidence distillate<br/>book, chapter, candidate quote, hit id"]:::ai
+        ACT --> OBS["observe: evidence distillate (book, chapter, candidate quote, hit id),<br/>then the quote gate in plain code: kept, re-pinned or dropped"]:::ai
         OBS --> REF{"reflect:<br/>enough<br/>evidence?"}:::ai
         REF -->|"next query, or a<br/>chapter not read yet"| ACT
         REF -->|"step limit, deadline,<br/>CRAG gate after 2 dry steps,<br/>no usable decision"| SYN["synthesize: answer with<br/>book, chapter citations"]:::ai
@@ -64,7 +64,7 @@ flowchart TD
     P -->|"step budget or question deadline<br/>used up after a clarify /<br/>the planner's own call timed out"| S
     P -->|"catalogue question: count, titles, a title or an author"| K["catalog: the book list read from the index tables,<br/>count = length of that list; no search, no second model call"]:::code
     K --> V
-    A --> O["observe: distill candidate quotes, each pinned to a hit id"]:::ai
+    A --> O["observe: distill candidate quotes, each pinned to a hit id,<br/>then the quote gate: kept, re-pinned or dropped"]:::ai
     O --> R{"reflect"}:::ai
     R -->|"search: next query, steps left"| A
     R -->|"read_chapter: not attempted yet"| A
@@ -87,8 +87,10 @@ unless `EMBED_BACKEND=openrouter` sends it out.
 ```
 question -> the 2-4 English queries the planner is asked for
          -> LanceDB hybrid search (vectors + BM25, RRF)
-         -> observe distills candidate quotes -> synthesize answers with citations
-         -> validate checks every collected evidence quote against the passage it was copied from
+         -> observe distills candidate quotes AND checks each one against the passage it cites:
+            kept, re-pinned to the passage that holds it, or dropped
+         -> synthesize answers with citations, from the evidence that passed
+         -> validate re-runs the same check over that evidence and reports it
 ```
 
 The three Mermaid diagrams in this repository — the one path through the loop on the
@@ -154,6 +156,21 @@ in [`adr/README.md`](adr/README.md), each with the measurement that settled it.
 
 ## Quote provenance (not faithfulness, and not correctness)
 
+**The check runs twice, and the first time is before the answer exists (16.09, #29).** `observe`
+runs it as the evidence gate: a quote confirmed in the passage it cites is kept, one found in
+another passage **of the same book** is **re-pinned** to the passage that holds it (searched book
+before corpus, so that book's own card outranks another work's chapter), one whose only match is a
+book card is kept and pinned to the card, and one that is in no retrieved passage of its step — or
+whose only holder is a different work, where re-pinning would swap a wrong citation for a confident
+one — is **dropped** and never reaches `synthesize`. So the answer is written from evidence that has
+already passed, and `validate` — which still runs last — is the report on it rather than the first
+look at it: on a run made after this, `confirmed == checked_book_text` and `broken == 0` by
+construction. What the gate spent travels with the run as `dropped_unverified` (with
+`dropped_by_reason` splitting it into `no_hit`, `cross_book`, `short` and `not_found`) and
+`repinned`, and every interface shows it. Both run the same
+function over the same passages, so they cannot disagree about one quote. The description below is
+that one check, stated once.
+
 `validate` is plain code, no LLM. Every retrieved passage gets a stable id when it is fetched
 (`s<step>h<n>`), and `observe` must name the id of the passage each quote was copied from; the
 book and section on an evidence item are then taken from that passage's record, never from the
@@ -161,9 +178,11 @@ model's own words. `validate` checks that the WHOLE quote, as a normalized token
 (punctuation and case folded, so honest typographic changes pass while paraphrase fails; signs,
 range dashes and separators inside numbers are kept, with "1,200" and "1.200" treated as the
 same number), is a contiguous whole-token run of the cited passage exactly as the model saw it. Four
-outcomes, a partition of the evidence checked: **confirmed** (found in the cited passage, and that
-passage is the book's own text), **unattributed** (not in the cited passage, but found in another
-retrieved book text - reported, never counted as confirmed), **card_only** (found in no retrieved
+outcomes, a partition of the evidence checked, decided by reading the CITED passage first:
+**confirmed** (found in the cited passage, and that passage is the book's own text),
+**unattributed** (not in the cited passage, but found in another
+retrieved book text - reported, never counted as confirmed), **card_only** (found in the cited
+passage and that passage is a book card, or found in no retrieved
 book text, but found in a **book card**) and **broken** (found in no retrieved passage at all).
 Every evidence item is checked, whether or
 not the answer names its book (an answer may cite "Dracula" for the index key "Dracula — Bram Stoker");

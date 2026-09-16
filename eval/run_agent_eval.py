@@ -336,6 +336,15 @@ def run_one(graph, item: dict, attempt: int = 1) -> dict:
         "steps_taken": result.steps_taken,
         "read_chapters": result.read_chapters,
         "evidence_items": len(result.evidence),
+        # the observe gate (#29): quotes that never reached the answer because
+        # no retrieved passage of their step held them, and quotes re-pinned to
+        # the passage that did. A question that ends with no evidence at all
+        # still carries them, which is often the only account of why it refused
+        "dropped_unverified": result.dropped_unverified,
+        # the same number split by the rule that refused each quote — no_hit,
+        # cross_book, short, not_found — because they call for different fixes
+        "dropped_by_reason": result.dropped_by_reason,
+        "repinned": result.repinned,
         "clarify_asked": result.clarify_asked,
         "clarify_candidates": result.clarify_candidates,
         "clarify_unresolved": result.clarify_unresolved,
@@ -786,6 +795,7 @@ def empty_totals() -> dict:
     return {"run": 0, "errors": 0, "clarify": 0, "checked": 0, "checked_book_text": 0,
             "confirmed": 0, "evidence": 0,
             "unattributed": 0, "broken": 0, "card_only": 0,
+            "dropped_unverified": 0, "dropped_cross_book": 0, "repinned": 0,
             "behavior_ok": 0, "titles_mentioned": 0, "titles_expected": 0,
             "facts_found": 0, "facts_expected": 0, "facts_items": 0, "facts_items_ok": 0,
             "drill_expected": 0, "drill_ok": 0, "cost_usd": 0.0, "llm_calls": 0,
@@ -822,6 +832,17 @@ def render_summary(totals: dict, per_group: dict, repeat: int, attempt_totals: l
                 # with eval/summarize_report.py and docs/eval-results/.
                 + (f"; {totals['card_only']} quotes matched only a book card, "
                    f"not the book text" if totals["card_only"] else "")
+                # The observe gate (#29), on the same rule as the card line: a
+                # run that dropped and re-pinned nothing writes the line it has
+                # always written, which is the byte-compat contract with
+                # eval/summarize_report.py and docs/eval-results/.
+                + (f"; {totals['dropped_unverified']} quotes dropped before the answer "
+                   f"(not in the passage they cited"
+                   + (f", {totals['dropped_cross_book']} of them held only by another book"
+                      if totals["dropped_cross_book"] else "") + ")"
+                   if totals["dropped_unverified"] else "")
+                + (f"; {totals['repinned']} quotes re-pinned to the passage that holds them"
+                   if totals["repinned"] else "")
                 + f"; evidence items {totals['evidence']}\n"
                 + headline
                 + f"; expected titles mentioned {totals['titles_mentioned']}/{totals['titles_expected']}"
@@ -873,6 +894,16 @@ def render_summary(totals: dict, per_group: dict, repeat: int, attempt_totals: l
         # keeps the block it had, and a reader who sees the line knows the run
         # quoted something a model wrote.
         lines.insert(-1, spread_line("quotes matched only a book card", column("card_only")))
+    if any(column("dropped_unverified")) or any(column("repinned")):
+        # Same rule for the observe gate (#29). Both lines together or neither,
+        # so the reader sees the whole of what the gate did at this repeat.
+        lines.insert(-1, spread_line("quotes dropped before the answer",
+                                     column("dropped_unverified")))
+        if any(column("dropped_cross_book")):
+            lines.insert(-1, spread_line("of those, held only by another book",
+                                         column("dropped_cross_book")))
+        lines.insert(-1, spread_line("quotes re-pinned to the passage that holds them",
+                                     column("repinned")))
     if expected["drill_items"]:
         lines.append(spread_line("chapter drill-down", column("drill_ok"),
                                  of=expected["drill_items"]))
@@ -1165,6 +1196,14 @@ def main(argv: list[str] | None = None) -> None:
                 totals["card_only"] += r["provenance"].get("card_only", 0)
                 totals["checked_book_text"] += r["provenance"].get(
                     "checked_book_text", r["provenance"].get("checked", 0))
+                # The gate's own numbers (#29). They are NOT part of `checked`:
+                # a dropped quote never became evidence, so it is not in any
+                # denominator above — it is what the answer was refused. `.get`
+                # defaults to 0, so a record written before the gate reads back
+                # as the run it was, one that dropped nothing.
+                totals["dropped_unverified"] += r.get("dropped_unverified", 0)
+                totals["dropped_cross_book"] += (r.get("dropped_by_reason") or {}).get("cross_book", 0)
+                totals["repinned"] += r.get("repinned", 0)
                 totals["evidence"] += r["evidence_items"]
                 for key in ("cost_usd", "llm_calls", "tokens_in", "tokens_out"):
                     totals[key] += r[key]
@@ -1197,6 +1236,14 @@ def main(argv: list[str] | None = None) -> None:
                     drill += ", clarify reply unresolved"
                 if r.get("plan_fallback"):
                     drill += ", planner fallback (raw question searched)"
+                if r.get("dropped_unverified"):
+                    drill += (f", {r['dropped_unverified']} quotes dropped before the answer "
+                              f"(not in the passage they cited)")
+                if (r.get("dropped_by_reason") or {}).get("cross_book"):
+                    drill += (f", {r['dropped_by_reason']['cross_book']} of them held only by "
+                              f"another book")
+                if r.get("repinned"):
+                    drill += f", {r['repinned']} quotes re-pinned"
                 if r.get("catalog"):
                     drill += (f", catalog {r['catalog']['op']}: {r['catalog']['count']} of {r['catalog']['total']}"
                               + (" — MISROUTED content question" if sc.get("catalog_misroute") else ""))

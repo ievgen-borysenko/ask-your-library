@@ -43,7 +43,7 @@ flowchart TB
     Q(["I remember a book about a man alone on an island…"]):::human
     Q --> P["plan: ask for 2–4 English queries"]:::ai
     P --> A["hybrid search over the books you own<br/>vectors + BM25, fused"]:::code
-    A --> O["observe: distill candidate quotes,<br/>each pinned to the passage it came from"]:::ai
+    A --> O["observe: distill candidate quotes, each pinned to the passage<br/>it came from — then code checks every quote against that passage:<br/>kept, re-pinned to the passage that holds it, or dropped"]:::ai
     O --> R{"enough?"}:::ai
     R -->|"no, steps left"| A
     R -->|"fits several books"| C["ask back: Robinson Crusoe or Gulliver's Travels?"]:::human
@@ -60,7 +60,9 @@ Blue = no answering-model call · orange = a call to the answering model you con
 human in the loop. Search is blue because the search step itself calls no answering model: it is
 plain code apart from embedding your query, which the default runs on your own machine. The
 passages it finds do reach the answering model, one step later, at `observe`. Nothing is verbatim
-until `validate` says so — that is what `validate` is for.
+until code says so, and code says so **before the answer is written**: the same check runs at
+`observe`, where a quote that is in no retrieved passage is dropped instead of becoming evidence, and
+again at `validate`, which reports what the gate let through.
 
 **A book card is not the book, and `validate` has four outcomes because of it.** Some of what a
 search returns is a *book card*: a per-book summary written by one model call when the index was
@@ -113,8 +115,11 @@ out, with your own books, the web UI and the eval commands, in
 - Only `observe` sees retrieved text, sanitized and cut to a budget; the loop sees distilled evidence.
 - A 4-step budget, a CRAG-style stop after 2 dry steps, drill-down, one clarify interrupt per run.
 - Catalogue questions skip retrieval; the count is the length of the list read from the tables (ADR-016).
-- `validate` is plain code: a quote must be a contiguous whole-token run of the passage it names,
-  and it only reports — it never gates or edits the answer, which `synthesize` has already written.
+- The quote check is plain code: a quote must be a contiguous whole-token run of the passage it
+  names. It runs at the `observe` gate, so a quote that is in no retrieved passage never becomes
+  evidence and the answer is written without it; `validate` runs the same check again afterwards and
+  reports it. Neither edits the answer, and neither checks the sentences the answer writes around
+  its evidence.
 
 The whole system, offline and online, and the loop's control flow at the level of the code's own
 routing conditions are drawn node by node, with the decision records behind them, in

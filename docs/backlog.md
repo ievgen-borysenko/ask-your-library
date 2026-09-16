@@ -70,8 +70,16 @@ open ones often refer to them.
   what the library holds, not what the books say. Next: honest marking in the synthesis ("found
   in these N books; no full scan was run") and, separately, a full scan per book as an explicit,
   priced decision.
-- Trust boundary: synthesize consumes evidence before validate runs; a "verifying" state in the
-  UI, or validation before synthesis.
+- ~~Trust boundary: synthesize consumes evidence before validate runs; a "verifying" state in the
+  UI, or validation before synthesis.~~ **Done 2026-09-16 (#29, first half):** the quote check runs
+  at the `observe` gate, so `synthesize` consumes verified evidence only — a broken quote is dropped
+  before the answer, an unattributed one is re-pinned to the passage that holds it, and the
+  post-synthesis check stays as the report (ADR-004, second amendment of 16.09). **The behavioural
+  effect is unmeasured until the next local run:** the paired baseline on three local models is
+  being produced, the gate's own run follows it, and the acceptance is a confirmed ratio of 1.0 by
+  construction, a published drop rate, and behaviour at repeat not below the baseline. Still open
+  from #29: citation by evidence id, checked against the answer's own sentences, and a broken quote
+  failing the evaluation instead of only being counted.
 - Behavioural scoring is heuristic (substring titles, refusal phrase markers); refusal markers are
   loose ("do not have", "доказів") and should be anchored to the library; an LLM judge for answer
   correctness remains future work.

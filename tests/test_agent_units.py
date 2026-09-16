@@ -248,17 +248,33 @@ def test_validate_card_only_is_reported_and_never_read_as_a_green_run():
     assert mixed["provenance"]["checked_book_text"] == 1
 
 
-def test_validate_prefers_the_book_text_when_both_a_card_and_a_chapter_hold_the_quote():
-    """The same sentence in a card and in the chapter is a quote from the book:
-    the card haystack is searched only after the book text has failed."""
+def test_validate_reads_the_cited_passage_first_so_a_quote_taken_from_a_card_is_a_card_match():
+    """A quote the model took from a card, whose words a chapter also holds.
+
+    Until #29 the book text was searched first, so this came back
+    `unattributed` — "not in the cited passage, found in another" — about a
+    quote that IS in the passage it cites. Two reasons it is `card_only` now.
+    It is true: the cited card holds the quote. And it is the only reading the
+    two gates can share — `observe` sees one step, `validate` sees the run, so
+    a card quote from step 1 whose words step 2 retrieves as book text would
+    otherwise get one verdict at the gate and another in the report.
+
+    The cost is stated rather than hidden: where a chapter really does say it
+    too, the count credits the card and not the book. That is the conservative
+    direction, and the conservative direction is the house rule for cards."""
     hits = HITS + [{"hit_id": "s2h1", "step": 2, "book": "Dracula — Bram Stoker",
                     "section": "Summary", "corpus": "cards",
                     "text": "The castle stood on the very edge of a terrible precipice."}]
     p = _validate([_item("s2h1", "The castle stood on the very edge of a terrible precipice.",
                          book="Dracula — Bram Stoker", section="Summary")], hits=hits)["provenance"]
-    # cited the card, but the chapter (s1h2) holds it too: unattributed, not card_only
-    assert (p["unattributed"], p["card_only"], p["confirmed"]) == (1, 0, 0)
-    assert p["items"][0]["source_kind"] == "card"       # the label is still what the reader would open
+    assert (p["card_only"], p["unattributed"], p["confirmed"]) == (1, 0, 0)
+    assert p["items"][0]["source_kind"] == "card"       # the label is what the reader would open
+    # the ordering is about the CITED passage only: a quote cited to a card that
+    # does NOT hold it still looks for the book text, and finds it
+    elsewhere = _validate([_item("s1h3", "The castle stood on the very edge of a terrible precipice.",
+                                 book="Dracula — Bram Stoker", section="Characters")],
+                          hits=hits)["provenance"]
+    assert (elsewhere["unattributed"], elsewhere["card_only"]) == (1, 0)
 
 
 def test_match_span_locates_the_quote_the_check_confirmed_and_nothing_else():
@@ -545,7 +561,9 @@ def test_observe_drops_malformed_evidence_and_pins_the_rest_to_its_hit(monkeypat
         {"hit_id": "s1h1", "book": "Moby Dick", "section": "1", "quote": "Call me Ishmael.", "why": "narrator"},
         {"hit_id": "s1h1", "book": "Dracula"},                      # no quote
         "not even a dict",
-        {"hit_id": "s1h2", "book": "", "quote": "x"},               # empty book: fine, the hit knows it
+        # empty book: fine, the hit knows it. The quote has to be IN the hit
+        # since #29 — the gate checks it here, not only in the report.
+        {"hit_id": "s1h2", "book": "", "quote": "A knight."},
         {"hit_id": "s1h2", "book": "Ivanhoe", "quote": "A knight.", "why": None},
         {"book": "Ivanhoe", "quote": "No hit id at all."},          # strict mode: dropped
         {"hit_id": "s9h9", "book": "Ivanhoe", "quote": "Unknown hit id."},   # dropped
@@ -573,16 +591,35 @@ def test_observe_non_strict_resolves_a_missing_hit_id_by_the_quote(monkeypatch):
 
     monkeypatch.setattr(provenance, "HIT_ID_STRICT", False)
     monkeypatch.setattr(llm, "ask_json", lambda system, user, role: {"evidence": [
-        {"book": "whatever", "quote": "A knight.", "why": "w"},          # found in s1h2
-        {"book": "whatever", "quote": "Not in any hit.", "why": "w"},    # dropped
+        # The model's own `book` is the one thing narrowing the search, so it is
+        # resolved canonically — "Ivanhoe" is "Ivanhoe — Walter Scott" here as it
+        # is in the catalogue — and the quote must sit in exactly one passage of
+        # exactly that book.
+        {"book": "Ivanhoe", "quote": "A knight of the shire.", "why": "w"},    # found in s1h2
+        {"book": "Ivanhoe", "quote": "Not in any hit.", "why": "w"},           # dropped
+        # A name that matches no retrieved book is not a citation, and the quote
+        # must NOT go hunting through the window for one: dropped, where the old
+        # rule pinned it to whatever else happened to hold the words.
+        {"book": "whatever", "quote": "A knight of the shire.", "why": "w"},   # dropped
+        # A quote with no hit id is not confirming a citation, it is looking for
+        # one, so it answers to the same floor a re-pin does: three words match
+        # somewhere in almost any library, and a match that short is a
+        # coincidence, not a provenance.
+        {"book": "Ivanhoe", "quote": "A knight", "why": "w"},                  # dropped: too short
     ]})
     llm.reset_usage()
     state = {"question": "q", "current_query": "cq", "empty_streak": 0, "evidence": [],
-             "hits": [{"hit_id": "s1h1", "corpus": "transcripts", "book": "A", "section": "1", "text": "Call me Ishmael."},
-                      {"hit_id": "s1h2", "corpus": "cards", "book": "B", "section": "S", "text": "A knight."}]}
+             "hits": [{"hit_id": "s1h1", "corpus": "transcripts", "book": "Moby Dick — Herman Melville",
+                       "section": "1", "text": "Call me Ishmael."},
+                      {"hit_id": "s1h2", "corpus": "cards", "book": "Ivanhoe — Walter Scott",
+                       "section": "S", "text": "A knight of the shire."}]}
     result = nodes.observe(state)
-    assert [(e["hit_id"], e["book"]) for e in result["evidence"]] == [("s1h2", "B")]
-    assert llm.usage_snapshot()["evidence_dropped_no_hit"] == 1
+    assert [(e["hit_id"], e["book"]) for e in result["evidence"]] == [
+        ("s1h2", "Ivanhoe — Walter Scott")]
+    assert llm.usage_snapshot()["evidence_dropped_no_hit"] == 3
+    # every refusal is in the headline number, under the rule that made it
+    assert result["dropped_unverified"] == 3
+    assert result["dropped_by_reason"] == {"no_hit": 2, "cross_book": 0, "short": 1, "not_found": 0}
 
 
 def test_reflect_treats_schema_less_read_chapter_as_enough(monkeypatch):
@@ -1189,8 +1226,10 @@ def test_valid_evidence_drops_a_non_list_container_instead_of_crashing():
 
     hits = [{"hit_id": "s1h1", "book": "B — A", "section": "S", "text": "the quote"}]
     for bad in (42, "none", {"hit_id": "s1h1"}, None):
-        assert _valid_evidence(bad, hits) == []
-    assert _valid_evidence([42, "x", None, {"hit_id": "s1h1", "quote": "the quote", "why": "w"}], hits)[0]["quote"] == "the quote"
+        assert _valid_evidence(bad, hits).evidence == []
+    kept = _valid_evidence([42, "x", None, {"hit_id": "s1h1", "quote": "the quote", "why": "w"}], hits)
+    assert kept.evidence[0]["quote"] == "the quote"
+    assert (kept.repinned, kept.dropped_unverified) == (0, 0)
 
 # ---------------------------------------------------------------- ADR-013 coverage gate
 def _hit(hit_id, book, step=1):
@@ -1857,6 +1896,182 @@ def test_validate_reports_every_item_with_its_verdict_in_evidence_order():
                              "status": "confirmed", "source_kind": "book_text"}
     assert p["items"][2]["quote"] == "Not anywhere."          # the full quote, not the 120-char preview of broken_items
     assert nodes.validate({"evidence": [], "answer": "", "hits_log": []})["provenance"]["items"] == []
+
+
+def test_the_observe_gate_and_the_report_read_a_quote_the_same_way():
+    """#29 factored the check into one function (`classify_quote`) over one
+    index of the run's passages, and both gates call it. What the entry gate
+    keeps, the report confirms; what it drops is exactly what the report would
+    have called broken. Two readings of the same quote — one at the gate, one in
+    the badge — is the drift this pair exists to prevent, which is why the
+    invariant below (`confirmed == checked_book_text`, `broken == 0`) can be
+    asserted at all."""
+    from ask_your_library import provenance
+
+    hits = [{"hit_id": "s1h1", "corpus": "transcripts", "book": "B — A", "section": "1",
+             "text": "Call me _Ishmael_, and never mind how long precisely."},
+            {"hit_id": "s1h2", "corpus": "cards", "book": "B — A", "section": "Summary",
+             "text": "A sailor joins a whaling ship."}]
+    quotes = ["Call me Ishmael",                    # italics markup: the normalizer sees through it
+              "A sailor joins a whaling ship.",     # the card, cited as the chapter: re-pinned
+              "never mind how long",
+              "Ishmael was a lawyer."]              # in no retrieved passage: dropped
+    gate = provenance._valid_evidence(
+        [{"hit_id": "s1h1", "book": "whatever", "quote": q, "why": "w"} for q in quotes], hits)
+    assert [e["quote"] for e in gate.evidence] == quotes[:3]
+    assert (gate.dropped_unverified, gate.repinned) == (1, 1)
+    assert [e["hit_id"] for e in gate.evidence] == ["s1h1", "s1h2", "s1h1"]
+
+    report = provenance.validate({"answer": "B", "evidence": gate.evidence,
+                                  "hits_log": [{**h, "step": 1} for h in hits]})["provenance"]
+    assert report["broken"] == 0 and report["confirmed"] == report["checked_book_text"] == 2
+    assert (report["checked"], report["card_only"]) == (3, 1)
+
+
+MOBY_KEY = "Moby Dick — Herman Melville"
+GULLIVER_KEY = "Gulliver's Travels — Jonathan Swift"
+STRAY = "the little unregarded corner of the world"
+
+
+def _gate_hit(hit_id, book, section, text, corpus="transcripts"):
+    return {"hit_id": hit_id, "corpus": corpus, "book": book, "section": section, "text": text}
+
+
+def test_a_quote_is_re_pinned_inside_its_book_and_the_nearest_section_wins():
+    """Which passage a re-pin picks is not a detail: the book on an evidence
+    item IS the book the answer cites. Picking the first holder in retrieval
+    order picked across books, so a quote cited to one work came back attributed
+    to another — a wrong citation replaced by a confident wrong citation. The
+    cited hit's own book wins, and inside it the cited hit's own section."""
+    from ask_your_library import provenance
+
+    hits = [_gate_hit("s1h1", GULLIVER_KEY, "Chapter 1", f"and {STRAY} besides"),   # first, wrong book
+            _gate_hit("s1h2", MOBY_KEY, "Chapter 1", "Call me Ishmael."),           # cited, no match
+            _gate_hit("s1h3", MOBY_KEY, "Chapter 9", f"so {STRAY} lay open"),
+            _gate_hit("s1h4", MOBY_KEY, "Chapter 1", f"now {STRAY} again")]
+    gate = provenance._valid_evidence([{"hit_id": "s1h2", "quote": STRAY, "why": "w"}], hits)
+    kept = gate.evidence[0]
+    assert (kept["hit_id"], kept["book"], kept["section"]) == ("s1h4", MOBY_KEY, "Chapter 1")
+    assert (gate.repinned, gate.dropped_unverified, gate.dropped_cross_book) == (1, 0, 0)
+    # without a same-section holder the same book still wins over retrieval order
+    no_section = provenance._valid_evidence([{"hit_id": "s1h2", "quote": STRAY, "why": "w"}],
+                                            hits[:3])
+    assert no_section.evidence[0]["hit_id"] == "s1h3"
+
+
+def test_a_quote_held_only_by_another_book_is_dropped_and_never_re_pinned():
+    """The cross-book re-pin is refused, not performed: moving a quote to a
+    different work would hand the reader a confident attribution to a book the
+    question never asked about. It is counted inside `dropped_unverified`, with
+    `dropped_cross_book` saying how many drops were of this kind."""
+    from ask_your_library import provenance
+
+    hits = [_gate_hit("s1h1", GULLIVER_KEY, "Chapter 1", f"and {STRAY} besides"),
+            _gate_hit("s1h2", MOBY_KEY, "Chapter 1", "Call me Ishmael.")]
+    gate = provenance._valid_evidence([{"hit_id": "s1h2", "quote": STRAY, "why": "w"}], hits)
+    assert gate.evidence == []
+    assert (gate.dropped_unverified, gate.dropped_cross_book, gate.repinned) == (1, 1, 0)
+
+    # The REPORT is unchanged by this: it drops nothing and re-pins nothing, so
+    # the same item, checked after the fact, is still reported `unattributed`.
+    report = provenance.validate({"answer": MOBY_KEY, "hits_log": [{**h, "step": 1} for h in hits],
+                                  "evidence": [{"hit_id": "s1h2", "book": MOBY_KEY,
+                                                "section": "Chapter 1", "quote": STRAY}]})
+    assert report["provenance"]["unattributed"] == 1 and report["provenance"]["broken"] == 0
+
+
+def test_a_quote_too_short_to_re_pin_is_dropped_rather_than_moved():
+    """Re-pinning is the one place the check writes a citation instead of only
+    accepting or refusing one, and three words are inside almost any book. Below
+    MIN_REPIN_TOKENS the match is a coincidence: the item is dropped. A quote
+    that IS in the passage it cited is never measured against this — nothing is
+    being invented there."""
+    from ask_your_library import provenance
+
+    hits = [_gate_hit("s1h1", MOBY_KEY, "Chapter 1", "Call me Ishmael."),
+            _gate_hit("s1h2", MOBY_KEY, "Chapter 9", "and the sea was calm that day")]
+    short = provenance._valid_evidence([{"hit_id": "s1h1", "quote": "the sea was", "why": "w"}], hits)
+    assert short.evidence == []
+    assert (short.dropped_unverified, short.dropped_cross_book, short.repinned) == (1, 0, 0)
+    long_enough = provenance._valid_evidence(
+        [{"hit_id": "s1h1", "quote": "and the sea was calm", "why": "w"}], hits)
+    assert long_enough.evidence[0]["hit_id"] == "s1h2" and long_enough.repinned == 1
+    # three words in the passage the model actually cited: kept, as before
+    at_home = provenance._valid_evidence([{"hit_id": "s1h1", "quote": "Call me Ishmael", "why": "w"}], hits)
+    assert at_home.evidence[0]["hit_id"] == "s1h1" and at_home.dropped_unverified == 0
+
+
+def test_a_card_of_the_cited_book_outranks_a_chapter_of_another_one():
+    """The search runs book before corpus. It used to run corpus before book —
+    every book-text passage of the window before any card — so a transcript of
+    an unrelated work outranked the cited book's OWN card, and the gate then
+    dropped as cross-book an item whose own book held the quote one passage
+    away. Valid same-book evidence lost to a coincidence in another novel."""
+    from ask_your_library import provenance
+
+    said = "a whale of uncommon magnitude and malice"
+    hits = [_gate_hit("s1h1", GULLIVER_KEY, "Chapter 1", f"they spoke of {said} that night"),
+            _gate_hit("s1h2", MOBY_KEY, "Chapter 1", "Call me Ishmael."),          # cited, no match
+            _gate_hit("s1h3", MOBY_KEY, "Summary", f"the book is about {said}", corpus="cards")]
+    gate = provenance._valid_evidence([{"hit_id": "s1h2", "quote": said, "why": "w"}], hits)
+    kept = gate.evidence[0]
+    assert (kept["hit_id"], kept["book"]) == ("s1h3", MOBY_KEY)
+    assert (gate.repinned, gate.dropped_unverified) == (1, 0)
+    # and with the cited book's card gone, the other book's chapter is good only
+    # for classifying the drop — never for receiving the quote
+    without = provenance._valid_evidence([{"hit_id": "s1h2", "quote": said, "why": "w"}], hits[:2])
+    assert without.evidence == [] and without.by_reason["cross_book"] == 1
+
+
+def test_every_gate_refusal_is_in_the_headline_number_and_under_a_reason(monkeypatch):
+    """A rejection for a missing or unknown hit id used to increment only the
+    usage counter, so `dropped_unverified` — the number the badge, the report
+    and the sidecar show a reader — undercounted what the answer had been
+    refused. All four rules report to one number now, and the breakdown sums to
+    it: one quote that did not reach the answer is one quote that did not reach
+    the answer, whichever rule stopped it."""
+    from ask_your_library import provenance
+
+    monkeypatch.setattr(provenance, "HIT_ID_STRICT", True)
+    hits = [_gate_hit("s1h1", MOBY_KEY, "Chapter 1", "Call me Ishmael."),
+            _gate_hit("s1h2", MOBY_KEY, "Chapter 9", "and the sea was calm that day"),
+            _gate_hit("s1h3", GULLIVER_KEY, "Chapter 1", "I felt something alive moving on my left leg")]
+    llm.reset_usage()
+    gate = provenance._valid_evidence([
+        {"hit_id": "s9h9", "quote": "Call me Ishmael and so on", "why": "w"},        # no_hit
+        {"hit_id": "s1h1", "quote": "I felt something alive moving", "why": "w"},    # cross_book
+        {"hit_id": "s1h1", "quote": "the sea was", "why": "w"},                      # short
+        {"hit_id": "s1h1", "quote": "Ishmael was a lawyer in Boston", "why": "w"},   # not_found
+    ], hits)
+    assert gate.evidence == [] and gate.dropped_unverified == 4
+    assert gate.by_reason == {"no_hit": 1, "cross_book": 1, "short": 1, "not_found": 1}
+    assert sum(gate.by_reason.values()) == gate.dropped_unverified
+    # the usage counter keeps the meaning it has always had: items with no
+    # resolvable hit id, which is now one reason of four and not the only record
+    assert llm.usage_snapshot()["evidence_dropped_no_hit"] == 1
+
+
+def test_a_card_quote_stays_a_card_quote_when_a_later_step_retrieves_the_same_words():
+    """The gate sees one step, `validate` sees the whole run — so the two could
+    disagree about one quote: taken from a book card in step 1, whose words step
+    2 then retrieves as the book's own text, it was `card_only` at the gate and
+    `unattributed` in the report, and `confirmed == checked_book_text` was not
+    an invariant at all. Both read the cited passage first now: it holds the
+    quote, it is a card, and that is the verdict either of them gives."""
+    from ask_your_library import provenance
+
+    said = "Captain Ahab hunts the white whale that took his leg"
+    card = _gate_hit("s1h1", MOBY_KEY, "Summary", f"{said}.", corpus="cards")
+    chapter = _gate_hit("s2h1", MOBY_KEY, "Chapter 2", f"{said}, and says so aloud.")
+    gate = provenance._valid_evidence([{"hit_id": "s1h1", "quote": said, "why": "w"}], [card])
+    assert [e["hit_id"] for e in gate.evidence] == ["s1h1"]
+    assert (gate.dropped_unverified, gate.repinned) == (0, 0)
+
+    report = provenance.validate({"answer": MOBY_KEY, "evidence": gate.evidence,
+                                  "hits_log": [{**card, "step": 1}, {**chapter, "step": 2}]})["provenance"]
+    assert report["items"][0]["status"] == "card_only"
+    assert (report["card_only"], report["unattributed"], report["broken"]) == (1, 0, 0)
+    assert report["confirmed"] == report["checked_book_text"] == 0       # the invariant, on a run of two steps
 
 
 def test_plan_treats_a_non_list_queries_container_as_no_plan(monkeypatch):

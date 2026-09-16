@@ -428,10 +428,17 @@ def verification_badge(update: dict) -> str:
 
     unused = numbers.get("unused", 0)
     unused_note = t("ui_badge_unused", n=unused) if unused else ""
+    # What the observe gate refused to let into the answer (#29). Its own line
+    # rather than a parenthesis: it is not a qualifier on the count above, it is
+    # a fact about quotes that are not in the count at all — and on a run where
+    # everything was dropped there is no count above to qualify. Absent when
+    # nothing was dropped, and absent from a record written before the gate.
+    dropped = numbers.get("dropped_unverified", 0)
+    dropped_note = t("ui_badge_dropped", n=dropped) if dropped else ""
 
     return (f'<div title="{tooltip}" style="border-left: 4px solid {color}; '
             f'background: {color}1a; padding: 8px 12px; border-radius: 4px;">'
-            f'<b>{title}</b><br>{headline}{card_note}{unused_note}{details}</div>')
+            f'<b>{title}</b><br>{headline}{card_note}{unused_note}{dropped_note}{details}</div>')
 
 
 class RunView:
