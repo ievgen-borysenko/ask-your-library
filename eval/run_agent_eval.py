@@ -321,7 +321,12 @@ def run_one(graph, item: dict, attempt: int = 1) -> dict:
                           on_event=on_event, on_clarify=on_clarify,
                           scratchpad_name=f"scratch-{item['id']}{suffix}.md")
     if result.failure is not None:
-        raise result.failure.error or RuntimeError(str(result.failure))
+        # `is not None`, not truthiness: an exception class may define __bool__
+        # or __len__, and a falsy one would be replaced here by a stand-in that
+        # is not the error that happened.
+        if result.failure.error is not None:
+            raise result.failure.error
+        raise RuntimeError(str(result.failure))
     record = {
         "id": item["id"], "type": item["type"],
         "question": item["question"],

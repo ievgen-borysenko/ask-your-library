@@ -406,6 +406,36 @@ def test_a_state_the_graph_cannot_produce_is_an_error_row_not_an_empty_answer(mo
         harness.run_one(NoStateGraph(), item)
 
 
+def test_the_exception_re_raised_is_the_one_that_happened(monkeypatch, tmp_path):
+    """run_one re-raises the runner's failure so that main() writes the ERROR
+    row. An exception class is free to define __bool__ — a falsy one must still
+    be re-raised as ITSELF, or the report names a stand-in for an error nobody
+    got."""
+    import pytest
+
+    class FalsyError(RuntimeError):
+        def __bool__(self):
+            return False
+
+    raised = FalsyError("the index is gone")
+
+    class BrokenGraph:
+        checkpointer = None
+
+        def stream(self, run_input, config):
+            raise raised
+            yield  # pragma: no cover - makes stream a generator
+
+        def get_state(self, config):
+            raise RuntimeError("no state")
+
+    monkeypatch.setattr(harness, "RESULTS_DIR", tmp_path)
+    item = {"id": "x", "type": "answer", "question": "q", "expected_books": ["Dracula"]}
+    with pytest.raises(FalsyError) as caught:
+        harness.run_one(BrokenGraph(), item)
+    assert caught.value is raised
+
+
 def test_the_report_row_and_line_carry_the_planner_fallback(monkeypatch, tmp_path):
     """A planner that never produced a plan completes as an ordinary row since
     0.2; the eval must still show it (that is how a local model is judged)."""

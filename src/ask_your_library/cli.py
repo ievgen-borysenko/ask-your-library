@@ -270,8 +270,12 @@ def main(argv: list[str] | None = None) -> None:
         # Single-question mode is what scripts and evals call: a failed run has
         # to be visible in the exit code, not only in the message _run printed.
         # (The interactive loop keeps going instead — a bad question there is
-        # not a failed session.)
-        if not _run(graph, question, history=[], deadline_s=args.deadline).answer:
+        # not a failed session.) `ok` is asked FIRST and separately from the
+        # answer: a run that died after synthesize carries the text it had
+        # written, and a caller that reads exit 0 would take that half-finished
+        # answer for a complete one.
+        result = _run(graph, question, history=[], deadline_s=args.deadline)
+        if not result.ok or not result.answer:
             raise SystemExit(1)
         return
 
@@ -286,7 +290,11 @@ def main(argv: list[str] | None = None) -> None:
             break
 
         result = _run(graph, question, history, deadline_s=args.deadline)
-        if not result.answer:
+        if not result.ok or not result.answer:
+            # The session goes on, the memory does not take it: an answer from a
+            # run that failed is whatever had been written when it died, and the
+            # next planner and synthesize prompt would read it as a turn that
+            # happened. The failure was already printed by _run.
             continue
         # Conversation memory: the question plus a truncated answer; a catalogue
         # answer only as its shape, never the list of titles.

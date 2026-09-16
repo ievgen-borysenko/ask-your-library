@@ -22,7 +22,10 @@
   comes back on the result as an exception class plus a message with this machine's paths replaced
   by `~` or `<repo>` (one rule now, `ask_your_library/paths.py`, instead of a copy in the runner and
   another in the harness). The CLI prints the same one-line error it always did and still exits 1 in
-  single-question mode; the eval harness re-raises it so the ERROR row and its "spent before the
+  single-question mode — and it asks whether the run succeeded before it accepts the answer at all,
+  because a run that died after `synthesize` carries the text it had written and neither an exit
+  code nor the conversation memory may take that for a finished turn; the eval harness re-raises the
+  exception that happened (identity, not a stand-in) so the ERROR row and its "spent before the
   error" are what they were. Two edges of that come with it: delivering the metrics event cannot
   change what the run reports — a consumer that raises while being handed it (the web UI renders
   inside that callback) is recorded on the result as `metrics_failure` and never propagates — and a

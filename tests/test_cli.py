@@ -146,6 +146,36 @@ def test_a_run_that_reports_its_failure_on_the_result_still_exits_non_zero(
     assert "RuntimeError: no checkpoint" in err and "Traceback" not in err
 
 
+def test_a_salvaged_answer_from_a_failed_run_is_not_taken_for_an_answer(
+        a_working_environment, monkeypatch, capsys):
+    """A run can die after synthesize has written something: the result then
+    carries BOTH a failure and text. Single-question mode must still exit 1 —
+    a script that reads exit 0 would publish a half-finished answer — and the
+    interactive loop must not put that text into the conversation memory, where
+    the next planner and synthesize prompt would read it as a turn that
+    happened."""
+    from ask_your_library.runner import RunFailure, RunResult
+    from ask_your_library.runner import history_entry as real_history_entry
+
+    half = RunResult(question="q", answer="partial",
+                     failure=RunFailure(type="RuntimeError", message="the index went away"))
+    monkeypatch.setattr(cli, "run_question", lambda *a, **k: half)
+    monkeypatch.delenv("ASK_DEBUG", raising=False)
+
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main(["a", "question"])
+    assert exit_info.value.code == 1
+    assert "RuntimeError: the index went away" in capsys.readouterr().err
+
+    remembered = []
+    monkeypatch.setattr(cli, "history_entry",
+                        lambda *a, **k: remembered.append(a) or real_history_entry(*a, **k))
+    answers = iter(["a question", "exit"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+    cli.main([])
+    assert remembered == []            # the session goes on; its memory does not take it
+
+
 def test_deadline_flag_is_an_integer_of_seconds_and_optional():
     args = cli.build_parser().parse_args(["--deadline", "45", "what", "happened"])
     assert args.deadline == 45 and " ".join(args.question) == "what happened"
