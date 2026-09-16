@@ -94,20 +94,24 @@ def test_the_interactive_loop_checks_the_environment_once_before_it_starts(
 
 
 def test_a_failed_single_question_exits_non_zero(a_working_environment, monkeypatch):
-    """_run() reports the failure and returns "": scripts and evals must see
-    that in the exit code too, not only in the message."""
-    monkeypatch.setattr(cli, "_run", lambda *a, **k: "")
+    """_run() reports the failure and comes back with no answer: scripts and
+    evals must see that in the exit code too, not only in the message."""
+    from ask_your_library.runner import RunResult
+    monkeypatch.setattr(cli, "_run", lambda *a, **k: RunResult(question="q"))
     with pytest.raises(SystemExit) as exit_info:
         cli.main(["what", "did", "X", "say"])
     assert exit_info.value.code == 1
 
-    monkeypatch.setattr(cli, "_run", lambda *a, **k: "an answer")
+    monkeypatch.setattr(cli, "_run", lambda *a, **k: RunResult(question="q", answer="an answer"))
     assert cli.main(["what", "did", "X", "say"]) is None            # a good run still exits 0
 
 
 def test_a_failing_run_is_reported_without_a_traceback(a_working_environment, monkeypatch, capsys):
-    """The single-question exit code comes from _run() returning "" — which is
-    what _run does with any exception unless ASK_DEBUG is set."""
+    """The single-question exit code comes from _run() coming back with no
+    answer — which is what _run does with any exception unless ASK_DEBUG is
+    set. A failure INSIDE the run arrives on the result instead (the runner
+    keeps the metrics of what it spent); this is the other half: anything
+    raised around the run, the scratchpad included."""
     def explode(*_args, **_kwargs):
         raise RuntimeError("no index")
     monkeypatch.setattr(cli, "run_question", explode)
@@ -166,7 +170,6 @@ def test_the_catalog_event_prints_the_listing_and_keeps_only_its_shape(capsys, m
     stripped from the answer as from any other passage the CLI prints."""
     from ask_your_library.i18n import t
     from ask_your_library.runner import history_entry
-    monkeypatch.setitem(cli.RUN, "catalog", None)
     listing = {"op": "list", "count": 2, "total": 2, "query": "", "resolved": True,
                "books": ["Moby Dick — Herman Melville", "My Private Notes — Unknown"]}
     answer = ("2 books in your library:\n- Moby Dick — Herman Melville\n"
@@ -175,8 +178,9 @@ def test_the_catalog_event_prints_the_listing_and_keeps_only_its_shape(capsys, m
     out = capsys.readouterr().out
     assert t("ev_catalog", op="list", n=2, total=2) in out
     assert "Moby Dick — Herman Melville" in out and "\x1b" not in out
-    assert cli.RUN["catalog"] == listing
-    entry = history_entry("what are my books called?", answer, cli.RUN["catalog"])
+    # the listing the conversation memory is built from comes back on the run's
+    # result (runner.RunResult.catalog), not out of the rendering of this event
+    entry = history_entry("what are my books called?", answer, listing)
     assert "Moby Dick" not in entry and "My Private" not in entry
     assert entry == "Q: what are my books called?\nA: " + t(
         "history_catalog", op="list", n=2, total=2, q="-", found=t("history_yes"))
@@ -311,11 +315,13 @@ def test_each_question_starts_with_no_passages(monkeypatch):
     cli.RUN["passages"]["stale"] = "old text"
     seen = {}
 
+    from ask_your_library.runner import RunResult
+
     def fake_run_question(graph, question, history, scratch_dir, on_event, on_clarify, deadline_s=None):
         seen["passages_at_start"] = dict(cli.RUN["passages"])
-        return "answer"
+        return RunResult(question=question, answer="answer")
     monkeypatch.setattr(cli, "run_question", fake_run_question)
-    assert cli._run(None, "q", []) == "answer" and seen["passages_at_start"] == {}
+    assert cli._run(None, "q", []).answer == "answer" and seen["passages_at_start"] == {}
 
 
 def test_verbose_flag_parses():

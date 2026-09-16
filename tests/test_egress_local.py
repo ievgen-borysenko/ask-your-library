@@ -496,10 +496,14 @@ except BaseException as error:
 
 with tempfile.TemporaryDirectory() as scratch:
     try:
-        answer = run_question(build_graph(), "Who narrates Moby Dick?", [], Path(scratch),
+        # A failure inside the run comes back ON the result (the runner keeps the
+        # metrics of what it spent); anything raised around it still raises here.
+        result = run_question(build_graph(), "Who narrates Moby Dick?", [], Path(scratch),
                               on_event=lambda name, update: None,
                               on_clarify=lambda question: "")
-        report["run"] = {"raised": "", "answer": answer[:200]}
+        report["run"] = {"raised": result.failure.type if result.failure else "",
+                         "message": result.failure.message[:300] if result.failure else "",
+                         "answer": result.answer[:200]}
     except BaseException as error:
         report["run"] = {"raised": type(error).__name__, "message": str(error)[:300]}
 """
