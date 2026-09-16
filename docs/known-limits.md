@@ -64,6 +64,26 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   `qwen2.5:14b` throughout and the catalogue half of both combined rows describe the prompt as it
   stood in Runs 1-6. Measure your own model before trusting it:
   `LLM_BACKEND=ollama uv run eval/run_agent_eval.py`.
+- **A local model's context window is Ollama's business, and a large default is a trap.** This
+  project cannot set `num_ctx`: the local backend uses Ollama's OpenAI-compatible `/v1` endpoint,
+  where an `options` block is accepted and ignored. A model pulled with a 128k default window is
+  loaded at that size — `mistral-small3.2:24b` on an M3 Pro / 36 GB took about 36 GB with roughly
+  28 % offloaded to the CPU — and the failure it produces is not an out-of-memory error but a
+  question deadline expiring inside a single model call (603 input tokens, 1,201 s, `plan 192.2,
+  observe 1005.4`). A derived model at `num_ctx 20480` ran the same eleven questions in 73–399 s
+  each. Set the window explicitly for any non-`qwen` default before measuring it
+  ([Configuration](configuration.md)); measured 2026-09-16
+  ([`eval-results/2026-09-16-local-models-repeat3.md`](eval-results/2026-09-16-local-models-repeat3.md)).
+- **A repeated local run measures latency, not behaviour.** At `temperature=0` the three local
+  models of 2026-09-16 returned the same answers three times over: across 189 item-attempts no
+  per-question behaviour verdict and no `facts_ok` moved, `qwen2.5:32b` was byte-identical on every
+  item of both golden sets, `qwen2.5:14b` varied on one item of 21 and `mistral-small3.2:24b-ctx20k`
+  on four (0.5 % of tokens in, 0.8 % of tokens out). What did vary is time — 30–196 s per question
+  on the shipped default for identical answers, with `observe` 70–76 % of all model seconds and
+  2–3× slower on a cold first attempt than on the two after it. So `--repeat N` locally buys a
+  latency distribution and almost no behavioural information, and **a spread on the behaviour rows
+  still has to be measured on a hosted run**, where the provider samples. Three attempts on one
+  machine; a zero spread over three samples is not proof of determinism.
 - **"Nothing leaves the machine" is tested for one process on one path, not for your machine.**
   `tests/test_egress_local.py` records every outbound connection attempt the application's own
   Python process makes — through CPython's socket audit events, which cover every socket whatever

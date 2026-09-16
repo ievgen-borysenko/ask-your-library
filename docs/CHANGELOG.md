@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+- **The first measurement with a spread, and the baseline the evidence gate will be read against.**
+  `docs/eval-results/2026-09-16-local-models-repeat3.md`, with the six planner recordings the runs
+  wrote (`eval/recordings/`, committed).
+
+  Three local models — `qwen2.5:14b`, `qwen2.5:32b` and a `mistral-small3.2:24b` derived at
+  `num_ctx 20480` — against both golden sets at `--repeat 3 --record-plans --clarify-pick second`,
+  on `169b511`, which is the merge of `#64` and therefore **before** the evidence gate. Six runs,
+  6 h 21 min on one M3 Pro. `en-demo`: 9/11, 9/11, 11/11. `en-demo-catalog`: 10/10 on all three.
+
+  **The repeat measured latency, not behaviour.** No per-question verdict moved on any of
+  189 item-attempts, and `qwen2.5:32b` returned byte-identical answers on every item of both sets;
+  `qwen2.5:14b` varied on one item of 21, the derived mistral on four, by under 1 % of tokens. Wall
+  clock did vary — 30–196 s per question on the shipped default for answers that never changed —
+  with `observe` 70–76 % of all model seconds and 2–3× slower on a cold first attempt. A spread on
+  the behaviour rows therefore has to come from a hosted run; `docs/backlog.md` carries that as the
+  next measurement.
+
+  Four more results worth the entry. Card-only matches are 20–30 % of checked quotes on the research
+  set and up to two thirds on the catalogue set, countable for the first time since `#64` — every
+  report published before 16.09 counted them inside `confirmed`. The mistral derivative has the best
+  behaviour and the worst quote fidelity (8–9 broken quotes an attempt against 2 and 1), which is
+  the case the evidence gate exists for, and the report states what the gate's own run must show
+  against each of these rows. `qwen2.5:32b` adds no passes over `qwen2.5:14b` — it wins `c09` and
+  loses `c04` — at 2.6× the wall clock. And `mistral-small3.2:24b` as pulled could not be measured
+  at all: Ollama loads it at `num_ctx 131072`, a single plan call hit the 1,200 s question deadline,
+  and only a derived model with an explicit window ran. `docs/configuration.md` and
+  `docs/known-limits.md` now say so, since the local backend's `/v1` endpoint gives this project no
+  way to set the window itself.
+
+  Correctness is ungraded, on purpose: the manual-correctness checkboxes in all six harness reports
+  are unticked.
+
 - **Quotes are checked before the answer is written, not after it.** #29, step 2 of the sequencing
   in the system design review of 16.09.
 

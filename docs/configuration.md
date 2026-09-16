@@ -92,6 +92,19 @@ uv run --extra ui chainlit run ui.py -w --host 127.0.0.1   # the UI's key gate i
 command names a backend, because the local one is the default; `LLM_BACKEND=openrouter` is how
 you leave it.
 
+**Set `num_ctx` yourself for any model whose default context window is large.** Ollama decides the
+context length, not this project: the local backend speaks to it through the OpenAI-compatible
+`/v1` endpoint, where an `options` block is accepted and ignored, so there is no context size to
+configure here. A model that defaults to 128k — `mistral-small3.2:24b` does — is loaded at that size
+and can need tens of gigabytes of weights plus KV cache, spill onto the CPU, and take minutes per
+call; what you see then is a question deadline running out inside a model call, not an out-of-memory
+error. Fix it before measuring anything: derive a model with an explicit window
+(`printf 'FROM mistral-small3.2:24b\nPARAMETER num_ctx 20480\n' | ollama create
+mistral-small3.2:24b-ctx20k -f -`) and point `OLLAMA_LLM_MODEL` at that, or set
+`OLLAMA_CONTEXT_LENGTH` on the Ollama server. The shipped default `qwen2.5:14b` needs none of this.
+Measured on 2026-09-16
+([`eval-results/2026-09-16-local-models-repeat3.md`](eval-results/2026-09-16-local-models-repeat3.md)).
+
 `OLLAMA_LLM_MODEL` picks the model; preflight fails early if it is not pulled (a model pulled as
 `name:latest` counts as `name`), and so does `OLLAMA_EMBED_MODEL` whenever embeddings are local —
 otherwise a reachable Ollama without `bge-m3` passes every check and fails on the first search.

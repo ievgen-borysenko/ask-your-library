@@ -313,8 +313,19 @@ open ones often refer to them.
   says which kind of run it was (`N attempts per item` vs `single run`), and `answers-<ts>.json`
   is the machine-readable record beside the Markdown: the fingerprint as fields, every attempt
   with its answer and its `score()` dict. A run at `--repeat 1` writes the Markdown byte for byte
-  as before. Failures are published alongside the numbers, as they already were. Not done: no
-  repeated run has been made, so no published number carries a spread yet.
+  as before. Failures are published alongside the numbers, as they already were. **Measured
+  16.09**: three local models against both golden sets at `--repeat 3 --record-plans
+  --clarify-pick second` on `169b511`
+  (`docs/eval-results/2026-09-16-local-models-repeat3.md`), so published numbers carry a spread now
+  — and the spread on the behaviour rows is **zero**. No per-question verdict moved on any of
+  189 item-attempts; `qwen2.5:32b` was byte-identical on every item of both sets. What the repeat
+  measured is latency (30–196 s per question for identical answers on the shipped default).
+- **A hosted run for behaviour spread.** Next, and the reason the row above is not fully closed: at
+  `temperature=0` a local model answers the same way every time, so `--repeat` cannot tell a stable
+  9/11 from a lucky one on that backend. The question needs a provider that samples —
+  `LLM_BACKEND=openrouter`, the core set at `--repeat 3` or more, `--require-clean`, on the user's
+  explicit go and inside a named budget. Until then every published behaviour verdict is a single
+  behavioural sample however many attempts produced it.
 - ADR-012: `SEARCH_HIT_CHARS` is a config knob, default raised 1,200 -> 2,500 after measuring
   1,200 / 2,500 / 4,000 on the core set (c03 complete at 2,500 and 4,000; c06 is not a window
   problem, the answering passage is never in the window).

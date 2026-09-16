@@ -6,12 +6,16 @@ same table without this text around it.
 Every run reported **on this page** was produced on the **hosted** configuration
 (`LLM_BACKEND=openrouter`, `anthropic/claude-sonnet-4.6`), which is not the shipped default: the
 default is local and free, a different answering model and therefore a different system, and no
-number on this page describes it. [`eval-results/`](eval-results/) is not hosted-only, and the two
+number on this page describes it. [`eval-results/`](eval-results/) is not hosted-only, and the three
 local reports there say so in their own provenance headers:
 [`2026-09-10-local-models.md`](eval-results/2026-09-10-local-models.md), two `qwen2.5` sizes on
-`LLM_BACKEND=ollama`, and
+`LLM_BACKEND=ollama`;
 [`2026-09-10-first-question-local.md`](eval-results/2026-09-10-first-question-local.md), one local
-CLI run. Neither feeds the table below. The rule that separates the two kinds at a glance is the
+CLI run; and
+[`2026-09-16-local-models-repeat3.md`](eval-results/2026-09-16-local-models-repeat3.md), three local
+models against both golden sets at `--repeat 3` — the first runs here to carry a spread, to publish
+the facts row and the card-only split on real numbers, and to commit their planner recordings. None
+of the three feeds the table below. The rule that separates the two kinds at a glance is the
 cost line: a hosted run carries the configured rates `$3.0/M in, $15.0/M out`, a local one `$0.0/M
 in, $0.0/M out`. From this release the harness fingerprint also names the backend outright — `model
 <name> via <backend>` — but every report committed before it prints `model <name>` alone, so for
@@ -241,8 +245,18 @@ limits and why the reports state the count of runs in their fingerprints. From t
 a choice rather than a missing capability - `uv run eval/run_agent_eval.py --repeat 5` reports
 every row as "how many attempts of 5 passed" with min / median / max cost and seconds, and the
 fingerprint of such a run reads `5 attempts per item` instead of `single run`, so the two kinds
-cannot be confused. No repeated run has been made yet: nothing below has been re-measured, and the
-numbers in the tables are what they always were.
+cannot be confused. The first repeated runs were made on 2026-09-16 and are published with their
+spread: three local models against both golden sets at `--repeat 3 --record-plans --clarify-pick
+second`, on `169b511` — the merge of `#64`, before the evidence gate
+([`eval-results/2026-09-16-local-models-repeat3.md`](eval-results/2026-09-16-local-models-repeat3.md)).
+That report is where `--repeat`, the facts row and the card-only split are shown on real numbers
+rather than described, and it is the paired baseline the gate's own run is to be read against.
+**Its first finding is about the instrument, not the models**: at `temperature=0` the local backend
+returned the same answers three times over — no per-question behaviour verdict moved on any of
+189 item-attempts, `qwen2.5:32b` was byte-identical on every item of both sets, and the only things
+that varied were seconds. So `--repeat` on a local model measures a latency distribution; **the
+behaviour spread it was built for has to be measured on a hosted run**, where the provider samples.
+Nothing in the tables below has been re-measured, and the numbers in them are what they always were.
 
 Two measured trees, both single runs, clean tree (`--require-clean`), strict hit-id mode, the same
 bge-m3 index: **v0.1.0**, 2026-09-05 on code `88881ee` (the last code commit before tag `v0.1.0`;
@@ -410,8 +424,16 @@ nobody ran.
 The mechanism is proved on fixture recordings (`tests/test_plan_recording.py`,
 `tests/test_plan_replay.py`, with the synthetic pair under `tests/fixtures/`), including that a
 replay makes **no network attempt at all** under the process-level egress guard.
-**No recording of a real golden set has been made yet**, so nothing on this page was produced this
-way; the first one will be made by the next paid run of the core set with `--record-plans`.
+The first recordings of real golden sets were made on 2026-09-16 and are committed: six files under
+[`eval/recordings/`](../eval/recordings/), both sets against all three local models of
+[`eval-results/2026-09-16-local-models-repeat3.md`](eval-results/2026-09-16-local-models-repeat3.md)
+(`en-demo.edc151948a58.*` and `en-demo-catalog.72eb2c2b2655.*`, 30 to 39 plan calls each, three
+attempts per item). Nothing on this page was produced by replaying them yet — they are the input a
+replayed number will be attributable to. One thing those runs settled about the recorder itself:
+a run cannot be both `--record-plans` and `--require-clean` as the code stands, because the
+recording lands in a committed directory and the fingerprint hashes un-ignored untracked files, so
+each run in a batch is stamped dirty by its predecessor's recording (the checksums are read in that
+report's header).
 
 ## Where the measured code lives
 
