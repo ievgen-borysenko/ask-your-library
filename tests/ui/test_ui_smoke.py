@@ -368,7 +368,12 @@ def walk_through_the_release_check(page, chainlit_server) -> None:
     expect(starters).to_contain_text("Count my library", timeout=RENDER_MS)
     expect(starters).to_contain_text("A question between two books", timeout=RENDER_MS)
     expect(starters).to_contain_text("Ask what the shelf cannot answer", timeout=RENDER_MS)
-    expect(body(page)).to_contain_text("Ask Your Library", timeout=RENDER_MS)   # chainlit.md above them
+    # chainlit.md is NOT on this screen: Chainlit 2.12 puts it behind the header's
+    # "Readme" button, so the starters are the whole of what a first-time reader
+    # sees without clicking. This asserts that, because it is the thing that
+    # decides how much the four labels have to carry.
+    expect(page.get_by_role("button", name="Readme")).to_be_visible(timeout=RENDER_MS)
+    expect(body(page)).not_to_contain_text("counts the quotes traced", timeout=RENDER_MS)
 
     # --- a research question: the live steps, then the answer. The step labels
     # are the product's own words, not "Used act #1": the name ui.py writes is

@@ -30,9 +30,11 @@
   count, a question between two books of the shelf, one the shelf cannot answer — built from the
   index that is actually loaded, so a clone with its own books gets its own first screen and an
   empty index gets no starters at all. The welcome message went with them, because it was what hid
-  the screen: Chainlit draws its welcome screen (this project's `chainlit.md`, and the starters
-  under it) only while the thread holds no message. A failed preflight still writes its message
-  instead.
+  the screen: Chainlit draws its welcome screen only while the thread holds no message. `chainlit.md`
+  is not on that screen either — 2.12 puts it behind the header's "Readme" button — so the four
+  starter labels are the whole of what a first-time reader is shown, and `chainlit.md` was rewritten
+  anyway, because it is what the Readme button opens and it described the badge of an older
+  release. A failed preflight still writes its message instead.
 
   Three smaller things in the same interface. The matched run is marked inside the passage
   (`provenance.match_span`, the same normalization the check uses, the chunk joiner a barrier), so

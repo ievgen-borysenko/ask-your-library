@@ -5,10 +5,12 @@
 Login: env CHAINLIT_USERNAME / CHAINLIT_PASSWORD (defaults admin / change-me;
 override them for anything beyond local use).
 
-First screen: chainlit.md, and under it four starters built from the index that
-is loaded (@cl.set_starters, starter_questions). It is Chainlit's welcome
-screen, drawn only while the thread holds no message, so nothing is sent into an
-empty chat except what a broken environment has to say.
+First screen: four starters built from the index that is loaded
+(@cl.set_starters, starter_questions). It is Chainlit's welcome screen, drawn
+only while the thread holds no message, so nothing is sent into an empty chat
+except what a broken environment has to say. chainlit.md is NOT on that screen —
+Chainlit 2.12 puts it behind the header's "Readme" button — so the four starter
+labels are the whole of what a first-time reader gets without clicking.
 
 Language switch: chat profile at the top of the chat (English / Ukrainian).
 Language is a property of the conversation, not the process: picking a profile
@@ -763,7 +765,9 @@ async def chat_starters(user=None, language=None) -> list:
     a reader arriving at it had no way of knowing which question exercises the
     loop (design critique 16.09 §1.2). Chainlit only draws it while the thread
     has no message at all, which is why `on_chat_start` no longer sends a
-    welcome line — the welcome text lives in `chainlit.md`, above these.
+    welcome line. It does not draw `chainlit.md` there either — that is behind
+    the header's "Readme" button — so these four labels are the only thing a
+    first-time reader is shown, and each one has to say what it will do.
 
     Reading the index is blocking work (LanceDB) in an HTTP handler, so it runs
     in a thread. An index that cannot be read is not an error here: the reader

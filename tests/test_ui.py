@@ -968,8 +968,8 @@ def test_a_notice_keeps_its_list_and_is_the_only_thing_sent(ui, monkeypatch):
 
 def test_a_healthy_chat_start_sends_nothing_into_the_chat(ui, monkeypatch):
     """Chainlit draws its welcome screen only while the thread has no message,
-    so a first screen that teaches (chainlit.md plus the four starters) costs
-    exactly one thing: not writing a welcome message over it."""
+    so the four starters cost exactly one thing: not writing a welcome message
+    over them."""
     assert _chat_start(ui, monkeypatch) == []
 
 
