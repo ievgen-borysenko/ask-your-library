@@ -1,10 +1,10 @@
 """The release check of the web UI, in a browser, as a test.
 
 Until now this path was walked by hand before every release (docs/backlog.md,
-"Release status"): first start, login, a question, the live agent steps, the
-quote-provenance badge, an evidence passage readable in the browser, the
-catalogue answer, a reload that restores the conversation, and a clarify nobody
-answers. That is what this file does, against a real `chainlit run ui.py
+"Release status"): first start, login, the starters on the empty chat screen, a
+question, the live agent steps, the quote-provenance badge, an evidence passage
+readable in the browser, the catalogue answer, a reload that restores the
+conversation, and a clarify nobody answers. That is what this file does, against a real `chainlit run ui.py
 --headless` — the real server, the real graph, the real rendering — with the
 model and the index replaced by `scripted_backend.py` (see
 `ask_your_library.fake_backend`). Nothing here needs Ollama, a key or an index,
@@ -357,10 +357,17 @@ def walk_through_the_release_check(page, chainlit_server) -> None:
     expect(page.locator("input#email")).to_be_visible(timeout=LOAD_MS)
     expect(page.locator(COMPOSER)).to_have_count(0)        # no chat before a login
 
-    # --- login
+    # --- login, and the first screen: four starters built from the scripted
+    # backend's own five-book catalogue, not from a hardcoded shelf. They are
+    # Chainlit's welcome screen, which it draws only while the thread holds no
+    # message — so this also asserts that nothing is sent into an empty chat.
     log_in(page, chainlit_server)
-    expect(body(page)).to_contain_text("Ask Your Library — ask about your library",
-                                       timeout=RENDER_MS)
+    starters = page.locator("#starters")
+    expect(starters).to_be_visible(timeout=RENDER_MS)
+    expect(starters).to_contain_text("Count my library", timeout=RENDER_MS)
+    expect(starters).to_contain_text("A question between two books", timeout=RENDER_MS)
+    expect(starters).to_contain_text("Ask what the shelf cannot answer", timeout=RENDER_MS)
+    expect(body(page)).to_contain_text("Ask Your Library", timeout=RENDER_MS)   # chainlit.md above them
 
     # --- a research question: the live steps, then the answer
     ask(page, RESEARCH_QUESTION)

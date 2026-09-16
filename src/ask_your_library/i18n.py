@@ -384,15 +384,24 @@ _T = {
     "m_session": {"ua": "  сесія разом: {q} питань, ~${cost:.4f}",
                   "en": "  session total: {q} questions, ~${cost:.4f}"},
 
-    # ---- web ui: chat header, agent-step trace, and metrics footer
-    "ui_welcome": {
-        "ua": "Ask Your Library — питай про свою бібліотеку. Кроки агента "
-              "(plan / act / observe / reflect, або catalog, коли питання про склад "
-              "бібліотеки) розгортаються над відповіддю.",
-        "en": "Ask Your Library — ask about your library. Agent steps "
-              "(plan / act / observe / reflect, or catalog for a question about what "
-              "the library holds) expand above the answer.",
+    # ---- web ui: the four starters on the empty chat screen. Three of them
+    # name no book and read the same on any shelf; the ask-back one is a
+    # template over two titles the loaded index really holds (ui.starter_questions).
+    "starter_identify_label": {"ua": "Впізнати книжку за описом", "en": "Name a book from a description"},
+    "starter_identify": {
+        "ua": "Пригадую книжку про людину далеко від дому, яка не могла повернутись. Що це за книжка?",
+        "en": "I remember a book about someone far from home who could not get back. Which one is it?",
     },
+    "starter_catalog_label": {"ua": "Порахувати бібліотеку", "en": "Count my library"},
+    "starter_catalog": {"ua": "Скільки в мене книжок?", "en": "How many books do I have?"},
+    "starter_clarify_label": {"ua": "Питання між двома книжками", "en": "A question between two books"},
+    "starter_clarify": {"ua": "Чим воно закінчується — у «{a}» чи в «{b}»?",
+                        "en": "How does it end — in {a}, or in {b}?"},
+    "starter_refusal_label": {"ua": "Спитати те, чого на полиці немає",
+                              "en": "Ask what the shelf cannot answer"},
+    "starter_refusal": {"ua": "Що мої книжки кажуть про новини минулого тижня?",
+                        "en": "What do my books say about the news from last week?"},
+    # ---- web ui: agent-step trace and metrics footer
     "ui_mode": {"ua": "режим: {mode}", "en": "mode: {mode}"},
     "ui_plan_catalog": {"ua": "режим: catalog, операція: {op}", "en": "mode: catalog, operation: {op}"},
     "ui_catalog_fallback_invalid_op": {"ua": "планер назвав операцію каталогу, якої нема: шукаю в текстах",

@@ -90,7 +90,8 @@ not.
 characters, takeaways) as a second corpus, and generating one costs an LLM call per book, so
 `ayl-add` does not make them — `--cards` prints that and exits. An index without a
 `cards_<backend>` table is fully supported: the agent searches full text only and says so — the
-preflight reports it as a notice (not an error) at CLI start-up and in the web chat welcome, and `library.search` logs it once
+preflight reports it as a notice (not an error) at CLI start-up and as the first message of a web
+chat, and `library.search` logs it once
 per process. Answers are still cited and quote-checked; broad "what is this book about" questions
 are simply weaker without cards.
 

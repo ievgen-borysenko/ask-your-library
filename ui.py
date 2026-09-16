@@ -5,6 +5,11 @@
 Login: env CHAINLIT_USERNAME / CHAINLIT_PASSWORD (defaults admin / change-me;
 override them for anything beyond local use).
 
+First screen: chainlit.md, and under it four starters built from the index that
+is loaded (@cl.set_starters, starter_questions). It is Chainlit's welcome
+screen, drawn only while the thread holds no message, so nothing is sent into an
+empty chat except what a broken environment has to say.
+
 Language switch: chat profile at the top of the chat (English / Ukrainian).
 Language is a property of the conversation, not the process: picking a profile
 starts a new chat, and resumed threads keep the language they were created
@@ -22,10 +27,12 @@ checked at startup (before anyone can log in); the rest is checked per session,
 because a login page for a server that cannot answer anything is worse than a
 refusal in the terminal.
 """
+import asyncio
 import functools
 import hmac
 import html
 import json
+import logging
 import os
 import re
 import secrets
@@ -51,8 +58,9 @@ from ask_your_library.fake_backend import install_fake_backend
 # anything, and the module below is the module that always ran.
 install_fake_backend()
 
+from ask_your_library import nodes                                  # noqa: E402
 from ask_your_library.graph import build_graph                      # noqa: E402
-from ask_your_library.i18n import LANG, set_lang, status_word, t    # noqa: E402
+from ask_your_library.i18n import LANG, get_lang, set_lang, status_word, t  # noqa: E402
 from ask_your_library.preflight import check_api_key, check_environment  # noqa: E402
 from ask_your_library.runner import failed_result, history_entry, run_question  # noqa: E402
 from ask_your_library.sanitize import LINE_BREAK_RE                 # noqa: E402
@@ -123,6 +131,8 @@ CLARIFY_TIMEOUT_SECONDS = _clarify_timeout_seconds()
 GREEN = "#16a34a"
 YELLOW = "#ca8a04"
 GRAY = "#6b7280"
+
+log = logging.getLogger("ask_your_library.ui")
 
 # Registered on Chainlit's own Starlette app, at import time: the middleware
 # stack is built when the server starts, and adding one afterwards is too late.
@@ -640,6 +650,89 @@ async def chat_profiles():
     ]
 
 
+# --- starters: the first screen ---------------------------------------------
+def starter_language(interface_language: str | None) -> str:
+    """The language the four starter questions are written in.
+
+    `set_starters` is answered by an HTTP endpoint (`/project/settings`) before
+    a chat session exists, so the chat profile that carries the session language
+    has not been picked yet and `cl.user_session` is not this request's. Chainlit
+    hands over the INTERFACE language instead ("en-US", "uk-UA"); anything this
+    project does not speak falls back to the process default."""
+    tag = (interface_language or "").lower()
+    if tag.startswith("uk"):
+        return "ua"
+    if tag.startswith("en"):
+        return "en"
+    return LANG
+
+
+def starter_questions(books: list) -> list[tuple[str, str]]:
+    """(label, question) for the four behaviours the README claims — identify,
+    the catalogue, the ask-back, and an honest refusal — written FROM THE INDEX
+    that is actually loaded rather than from a hardcoded shelf, so a clone with
+    its own books gets its own first screen (and so does the second index of
+    #58). Three of the four name no book at all and are the same question on any
+    shelf; the ask-back one is a template over two titles the catalogue holds.
+
+    An empty index gets no starters: a first screen offering questions about
+    books nobody has is worse than an empty one. A shelf of one gets three — the
+    ask-back question needs two books to sit between."""
+    if not books:
+        return []
+    rows = [(t("starter_identify_label"), t("starter_identify")),
+            (t("starter_catalog_label"), t("starter_catalog"))]
+    # Books with text first: a catalogue-only entry (a card and no transcript)
+    # has no passage for the loop to quote, which is the wrong book to send a
+    # reader's first question at.
+    with_text = [book for book in books if getattr(book, "has_text", True)]
+    pair = (with_text if len(with_text) >= 2 else books)[:2]
+    if len(pair) == 2:
+        first, second = pair
+        # Two books of the same title are told apart by their index key, which
+        # is what the ask-back would offer the reader anyway.
+        names = ((first.key, second.key) if first.title == second.title
+                 else (first.title, second.title))
+        rows.append((t("starter_clarify_label"), t("starter_clarify", a=names[0], b=names[1])))
+    rows.append((t("starter_refusal_label"), t("starter_refusal")))
+    return rows
+
+
+@cl.set_starters
+async def chat_starters(user=None, language=None) -> list:
+    """The four questions on the empty chat screen.
+
+    The screen used to be one sentence naming four node names and then nothing:
+    a reader arriving at it had no way of knowing which question exercises the
+    loop (design critique 16.09 §1.2). Chainlit only draws it while the thread
+    has no message at all, which is why `on_chat_start` no longer sends a
+    welcome line — the welcome text lives in `chainlit.md`, above these.
+
+    Reading the index is blocking work (LanceDB) in an HTTP handler, so it runs
+    in a thread. An index that cannot be read is not an error here: the reader
+    gets the empty screen they would have got anyway, and the preflight in
+    `on_chat_start` is what tells them what is wrong."""
+    previous = get_lang()
+    set_lang(starter_language(language))
+    try:
+        try:
+            books = await asyncio.to_thread(nodes.list_books)
+        except Exception as error:
+            log.warning("no starters: the catalogue could not be read (%s: %s)",
+                        type(error).__name__, error)
+            books = []
+        # Titles are index metadata, i.e. data. They are the label of a button
+        # and the text of a message the reader sends, never HTML: Chainlit
+        # renders both as text, and nothing here builds markup around them.
+        return [cl.Starter(label=label, message=question)
+                for label, question in starter_questions(books)]
+    finally:
+        # The questions are formatted before the language goes back: this
+        # coroutine has its own context copy, but the restore keeps the process
+        # default honest for anything sharing it.
+        set_lang(previous)
+
+
 def session_lang(chat_profile: str | None) -> str:
     """Session language from the chat profile name, falling back to the
     process default (ASK_LANG) when no profile is set."""
@@ -677,7 +770,13 @@ async def on_chat_start() -> None:
     if notices:
         text = t("pf_notice_header") + "\n" + "\n".join(f"- {n}" for n in notices)
         await cl.Message(content=safe_markdown(text)).send()
-    await cl.Message(content=t("ui_welcome")).send()
+    # No welcome MESSAGE any more. Chainlit draws its welcome screen — this
+    # project's chainlit.md, and under it the four starters — only while the
+    # thread holds no message at all, so the one sentence that used to be sent
+    # here was the thing that stopped the first screen from teaching anything
+    # (design critique 16.09 §1.2). A session whose preflight failed returns
+    # above and keeps its message: a reader whose environment is broken should
+    # read why, not be offered four questions it cannot answer.
 
 
 @cl.on_chat_resume
@@ -709,7 +808,10 @@ async def on_chat_resume(thread) -> None:
         if step.get("type") == "user_message":
             last_question = step_output
         elif step.get("type") == "assistant_message":
-            # badges/metrics (HTML) and the welcome message are not agent answers
+            # badges/metrics (HTML) are not agent answers, and neither is the
+            # welcome line threads created before 2026-09-16 still carry (it is
+            # not sent any more: the welcome screen and its starters need an
+            # empty thread to be drawn at all)
             if step_output.startswith("<div") or step_output.startswith("Ask Your Library —"):
                 continue
             if last_question:

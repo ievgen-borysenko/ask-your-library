@@ -776,6 +776,73 @@ def test_the_login_cookie_is_really_strict_under_chainlit_run(tmp_path):
     assert "SameSite=strict" in header and "Secure" not in header and "HttpOnly" in header
 
 
+# --- the starters on the empty chat screen -------------------------------------
+
+def _books(*keys):
+    from ask_your_library.library import BookEntry, author_of, title_of
+    return [BookEntry(key, title_of(key), author_of(key), True, True) for key in keys]
+
+
+def _starters(ui, monkeypatch, books, language="en-US"):
+    from ask_your_library import nodes
+    monkeypatch.setattr(nodes, "list_books", lambda: books)
+    monkeypatch.setattr(ui.cl, "Starter", lambda label, message: (label, message))
+    return asyncio.run(ui.chat_starters(None, language))
+
+
+def test_four_starters_come_from_the_index_that_is_loaded(ui, monkeypatch):
+    """The first screen used to teach nothing. It now offers the four
+    behaviours the README claims — identify, catalogue, ask-back, refusal — and
+    the ask-back one is written from the catalogue, so a clone with its own
+    books (or the second index of #58) gets its own question rather than two
+    titles this repository hardcoded."""
+    starters = _starters(ui, monkeypatch,
+                         _books("Dracula — Bram Stoker", "Frankenstein — Mary Shelley"))
+    assert len(starters) == 4
+    questions = [message for _, message in starters]
+    assert "How many books do I have?" in questions
+    assert "How does it end — in Dracula, or in Frankenstein?" in questions
+    # the identify and refusal questions name no book at all: they read the same
+    # on any shelf, which is what lets them survive a change of index
+    identify, refusal = questions[0], questions[3]
+    for question in (identify, refusal):
+        assert "Dracula" not in question and "Frankenstein" not in question
+
+
+def test_an_empty_index_gets_no_starters_and_one_book_gets_no_ask_back(ui, monkeypatch):
+    """A first screen offering questions about books nobody has is worse than an
+    empty one; and the ask-back question needs two books to sit between."""
+    assert _starters(ui, monkeypatch, []) == []
+    one = _starters(ui, monkeypatch, _books("Dracula — Bram Stoker"))
+    assert len(one) == 3 and all("or in" not in message for _, message in one)
+
+
+def test_an_unreadable_catalogue_is_an_empty_first_screen_not_a_failed_request(ui, monkeypatch):
+    """No index yet is the normal state of a fresh clone. The reader gets the
+    screen they would have got anyway, and `on_chat_start`'s preflight is what
+    tells them what is wrong."""
+    from ask_your_library import nodes
+    monkeypatch.setattr(nodes, "list_books", lambda: (_ for _ in ()).throw(RuntimeError("no index")))
+    monkeypatch.setattr(ui.cl, "Starter", lambda label, message: (label, message))
+    assert asyncio.run(ui.chat_starters(None, "en-US")) == []
+
+
+def test_the_starters_follow_the_interface_language_not_the_process_default(ui, monkeypatch):
+    """`set_starters` is answered before a chat session exists, so the chat
+    profile that carries the session language has not been picked yet: Chainlit
+    hands over the interface language instead, and the process default is left
+    as it was found."""
+    from ask_your_library.i18n import get_lang
+
+    before = get_lang()
+    ukrainian = _starters(ui, monkeypatch, _books("Dracula — Bram Stoker",
+                                                  "Frankenstein — Mary Shelley"),
+                          language="uk-UA")
+    assert "Скільки в мене книжок?" in [message for _, message in ukrainian]
+    assert get_lang() == before
+    assert ui.starter_language("fr-FR") == ui.LANG        # a language this project does not speak
+
+
 # --- on_chat_start: plain-markdown messages, and the db siblings ---------------
 
 def _chat_start(ui, monkeypatch, problems=(), notices=()) -> list[str]:
@@ -820,10 +887,21 @@ def test_the_preflight_message_is_still_a_markdown_list(ui, monkeypatch):
     assert "[image removed]" in sent[0] and "y.png" not in sent[0]
 
 
-def test_a_notice_keeps_its_list_too_and_the_welcome_still_follows(ui, monkeypatch):
+def test_a_notice_keeps_its_list_and_is_the_only_thing_sent(ui, monkeypatch):
+    """A non-fatal notice is still a markdown list. It is also the ONLY message
+    a healthy-enough chat start sends: the welcome line that used to follow it
+    was what kept Chainlit's welcome screen — and the starters on it — from
+    being drawn at all."""
     sent = _chat_start(ui, monkeypatch, notices=["the cards table is missing"])
-    assert len(sent) == 2 and "<br>" not in sent[0]
+    assert len(sent) == 1 and "<br>" not in sent[0]
     assert sent[0].endswith("\n- the cards table is missing")
+
+
+def test_a_healthy_chat_start_sends_nothing_into_the_chat(ui, monkeypatch):
+    """Chainlit draws its welcome screen only while the thread has no message,
+    so a first screen that teaches (chainlit.md plus the four starters) costs
+    exactly one thing: not writing a welcome message over it."""
+    assert _chat_start(ui, monkeypatch) == []
 
 
 def test_a_chat_start_narrows_the_journal_siblings_too(ui, monkeypatch, tmp_path):
