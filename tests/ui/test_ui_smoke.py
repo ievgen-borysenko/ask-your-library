@@ -91,7 +91,7 @@ if _PROBLEM:
             f"{REQUIRED_VAR}=1, so this file must RUN, and it cannot: {_PROBLEM}")
     pytest.skip(_PROBLEM, allow_module_level=True)
 
-from playwright.sync_api import expect, sync_playwright   # noqa: E402  (after the skip)
+from playwright.sync_api import Error as PlaywrightError, expect, sync_playwright  # noqa: E402
 
 
 @pytest.fixture
@@ -137,6 +137,9 @@ CANDIDATES = "Candidates in the library"
 METRICS_SUMMARY = "run details"
 
 COMPOSER = "textarea#chat-input"
+# The thread list inside the sidebar. Its presence is how the test knows the
+# drawer is open at phone width, where the sidebar is a modal.
+THREAD_HISTORY = "#thread-history"
 
 
 # --- the server under test ---------------------------------------------------
@@ -300,6 +303,38 @@ def ask(page, question: str) -> None:
     expect(body(page)).to_contain_text(question, timeout=RENDER_MS)
 
 
+def thread_link_in_the_drawer(page) -> str:
+    """The href of this conversation's entry in the thread list, or "" while
+    there is not one to read.
+
+    At 390 px the thread history is a modal drawer: `#thread-history` is not in
+    the DOM at all until the sidebar toggle is pressed, and a re-render can take
+    it away again. That is how a link `count()` had just seen timed out thirty
+    seconds later inside `get_attribute` — three times on this branch, phone leg
+    only, never on the desktop one.
+
+    So: the toggle is pressed only when the list is absent, because it is a
+    TOGGLE and a second press closes the drawer the first one opened; and the
+    read is allowed to fail, because a detached link is something to look up
+    again on the next poll, not something to wait thirty seconds for. Nothing
+    here waits: the caller owns the deadline.
+    """
+    if not page.locator(THREAD_HISTORY).count():
+        toggle = page.locator("#sidebar-trigger-button")
+        if not toggle.count() or not toggle.is_visible():
+            return ""
+        toggle.click(timeout=RENDER_MS)
+        page.wait_for_timeout(250)          # the drawer animates in
+        return ""                           # read it on the next poll, once it has settled
+    link = page.locator("a[href*='/thread/']").first
+    if not link.count():
+        return ""                           # the drawer is open and the thread is not in it yet
+    try:
+        return link.get_attribute("href", timeout=2_000) or ""
+    except PlaywrightError:
+        return ""                           # the list re-rendered under the read; try again
+
+
 def thread_address(page, timeout_ms: int) -> str:
     """The address this conversation lives at — what a reload has to be a
     reload OF, since reloading "/" opens a new chat instead of restoring it.
@@ -307,21 +342,16 @@ def thread_address(page, timeout_ms: int) -> str:
     Two shapes, and the difference is the phone trap: in a wide window Chainlit
     moves the browser onto /thread/<id> itself, a beat after the answer renders
     (a history push inside the running app, polled rather than awaited as a
-    navigation). At 390 px the thread history is off-canvas and is not in the
-    DOM at all until the sidebar toggle is pressed, and the address is only ever
-    a link inside it.
+    navigation). At 390 px it never does, and the address is only ever a link
+    inside the off-canvas drawer — see thread_link_in_the_drawer.
     """
-    if "/thread/" not in page.url:
-        toggle = page.locator("#sidebar-trigger-button")
-        expect(toggle).to_be_visible(timeout=RENDER_MS)
-        toggle.click(timeout=RENDER_MS)
     deadline = time.monotonic() + timeout_ms / 1000
     while time.monotonic() < deadline:
         if "/thread/" in page.url:
             return page.url
-        link = page.locator("a[href*='/thread/']").first
-        if link.count():
-            return urljoin(page.url, link.get_attribute("href"))
+        href = thread_link_in_the_drawer(page)
+        if href:
+            return urljoin(page.url, href)
         page.wait_for_timeout(250)
     raise AssertionError(f"the conversation never got an address of its own: {page.url}")
 
