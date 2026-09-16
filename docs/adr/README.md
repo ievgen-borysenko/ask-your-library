@@ -117,12 +117,33 @@ answer is written; the post-synthesis check stays as the report (#29).** Until t
 `validate` was the last node of the graph, so a quote in no retrieved passage reached the reader
 inside the answer and was counted underneath it — a warning about a sentence the reader had already
 read. The same check now runs inside `_valid_evidence`, at the `observe` gate, over the step's own
-passages cut exactly as the prompt cut them: **confirmed** is kept, **unattributed** is re-pinned to
-the passage that holds the quote (so the citation stops naming the wrong one), **card_only** is kept
-and pinned to the card and stays outside every traced count, and **broken** is dropped and never
-reaches `synthesize`. Two counters travel with the run — `dropped_unverified` and `repinned` —
-through the `observe` event, `RunResult`, the provenance report, the badge, the CLI line and the
-harness.
+passages cut exactly as the prompt cut them: **confirmed** is kept, **card_only** is kept and stays
+outside every traced count, **unattributed** is re-pinned to the passage that holds the quote (so
+the citation stops naming the wrong one), and **broken** is dropped and never reaches `synthesize`.
+Counters travel with the run — `dropped_unverified`, `repinned`, and `dropped_cross_book` inside the
+first — through the `observe` event, `RunResult`, the provenance report, the badge, the CLI line and
+the harness.
+
+**A re-pin may correct a citation; it may not write a new one.** Two limits, both because the book
+on an evidence item is the book the ANSWER cites. A quote is re-pinned only inside the cited hit's
+own book — the same book's nearest section first, then the rest of that book — and a quote whose
+only holder belongs to another work is **dropped**, counted in `dropped_unverified` and again in
+`dropped_cross_book`. Moving it would have replaced a wrong citation with a confident wrong
+citation, which is worse than refusing it, and picking the first holder in retrieval order did
+exactly that. The second limit is length: a quote that has to FIND its passage must be at least
+`MIN_REPIN_TOKENS` (4) normalized words, because "the sea" or "he said" is inside almost any book
+and a match that short is a coincidence, not a provenance. A quote that is in the passage it cited
+is never measured against either limit; nothing is being invented there.
+
+**The cited passage is read before the rest of the run, and that changed one verdict.** A quote
+inside the book card it cites is `card_only`, even where a chapter also holds those words; before
+#29 the book text was searched first and such an item came back `unattributed` — "not in the cited
+passage, found in another" — about a quote that *is* in the passage it cites. It is now true, and it
+is the only reading the two gates can share: the gate sees one step and `validate` sees the run, so
+a card quote from step 1 whose words step 2 retrieves as book text would otherwise get one verdict
+at the gate and another in the report. The cost is stated rather than hidden — where a chapter does
+say it too, the count credits the card and not the book, which is the conservative direction and the
+house rule for cards.
 
 The two gates run **one** function over one index of the run's passages (`classify_quote`,
 `passage_index`), and `validate`'s own classification was rewritten onto it. That is the decision,
@@ -136,20 +157,39 @@ and stated in the same words as before: the quotations the ANSWER writes are not
 nothing checks them. #29's second half — citation by evidence id, checked against the answer's
 sentences — is not built.
 
-The cost is one normalization pass per step instead of one per run, on a loop whose cheapest node is
-about seven seconds, and no model call. The risk was never cost: it was **control flow**, and the
-system design review of 16.09 §3(a) is the only document that named it. A step whose every item is
-dropped would have become a dry step, and two dry steps end a run at the CRAG gate — #29 would have
-improved provenance by shortening the search. The owner's decision of the same day settles it and
-the code implements it: "dropped" is counted apart and is never a dry step. Such a step neither
-advances the empty streak (its passages *were* retrieved, so the library is not silent on the
-question) nor resets it (it proved nothing about the library either); the loop goes on to the next
-query, and `reflect` is told how many quotes were dropped, in a line added to its context only when
-there is one to add. No new stop reason was needed, because a dropped step never ends the loop by
-that rule; when the loop ends by another one the reason names that rule and the counters say what
-the gate spent, the honest refusal included. **Not measured yet:** the acceptance is a confirmed
-ratio of 1.0 by construction on evidence, a published drop rate, and behaviour at `--repeat` not
-below the baseline being produced on the three local models. Nothing here was re-run against it.
+The arithmetic costs one normalization pass per step instead of one per run, on a loop whose
+cheapest node is about seven seconds, and no model call. The risk was never that: it was **control
+flow**, and the system design review of 16.09 §3(a) is the only document that named it. A step whose
+every item is dropped would have become a dry step, and two dry steps end a run at the CRAG gate —
+#29 would have improved provenance by shortening the search. The owner's decision of the same day
+settles it and the code implements it: "dropped" is counted apart and is never a dry step. Such a
+step neither advances the empty streak (its passages *were* retrieved, so the library is not silent
+on the question) nor resets it (it proved nothing about the library either); the loop goes on to the
+next query, and `reflect` is told how many quotes were dropped, in a line added to its context only
+when there is one to add. No new stop reason was needed, because a dropped step never ends the loop
+by that rule; when the loop ends by another one the reason names that rule and the counters say what
+the gate spent, the honest refusal included.
+
+**What the hold decision really costs, said as a number.** A model that quotes badly is no longer
+stopped after two steps. Where the CRAG gate used to end such a run at step 2, it now runs to
+`MAX_STEPS` (4), and every extra step is a search plus an `observe` call plus a `reflect` call — on
+the local default, roughly the difference between a question of five model calls and one of nine.
+That is the price of not shortening the search, paid exactly by the runs that produce the least, and
+it is the reason the acceptance below is about behaviour at repeat and not only about the quote
+counts.
+
+**A second coupling, not decided here: the coverage gate (ADR-013).** `coverage._uncovered_books` is
+the hits of the run minus the books the *evidence* names, so evidence the gate thinned makes a book
+look uncovered and the one probe of a run fires where it would not have before. That is arguably
+right — a book whose only quotes were dropped genuinely is not covered — and it costs a step from
+the same budget the paragraph above already stretches. No code changed for it; it is a **measured
+effect**, and the gate's run is to report the coverage-probe firing count beside the baseline's
+([`../evaluation.md`](../evaluation.md)).
+
+**Not measured yet:** the acceptance is a confirmed ratio of 1.0 by construction on evidence, a
+published drop rate (with the cross-book share and the re-pin count), the coverage-probe firing
+count, and behaviour at `--repeat` not below the baseline being produced on the three local models.
+Nothing here was re-run against it.
 
 ## ADR-005: `observe` sees a fixed budget of each hit; the rest of the loop sees only evidence
 

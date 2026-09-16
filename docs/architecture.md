@@ -158,14 +158,16 @@ in [`adr/README.md`](adr/README.md), each with the measurement that settled it.
 
 **The check runs twice, and the first time is before the answer exists (16.09, #29).** `observe`
 runs it as the evidence gate: a quote confirmed in the passage it cites is kept, one found in
-another passage of the same step is **re-pinned** to the passage that holds it, one whose only match
-is a book card is kept and pinned to the card, and one that is in no retrieved passage of its step
-is **dropped** and never reaches `synthesize`. So the answer is written from evidence that has
+another passage **of the same book** is **re-pinned** to the passage that holds it, one whose only
+match is a book card is kept and pinned to the card, and one that is in no retrieved passage of its
+step — or whose only holder is a different work, where re-pinning would swap a wrong citation for a
+confident one — is **dropped** and never reaches `synthesize`. So the answer is written from evidence that has
 already passed, and `validate` — which still runs last — is the report on it rather than the first
 look at it: on a run made after this, `confirmed == checked_book_text` and `broken == 0` by
-construction. What the gate spent travels with the run as `dropped_unverified` and `repinned`, and
-every interface shows it. Both run the same function over the same passages, so they cannot disagree
-about one quote. The description below is that one check, stated once.
+construction. What the gate spent travels with the run as `dropped_unverified` (with
+`dropped_cross_book` inside it) and `repinned`, and every interface shows it. Both run the same
+function over the same passages, so they cannot disagree about one quote. The description below is
+that one check, stated once.
 
 `validate` is plain code, no LLM. Every retrieved passage gets a stable id when it is fetched
 (`s<step>h<n>`), and `observe` must name the id of the passage each quote was copied from; the
@@ -174,9 +176,11 @@ model's own words. `validate` checks that the WHOLE quote, as a normalized token
 (punctuation and case folded, so honest typographic changes pass while paraphrase fails; signs,
 range dashes and separators inside numbers are kept, with "1,200" and "1.200" treated as the
 same number), is a contiguous whole-token run of the cited passage exactly as the model saw it. Four
-outcomes, a partition of the evidence checked: **confirmed** (found in the cited passage, and that
-passage is the book's own text), **unattributed** (not in the cited passage, but found in another
-retrieved book text - reported, never counted as confirmed), **card_only** (found in no retrieved
+outcomes, a partition of the evidence checked, decided by reading the CITED passage first:
+**confirmed** (found in the cited passage, and that passage is the book's own text),
+**unattributed** (not in the cited passage, but found in another
+retrieved book text - reported, never counted as confirmed), **card_only** (found in the cited
+passage and that passage is a book card, or found in no retrieved
 book text, but found in a **book card**) and **broken** (found in no retrieved passage at all).
 Every evidence item is checked, whether or
 not the answer names its book (an answer may cite "Dracula" for the index key "Dracula — Bram Stoker");

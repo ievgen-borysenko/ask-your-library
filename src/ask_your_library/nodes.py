@@ -499,6 +499,8 @@ def observe(state: AgentState) -> dict:
     # report: a reader wants "this answer lost N quotes", not a per-step ledger.
     if gate.dropped_unverified:
         update["dropped_unverified"] = state.get("dropped_unverified", 0) + gate.dropped_unverified
+    if gate.dropped_cross_book:
+        update["dropped_cross_book"] = state.get("dropped_cross_book", 0) + gate.dropped_cross_book
     if gate.repinned:
         update["repinned"] = state.get("repinned", 0) + gate.repinned
     return update

@@ -31,6 +31,15 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   unchanged: it checks the evidence the answer is written from, never the sentences the answer
   writes around it.
 
+  **The gate throws away some true evidence, on purpose.** A quote whose only holder is a passage of
+  a *different* book is dropped rather than re-attributed: the book on an evidence item is the book
+  the answer cites, and moving a quote across works would replace a wrong citation with a confident
+  wrong one. So a model that names the wrong book beside a real quote loses that quote instead of
+  having it corrected, and the count is published (`dropped_cross_book`). The same goes for a quote
+  under four normalized words that is not in the passage it cited: too short to re-pin without
+  guessing, so dropped. Both are the conservative direction — fewer citations, none of them invented
+  by the check.
+
   What the hosted configuration does on the nearest sets, and how near they are. The catalogue set
   is the same golden file at the same checksum (`en-demo-catalog.yaml@14b001e26f5e`): hosted
   Sonnet 4.6 scored 10/10 with 21 / 0 / 0 on 2026-09-10

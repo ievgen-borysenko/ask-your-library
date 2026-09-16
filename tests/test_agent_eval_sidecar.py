@@ -553,16 +553,20 @@ def test_what_the_observe_gate_spent_reaches_the_report_line_and_the_sidecar(
     passage that really holds them, and both are written only where there was
     something to say."""
     out = prepared(monkeypatch, tmp_path, [],
-                   lambda item, attempt: fake_result(item, dropped_unverified=2, repinned=1))
+                   lambda item, attempt: fake_result(item, dropped_unverified=2, repinned=1,
+                                                     dropped_cross_book=1))
     report = only(out, ".md").read_text(encoding="utf-8")
     assert "quotes verified 4/4 (confirmed / unattributed / broken = 4 / 0 / 0)" in report
-    assert "; 4 quotes dropped before the answer (not in the passage they cited)" in report
+    assert ("; 4 quotes dropped before the answer (not in the passage they cited, "
+            "2 of them held only by another book)") in report
     assert "; 2 quotes re-pinned to the passage that holds them" in report
     sidecar = json.loads(only(out, ".json").read_text(encoding="utf-8"))
     attempt = sidecar["questions"][0]["attempts"][0]
     assert (attempt["dropped_unverified"], attempt["repinned"]) == (2, 1)
+    assert attempt["dropped_cross_book"] == 1
     per_attempt = sidecar["totals"]["per_attempt"]
     assert per_attempt["dropped_unverified"]["values"] == [4]
+    assert per_attempt["dropped_cross_book"]["values"] == [2]
     assert per_attempt["repinned"]["values"] == [2]
 
 

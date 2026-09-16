@@ -46,16 +46,29 @@ one found in another retrieved passage of the same step is re-pinned to that pas
 match is a book card is kept and pinned to the card, and one that is in no retrieved passage of its
 step is dropped and never reaches `synthesize`. `validate` still runs last and still reports the
 same four outcomes over the same text through the same function — so on a run made after this,
-`confirmed == checked_book_text` and `broken == 0` **by construction**. A published triple of
-`n / 0 / 0` therefore no longer says "the model quoted honestly n times"; it says "the gate held",
-and what the model got wrong is in two counters beside it: `dropped_unverified` (quotes that never
-became evidence) and `repinned` (quotes whose citation was corrected). Both are per question and in
-totals, in the report line and the sidecar, and both clauses are written only where there was
-something to say, so a run that spent neither writes the line the harness has always written.
+`confirmed == checked_book_text` and `broken == 0` **by construction**. (That invariant is exact
+only because both gates read the CITED passage first: a quote inside the card it cites stays
+`card_only` even when a later step retrieves those words as book text, which is the one `validate`
+verdict #29 changed. A re-pin is also confined to the cited hit's own book and to quotes of at least
+four normalized words — a quote held only by another work is dropped, not re-attributed.)
+
+A published triple of `n / 0 / 0` therefore no longer says "the model quoted honestly n times"; it
+says "the gate held", and what the model got wrong is in the counters beside it:
+`dropped_unverified` (quotes that never became evidence), `dropped_cross_book` (the share of those
+whose only holder was another book) and `repinned` (quotes whose citation was corrected inside their
+own book). All are per question and in totals, in the report line and the sidecar, and every clause
+is written only where there was something to say, so a run that spent none of them writes the line
+the harness has always written.
+
 The gate's own behavioural effect — whether a set answers as well with it as without — is **not
 measured yet**: the paired baseline on three local models is being produced, the gate's run comes
 after it, and the acceptance agreed in advance is 1.0 confirmed by construction, a published drop
-rate, and behaviour at `--repeat` not below that baseline.
+rate, and behaviour at `--repeat` not below that baseline. Two figures to read beside those, because
+both follow from the gate rather than from the models: the **coverage-probe firing count**
+(`coverage._uncovered_books` subtracts the books the *evidence* names, so thinner evidence makes the
+one probe per run fire more often — ADR-013 spending a step out of the same budget), and the **steps
+per question**, since a step whose quotes were all dropped no longer counts toward the CRAG gate and
+a model that quotes badly now runs to `MAX_STEPS` where it used to stop at two.
 
 **A book card is not the book, and since 2026-09-16 the triple says so.** `validate` splits its
 verdicts by the corpus the matching passage came from: `confirmed / unattributed / broken` are

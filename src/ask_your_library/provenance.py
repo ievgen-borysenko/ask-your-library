@@ -52,15 +52,26 @@ CARD_CORPUS = "cards"
 HIT_ID_STRICT = os.environ.get("AYL_STRICT_HIT_ID", "1") == "1"
 
 
+# A quote that has to FIND its passage — because the one it cited does not hold
+# it — must be at least this many normalized words long. Re-pinning is the one
+# place the check can make a citation up rather than only accept or refuse one,
+# and "the sea" or "he said" is inside almost every book: below this length a
+# match is a coincidence, not a provenance. A quote that IS in the passage it
+# cited is never measured against this — nothing is being invented there.
+MIN_REPIN_TOKENS = 4
+
+
 class EvidenceGate(NamedTuple):
     """What `observe`'s gate made of one distillate: the evidence that survived
-    it, and how it was spent. `repinned` and `dropped_unverified` are the two
-    numbers #29 adds to the record — an item whose quote sat in a passage other
-    than the one the model cited, and an item whose quote sat in no retrieved
-    passage of this step at all and therefore never became evidence."""
+    it, and how it was spent. The numbers #29 adds to the record — an item whose
+    quote sat in another passage OF THE SAME BOOK and was re-pinned to it, and
+    an item whose quote never became evidence at all, with the share of those
+    that failed for naming the wrong book called out (`dropped_cross_book` is a
+    part of `dropped_unverified`, not a fifth outcome beside it)."""
     evidence: list[dict]
     repinned: int = 0
     dropped_unverified: int = 0
+    dropped_cross_book: int = 0
 
 
 def _valid_evidence(items, hits: list[dict] | None = None) -> EvidenceGate:
@@ -68,28 +79,37 @@ def _valid_evidence(items, hits: list[dict] | None = None) -> EvidenceGate:
     its quote is actually in: book and section are taken from the hit record,
     never from the model. Malformed output is dropped, not crashed on.
 
-    Three outcomes for a well-formed item, all decided by `classify_quote`
-    against this step's passages — the same function and the same normalization
+    The outcomes for a well-formed item, all decided by `classify_quote` against
+    this step's passages — the same function and the same normalization
     `validate` runs afterwards, so the gate and the report cannot drift:
 
-      confirmed    the quote is a contiguous run of the hit the model cited: kept
-      unattributed the quote is in ANOTHER hit of this step: re-pinned to that
-                   hit (book, section and hit_id come from it) and counted
-                   `repinned`, so the citation names the passage that holds it
-      card_only    the quote is in no retrieved book text but is in a book card:
-                   kept as evidence, pinned to the card — it is real retrieved
-                   text, and `validate` goes on reporting it as a card match and
-                   never as a quote traced to the book (ADR-004, amended 16.09)
-      broken       the quote is in no retrieved passage of this step: DROPPED,
-                   counted `dropped_unverified`. Before #29 it reached
-                   `synthesize` and was only counted afterwards, by the report.
+      in the cited hit    kept as it stands: `confirmed` when that hit is the
+                          book's own text, `card_only` when it is a book card —
+                          still evidence, still pinned where the model put it,
+                          and still never counted as traced to the book
+                          (ADR-004, amended 16.09)
+      in another hit      re-pinned to the hit that holds it (book, section and
+                          hit_id come from that hit) and counted `repinned` —
+                          BUT ONLY WITHIN THE CITED HIT'S BOOK, and only for a
+                          quote of at least MIN_REPIN_TOKENS words
+      nowhere, or a       DROPPED, counted `dropped_unverified`; a drop for
+      re-pin refused      naming the wrong book is also counted
+                          `dropped_cross_book`. Before #29 such a quote reached
+                          `synthesize` and was counted afterwards, by the report.
+
+    Re-pinning across books is refused rather than done because the book on an
+    evidence item is the book the ANSWER cites: moving a quote to a different
+    work would swap one wrong citation for another and hand the reader a
+    confident attribution to a book that was never asked about. Inside one book
+    the correction is real — the same work, a better passage — which is the only
+    case where re-pinning makes the citation truer than the model left it.
 
     `hits` is None only in legacy callers/tests; then the model's book/section
     are kept as given and there is nothing to check a quote against."""
     by_id = {h["hit_id"]: h for h in (hits or []) if h.get("hit_id")}
     index = passage_index(hits) if hits is not None else {}
     valid: list[dict] = []
-    repinned = dropped_unverified = 0
+    repinned = dropped_unverified = dropped_cross_book = 0
     if not isinstance(items, list):
         # "evidence": 42 or "evidence": "none" is valid JSON and malformed
         # output: dropped like a malformed item, never a TypeError mid-run.
@@ -115,13 +135,23 @@ def _valid_evidence(items, hits: list[dict] | None = None) -> EvidenceGate:
                 # pinned wrong, nothing was pinned at all.
                 hit_id = ""
             status, holder = classify_quote(quote, hit_id, index)
-            if status == BROKEN:
+            # A quote that is not where it said it is has to be MOVED to the
+            # passage that holds it, and the two refusals below say what may not
+            # be moved: not into another book, and not on the strength of three
+            # words. A refused move and a quote that is nowhere count the same,
+            # because from the answer's side they are the same event — a
+            # distillate that did not become evidence.
+            moved = status != BROKEN and holder != hit_id
+            cross_book = moved and cited is not None and index[holder]["book"] != cited["book"]
+            too_short = moved and quote_tokens(quote) < MIN_REPIN_TOKENS
+            if status == BROKEN or cross_book or too_short:
                 if cited is None:
                     llm._usage().evidence_dropped_no_hit += 1   # unchanged: no hit could be resolved
                 else:
                     dropped_unverified += 1
+                    dropped_cross_book += int(cross_book)
                 continue
-            if cited is not None and holder != hit_id:
+            if moved and cited is not None:
                 repinned += 1
             hit = by_id[holder]
             book, section, hit_id = hit["book"], hit["section"], hit["hit_id"]
@@ -131,7 +161,7 @@ def _valid_evidence(items, hits: list[dict] | None = None) -> EvidenceGate:
             book, section = book.strip(), str(e.get("section") or "").strip()
         valid.append({"hit_id": hit_id, "book": book, "section": section, "quote": quote,
                       "why": str(e.get("why") or "").strip()[:300]})
-    return EvidenceGate(valid, repinned, dropped_unverified)
+    return EvidenceGate(valid, repinned, dropped_unverified, dropped_cross_book)
 
 
 # ---------------------------------------------------------------- validate
@@ -230,7 +260,8 @@ def passage_index(hits) -> dict[str, dict]:
         if not hit_id:
             continue
         index[hit_id] = {"segments": _segments(h.get("text", "")),
-                         "card": h.get("corpus", "") == CARD_CORPUS}
+                         "card": h.get("corpus", "") == CARD_CORPUS,
+                         "book": h.get("book", ""), "section": h.get("section", "")}
     return index
 
 
@@ -238,17 +269,59 @@ def _found_in(quote_norm: str, segments: list[str]) -> bool:
     return bool(quote_norm) and any(_contains_tokens(seg, quote_norm) for seg in segments)
 
 
+def quote_tokens(quote: str) -> int:
+    """How many words the check has to work with. A one- or two-word "quote"
+    matches somewhere in almost any book, so the number is what tells a real
+    re-pin from a coincidence (see `MIN_REPIN_TOKENS`)."""
+    return len(_normalize(quote).split())
+
+
+def _holder_among(quote_norm: str, index: dict[str, dict], card: bool,
+                  book: str, section: str, skip: str) -> str:
+    """The best passage of one kind (book text or card) that holds this quote.
+
+    "Best" is not "first in the dict": a quote is re-pinned to what this returns,
+    and the book on an evidence item is the book the ANSWER will cite. So a
+    passage of the same book wins over any other, and within that book one from
+    the same section wins over the rest; only then does retrieval order decide.
+    Without this, a quote cited to one book and present in two was re-pinned to
+    whichever hit the search happened to return first — across books, which is
+    the one re-pin that makes a citation worse instead of better."""
+    best = ""
+    rank = 99
+    for other, record in index.items():
+        if other == skip or record["card"] != card:
+            continue
+        if not _found_in(quote_norm, record["segments"]):
+            continue
+        here = (0 if record["section"] == section else 1) if record["book"] == book else 2
+        if here < rank:
+            best, rank = other, here
+            if rank == 0:
+                break
+    return best
+
+
 def classify_quote(quote: str, hit_id: str, index: dict[str, dict]) -> tuple[str, str]:
     """THE quote check, run by both gates: what is this quote, and which
     retrieved passage holds it? Returns (status, hit_id of the holder); the
     holder is "" when nothing holds it.
 
-    The order of the four answers is the order of what they mean. The cited
-    passage's own book text confirms; any other retrieved book text makes the
-    quote real but the citation wrong; a book card makes the quote real and
-    written by a model rather than by the author; nothing at all makes it
-    broken. An empty or punctuation-only quote is broken by construction: there
-    is no word sequence to find.
+    The cited passage is read first, and what it is decides the answer: its own
+    book text **confirms**; a book card that holds the quote is **card_only**,
+    because the citation is right and the source is a model's summary rather
+    than the author's words. Only when the cited passage does not hold the quote
+    does the rest of the run matter: other retrieved book text makes the quote
+    real and the citation wrong (**unattributed**), a card elsewhere makes it
+    real and model-written, and nothing at all makes it **broken**. An empty or
+    punctuation-only quote is broken by construction: there is no word sequence
+    to find.
+
+    Reading the cited passage first is what keeps the two gates telling the same
+    story about one quote. The gate sees one step; `validate` sees the whole
+    run, so a card quote from step 1 whose words a later step also retrieves as
+    book text would otherwise be `card_only` at the gate and `unattributed` in
+    the report — two verdicts, one quote, and the invariant below untrue.
 
     `observe` calls this before an item becomes evidence and `validate` calls it
     on the evidence afterwards. One function, one normalization, one verdict —
@@ -258,16 +331,16 @@ def classify_quote(quote: str, hit_id: str, index: dict[str, dict]) -> tuple[str
     if not quote_norm:
         return BROKEN, ""
     cited = index.get(hit_id)
-    if cited is not None and not cited["card"] and _found_in(quote_norm, cited["segments"]):
-        return CONFIRMED, hit_id
-    for other, record in index.items():
-        if not record["card"] and _found_in(quote_norm, record["segments"]):
-            return UNATTRIBUTED, other
-    if cited is not None and cited["card"] and _found_in(quote_norm, cited["segments"]):
-        return CARD_ONLY, hit_id
-    for other, record in index.items():
-        if record["card"] and _found_in(quote_norm, record["segments"]):
-            return CARD_ONLY, other
+    if cited is not None and _found_in(quote_norm, cited["segments"]):
+        return (CARD_ONLY if cited["card"] else CONFIRMED), hit_id
+    book = cited["book"] if cited is not None else ""
+    section = cited["section"] if cited is not None else ""
+    elsewhere = _holder_among(quote_norm, index, False, book, section, hit_id)
+    if elsewhere:
+        return UNATTRIBUTED, elsewhere
+    on_a_card = _holder_among(quote_norm, index, True, book, section, hit_id)
+    if on_a_card:
+        return CARD_ONLY, on_a_card
     return BROKEN, ""
 
 
@@ -321,13 +394,18 @@ def match_span(passage: str, quote: str) -> tuple[int, int] | None:
 
 
 def gate_counts(state: AgentState) -> dict:
-    """What the observe gate spent, as the report carries it (#29). Always both
-    keys and always integers, so an interface, the harness and a sidecar read
-    one shape whether or not this run dropped anything; a state from before the
-    gate (a recording, a legacy caller) reads back as a run that dropped
+    """What the observe gate spent, as the report carries it (#29). Always all
+    three keys and always integers, so an interface, the harness and a sidecar
+    read one shape whether or not this run dropped anything; a state from before
+    the gate (a recording, a legacy caller) reads back as a run that dropped
     nothing, which is exactly what it was."""
     return {"dropped_unverified": int(state.get("dropped_unverified") or 0),
-            "repinned": int(state.get("repinned") or 0)}
+            "repinned": int(state.get("repinned") or 0),
+            # a part of dropped_unverified, not a fifth outcome beside it: the
+            # quotes dropped because the only passage holding them was another
+            # book's, where a re-pin would have swapped one wrong citation for
+            # a more confident one
+            "dropped_cross_book": int(state.get("dropped_cross_book") or 0)}
 
 
 def validate(state: AgentState) -> dict:
@@ -336,9 +414,16 @@ def validate(state: AgentState) -> dict:
     hit record). The WHOLE quote, as a normalized word sequence, must be a
     contiguous substring of that hit's text as observe saw it:
       confirmed    found in the cited hit, and that hit is the book's own text
+      card_only    found in the cited hit and that hit is a book card, or found
+                   in no cited passage and in no other book text but on a card
       unattributed not in the cited hit, but found in another retrieved book text
-      card_only    found in no retrieved book text, but found in a book card
       broken       found in no retrieved passage at all
+    The cited passage is read first (see `classify_quote`): a quote inside the
+    card it cites is `card_only` even when a later step also retrieved those
+    words as book text, because the citation is right and the source is a
+    model's summary. That ordering is what makes the report agree with the gate,
+    which saw only one step's passages.
+
     The four are a partition of `checked`; the first three are a partition of
     `checked_book_text` (= checked - card_only), which is the denominator of
     every "traced" count an interface shows. A card is a model-written summary,

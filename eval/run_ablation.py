@@ -230,6 +230,11 @@ def empty_totals() -> dict:
             "no_clarify_items": 0, "titles_mentioned": 0, "titles_expected": 0,
             "checked": 0, "checked_book_text": 0, "confirmed": 0, "unattributed": 0,
             "broken": 0, "card_only": 0,
+            # the observe gate (#29): quotes that never became evidence, and
+            # quotes whose citation was corrected to the passage that holds
+            # them. Neither is in `checked` — a dropped quote is not checked
+            # evidence, it is evidence that was refused.
+            "dropped_unverified": 0, "dropped_cross_book": 0, "repinned": 0,
             "llm_calls": 0, "tokens_in": 0, "tokens_out": 0,
             "cost_usd": 0.0, "seconds": 0}
 
@@ -254,6 +259,12 @@ def accumulate(totals: dict, item: dict, r: dict) -> None:
     # matched only a book card is a model's summary and is counted apart. The
     # default keeps a record written before the split meaning what it meant.
     totals["checked_book_text"] += prov.get("checked_book_text", prov.get("checked", 0))
+    # From the run record where the harness has them, from the provenance report
+    # otherwise: the two conditions that answer without the graph have no gate to
+    # report, and a record written before 16.09 has neither, which reads back as
+    # the run it was — one that dropped nothing.
+    for key in ("dropped_unverified", "dropped_cross_book", "repinned"):
+        totals[key] += r.get(key, prov.get(key, 0))
     for key in ("llm_calls", "tokens_in", "tokens_out"):
         totals[key] += r.get(key, 0)
     totals["cost_usd"] = round(totals["cost_usd"] + r.get("cost_usd", 0.0), 4)
@@ -335,7 +346,15 @@ def fmt_provenance(condition: str, totals: dict) -> str:
         return "n/a"
     return (f"{totals['confirmed']} / {totals['unattributed']} / {totals['broken']} "
             f"of {totals['checked_book_text']}"
-            + (f" (+{totals['card_only']} card-only)" if totals["card_only"] else ""))
+            + (f" (+{totals['card_only']} card-only)" if totals["card_only"] else "")
+            # The gate (#29) is outside that denominator: a dropped quote is not
+            # a checked one, it is one the answer was refused. Written only where
+            # it happened, so a condition that spent nothing reads as before.
+            + (f" (−{totals['dropped_unverified']} dropped"
+               + (f", {totals['dropped_cross_book']} of them cross-book"
+                  if totals["dropped_cross_book"] else "")
+               + ")" if totals["dropped_unverified"] else "")
+            + (f" (↻{totals['repinned']} re-pinned)" if totals["repinned"] else ""))
 
 
 def render_artifact(fingerprint: str, order: list[str], results: dict,

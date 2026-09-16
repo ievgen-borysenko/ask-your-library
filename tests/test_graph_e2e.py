@@ -458,6 +458,34 @@ def test_two_all_dropped_steps_are_not_dry_and_do_not_stop_the_run(run):
     assert p["confirmed"] == p["checked_book_text"] == 1
 
 
+def test_a_dropped_step_holds_the_dry_streak_and_does_not_reset_it(run):
+    """The other half of the hold rule, and the one a streak of 0 cannot show.
+    "Not dry" must not mean "productive": a step that dropped everything proved
+    nothing about the library either, so the dry steps around it still stand and
+    still add up. dry -> all-dropped -> dry reaches MAX_EMPTY_STREAK and stops,
+    exactly as two dry steps in a row would."""
+    model = ScriptedModel(
+        plan=[{"mode": "answer", "queries": ["q1", "q2", "q3", "q4"]}],
+        observe=[{"evidence": []},
+                 {"evidence": [evidence(MOBY, "transcripts", "s2h2",
+                                        quote="Ishmael was a lawyer in Boston.")]},
+                 {"evidence": []}],
+        reflect=[{"decision": "search", "next_query": "q2"},
+                 {"decision": "search", "next_query": "q3"}],
+    )
+    answer, events, _ = run(model, FakeLibrary(lambda q: [MOBY]),
+                            "What is the airspeed of a swallow?")
+    assert [u["empty_streak"] for u in by_name(events, "observe")] == [1, 1, 2]
+    assert model.roles().count("reflect") == 2      # the third stop is the pre-check: no call
+    assert by_name(events, "reflect")[-1]["stop_reason"] == t("stop_crag", n=config.MAX_EMPTY_STREAK)
+    assert answer == t("refusal_answer")
+    # and the refusal says what was dropped, so the reader is not told the
+    # library was silent when one of the three steps was not
+    verification = by_name(events, "validate")[0]["verification"]
+    assert verification.startswith(t("verif_no_evidence"))
+    assert "1 quotes dropped before the answer" in verification
+
+
 def test_synthesize_is_never_given_a_quote_that_failed_the_gate(run):
     """The headline of #29 in one assertion: an unverified quote is not in the
     prompt the answer is written from. Before this it was — `validate` only
@@ -597,18 +625,19 @@ def test_a_quote_not_in_the_cited_passage_is_repinned_or_dropped_before_the_answ
     finished answer decides what the answer may be written from.
 
     Four shapes of the same mistake, and four different answers to it — a quote
-    where it says it is, a quote in another retrieved chapter (re-pinned to the
-    chapter that holds it, so the citation stops lying), a quote whose only
-    match is a book card (kept, pinned to the card, and never counted as traced
-    to the book), and a quote in nothing this run retrieved (dropped, counted,
-    named to the reader). The unknown hit id is dropped as it always was."""
+    where it says it is (kept), a quote whose only holder is ANOTHER BOOK
+    (dropped: re-pinning it would swap a wrong citation for a confident one), a
+    quote whose only match is a book card of the same book (kept and re-pinned
+    to that card, never counted as traced to the book), and a quote in nothing
+    this run retrieved (dropped). The unknown hit id is dropped as it always
+    was."""
     model = ScriptedModel(
         plan=[{"mode": "answer", "queries": ["Ishmael"]}],
         observe=[{"evidence": [
             evidence(MOBY, "transcripts", "s1h2"),                                     # confirmed where it says
-            # Gulliver's chapter (s1h4), cited as Moby Dick's (s1h2): re-pinned to s1h4
+            # Gulliver's chapter (s1h4), cited as Moby Dick's (s1h2): a cross-book drop
             evidence(MOBY, "transcripts", "s1h2", quote="I felt something alive moving on my left leg"),
-            # the Moby Dick card (s1h1), cited as its chapter: kept, re-pinned to the card
+            # the Moby Dick card (s1h1), cited as its chapter: same book, so re-pinned to the card
             evidence(MOBY, "cards", "s1h2", quote="Captain Ahab hunts the white whale that took his leg."),
             evidence(MOBY, "cards", "s1h1", quote="Ishmael was a lawyer in Boston."),  # nowhere: dropped
             {"hit_id": "s9h9", "book": MOBY, "section": "x", "quote": "Call me Ishmael.", "why": "no such hit"},
@@ -618,27 +647,28 @@ def test_a_quote_not_in_the_cited_passage_is_repinned_or_dropped_before_the_answ
     )
     _, events, _ = run(model, FakeLibrary(), "Who is Ishmael?")
     observe = by_name(events, "observe")[0]
-    assert len(observe["evidence"]) == 3     # one unverified, one with an unknown hit id (strict mode)
-    assert (observe["dropped_unverified"], observe["repinned"]) == (1, 2)
-    assert [e["hit_id"] for e in observe["evidence"]] == ["s1h2", "s1h4", "s1h1"]
-    assert observe["evidence"][1]["book"] == GULLIVER      # the citation now names what holds the quote
+    assert len(observe["evidence"]) == 2     # two unverified, one with an unknown hit id (strict mode)
+    assert (observe["dropped_unverified"], observe["dropped_cross_book"]) == (2, 1)
+    assert observe["repinned"] == 1
+    assert [e["hit_id"] for e in observe["evidence"]] == ["s1h2", "s1h1"]
+    assert [e["book"] for e in observe["evidence"]] == [MOBY, MOBY]   # no citation left another book
     p = by_name(events, "validate")[0]["provenance"]
     # The report is a report: the evidence it checks has already passed the same
     # check, on the same text, through the same function — so nothing is broken
     # and confirmed == checked_book_text, by construction.
-    assert (p["checked"], p["confirmed"], p["unattributed"], p["broken"]) == (3, 2, 0, 0)
+    assert (p["checked"], p["confirmed"], p["unattributed"], p["broken"]) == (2, 1, 0, 0)
     assert p["confirmed"] == p["checked_book_text"] and p["broken_items"] == []
-    assert (p["card_only"], p["checked_book_text"]) == (1, 2)
-    assert (p["dropped_unverified"], p["repinned"]) == (1, 2)
+    assert (p["card_only"], p["checked_book_text"]) == (1, 1)
+    assert (p["dropped_unverified"], p["dropped_cross_book"], p["repinned"]) == (2, 1, 1)
     # every item with its verdict, in evidence order: what the interfaces open on the passage
     assert [(i["hit_id"], i["status"]) for i in p["items"]] == [
-        ("s1h2", "confirmed"), ("s1h4", "confirmed"), ("s1h1", "card_only")]
-    assert [i["source_kind"] for i in p["items"]] == ["book_text", "book_text", "card"]
+        ("s1h2", "confirmed"), ("s1h1", "card_only")]
+    assert [i["source_kind"] for i in p["items"]] == ["book_text", "card"]
     passages = {h["hit_id"]: h["text"] for h in by_name(events, "act")[0]["hits_log"]}
     assert all(i["hit_id"] in passages for i in p["items"])          # the UI can open each one
     assert by_name(events, "metrics")[0]["evidence_dropped_no_hit"] == 1
     # and the reader is told what the answer was not allowed to rest on
-    assert "1 quotes dropped before the answer" in by_name(events, "validate")[0]["verification"]
+    assert "2 quotes dropped before the answer" in by_name(events, "validate")[0]["verification"]
 
 
 def test_deadline_spent_after_a_step_answers_from_what_was_found(monkeypatch, tmp_path):

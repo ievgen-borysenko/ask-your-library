@@ -341,6 +341,9 @@ def run_one(graph, item: dict, attempt: int = 1) -> dict:
         # the passage that did. A question that ends with no evidence at all
         # still carries them, which is often the only account of why it refused
         "dropped_unverified": result.dropped_unverified,
+        # the share of those that failed for naming another book, where a
+        # re-pin would have swapped a wrong citation for a confident one
+        "dropped_cross_book": result.dropped_cross_book,
         "repinned": result.repinned,
         "clarify_asked": result.clarify_asked,
         "clarify_candidates": result.clarify_candidates,
@@ -792,7 +795,7 @@ def empty_totals() -> dict:
     return {"run": 0, "errors": 0, "clarify": 0, "checked": 0, "checked_book_text": 0,
             "confirmed": 0, "evidence": 0,
             "unattributed": 0, "broken": 0, "card_only": 0,
-            "dropped_unverified": 0, "repinned": 0,
+            "dropped_unverified": 0, "dropped_cross_book": 0, "repinned": 0,
             "behavior_ok": 0, "titles_mentioned": 0, "titles_expected": 0,
             "facts_found": 0, "facts_expected": 0, "facts_items": 0, "facts_items_ok": 0,
             "drill_expected": 0, "drill_ok": 0, "cost_usd": 0.0, "llm_calls": 0,
@@ -834,7 +837,10 @@ def render_summary(totals: dict, per_group: dict, repeat: int, attempt_totals: l
                 # always written, which is the byte-compat contract with
                 # eval/summarize_report.py and docs/eval-results/.
                 + (f"; {totals['dropped_unverified']} quotes dropped before the answer "
-                   f"(not in the passage they cited)" if totals["dropped_unverified"] else "")
+                   f"(not in the passage they cited"
+                   + (f", {totals['dropped_cross_book']} of them held only by another book"
+                      if totals["dropped_cross_book"] else "") + ")"
+                   if totals["dropped_unverified"] else "")
                 + (f"; {totals['repinned']} quotes re-pinned to the passage that holds them"
                    if totals["repinned"] else "")
                 + f"; evidence items {totals['evidence']}\n"
@@ -893,6 +899,9 @@ def render_summary(totals: dict, per_group: dict, repeat: int, attempt_totals: l
         # so the reader sees the whole of what the gate did at this repeat.
         lines.insert(-1, spread_line("quotes dropped before the answer",
                                      column("dropped_unverified")))
+        if any(column("dropped_cross_book")):
+            lines.insert(-1, spread_line("of those, held only by another book",
+                                         column("dropped_cross_book")))
         lines.insert(-1, spread_line("quotes re-pinned to the passage that holds them",
                                      column("repinned")))
     if expected["drill_items"]:
@@ -1193,6 +1202,7 @@ def main(argv: list[str] | None = None) -> None:
                 # defaults to 0, so a record written before the gate reads back
                 # as the run it was, one that dropped nothing.
                 totals["dropped_unverified"] += r.get("dropped_unverified", 0)
+                totals["dropped_cross_book"] += r.get("dropped_cross_book", 0)
                 totals["repinned"] += r.get("repinned", 0)
                 totals["evidence"] += r["evidence_items"]
                 for key in ("cost_usd", "llm_calls", "tokens_in", "tokens_out"):
@@ -1229,6 +1239,8 @@ def main(argv: list[str] | None = None) -> None:
                 if r.get("dropped_unverified"):
                     drill += (f", {r['dropped_unverified']} quotes dropped before the answer "
                               f"(not in the passage they cited)")
+                if r.get("dropped_cross_book"):
+                    drill += f", {r['dropped_cross_book']} of them held only by another book"
                 if r.get("repinned"):
                     drill += f", {r['repinned']} quotes re-pinned"
                 if r.get("catalog"):
