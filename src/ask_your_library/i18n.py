@@ -401,6 +401,15 @@ _T = {
                               "en": "Ask what the shelf cannot answer"},
     "starter_refusal": {"ua": "Що мої книжки кажуть про новини минулого тижня?",
                         "en": "What do my books say about the news from last week?"},
+    # ---- web ui: the label of an agent step. It is the WHOLE label the reader
+    # sees — the project's en-US.json empties Chainlit's "Used" prefix — so each
+    # one is a sentence in the product's voice, not a node name.
+    "ui_step_plan": {"ua": "спланував пошук", "en": "planned the search"},
+    "ui_step_act": {"ua": "шукав у бібліотеці #{n}", "en": "searched the library #{n}"},
+    "ui_step_observe": {"ua": "відібрав цитати", "en": "picked out the quotes"},
+    "ui_step_reflect": {"ua": "вирішив, що робити далі", "en": "decided what to do next"},
+    "ui_step_clarify": {"ua": "врахував вашу відповідь", "en": "took your answer"},
+    "ui_step_catalog": {"ua": "прочитав каталог", "en": "read the catalogue"},
     # ---- web ui: agent-step trace and metrics footer
     "ui_mode": {"ua": "режим: {mode}", "en": "mode: {mode}"},
     "ui_plan_catalog": {"ua": "режим: catalog, операція: {op}", "en": "mode: catalog, operation: {op}"},

@@ -261,6 +261,36 @@ def test_validate_prefers_the_book_text_when_both_a_card_and_a_chapter_hold_the_
     assert p["items"][0]["source_kind"] == "card"       # the label is still what the reader would open
 
 
+def test_match_span_locates_the_quote_the_check_confirmed_and_nothing_else():
+    """validate says WHETHER a quote is a contiguous run of a passage;
+    match_span says where, over the same normalization, so an interface can
+    point at the proof. What is not confirmed is not located either."""
+    from ask_your_library.provenance import match_span
+
+    passage = "Call me Ishmael. Some years ago, never mind how long, I thought I would sail."
+    start, end = match_span(passage, "Some years ago, never mind how long")
+    # whole whitespace chunks: the trailing comma the normalized run stops
+    # before is inside the span, which is what a reader wants marked
+    assert passage[start:end] == "Some years ago, never mind how long,"
+    # honest typographic differences match, as they do in the check
+    assert match_span(passage, "some years ago never mind how long") == (start, end)
+    assert match_span(passage, "Call me Bob.") is None
+    assert match_span(passage, "Call me Ishmael. I thought I would sail.") is None   # not adjacent
+    assert match_span(passage, "") is None and match_span(passage, "   ") is None
+
+
+def test_match_span_will_not_run_across_a_chunk_joiner():
+    """The [...] between two chunks of a chapter read means the text is not
+    contiguous in the book. `_segments` refuses a quote that straddles it and so
+    does this, or the interface would highlight a run the check called broken."""
+    from ask_your_library.provenance import CHUNK_JOINER, match_span
+
+    passage = f"alpha beta{CHUNK_JOINER}gamma delta"
+    assert match_span(passage, "beta gamma") is None
+    start, end = match_span(passage, "gamma delta")
+    assert passage[start:end] == "gamma delta"
+
+
 def test_validate_reads_a_hit_without_a_corpus_as_book_text():
     """An index and a recorded run from before cards existed carry no `corpus`
     on the hit; guessing "card" there would demote quotes that are the book's

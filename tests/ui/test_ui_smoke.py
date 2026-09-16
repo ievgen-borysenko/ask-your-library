@@ -259,8 +259,9 @@ def body(page):
 
 
 def step(page, name: str):
-    """One agent step's collapse trigger. Chainlit ids them `step-<name>`, so
-    the act step is `step-act #1` — a space and a hash in an id, hence the
+    """One agent step's collapse trigger. Chainlit ids them `step-<name>`, and
+    the name is the label ui.py writes, so the second step is
+    `step-searched the library #1` — spaces and a hash in an id, hence the
     attribute selector."""
     return page.locator(f'[id="step-{name}"]')
 
@@ -369,13 +370,15 @@ def walk_through_the_release_check(page, chainlit_server) -> None:
     expect(starters).to_contain_text("Ask what the shelf cannot answer", timeout=RENDER_MS)
     expect(body(page)).to_contain_text("Ask Your Library", timeout=RENDER_MS)   # chainlit.md above them
 
-    # --- a research question: the live steps, then the answer
+    # --- a research question: the live steps, then the answer. The step labels
+    # are the product's own words, not "Used act #1": the name ui.py writes is
+    # the whole label, because the project's en-US.json empties Chainlit's
+    # prefix (design critique 16.09 §1.6).
     ask(page, RESEARCH_QUESTION)
-    for name in ("plan", "act #1", "observe"):
+    for name in ("planned the search", "searched the library #1", "picked out the quotes"):
         expect(step(page, name)).to_be_visible(timeout=ANSWER_MS)
-    # Every step renders collapsed, whatever `cot` says: what the agent did is
-    # one click away, and that click is part of the path being checked.
-    step(page, "plan").click(timeout=RENDER_MS)
+    expect(body(page)).not_to_contain_text("Used planned the search", timeout=RENDER_MS)
+    # `plan` opens by itself; the rest stay one click away.
     expect(body(page)).to_contain_text("mode: answer", timeout=RENDER_MS)
     expect(body(page)).to_contain_text("who narrates the Pequod voyage", timeout=RENDER_MS)
     expect(body(page)).to_contain_text("retrieval limited to it", timeout=RENDER_MS)

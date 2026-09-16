@@ -51,13 +51,18 @@ def ui(monkeypatch, tmp_path):
 
 def test_reflect_step_shows_the_real_stop_reason(ui, monkeypatch):
     shown = []
-    monkeypatch.setattr(ui, "show_step", lambda name, text: shown.append((name, text)))
+    monkeypatch.setattr(ui, "show_step",
+                        lambda name, text, default_open=False: shown.append((name, text, default_open)))
     ui.render_event("reflect", {"current_query": "", "stop_reason": "step limit (5) — wanted to keep searching"})
-    assert shown[-1][0] == "reflect" and "step limit" in shown[-1][1]
+    from ask_your_library.i18n import t as _t
+    # the label is the product's own sentence, and the LAST reflect — the one
+    # that says why the search stopped — opens by itself
+    assert shown[-1] == (_t("ui_step_reflect"), shown[-1][1], True)
+    assert "step limit" in shown[-1][1]
     ui.render_event("reflect", {"current_query": ""})
     assert "enough" in shown[-1][1]                     # legacy fallback when no reason is given
     ui.render_event("reflect", {"current_query": "more whales"})
-    assert "more whales" in shown[-1][1]
+    assert "more whales" in shown[-1][1] and shown[-1][2] is False   # still searching: collapsed
     # The web UI's line adds "stopped: " the same way the CLI's does, so a reason
     # that carried the word itself was printed twice here too.
     from ask_your_library.i18n import t
@@ -100,7 +105,8 @@ def test_the_headline_count_never_includes_a_quote_that_only_matched_a_card(ui):
 
 def test_a_catalogue_answer_is_one_step_and_the_titles_render_as_text(ui, monkeypatch):
     shown, sent = [], []
-    monkeypatch.setattr(ui, "show_step", lambda name, text: shown.append((name, text)))
+    monkeypatch.setattr(ui, "show_step",
+                        lambda name, text, default_open=False: shown.append((name, text, default_open)))
 
     class Msg:
         def __init__(self, content, metadata=None):
@@ -112,12 +118,14 @@ def test_a_catalogue_answer_is_one_step_and_the_titles_render_as_text(ui, monkey
     monkeypatch.setattr(ui.cl, "Message", Msg)
     ui.render_event("plan", {"mode": "catalog", "catalog_request": {"op": "list", "title": "", "author": ""},
                              "current_query": "", "queries": []})
-    assert shown[-1][0] == "plan" and "operation: list" in shown[-1][1] and "search queries" not in shown[-1][1]
+    from ask_your_library.i18n import t as _t
+    assert shown[-1][0] == _t("ui_step_plan") and shown[-1][2] is True      # plan opens by itself
+    assert "operation: list" in shown[-1][1] and "search queries" not in shown[-1][1]
     ui.render_event("catalog", {"answer": "2 books:\n- <b>Moby Dick</b> — Herman Melville",
                                 "catalog": {"op": "list", "count": 2, "total": 2, "books": ["x", "y"],
                                             "query": "", "resolved": True, "suggestions": []},
                                 "stop_reason": "catalog"})
-    assert shown[-1] == ("catalog", "list: 2 of 2 books, from the index tables")
+    assert shown[-1] == (_t("ui_step_catalog"), "list: 2 of 2 books, from the index tables", False)
     content, metadata = sent[-1]
     assert "&lt;b&gt;Moby Dick&lt;/b&gt;" in content                   # a crafted title is text, not DOM
     assert metadata == {"catalog": {"op": "list", "count": 2, "total": 2, "query": "", "resolved": True}}
@@ -134,8 +142,8 @@ def test_plan_step_book_names_are_escaped_by_the_real_step_writer(ui, monkeypatc
     outputs = []
 
     class Step:
-        def __init__(self, name, type=None):
-            self.name, self.output = name, ""
+        def __init__(self, name, type=None, default_open=False):
+            self.name, self.output, self.default_open = name, "", default_open
 
         async def __aenter__(self):
             return self
@@ -149,7 +157,9 @@ def test_plan_step_book_names_are_escaped_by_the_real_step_writer(ui, monkeypatc
     ui.render_event("plan", {"mode": "answer", "current_query": "q", "queries": [],
                              "book_filter": "<img src=x onerror=alert(1)> — Nobody", "book_unresolved": ""})
     name, output = outputs[-1]
-    assert name == "plan" and "&lt;img src=x onerror=alert(1)&gt;" in output and "<img" not in output
+    from ask_your_library.i18n import t as _t
+    assert name == _t("ui_step_plan") and "&lt;img src=x onerror=alert(1)&gt;" in output
+    assert "<img" not in output
 
 
 def test_the_badge_of_a_catalogue_answer_is_green_and_names_the_source(ui):
@@ -394,7 +404,8 @@ def test_partial_metrics_are_shown_but_not_added_to_the_session_cost(ui, monkeyp
 def test_plan_step_says_when_the_planner_fell_back_to_the_raw_question(ui, monkeypatch):
     from ask_your_library.i18n import t
     shown = []
-    monkeypatch.setattr(ui, "show_step", lambda name, text: shown.append((name, text)))
+    monkeypatch.setattr(ui, "show_step",
+                        lambda name, text, default_open=False: shown.append((name, text, default_open)))
     ui.render_event("plan", {"mode": "answer", "current_query": "q", "queries": []})
     ui.render_event("plan", {"mode": "answer", "current_query": "q", "queries": [], "plan_fallback": True})
     assert t("ui_plan_fallback") not in shown[0][1] and t("ui_plan_fallback") in shown[1][1]
@@ -449,6 +460,39 @@ def test_every_evidence_item_opens_on_the_passage_it_was_checked_against(ui, mon
     ui.render_event("validate", {"verification": "OK", "provenance": {"items": [
         {"hit_id": "s1h1", "book": "b", "section": "s", "quote": "q", "status": "confirmed"}]}}, view=other)
     assert t("ui_passage_missing") in sent[-1] and "Call me Ishmael" not in sent[-1]
+
+
+def test_the_matched_run_is_marked_inside_the_passage(ui):
+    """The quote was printed above six lines of monospace and the reader was
+    left to find it: the proof was on screen and unproven to the eye (design
+    critique 16.09 §1.3). Every quote that really is inside the passage is
+    marked where it sits, and one that is not is not marked anywhere."""
+    passage = "Call me Ishmael. Some years ago I thought I would sail. It drove off the spleen."
+    items = [{"hit_id": "s1h1", "book": "b", "section": "s", "status": "confirmed",
+              "quote": "Some years ago I thought I would sail."},
+             {"hit_id": "s1h1", "book": "b", "section": "s", "status": "broken",
+              "quote": "Ishmael was a lawyer."}]
+    block = ui.evidence_passages(items, {"s1h1": passage})
+    assert block.count("<mark") == 1
+    marked = block.split("<mark", 1)[1].split(">", 1)[1].split("</mark>", 1)[0]
+    assert marked == "Some years ago I thought I would sail."
+    # the rest of the passage is still there, once, around the mark
+    assert "Call me Ishmael." in block and "It drove off the spleen." in block
+
+
+def test_marking_a_passage_does_not_open_a_hole_in_the_escaping(ui):
+    """The passage is cut into slices and each one goes through safe_html, so
+    every rule the whole of it obeyed still holds: HTML is text, an image cannot
+    be fetched on render, and no raw line break can end the HTML block."""
+    passage = ("<script>alert(1)</script> quote me here now\n\n"
+               "![x](http://evil/x.png) and <b>bold</b>")
+    block = ui.evidence_passages(
+        [{"hit_id": "s1h1", "book": "b", "section": "s", "status": "confirmed",
+          "quote": "quote me here now"}], {"s1h1": passage})
+    assert "<mark" in block and ">quote me here now<" in block
+    assert "&lt;script&gt;" in block and "<script>" not in block
+    assert "&lt;b&gt;" in block and "x.png" not in block and "[image removed]" in block
+    assert "\n" not in block and "<br><br>" in block
 
 
 def test_the_evidence_list_says_which_passages_are_book_cards(ui):
@@ -662,6 +706,15 @@ def test_config_pins_allow_origins_to_the_serving_port_only():
 PROJECT_TRANSLATION = REPO / ".chainlit" / "translations" / "en-US.json"
 NEW_CHAT_DESCRIPTION = "navigation.newChat.dialog.description"
 OUR_WORDING = "This starts a new chat. The current chat stays in your history."
+# Every value of the vendored file this project changed, and why it had to be
+# changed here rather than in ui.py. NOTICE and .chainlit/translations/README.md
+# carry the same list in prose (Apache-2.0 §4(b)); this is the enforcement.
+STEP_PREFIXES = ("chat.messages.status.used", "chat.messages.status.using")
+WATERMARK = "chat.watermark"
+OUR_VALUES = {NEW_CHAT_DESCRIPTION: OUR_WORDING,
+              "chat.messages.status.used": "",
+              "chat.messages.status.using": "",
+              WATERMARK: "Quotes are checked in code. The reasoning is not."}
 
 
 def _leaves(node, path=""):
@@ -693,16 +746,29 @@ def test_the_project_translation_carries_the_whole_key_set_of_the_installed_one(
         f"missing: {sorted(set(theirs) - set(ours))}; extra: {sorted(set(ours) - set(theirs))}")
 
 
-def test_only_the_new_chat_description_is_reworded():
-    """Chats are persisted by the data layer and stay in the sidebar, so
-    Chainlit's "This will clear your current chat history" describes an app this
-    is not. That one string is ours; the rest has to stay upstream's, or the file
-    is a fork nobody re-reads on a bump."""
+def test_exactly_four_values_are_ours_and_the_rest_stays_upstreams():
+    """Four strings are this project's, and each one is a claim ui.py cannot
+    make for itself:
+
+    - the New Chat warning: chats are persisted by the data layer and stay in
+      the sidebar, so "This will clear your current chat history" describes an
+      app this is not;
+    - the two step prefixes: Chainlit prints "Used"/"Using" in front of a step
+      name, and "Used act #1" is a framework log line, not the product's voice.
+      Emptied, the name ui.py writes is the whole label;
+    - the watermark: "LLMs can make mistakes. Check important info." sits under
+      a badge that says a quote was checked in code, and contradicts it.
+
+    The rest has to stay upstream's, or the file is a fork nobody re-reads on a
+    bump. en-US only: every other locale falls back to Chainlit's own copy."""
     ours = _leaves(json.loads(PROJECT_TRANSLATION.read_text(encoding="utf-8")))
     theirs = _leaves(_shipped_translation())
-    assert {path for path, text in ours.items() if theirs[path] != text} == {NEW_CHAT_DESCRIPTION}
-    assert ours[NEW_CHAT_DESCRIPTION] == OUR_WORDING
+    assert {path for path, text in ours.items() if theirs[path] != text} == set(OUR_VALUES)
+    assert {path: ours[path] for path in OUR_VALUES} == OUR_VALUES
     assert "clear" not in ours[NEW_CHAT_DESCRIPTION].lower()
+    # the watermark must not promise more than validate does: the quotes are
+    # checked, the reasoning is not, and neither half may go missing
+    assert "checked in code" in ours[WATERMARK] and "reasoning is not" in ours[WATERMARK]
 
 
 def test_startup_seeds_the_other_languages_and_leaves_ours_alone(tmp_path, monkeypatch):
@@ -728,21 +794,24 @@ def test_startup_seeds_the_other_languages_and_leaves_ours_alone(tmp_path, monke
 
 def test_the_notice_attributes_the_vendored_chainlit_file():
     """Apache-2.0 §4(b) asks a modified third-party file to carry a notice that
-    it was changed, and a file that is upstream's byte for byte except one value
-    is exactly that. The file and the paragraph are one contract, so this test
-    fails if either side goes: no NOTICE paragraph with a tracked copy, and no
-    stale paragraph after the copy is dropped. The version is asserted too —
+    it was changed, and a file that is upstream's byte for byte except four
+    values is exactly that. The file and the paragraph are one contract, so this
+    test fails if either side goes: no NOTICE paragraph with a tracked copy, and
+    no stale paragraph after the copy is dropped. The version is asserted too —
     a chainlit bump has to be a decision about this copy, not a silent drift
-    between what NOTICE names and what the tree holds."""
+    between what NOTICE names and what the tree holds. Every changed key is
+    named in both records, so a fifth one cannot be added in silence."""
     from importlib.metadata import version
     notice = (REPO / "NOTICE").read_text(encoding="utf-8")
     if PROJECT_TRANSLATION.exists():
         assert ".chainlit/translations/en-US.json" in notice
         assert f"Chainlit {version('chainlit')}" in notice
         assert "Apache License" in notice
-        assert NEW_CHAT_DESCRIPTION in notice      # the one value that differs, named
         readme = (PROJECT_TRANSLATION.parent / "README.md").read_text(encoding="utf-8")
-        assert "Apache" in readme and NEW_CHAT_DESCRIPTION in readme
+        assert "Apache" in readme
+        for path in OUR_VALUES:                    # every value that differs, named in both
+            assert path in notice, path
+            assert path in readme, path
     else:
         assert ".chainlit/translations/en-US.json" not in notice
 

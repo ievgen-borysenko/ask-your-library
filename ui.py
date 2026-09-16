@@ -62,6 +62,7 @@ from ask_your_library import nodes                                  # noqa: E402
 from ask_your_library.graph import build_graph                      # noqa: E402
 from ask_your_library.i18n import LANG, get_lang, set_lang, status_word, t  # noqa: E402
 from ask_your_library.preflight import check_api_key, check_environment  # noqa: E402
+from ask_your_library.provenance import match_span                  # noqa: E402
 from ask_your_library.runner import failed_result, history_entry, run_question  # noqa: E402
 from ask_your_library.sanitize import LINE_BREAK_RE                 # noqa: E402
 
@@ -130,7 +131,10 @@ CLARIFY_TIMEOUT_SECONDS = _clarify_timeout_seconds()
 
 GREEN = "#16a34a"
 YELLOW = "#ca8a04"
-GRAY = "#6b7280"
+# The metrics footer carries the cost, the seconds and the real stop reason at
+# 0.85em. #6b7280 on the dark ground is about 3.4:1 and fails WCAG AA; this is
+# about 6.6:1 and keeps the same visual rank (design critique 16.09 §1.7).
+GRAY = "#9ca3af"
 
 log = logging.getLogger("ask_your_library.ui")
 
@@ -326,12 +330,23 @@ def neutralize_markdown(text: str) -> str:
     return text.replace("![", "[")
 
 
-async def show_step(step_name: str, step_output: str) -> None:
-    # Step text mixes our labels with corpus/model-derived strings (book
-    # titles, queries); with unsafe_allow_html enabled for our own badges,
-    # everything third-party must be neutralized. A step is plain markdown, so
-    # safe_markdown, not safe_html: its line breaks are the list it prints.
-    async with cl.Step(name=step_name, type="tool") as step:
+async def show_step(step_name: str, step_output: str, default_open: bool = False) -> None:
+    """One agent step in the thread.
+
+    The name is the whole label the reader sees: Chainlit prints
+    `chat.messages.status.used` in front of it, and this project's en-US.json
+    sets that to nothing, so "Used act #1" — a framework log line — reads
+    "searched the library #1" instead (design critique 16.09 §1.6). The names
+    come from i18n, like every other word the interface speaks.
+
+    `default_open` is for the two steps that are the reader's own question, not
+    the machinery: what the agent decided to look for, and why it stopped.
+
+    Step text mixes our labels with corpus/model-derived strings (book titles,
+    queries); with unsafe_allow_html enabled for our own badges, everything
+    third-party must be neutralized. A step is plain markdown, so safe_markdown,
+    not safe_html: its line breaks are the list it prints."""
+    async with cl.Step(name=step_name, type="tool", default_open=default_open) as step:
         step.output = safe_markdown(step_output)
 
 
@@ -445,6 +460,43 @@ def safe_html(text: str) -> str:
     return LINE_BREAK_RE.sub("<br>", safe_markdown(text))
 
 
+def marked_passage(passage: str, items: list[dict]) -> str:
+    """The passage as HTML for our own block, with every quote that really is
+    inside it wrapped in <mark>.
+
+    The quote was printed above the passage and the reader was left to find it,
+    so the proof was on screen and unproven to the eye (design critique 16.09
+    §1.3). `provenance.match_span` says where each one sits, over the same
+    normalization `validate` used, so nothing is marked that validate would not
+    have confirmed against this passage.
+
+    ESCAPING. The passage is cut into slices and every slice goes through
+    safe_html, exactly as the whole of it used to: escaped, image-free, line
+    breaks as <br>. A slice boundary can only fall at whitespace (match_span
+    returns whole non-space chunks), so "![" — the construct neutralize_markdown
+    demotes — is never split across two slices and cannot survive the cut. A
+    markdown image whose alt text contains a space could have its full inline
+    form split, and then the "!" of that half is still dropped: it renders as a
+    link, never as a fetch. The <mark> tags are ours and are the only markup
+    added; an inline style carries the highlight because the corpus text around
+    it is styled the same way."""
+    spans: list[tuple[int, int]] = []
+    for item in items:
+        span = match_span(passage, item.get("quote", ""))
+        # Two quotes of one passage can overlap (one is inside the other, or
+        # they share a sentence); the first one wins, and nothing is nested.
+        if span and not any(start < span[1] and span[0] < end for start, end in spans):
+            spans.append(span)
+    rendered, cursor = [], 0
+    for start, end in sorted(spans):
+        rendered.append(safe_html(passage[cursor:start]))
+        rendered.append(f'<mark style="background: #fde68a; color: #000;">'
+                        f'{safe_html(passage[start:end])}</mark>')
+        cursor = end
+    rendered.append(safe_html(passage[cursor:]))
+    return "".join(rendered)
+
+
 def evidence_passages(items: list[dict], passages: dict[str, str]) -> str:
     """One <details> per PASSAGE (hit id), in evidence order: book, section, hit
     id, WHAT KIND OF SOURCE this passage is, and the verdict count in the
@@ -471,7 +523,7 @@ def evidence_passages(items: list[dict], passages: dict[str, str]) -> str:
         # browser. The style keeps the monospaced, wrapped look a pre gave it;
         # safe_html already turns the line breaks into <br>.
         body = (f'<div style="white-space: pre-wrap; font-family: monospace; '
-                f'font-size: 0.85em;">{safe_html(passage)}</div>'
+                f'font-size: 0.85em;">{marked_passage(passage, group)}</div>'
                 if passage is not None else f"<i>{t('ui_passage_missing')}</i>")
         verdicts = " · ".join(f"{safe_html(status_word(s))} {sum(1 for i in group if i.get('status') == s)}"
                               for s in ("confirmed", "unattributed", "broken")
@@ -553,7 +605,9 @@ def render_event(node_name: str, update: dict, view: RunView | None = None) -> N
             lines.append(t("ui_clarify_unresolved"))
         if update.get("plan_fallback"):
             lines.append(t("ui_plan_fallback"))
-        cl.run_sync(show_step("plan", "\n".join(lines)))
+        # plan opens by itself: what the agent decided to look for is the
+        # reader's own question restated, not machinery.
+        cl.run_sync(show_step(t("ui_step_plan"), "\n".join(lines), default_open=True))
 
     elif node_name == "act":
         lines = [t("ui_hits", n=len(update["hits"]))]
@@ -561,13 +615,13 @@ def render_event(node_name: str, update: dict, view: RunView | None = None) -> N
             lines.append(f"- [{hit['corpus']}] {hit['book']} — {hit['section']}")
         for h in update.get("hits_log", []):
             view.passages[h["hit_id"]] = h["text"]
-        cl.run_sync(show_step(f"act #{update['steps_taken']}", "\n".join(lines)))
+        cl.run_sync(show_step(t("ui_step_act", n=update["steps_taken"]), "\n".join(lines)))
 
     elif node_name == "observe":
         text = t("ui_evidence", n=len(update["evidence"]))
         if update["empty_streak"]:
             text += t("ui_streak", n=update["empty_streak"])
-        cl.run_sync(show_step("observe", text))
+        cl.run_sync(show_step(t("ui_step_observe"), text))
 
     elif node_name == "reflect":
         next_query = update.get("current_query")
@@ -587,15 +641,18 @@ def render_event(node_name: str, update: dict, view: RunView | None = None) -> N
             text = t("ui_stopped", r=update["stop_reason"])
         else:
             text = t("ui_enough")
-        cl.run_sync(show_step("reflect", text))
+        # The LAST reflect is the one that says why the search stopped, and
+        # that is the sentence a reader judges the answer by; the ones that
+        # only queue another query stay collapsed.
+        cl.run_sync(show_step(t("ui_step_reflect"), text, default_open=not next_query))
 
     elif node_name == "clarify":
-        cl.run_sync(show_step("clarify",
+        cl.run_sync(show_step(t("ui_step_clarify"),
                               t("ui_user_clarified", a=update["clarification"])))
 
     elif node_name == "catalog":
         listing = update["catalog"]
-        cl.run_sync(show_step("catalog", t("ui_catalog_step", op=listing["op"], n=listing["count"],
+        cl.run_sync(show_step(t("ui_step_catalog"), t("ui_catalog_step", op=listing["op"], n=listing["count"],
                                            total=listing["total"])))
         # Titles are index metadata, i.e. data: rendered as text like a model answer.
         # The shape of the result travels with the persisted message, so a resumed

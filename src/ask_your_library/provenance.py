@@ -151,6 +151,55 @@ def _segments(hit_text: str) -> list[str]:
     return [_normalize(part) for part in body.split(CHUNK_JOINER)]
 
 
+def match_span(passage: str, quote: str) -> tuple[int, int] | None:
+    """WHERE the quote sits inside the passage — (start, end) character offsets
+    into `passage`, or None when it is not there.
+
+    `validate` answers whether a quote is a contiguous run of a passage; this
+    answers where, so an interface can point at the proof instead of printing it
+    above six lines of text and leaving the reader to find it (design critique
+    16.09 §1.3). It runs the same `_normalize` over both sides, so the two agree:
+    what validate confirmed against this passage is found here, and a quote it
+    did not confirm is not.
+
+    The span covers whole whitespace-separated chunks of the RAW text. That is
+    the finest boundary offsets survive: inside a chunk, NFKC composition, the
+    dropped control characters and the punctuation rules all change lengths, so
+    a normalized offset is not a raw one. The practical effect is that a
+    trailing comma or a closing quotation mark is inside the span although the
+    matched token run stops before it — which is what a reader wants marked
+    anyway. The chunk joiner of a chapter read is a barrier, exactly as it is in
+    `_segments`: a run that straddles it is not contiguous in the book and is
+    not a match here either."""
+    needle = _normalize(quote).split()
+    if not needle:
+        return None
+    body = CUT_MARKER_RE.sub("", passage)
+    chunks: list[tuple[int, int] | None] = []
+    tokens: list[str | None] = []
+    where: list[int] = []
+    offset = 0
+    for index, part in enumerate(body.split(CHUNK_JOINER)):
+        if index:
+            # a barrier chunk: it holds a token no quote can carry, so no match
+            # is allowed to run across the [...] that separates two chunks
+            chunks.append(None)
+            tokens.append(None)
+            where.append(len(chunks) - 1)
+        for word in re.finditer(r"\S+", part):
+            chunks.append((offset + word.start(), offset + word.end()))
+            for token in _normalize(word.group()).split():
+                tokens.append(token)
+                where.append(len(chunks) - 1)
+        offset += len(part) + len(CHUNK_JOINER)
+    for start in range(len(tokens) - len(needle) + 1):
+        if tokens[start:start + len(needle)] == needle:
+            first, last = chunks[where[start]], chunks[where[start + len(needle) - 1]]
+            if first is not None and last is not None:
+                return first[0], last[1]
+    return None
+
+
 def validate(state: AgentState) -> dict:
     """Quote-provenance guard (plain CODE, no LLM). Every evidence item names the
     hit it was copied from (hit_id, assigned by act; book/section taken from the

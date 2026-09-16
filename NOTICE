@@ -13,13 +13,28 @@ Version 2.0:
     .chainlit/translations/en-US.json
 
 That file is Chainlit 2.12.0's own en-US.json, copied byte for byte and then
-MODIFIED on 2026-09-10: the value of the key
+MODIFIED. Four values differ from the upstream copy; no other value, key or
+line does.
 
-    navigation.newChat.dialog.description
+    navigation.newChat.dialog.description   (2026-09-10)
 
 was reworded, because the stock wording warns that starting a new chat clears
-the chat history, and this application persists every chat. No other value,
-key or line differs from the upstream copy.
+the chat history, and this application persists every chat.
+
+    chat.messages.status.used               (2026-09-16)
+    chat.messages.status.using              (2026-09-16)
+
+were emptied. Chainlit prints one of them in front of every agent step's name,
+and "Used act #1" is a framework log line rather than what this application did;
+with the prefix gone, the name the application writes ("searched the library
+#1") is the whole label.
+
+    chat.watermark                          (2026-09-16)
+
+was replaced with "Quotes are checked in code. The reasoning is not." The stock
+wording, "LLMs can make mistakes. Check important info.", sits directly under a
+badge that reports a code-only check of every quote, and says less than this
+application knows about its own answer.
 
 No copyright line is quoted here because the installed chainlit 2.12.0
 distribution carries none: it ships neither a LICENSE nor a NOTICE file, and

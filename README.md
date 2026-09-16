@@ -189,7 +189,7 @@ and the open gaps in [`docs/backlog.md`](docs/backlog.md).
 
 The code and the project's own files are under Apache-2.0 (`LICENSE`, attribution in
 [`NOTICE`](NOTICE)); one file in the tree is somebody else's — Chainlit's own
-`.chainlit/translations/en-US.json`, Apache-2.0, copied here with a single string changed, which
+`.chainlit/translations/en-US.json`, Apache-2.0, copied here with four strings changed, which
 [`NOTICE`](NOTICE) and [`.chainlit/translations/README.md`](.chainlit/translations/README.md)
 record.
 
