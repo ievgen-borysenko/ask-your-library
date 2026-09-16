@@ -38,16 +38,19 @@ flowchart TB
         CAT --> VAL
         VAL --> OUT(["answer with citations and a provenance badge,<br/>or an honest 'not found'"]):::code
     end
-    subgraph legend["CODE = no model call, with one exception: act embeds its query · AI = a model call: the answering model you configure, and offline the embedding model and the card distiller · HUMAN = human in the loop"]
-        direction LR
-        L1["CODE"]:::code ~~~ L2["AI"]:::ai ~~~ L3["HUMAN"]:::human
-    end
     DB --> ACT
     DB --> CAT
     classDef code fill:#dbeafe,stroke:#1d4ed8,color:#000
     classDef ai fill:#fed7aa,stroke:#c2410c,color:#000
     classDef human fill:#bbf7d0,stroke:#15803d,color:#000
 ```
+
+Blue = no model call, with one exception: `act` embeds its query. Orange = a model call — the
+answering model you configure online, and offline the embedding model and the card distiller.
+Green = human in the loop. (This legend used to be a `subgraph` wired with `~~~`, which the 0.3.1
+entry named as one of two suspects for a rendering failure whose cause was never established. The
+other two diagrams carry their legend as prose, the form known to survive, and now so does this
+one; the diagram itself loses nothing.)
 
 ## The loop, step by step
 
@@ -87,6 +90,22 @@ question -> the 2-4 English queries the planner is asked for
          -> observe distills candidate quotes -> synthesize answers with citations
          -> validate checks every collected evidence quote against the passage it was copied from
 ```
+
+The three Mermaid diagrams in this repository — the one path through the loop on the
+[README](../README.md) front page, and the two above — are the drawings to trust: they are
+reconciled against the code, in the tree, and they diff. The author's Excalidraw originals from
+the September 2026 course demo were kept here until 2026-09-16 and are now deleted: GitHub renders
+them as raw JSON, no image export was ever committed, and they had drifted from the product in
+ways that cost a correction per change to the loop. Three claims in them were the demo's, not this
+project's, and are recorded here so a reader who has seen those slides is not misled — the demo
+called the quote check a **faithfulness guard** (it is not one: it verifies quote provenance and
+says nothing about whether an answer is faithful or correct); it named one hosted model,
+`OpenRouter: Sonnet 4.6`, where the product lets you configure the answering model and runs fully
+locally with no account ([`configuration.md`](configuration.md)); and it priced a question at
+`~$0.02-0.08` against the author's private 169-book library, where the figure measured on the demo
+corpus is $0.04-0.05 at v0.2.0-rc1 ([`cost.md`](cost.md)). Its canvas also named an `MCP server
+(future)`, which `.chainlit/config.toml` declines by policy, and wrote `CODE = deterministic
+code`, the phrasing 0.3.1 replaced with "no answering-model call" because `act` embeds its query.
 
 The decisions behind this shape, and the alternative each one replaced, are recorded as ADRs
 in [`adr/README.md`](adr/README.md), each with the measurement that settled it.

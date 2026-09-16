@@ -188,7 +188,7 @@ themselves are in [`docs/eval-results/`](docs/eval-results/).
 
 Everything else is under [`docs/`](docs/): the architecture and its decision records, what a
 question costs, the known limits, two end-to-end example traces, every eval report verbatim, the
-diagram sources, the backlog and the changelog.
+backlog and the changelog.
 
 ## Status and licence
 
