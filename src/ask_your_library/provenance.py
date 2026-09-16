@@ -28,9 +28,10 @@ import re
 import unicodedata
 from typing import NamedTuple
 
+from .catalog import resolve_title
 from .config import SEARCH_HIT_CHARS
 from .i18n import t
-from .library import title_of
+from .library import BookEntry, author_of, title_of
 from . import llm
 from .sanitize import LINE_BREAK_RE, strip_control_chars
 from .state import AgentState
@@ -60,18 +61,39 @@ HIT_ID_STRICT = os.environ.get("AYL_STRICT_HIT_ID", "1") == "1"
 # cited is never measured against this — nothing is being invented there.
 MIN_REPIN_TOKENS = 4
 
+# Why a well-formed distillate did not become evidence. One number is the answer
+# a reader wants — how many quotes this answer was refused — and these are the
+# telemetry under it, because they call for different fixes: `no_hit` is a model
+# that cites nothing usable, `cross_book` one that names the wrong work beside a
+# real quote, `short` one that quotes three words, `not_found` one that writes
+# sentences the passages do not contain. Every one of them counts in
+# `dropped_unverified`; none of them is a fifth outcome beside it.
+DROP_REASONS = ("no_hit", "cross_book", "short", "not_found")
+
 
 class EvidenceGate(NamedTuple):
     """What `observe`'s gate made of one distillate: the evidence that survived
-    it, and how it was spent. The numbers #29 adds to the record — an item whose
-    quote sat in another passage OF THE SAME BOOK and was re-pinned to it, and
-    an item whose quote never became evidence at all, with the share of those
-    that failed for naming the wrong book called out (`dropped_cross_book` is a
-    part of `dropped_unverified`, not a fifth outcome beside it)."""
+    it, and how it was spent — items re-pinned to another passage of their own
+    book, and items dropped, counted by reason."""
     evidence: list[dict]
     repinned: int = 0
-    dropped_unverified: int = 0
+    dropped_no_hit: int = 0
     dropped_cross_book: int = 0
+    dropped_short: int = 0
+    dropped_not_found: int = 0
+
+    @property
+    def dropped_unverified(self) -> int:
+        """Every well-formed distillate this gate refused. The headline number:
+        one quote that did not reach the answer is one quote that did not reach
+        the answer, whichever rule stopped it."""
+        return (self.dropped_no_hit + self.dropped_cross_book
+                + self.dropped_short + self.dropped_not_found)
+
+    @property
+    def by_reason(self) -> dict:
+        return {"no_hit": self.dropped_no_hit, "cross_book": self.dropped_cross_book,
+                "short": self.dropped_short, "not_found": self.dropped_not_found}
 
 
 def _valid_evidence(items, hits: list[dict] | None = None) -> EvidenceGate:
@@ -92,9 +114,12 @@ def _valid_evidence(items, hits: list[dict] | None = None) -> EvidenceGate:
                           hit_id come from that hit) and counted `repinned` —
                           BUT ONLY WITHIN THE CITED HIT'S BOOK, and only for a
                           quote of at least MIN_REPIN_TOKENS words
-      nowhere, or a       DROPPED, counted `dropped_unverified`; a drop for
-      re-pin refused      naming the wrong book is also counted
-                          `dropped_cross_book`. Before #29 such a quote reached
+      anything else       DROPPED and counted, under the reason that stopped it:
+                          `not_found` (in no passage of this step), `cross_book`
+                          (its only holder is another work), `short` (too few
+                          words to move without guessing) or `no_hit` (no usable
+                          citation at all). Every one of them is inside
+                          `dropped_unverified`. Before #29 such a quote reached
                           `synthesize` and was counted afterwards, by the report.
 
     Re-pinning across books is refused rather than done because the book on an
@@ -104,12 +129,31 @@ def _valid_evidence(items, hits: list[dict] | None = None) -> EvidenceGate:
     the correction is real — the same work, a better passage — which is the only
     case where re-pinning makes the citation truer than the model left it.
 
+    With `AYL_STRICT_HIT_ID=0` an item may carry no usable hit id at all. It is
+    then resolved by `_sole_holder`, which is the same rule seen from the other
+    end: the model's own `book` field, resolved canonically by the catalogue's
+    resolver, must name one retrieved book, and exactly one passage of that book
+    must hold the quote. A name that matches nothing, a name that matches two
+    books, and a quote two passages hold are all citations nobody can write down
+    — they are dropped, not guessed at.
+
     `hits` is None only in legacy callers/tests; then the model's book/section
     are kept as given and there is nothing to check a quote against."""
     by_id = {h["hit_id"]: h for h in (hits or []) if h.get("hit_id")}
     index = passage_index(hits) if hits is not None else {}
     valid: list[dict] = []
-    repinned = dropped_unverified = dropped_cross_book = 0
+    repinned = 0
+    dropped = dict.fromkeys(DROP_REASONS, 0)
+
+    def refuse(reason: str, cited_a_hit: bool) -> None:
+        """One place that records a refusal, so no path can drop a well-formed
+        quote without it showing up in `dropped_unverified`. The usage counter
+        keeps the meaning it has always had — an item with no resolvable hit id
+        — and is now one reason among four rather than the only one recorded."""
+        dropped[reason] += 1
+        if not cited_a_hit:
+            llm._usage().evidence_dropped_no_hit += 1
+
     if not isinstance(items, list):
         # "evidence": 42 or "evidence": "none" is valid JSON and malformed
         # output: dropped like a malformed item, never a TypeError mid-run.
@@ -125,34 +169,37 @@ def _valid_evidence(items, hits: list[dict] | None = None) -> EvidenceGate:
         if hits is not None:
             cited = by_id.get(hit_id)
             if cited is None and HIT_ID_STRICT:
-                llm._usage().evidence_dropped_no_hit += 1
+                refuse("no_hit", cited_a_hit=False)
                 continue
             if cited is None:
-                # Non-strict mode: the model named no usable hit, so there is no
-                # citation to confirm or to correct — the quote itself has to
-                # find its passage, which is what classify_quote does from an
-                # empty cited id. Resolving it is not a re-pin: nothing was
-                # pinned wrong, nothing was pinned at all.
-                hit_id = ""
-            status, holder = classify_quote(quote, hit_id, index)
-            # A quote that is not where it said it is has to be MOVED to the
-            # passage that holds it, and the two refusals below say what may not
-            # be moved: not into another book, and not on the strength of three
-            # words. A refused move and a quote that is nowhere count the same,
-            # because from the answer's side they are the same event — a
-            # distillate that did not become evidence.
-            moved = status != BROKEN and holder != hit_id
-            cross_book = moved and cited is not None and index[holder]["book"] != cited["book"]
-            too_short = moved and quote_tokens(quote) < MIN_REPIN_TOKENS
-            if status == BROKEN or cross_book or too_short:
-                if cited is None:
-                    llm._usage().evidence_dropped_no_hit += 1   # unchanged: no hit could be resolved
-                else:
-                    dropped_unverified += 1
-                    dropped_cross_book += int(cross_book)
-                continue
-            if moved and cited is not None:
-                repinned += 1
+                # Non-strict: the model named no usable hit, so there is no
+                # citation to confirm or to correct — and the quote may not go
+                # hunting through the whole window for one. It may land only
+                # inside the book the model itself named, and only when that
+                # book and that passage are both unambiguous.
+                holder, why = _sole_holder(quote, book, index)
+                if not holder:
+                    refuse(why, cited_a_hit=False)
+                    continue
+            else:
+                status, holder = classify_quote(quote, hit_id, index)
+                # A quote that is not where it said it is has to be MOVED to the
+                # passage that holds it, and the two refusals below say what may
+                # not be moved: not into another book, and not on the strength of
+                # three words. A refused move and a quote that is nowhere count
+                # the same, because from the answer's side they are the same
+                # event — a distillate that did not become evidence.
+                if status == BROKEN:
+                    refuse("not_found", cited_a_hit=True)
+                    continue
+                if holder != hit_id:
+                    if quote_tokens(quote) < MIN_REPIN_TOKENS:
+                        refuse("short", cited_a_hit=True)
+                        continue
+                    if index[holder]["book"] != cited["book"]:
+                        refuse("cross_book", cited_a_hit=True)
+                        continue
+                    repinned += 1
             hit = by_id[holder]
             book, section, hit_id = hit["book"], hit["section"], hit["hit_id"]
         else:
@@ -161,7 +208,7 @@ def _valid_evidence(items, hits: list[dict] | None = None) -> EvidenceGate:
             book, section = book.strip(), str(e.get("section") or "").strip()
         valid.append({"hit_id": hit_id, "book": book, "section": section, "quote": quote,
                       "why": str(e.get("why") or "").strip()[:300]})
-    return EvidenceGate(valid, repinned, dropped_unverified, dropped_cross_book)
+    return EvidenceGate(valid, repinned, **{f"dropped_{r}": n for r, n in dropped.items()})
 
 
 # ---------------------------------------------------------------- validate
@@ -278,7 +325,8 @@ def quote_tokens(quote: str) -> int:
 
 def _holder_among(quote_norm: str, index: dict[str, dict], card: bool,
                   book: str, section: str, skip: str) -> str:
-    """The best passage of one kind (book text or card) that holds this quote.
+    """The best passage of one kind (book text or card) that holds this quote,
+    inside `book` if any does and anywhere otherwise.
 
     "Best" is not "first in the dict": a quote is re-pinned to what this returns,
     and the book on an evidence item is the book the ANSWER will cite. So a
@@ -302,20 +350,74 @@ def _holder_among(quote_norm: str, index: dict[str, dict], card: bool,
     return best
 
 
+def _book_entries(index: dict[str, dict]) -> list[BookEntry]:
+    """The books this run retrieved, shaped as the catalogue's resolver reads
+    them. Title and author are split off the index key by the same two helpers
+    the catalogue uses, so "Dracula" means "Dracula — Bram Stoker" here exactly
+    as it does when the reader asks whether the library holds it."""
+    entries: dict[str, BookEntry] = {}
+    for record in index.values():
+        key = record["book"]
+        if not key:
+            continue
+        seen = entries.get(key)
+        entries[key] = BookEntry(key, title_of(key), author_of(key),
+                                 has_cards=record["card"] or bool(seen and seen.has_cards),
+                                 has_text=not record["card"] or bool(seen and seen.has_text))
+    return list(entries.values())
+
+
+def _sole_holder(quote: str, stated_book, index: dict[str, dict]) -> tuple[str, str]:
+    """The one passage an item with NO usable hit id may be pinned to, or ("",
+    reason) when there is no such passage.
+
+    With `AYL_STRICT_HIT_ID=0` the model may return a quote without naming the
+    passage it came from, and the old rule searched every hit of the window and
+    took the first that matched — so an item whose `book` field said one thing
+    was pinned, silently, to whatever else happened to hold those words. The
+    model's own `book` is a claim, and here it is the one thing narrowing the
+    search: it is resolved canonically against the books this run retrieved
+    (`catalog.resolve_title`, the resolver the catalogue answers "do I have X"
+    with), and the quote must then sit in exactly one passage of that one book.
+
+    Three ways that fails and all three are drops, because none of them yields a
+    citation anyone could write down: a name that matches no retrieved book or
+    matches two, and a quote that two passages of the right book hold. The
+    length floor applies here as it does to a re-pin — this is the same act of
+    inventing a citation, seen from the other end."""
+    if quote_tokens(quote) < MIN_REPIN_TOKENS:
+        return "", "short"
+    if not (isinstance(stated_book, str) and stated_book.strip()):
+        return "", "no_hit"
+    entries = _book_entries(index)
+    matches, _ = resolve_title(stated_book.strip(), entries, strict=True)
+    if not matches:
+        matches, _ = resolve_title(stated_book.strip(), entries)
+    if len(matches) != 1:
+        return "", "no_hit"
+    quote_norm = _normalize(quote)
+    holders = [hit_id for hit_id, record in index.items()
+               if record["book"] == matches[0].key and _found_in(quote_norm, record["segments"])]
+    return (holders[0], "") if len(holders) == 1 else ("", "no_hit")
+
+
 def classify_quote(quote: str, hit_id: str, index: dict[str, dict]) -> tuple[str, str]:
     """THE quote check, run by both gates: what is this quote, and which
     retrieved passage holds it? Returns (status, hit_id of the holder); the
     holder is "" when nothing holds it.
 
-    The cited passage is read first, and what it is decides the answer: its own
-    book text **confirms**; a book card that holds the quote is **card_only**,
-    because the citation is right and the source is a model's summary rather
-    than the author's words. Only when the cited passage does not hold the quote
-    does the rest of the run matter: other retrieved book text makes the quote
-    real and the citation wrong (**unattributed**), a card elsewhere makes it
-    real and model-written, and nothing at all makes it **broken**. An empty or
-    punctuation-only quote is broken by construction: there is no word sequence
-    to find.
+    The search runs **book before corpus**, in four passes. The cited passage
+    first, and what it is decides the answer: its own book text **confirms**; a
+    book card that holds the quote is **card_only**, because the citation is
+    right and the source is a model's summary rather than the author's words.
+    Then the rest of the CITED BOOK — its other chapters, then its cards — and
+    only after that other books, whose holders exist to classify a drop rather
+    than to receive a re-pin. Corpus-before-book was the wrong order: a
+    transcript of some other work outranked a card of the book actually cited,
+    so the gate dropped as `cross_book` an item whose own book held the quote
+    one passage away. Nothing at all makes it **broken**; an empty or
+    punctuation-only quote is broken by construction, there being no word
+    sequence to find.
 
     Reading the cited passage first is what keeps the two gates telling the same
     story about one quote. The gate sees one step; `validate` sees the whole
@@ -335,12 +437,19 @@ def classify_quote(quote: str, hit_id: str, index: dict[str, dict]) -> tuple[str
         return (CARD_ONLY if cited["card"] else CONFIRMED), hit_id
     book = cited["book"] if cited is not None else ""
     section = cited["section"] if cited is not None else ""
-    elsewhere = _holder_among(quote_norm, index, False, book, section, hit_id)
-    if elsewhere:
-        return UNATTRIBUTED, elsewhere
-    on_a_card = _holder_among(quote_norm, index, True, book, section, hit_id)
-    if on_a_card:
-        return CARD_ONLY, on_a_card
+    # Book before corpus: the cited book's own text, then the cited book's
+    # cards, and only then anything else. `_holder_among` already prefers the
+    # named book, so a pass is "inside this book" when it returns a holder from
+    # it and "anywhere" otherwise — which is why the same-book passes come as a
+    # pair before the two that may land in another work.
+    for card, status in ((False, UNATTRIBUTED), (True, CARD_ONLY)):
+        holder = _holder_among(quote_norm, index, card, book, section, hit_id)
+        if holder and index[holder]["book"] == book:
+            return status, holder
+    for card, status in ((False, UNATTRIBUTED), (True, CARD_ONLY)):
+        holder = _holder_among(quote_norm, index, card, book, section, hit_id)
+        if holder:
+            return status, holder
     return BROKEN, ""
 
 
@@ -394,18 +503,20 @@ def match_span(passage: str, quote: str) -> tuple[int, int] | None:
 
 
 def gate_counts(state: AgentState) -> dict:
-    """What the observe gate spent, as the report carries it (#29). Always all
-    three keys and always integers, so an interface, the harness and a sidecar
-    read one shape whether or not this run dropped anything; a state from before
-    the gate (a recording, a legacy caller) reads back as a run that dropped
-    nothing, which is exactly what it was."""
+    """What the observe gate spent, as the report carries it (#29). Always the
+    same keys and always the same shape, so an interface, the harness and a
+    sidecar read one thing whether or not this run dropped anything; a state
+    from before the gate (a recording, a legacy caller) reads back as a run that
+    dropped nothing, which is exactly what it was.
+
+    One headline and its telemetry. `dropped_unverified` is what a reader wants
+    — how many quotes this answer was refused — and `dropped_by_reason` splits
+    it four ways for whoever has to do something about it. The parts sum to the
+    whole by construction; nothing in the breakdown is an outcome beside it."""
+    reasons = state.get("dropped_by_reason") or {}
     return {"dropped_unverified": int(state.get("dropped_unverified") or 0),
             "repinned": int(state.get("repinned") or 0),
-            # a part of dropped_unverified, not a fifth outcome beside it: the
-            # quotes dropped because the only passage holding them was another
-            # book's, where a re-pin would have swapped one wrong citation for
-            # a more confident one
-            "dropped_cross_book": int(state.get("dropped_cross_book") or 0)}
+            "dropped_by_reason": {r: int(reasons.get(r) or 0) for r in DROP_REASONS}}
 
 
 def validate(state: AgentState) -> dict:

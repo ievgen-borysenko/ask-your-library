@@ -34,11 +34,11 @@ class AgentState(TypedDict):
     empty_streak: int      # consecutive DRY steps — no evidence and nothing dropped (CRAG gate).
                            # A step whose quotes were all dropped as unverified is not dry: the
                            # passages were there, so it neither advances the streak nor resets it
-    # the observe gate (#29), as run totals: quotes dropped because no passage of their step
-    # held them (or because the only one that did belongs to another book — dropped_cross_book,
-    # a part of that number), and quotes re-pinned to the passage of the SAME book that holds them
+    # the observe gate (#29), as run totals: every well-formed quote the gate refused, the
+    # same number split by the rule that refused it (no_hit / cross_book / short / not_found,
+    # summing to it), and the quotes re-pinned to the passage of the SAME book that holds them
     dropped_unverified: int
-    dropped_cross_book: int
+    dropped_by_reason: dict
     repinned: int
     read_chapters: list[str]  # chapter reads attempted: "book|section|status", status = complete | partial | empty
     clarification: str     # the user's reply to a clarifying question

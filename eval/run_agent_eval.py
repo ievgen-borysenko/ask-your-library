@@ -341,9 +341,9 @@ def run_one(graph, item: dict, attempt: int = 1) -> dict:
         # the passage that did. A question that ends with no evidence at all
         # still carries them, which is often the only account of why it refused
         "dropped_unverified": result.dropped_unverified,
-        # the share of those that failed for naming another book, where a
-        # re-pin would have swapped a wrong citation for a confident one
-        "dropped_cross_book": result.dropped_cross_book,
+        # the same number split by the rule that refused each quote — no_hit,
+        # cross_book, short, not_found — because they call for different fixes
+        "dropped_by_reason": result.dropped_by_reason,
         "repinned": result.repinned,
         "clarify_asked": result.clarify_asked,
         "clarify_candidates": result.clarify_candidates,
@@ -1202,7 +1202,7 @@ def main(argv: list[str] | None = None) -> None:
                 # defaults to 0, so a record written before the gate reads back
                 # as the run it was, one that dropped nothing.
                 totals["dropped_unverified"] += r.get("dropped_unverified", 0)
-                totals["dropped_cross_book"] += r.get("dropped_cross_book", 0)
+                totals["dropped_cross_book"] += (r.get("dropped_by_reason") or {}).get("cross_book", 0)
                 totals["repinned"] += r.get("repinned", 0)
                 totals["evidence"] += r["evidence_items"]
                 for key in ("cost_usd", "llm_calls", "tokens_in", "tokens_out"):
@@ -1239,8 +1239,9 @@ def main(argv: list[str] | None = None) -> None:
                 if r.get("dropped_unverified"):
                     drill += (f", {r['dropped_unverified']} quotes dropped before the answer "
                               f"(not in the passage they cited)")
-                if r.get("dropped_cross_book"):
-                    drill += f", {r['dropped_cross_book']} of them held only by another book"
+                if (r.get("dropped_by_reason") or {}).get("cross_book"):
+                    drill += (f", {r['dropped_by_reason']['cross_book']} of them held only by "
+                              f"another book")
                 if r.get("repinned"):
                     drill += f", {r['repinned']} quotes re-pinned"
                 if r.get("catalog"):

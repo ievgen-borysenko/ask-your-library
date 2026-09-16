@@ -499,8 +499,11 @@ def observe(state: AgentState) -> dict:
     # report: a reader wants "this answer lost N quotes", not a per-step ledger.
     if gate.dropped_unverified:
         update["dropped_unverified"] = state.get("dropped_unverified", 0) + gate.dropped_unverified
-    if gate.dropped_cross_book:
-        update["dropped_cross_book"] = state.get("dropped_cross_book", 0) + gate.dropped_cross_book
+        # The breakdown travels with the number it breaks down, never apart from
+        # it: a consumer that sees one sees both, and the parts still sum.
+        so_far = state.get("dropped_by_reason") or {}
+        update["dropped_by_reason"] = {reason: (so_far.get(reason) or 0) + spent
+                                       for reason, spent in gate.by_reason.items()}
     if gate.repinned:
         update["repinned"] = state.get("repinned", 0) + gate.repinned
     return update

@@ -591,21 +591,35 @@ def test_observe_non_strict_resolves_a_missing_hit_id_by_the_quote(monkeypatch):
 
     monkeypatch.setattr(provenance, "HIT_ID_STRICT", False)
     monkeypatch.setattr(llm, "ask_json", lambda system, user, role: {"evidence": [
-        {"book": "whatever", "quote": "A knight of the shire.", "why": "w"},   # found in s1h2
-        {"book": "whatever", "quote": "Not in any hit.", "why": "w"},          # dropped
+        # The model's own `book` is the one thing narrowing the search, so it is
+        # resolved canonically — "Ivanhoe" is "Ivanhoe — Walter Scott" here as it
+        # is in the catalogue — and the quote must sit in exactly one passage of
+        # exactly that book.
+        {"book": "Ivanhoe", "quote": "A knight of the shire.", "why": "w"},    # found in s1h2
+        {"book": "Ivanhoe", "quote": "Not in any hit.", "why": "w"},           # dropped
+        # A name that matches no retrieved book is not a citation, and the quote
+        # must NOT go hunting through the window for one: dropped, where the old
+        # rule pinned it to whatever else happened to hold the words.
+        {"book": "whatever", "quote": "A knight of the shire.", "why": "w"},   # dropped
         # A quote with no hit id is not confirming a citation, it is looking for
         # one, so it answers to the same floor a re-pin does: three words match
         # somewhere in almost any library, and a match that short is a
         # coincidence, not a provenance.
-        {"book": "whatever", "quote": "A knight", "why": "w"},                 # dropped: too short
+        {"book": "Ivanhoe", "quote": "A knight", "why": "w"},                  # dropped: too short
     ]})
     llm.reset_usage()
     state = {"question": "q", "current_query": "cq", "empty_streak": 0, "evidence": [],
-             "hits": [{"hit_id": "s1h1", "corpus": "transcripts", "book": "A", "section": "1", "text": "Call me Ishmael."},
-                      {"hit_id": "s1h2", "corpus": "cards", "book": "B", "section": "S", "text": "A knight of the shire."}]}
+             "hits": [{"hit_id": "s1h1", "corpus": "transcripts", "book": "Moby Dick — Herman Melville",
+                       "section": "1", "text": "Call me Ishmael."},
+                      {"hit_id": "s1h2", "corpus": "cards", "book": "Ivanhoe — Walter Scott",
+                       "section": "S", "text": "A knight of the shire."}]}
     result = nodes.observe(state)
-    assert [(e["hit_id"], e["book"]) for e in result["evidence"]] == [("s1h2", "B")]
-    assert llm.usage_snapshot()["evidence_dropped_no_hit"] == 2
+    assert [(e["hit_id"], e["book"]) for e in result["evidence"]] == [
+        ("s1h2", "Ivanhoe — Walter Scott")]
+    assert llm.usage_snapshot()["evidence_dropped_no_hit"] == 3
+    # every refusal is in the headline number, under the rule that made it
+    assert result["dropped_unverified"] == 3
+    assert result["dropped_by_reason"] == {"no_hit": 2, "cross_book": 0, "short": 1, "not_found": 0}
 
 
 def test_reflect_treats_schema_less_read_chapter_as_enough(monkeypatch):
@@ -1985,6 +1999,56 @@ def test_a_quote_too_short_to_re_pin_is_dropped_rather_than_moved():
     # three words in the passage the model actually cited: kept, as before
     at_home = provenance._valid_evidence([{"hit_id": "s1h1", "quote": "Call me Ishmael", "why": "w"}], hits)
     assert at_home.evidence[0]["hit_id"] == "s1h1" and at_home.dropped_unverified == 0
+
+
+def test_a_card_of_the_cited_book_outranks_a_chapter_of_another_one():
+    """The search runs book before corpus. It used to run corpus before book —
+    every book-text passage of the window before any card — so a transcript of
+    an unrelated work outranked the cited book's OWN card, and the gate then
+    dropped as cross-book an item whose own book held the quote one passage
+    away. Valid same-book evidence lost to a coincidence in another novel."""
+    from ask_your_library import provenance
+
+    said = "a whale of uncommon magnitude and malice"
+    hits = [_gate_hit("s1h1", GULLIVER_KEY, "Chapter 1", f"they spoke of {said} that night"),
+            _gate_hit("s1h2", MOBY_KEY, "Chapter 1", "Call me Ishmael."),          # cited, no match
+            _gate_hit("s1h3", MOBY_KEY, "Summary", f"the book is about {said}", corpus="cards")]
+    gate = provenance._valid_evidence([{"hit_id": "s1h2", "quote": said, "why": "w"}], hits)
+    kept = gate.evidence[0]
+    assert (kept["hit_id"], kept["book"]) == ("s1h3", MOBY_KEY)
+    assert (gate.repinned, gate.dropped_unverified) == (1, 0)
+    # and with the cited book's card gone, the other book's chapter is good only
+    # for classifying the drop — never for receiving the quote
+    without = provenance._valid_evidence([{"hit_id": "s1h2", "quote": said, "why": "w"}], hits[:2])
+    assert without.evidence == [] and without.by_reason["cross_book"] == 1
+
+
+def test_every_gate_refusal_is_in_the_headline_number_and_under_a_reason(monkeypatch):
+    """A rejection for a missing or unknown hit id used to increment only the
+    usage counter, so `dropped_unverified` — the number the badge, the report
+    and the sidecar show a reader — undercounted what the answer had been
+    refused. All four rules report to one number now, and the breakdown sums to
+    it: one quote that did not reach the answer is one quote that did not reach
+    the answer, whichever rule stopped it."""
+    from ask_your_library import provenance
+
+    monkeypatch.setattr(provenance, "HIT_ID_STRICT", True)
+    hits = [_gate_hit("s1h1", MOBY_KEY, "Chapter 1", "Call me Ishmael."),
+            _gate_hit("s1h2", MOBY_KEY, "Chapter 9", "and the sea was calm that day"),
+            _gate_hit("s1h3", GULLIVER_KEY, "Chapter 1", "I felt something alive moving on my left leg")]
+    llm.reset_usage()
+    gate = provenance._valid_evidence([
+        {"hit_id": "s9h9", "quote": "Call me Ishmael and so on", "why": "w"},        # no_hit
+        {"hit_id": "s1h1", "quote": "I felt something alive moving", "why": "w"},    # cross_book
+        {"hit_id": "s1h1", "quote": "the sea was", "why": "w"},                      # short
+        {"hit_id": "s1h1", "quote": "Ishmael was a lawyer in Boston", "why": "w"},   # not_found
+    ], hits)
+    assert gate.evidence == [] and gate.dropped_unverified == 4
+    assert gate.by_reason == {"no_hit": 1, "cross_book": 1, "short": 1, "not_found": 1}
+    assert sum(gate.by_reason.values()) == gate.dropped_unverified
+    # the usage counter keeps the meaning it has always had: items with no
+    # resolvable hit id, which is now one reason of four and not the only record
+    assert llm.usage_snapshot()["evidence_dropped_no_hit"] == 1
 
 
 def test_a_card_quote_stays_a_card_quote_when_a_later_step_retrieves_the_same_words():

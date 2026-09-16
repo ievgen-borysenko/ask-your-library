@@ -205,7 +205,9 @@ def test_one_search_enough_answer_and_confirmed_provenance(run, tmp_path):
     assert validate["provenance"] == {"checked": 1, "checked_book_text": 1, "confirmed": 1,
                                       "unattributed": 0, "broken": 0, "card_only": 0,
                                       # the observe gate let this quote through and took nothing
-                                      "dropped_unverified": 0, "dropped_cross_book": 0, "repinned": 0,
+                                      "dropped_unverified": 0, "repinned": 0,
+                                      "dropped_by_reason": {"no_hit": 0, "cross_book": 0,
+                                                            "short": 0, "not_found": 0},
                                       "unused": 0, "broken_items": [],
                                       "items": [{"hit_id": "s1h2", "book": MOBY, "section": "Chapter 1",
                                                  "quote": "Call me Ishmael.", "status": "confirmed",
@@ -640,6 +642,8 @@ def test_a_quote_not_in_the_cited_passage_is_repinned_or_dropped_before_the_answ
             # the Moby Dick card (s1h1), cited as its chapter: same book, so re-pinned to the card
             evidence(MOBY, "cards", "s1h2", quote="Captain Ahab hunts the white whale that took his leg."),
             evidence(MOBY, "cards", "s1h1", quote="Ishmael was a lawyer in Boston."),  # nowhere: dropped
+            # an unknown hit id is no citation at all: dropped as it always was,
+            # and since review round 2 counted in the headline number like the rest
             {"hit_id": "s9h9", "book": MOBY, "section": "x", "quote": "Call me Ishmael.", "why": "no such hit"},
         ]}],
         reflect=[{"decision": "enough"}],
@@ -647,9 +651,9 @@ def test_a_quote_not_in_the_cited_passage_is_repinned_or_dropped_before_the_answ
     )
     _, events, _ = run(model, FakeLibrary(), "Who is Ishmael?")
     observe = by_name(events, "observe")[0]
-    assert len(observe["evidence"]) == 2     # two unverified, one with an unknown hit id (strict mode)
-    assert (observe["dropped_unverified"], observe["dropped_cross_book"]) == (2, 1)
-    assert observe["repinned"] == 1
+    assert len(observe["evidence"]) == 2     # three refusals, each under the rule that made it
+    assert observe["dropped_unverified"] == 3 and observe["repinned"] == 1
+    assert observe["dropped_by_reason"] == {"no_hit": 1, "cross_book": 1, "short": 0, "not_found": 1}
     assert [e["hit_id"] for e in observe["evidence"]] == ["s1h2", "s1h1"]
     assert [e["book"] for e in observe["evidence"]] == [MOBY, MOBY]   # no citation left another book
     p = by_name(events, "validate")[0]["provenance"]
@@ -659,7 +663,8 @@ def test_a_quote_not_in_the_cited_passage_is_repinned_or_dropped_before_the_answ
     assert (p["checked"], p["confirmed"], p["unattributed"], p["broken"]) == (2, 1, 0, 0)
     assert p["confirmed"] == p["checked_book_text"] and p["broken_items"] == []
     assert (p["card_only"], p["checked_book_text"]) == (1, 1)
-    assert (p["dropped_unverified"], p["dropped_cross_book"], p["repinned"]) == (2, 1, 1)
+    assert (p["dropped_unverified"], p["repinned"]) == (3, 1)
+    assert p["dropped_by_reason"] == {"no_hit": 1, "cross_book": 1, "short": 0, "not_found": 1}
     # every item with its verdict, in evidence order: what the interfaces open on the passage
     assert [(i["hit_id"], i["status"]) for i in p["items"]] == [
         ("s1h2", "confirmed"), ("s1h1", "card_only")]
@@ -668,7 +673,7 @@ def test_a_quote_not_in_the_cited_passage_is_repinned_or_dropped_before_the_answ
     assert all(i["hit_id"] in passages for i in p["items"])          # the UI can open each one
     assert by_name(events, "metrics")[0]["evidence_dropped_no_hit"] == 1
     # and the reader is told what the answer was not allowed to rest on
-    assert "2 quotes dropped before the answer" in by_name(events, "validate")[0]["verification"]
+    assert "3 quotes dropped before the answer" in by_name(events, "validate")[0]["verification"]
 
 
 def test_deadline_spent_after_a_step_answers_from_what_was_found(monkeypatch, tmp_path):

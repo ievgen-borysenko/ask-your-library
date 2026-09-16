@@ -263,8 +263,10 @@ def accumulate(totals: dict, item: dict, r: dict) -> None:
     # otherwise: the two conditions that answer without the graph have no gate to
     # report, and a record written before 16.09 has neither, which reads back as
     # the run it was — one that dropped nothing.
-    for key in ("dropped_unverified", "dropped_cross_book", "repinned"):
+    for key in ("dropped_unverified", "repinned"):
         totals[key] += r.get(key, prov.get(key, 0))
+    reasons = r.get("dropped_by_reason") or prov.get("dropped_by_reason") or {}
+    totals["dropped_cross_book"] += reasons.get("cross_book", 0)
     for key in ("llm_calls", "tokens_in", "tokens_out"):
         totals[key] += r.get(key, 0)
     totals["cost_usd"] = round(totals["cost_usd"] + r.get("cost_usd", 0.0), 4)

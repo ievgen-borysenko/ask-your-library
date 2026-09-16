@@ -26,9 +26,10 @@ Event contract (node_name -> keys present in update):
              passages only; the graph state append-reduces them across steps)
   observe    evidence (accumulated), empty_streak; a distillation call that timed out sends
              call_timed_out=True and stop_reason instead, and the loop ends at reflect.
-             The provenance gate (#29) adds dropped_unverified, dropped_cross_book (a part
-             of it) and repinned — run totals, each present ONLY on a step that spent it, so
-             a run where every quote checks out emits exactly the event it always did
+             The provenance gate (#29) adds dropped_unverified with dropped_by_reason
+             (no_hit / cross_book / short / not_found, summing to it) and repinned — run
+             totals, each present ONLY on a step that spent it, so a run where every quote
+             checks out emits exactly the event it always did
   reflect    current_query ("" = synthesize; "__clarify__" + clarify_candidates; "__chapter__|book|section";
              "__book__|book|query" = coverage probe, one search inside one candidate) + coverage_probed
   clarify    clarification (the user's reply)
@@ -36,7 +37,7 @@ Event contract (node_name -> keys present in update):
   validate   verification (human-readable) + provenance (numbers:
              checked/confirmed/unattributed/broken (a partition of checked) + unused
              (items for books the answer does not name, checked anyway)
-             + dropped_unverified/dropped_cross_book/repinned (what the observe gate
+             + dropped_unverified/dropped_by_reason/repinned (what the observe gate
              spent before the answer was written: always present, 0 on a run that
              dropped nothing),
              + broken_items[{hit_id,book,section,quote}]
@@ -80,7 +81,7 @@ def initial_state(question: str, history: list[str], scratchpad: Path) -> dict:
         "question": question, "history": history,
         "mode": "", "queries": [], "current_query": "",
         "hits": [], "hits_log": [], "evidence": [], "steps_taken": 0,
-        "empty_streak": 0, "dropped_unverified": 0, "dropped_cross_book": 0, "repinned": 0,
+        "empty_streak": 0, "dropped_unverified": 0, "dropped_by_reason": {}, "repinned": 0,
         "clarification": "", "clarify_asked": False, "coverage_probed": False,
         "plan_fallback": False, "catalog_fallback": "",
         "clarify_candidates": [], "clarify_unresolved": False, "clarify_chosen": "",
@@ -175,13 +176,14 @@ class RunResult:
     steps_taken: int = 0
     evidence: list = field(default_factory=list)
     read_chapters: list = field(default_factory=list)
-    # what the provenance gate spent on this question (#29): quotes dropped
-    # because no retrieved passage of their step held them, and quotes re-pinned
-    # to the passage that did. They are also inside `provenance`; they are
-    # fields of their own because they are facts about the RUN, and a question
-    # that ends with no evidence at all still has them to report.
+    # what the provenance gate spent on this question (#29): every quote it
+    # refused, the same number split by the rule that refused it, and the quotes
+    # re-pinned to another passage of their own book. They are also inside
+    # `provenance`; they are fields of their own because they are facts about
+    # the RUN, and a question that ends with no evidence at all still has them
+    # to report.
     dropped_unverified: int = 0
-    dropped_cross_book: int = 0
+    dropped_by_reason: dict = field(default_factory=dict)
     repinned: int = 0
     # the clarify interrupt: whether it happened at all (the runner knows, the
     # state does not say it after a resume), what was offered and what code
@@ -246,7 +248,7 @@ def _result(question: str, state: dict, usage: dict, seconds: float,
         evidence=state.get("evidence") or [],
         read_chapters=state.get("read_chapters") or [],
         dropped_unverified=int(state.get("dropped_unverified") or 0),
-        dropped_cross_book=int(state.get("dropped_cross_book") or 0),
+        dropped_by_reason=dict(state.get("dropped_by_reason") or {}),
         repinned=int(state.get("repinned") or 0),
         clarify_asked=clarify_asked,
         clarify_candidates=state.get("clarify_candidates") or [],
