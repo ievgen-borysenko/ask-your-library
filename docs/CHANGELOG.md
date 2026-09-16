@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+- **The runner returns a result, the eval harness consumes it, and a failed question is still
+  measured.** `runner.run_question` handed back the answer string and every caller reached into
+  the graph's state for the rest; `eval/run_agent_eval.py` did not even call it — it re-implemented
+  the stream loop, the clarify interrupt and the per-question usage reset — so the code that
+  produces this project's published numbers was not the code a reader runs. Now `run_question`
+  returns a frozen `RunResult` (the answer, the evidence and its provenance, the stop reason, the
+  clarify and catalogue fields, the read chapters and steps, the planner fallback, the usage
+  snapshot, the wall clock, the scratchpad, and the failure if there was one), and the CLI, the web
+  UI and `run_one` read that. The runner owns the stream loop, the interrupt, the usage reset and
+  the scratchpad — `run_one` passes in an event collector and its own `--clarify-pick` reply policy
+  and keeps the scratchpad name it has always written (`eval/results/scratch-<id>.md`, one per
+  attempt under `--repeat`). The event contract is byte-identical: same events, same order, same
+  payloads, pinned by the tests that already pinned it (ADR-009, amended 16.09).
+
+  A run that fails is part of that record rather than an exception through every interface: the
+  metrics event moved into a `finally`, so a question that dies mid-run still reports the calls,
+  tokens and seconds it spent (the partial event at a clarify pause is unchanged), and the failure
+  comes back on the result as an exception class plus a message with this machine's paths replaced
+  by `~` or `<repo>`. The CLI prints the same one-line error it always did and still exits 1 in
+  single-question mode; the eval harness re-raises it so the ERROR row and its "spent before the
+  error" are what they were.
+
+- **Seconds per node role in the usage accounting.** `by_role` carried calls and tokens only, so a
+  latency budget could not be argued at all on the local backend, where a question costs $0 and
+  seconds are the only currency (#32). Each role now accumulates the wall clock of its model calls
+  — measured in a `finally` around the call, so retries, their backoff and a call that ended in a
+  timeout are all counted, and a role can honestly report seconds with zero completed calls —
+  `usage_snapshot()` carries it, and the eval report prints `- seconds by role: plan 1.2, observe
+  8.5` under a question's steps log with the same figures in the JSON sidecar
+  (`by_role_seconds`). Every existing number is unchanged, the report of a run that spent no call
+  included: the byte-compatible report fixture (`tests/fixtures/agent-eval-report-pre-sidecar.md`)
+  passes untouched.
+
 - **The web UI's release check is a test now, not a walk-through.** First start, login, a
   question, the live agent steps, the quote-provenance badge, an evidence passage opened and
   readable, the catalogue answer with its count, a reload that restores the conversation, a

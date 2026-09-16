@@ -109,6 +109,14 @@ open ones often refer to them.
   is the history of what was ingested, not the current state of the folder
   (`docs/known-limits.md`). Fix: a `books` table with a stable id that a re-ingest updates in place, and an ingest
   ledger beside it.
+- **A local latency budget still misses what is not a model call.** Since 16.09 `by_role` carries
+  `seconds` beside calls and tokens (the wall clock of each model call, retries and timeouts
+  included), and the eval report and sidecar carry them per question — the precondition #32 was
+  blocked on, because locally a question costs $0 and seconds are the only currency there is. What
+  they do not cover: model residency (the ~98 s of the first question that is model load plus a
+  cold prompt cache, paid before any call this counts), and the parts of a node that are not a
+  call — retrieval is under a second today, which is why the role granularity was enough to start.
+  Closing #32 means deciding those two separately.
 - `validate` accepts one-token quotes; require a minimum of 3-5 tokens in `_valid_evidence` (a
   reviewer disagrees: one name can be evidence; decide with a case).
 - Link answer claims to evidence ids (citations by id in the answer, checked by code); today the
@@ -221,6 +229,18 @@ open ones often refer to them.
   not one command away either (same item as above).
 
 ## Resolved (kept because the open items refer to them)
+
+- **A question that failed was measured by nothing, and the eval harness was a second execution
+  path.** The metrics event was emitted after the `try` in `runner.run_question`, so a run that
+  raised reported no metrics at all — the model calls it had already paid for were invisible to the
+  CLI, the web UI and the report — and `eval/run_agent_eval.py` drove `graph.stream`, the clarify
+  interrupt and the usage reset itself, so the numbers this project publishes were produced by code
+  no reader ever runs. Closed on 16.09 (ADR-009 amended): `run_question` returns a `RunResult` —
+  the answer, evidence, provenance, the clarify and catalogue fields, the usage snapshot, the wall
+  clock and the failure (class and a message with local paths redacted) — the metrics event is
+  emitted in a `finally`, and the harness is a consumer of the runner like the other two, with its
+  `--clarify-pick` policy as the reply callback. The event contract is unchanged except that
+  `by_role` gained `seconds`; the byte-compat report fixture is untouched.
 
 - README quickstart, honest claims, privacy/data-flow, threat model, known limits (AR-31.08,
   CR-03.09); golden split core/extended with fingerprinted artifacts; `--help`/`--version` without
