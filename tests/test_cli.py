@@ -127,6 +127,25 @@ def test_a_failing_run_is_reported_without_a_traceback(a_working_environment, mo
         cli.main(["a", "question"])
 
 
+def test_a_run_that_reports_its_failure_on_the_result_still_exits_non_zero(
+        a_working_environment, monkeypatch, capsys):
+    """The runner reports a failure inside the run on the result (so that the
+    metrics of what it spent are still emitted) instead of raising. The CLI must
+    treat that exactly like the exception it used to catch: one line, no
+    traceback, and exit 1 in single-question mode."""
+    from ask_your_library.runner import RunFailure, RunResult
+
+    failed = RunResult(question="q", failure=RunFailure(type="RuntimeError",
+                                                        message="no checkpoint"))
+    monkeypatch.setattr(cli, "run_question", lambda *a, **k: failed)
+    monkeypatch.delenv("ASK_DEBUG", raising=False)
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main(["a", "question"])
+    assert exit_info.value.code == 1
+    err = capsys.readouterr().err
+    assert "RuntimeError: no checkpoint" in err and "Traceback" not in err
+
+
 def test_deadline_flag_is_an_integer_of_seconds_and_optional():
     args = cli.build_parser().parse_args(["--deadline", "45", "what", "happened"])
     assert args.deadline == 45 and " ".join(args.question) == "what happened"

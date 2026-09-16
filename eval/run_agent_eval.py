@@ -72,6 +72,10 @@ from ask_your_library.i18n import t
 from ask_your_library.config import (CHAPTER_HIT_CHARS, MAX_CLARIFY_CANDIDATES, MAX_EMPTY_STREAK, MAX_STEPS,
                                      PRICE_IN_PER_MTOK, PRICE_OUT_PER_MTOK, QUESTION_DEADLINE_S, SEARCH_HIT_CHARS)
 from ask_your_library.llm import usage_snapshot
+# The one home of the rule (it used to live here and in the runner, with the
+# repo root derived two different ways); re-exported because the recorder, the
+# plan replay and the tests reach for it as `harness.redact_paths`.
+from ask_your_library.paths import redact_paths
 from ask_your_library.provenance import HIT_ID_STRICT
 from ask_your_library.runner import run_question
 
@@ -111,24 +115,6 @@ def git_code_stamp() -> str:
         return f"{sha}+dirty({h.hexdigest()[:12]})"
     except (OSError, RuntimeError):
         return "unknown"
-
-
-def redact_paths(text: str) -> str:
-    """The same text with any absolute path replaced by `<repo>` or `~`.
-
-    An exception message is written into the report AND into the sidecar, and
-    `summarize_report.py` copies the report's ERROR lines into the committed
-    summary. A FileNotFoundError names the file it could not open, and under a
-    home directory that file name is the reader's login. The message stays
-    whole; only the part that identifies a machine is dropped."""
-    repo = str(Path(__file__).resolve().parents[1])
-    home = str(Path.home())
-    # the repo first: it usually LIVES under the home directory, and the longer
-    # prefix is the informative one
-    for prefix, stand_in in ((repo, "<repo>"), (home, "~")):
-        if prefix and prefix != "/":
-            text = text.replace(prefix, stand_in)
-    return text
 
 
 def golden_location(repo: Path) -> str:

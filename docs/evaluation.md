@@ -146,9 +146,11 @@ is measured here is what a reader runs, not a second implementation of it (ADR-0
 things follow in the record. A question that fails is still accounted for: the runner reports the
 failure on the result and emits its metrics anyway, so the calls a dead question made are in the
 ERROR row's "spent before the error" as they always claimed to be. And every attempt carries
-`by_role_seconds`, wall clock per node role — `plan`, `act`'s callers, `observe`, `reflect`,
-`synthesize` — printed under the steps log as `- seconds by role: plan 1.2, observe 8.5` and stored
-in the sidecar. It is the number a local latency budget needs: hosted, a question is priced in
+`by_role_seconds`, printed under the steps log as `- seconds by role: plan 1.2, observe 8.5` and
+stored in the sidecar. A role is a node that calls the model — `plan`, `observe`, `reflect`,
+`synthesize` — and the figure is the wall clock of those calls only, retries and a call that timed
+out included: `act` issues no model call and appears nowhere in it, and neither does the model
+residency a first local question pays before any call (see ADR-009 and `docs/backlog.md`). It is the number a local latency budget needs: hosted, a question is priced in
 dollars and the cost line says so; locally it costs $0, and seconds are the only currency there is.
 A run that spent no model call writes no such line, which is why the byte-compat fixture above is
 unchanged by this.

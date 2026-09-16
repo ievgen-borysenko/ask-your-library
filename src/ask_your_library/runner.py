@@ -66,6 +66,7 @@ from langgraph.types import Command
 
 from .i18n import t
 from .llm import pause_deadline, reset_usage, usage_snapshot
+from .paths import redact_paths
 
 
 def initial_state(question: str, history: list[str], scratchpad: Path) -> dict:
@@ -98,44 +99,35 @@ def history_entry(question: str, answer: str, catalog: dict | None = None) -> st
     return f"Q: {question}\nA: {answer[:500]}"
 
 
-def _state_values(graph, config) -> dict:
-    """The graph's state for this thread, or {} when there is none to read —
-    a fake graph in tests has no state, and a run that failed inside the first
-    node may have left nothing checkpointed. The result is built out of this,
-    so it must never be the reason a failed run raises a second time."""
+def _state_of(graph, config) -> dict:
+    """The graph's final state for this thread, and it may raise.
+
+    On the path where the stream finished, this read IS the run: a state the
+    checkpointer cannot produce means there is no answer to return, and
+    swallowing it would hand the caller `ok=True` with an empty answer — a
+    failure told as a successful question with nothing in it."""
+    values = graph.get_state(config).values
+    return values if isinstance(values, dict) else {}
+
+
+def _state_or_empty(graph, config) -> dict:
+    """The same read, guarded, for the two places where a failure is ALREADY in
+    hand and the state is only what can still be salvaged for the record: the
+    `except` below, and the partial metrics of a run paused at a clarify (a
+    fake graph in tests has no state, and a run that died inside the first node
+    may have left nothing checkpointed). It must never be the reason a failed
+    run raises a second time."""
     try:
-        values = graph.get_state(config).values
+        return _state_of(graph, config)
     except Exception:
         return {}
-    return values if isinstance(values, dict) else {}
 
 
 def _steps_so_far(graph, config) -> int:
     try:
-        return int(_state_values(graph, config).get("steps_taken", 0))
+        return int(_state_or_empty(graph, config).get("steps_taken", 0))
     except Exception:
         return 0
-
-
-def redact_paths(text: str) -> str:
-    """The same text with this machine's absolute paths replaced by `<repo>`
-    or `~`.
-
-    A failure travels further than the run it happened in — into the CLI's
-    error line, the web chat, an eval report and its sidecar — and a
-    FileNotFoundError names the file it could not open, which under a home
-    directory is the reader's login. The message stays whole; only the part
-    that identifies a machine goes. (eval/run_agent_eval.py has the same rule
-    for text of its own that never passed through a result; the two must keep
-    saying the same thing.)"""
-    repo = str(Path(__file__).resolve().parents[2])
-    home = str(Path.home())
-    # the repo first: it usually LIVES under the home directory, and the longer
-    # prefix is the informative one
-    for prefix, stand_in in ((repo, "<repo>"), (home, "~")):
-        if prefix and prefix != "/":
-            text = text.replace(prefix, stand_in)
-    return text
 
 
 @dataclass(frozen=True)
@@ -196,10 +188,24 @@ class RunResult:
     seconds: float = 0.0
     scratchpad: Path | None = None
     failure: RunFailure | None = None
+    # The consumer's own failure while being handed the metrics event, kept
+    # apart from the run's: the question may have answered perfectly and the
+    # renderer of its account still have raised. `ok` is about the run.
+    metrics_failure: RunFailure | None = None
 
     @property
     def ok(self) -> bool:
         return self.failure is None
+
+    @property
+    def metrics_delivered(self) -> bool:
+        return self.metrics_failure is None
+
+
+def _failure(error: BaseException) -> RunFailure:
+    """One place that turns an exception into the record of it: the class name,
+    and the message with this machine's paths taken out of it."""
+    return RunFailure(type=type(error).__name__, message=redact_paths(f"{error}"), error=error)
 
 
 def failed_result(question: str, error: Exception) -> RunResult:
@@ -207,13 +213,12 @@ def failed_result(question: str, error: Exception) -> RunResult:
     could not be created, say. The run inside the graph reports its own failure
     on the result it returns; this is for the caller that has no result at all
     and still has to tell a reader what happened."""
-    return RunResult(question=question,
-                     failure=RunFailure(type=type(error).__name__,
-                                        message=redact_paths(f"{error}"), error=error))
+    return RunResult(question=question, failure=_failure(error))
 
 
 def _result(question: str, state: dict, usage: dict, seconds: float,
-            scratchpad: Path, clarify_asked: bool, failure: RunFailure | None) -> RunResult:
+            scratchpad: Path, clarify_asked: bool, failure: RunFailure | None,
+            metrics_failure: RunFailure | None = None) -> RunResult:
     """The graph's final state, read once, here — the one place that knows
     which state fields an interface is allowed to depend on."""
     return RunResult(
@@ -234,7 +239,8 @@ def _result(question: str, state: dict, usage: dict, seconds: float,
         catalog_fallback=state.get("catalog_fallback") or "",
         book_filter=state.get("book_filter") or "",
         book_unresolved=state.get("book_unresolved") or "",
-        usage=usage, seconds=seconds, scratchpad=scratchpad, failure=failure)
+        usage=usage, seconds=seconds, scratchpad=scratchpad, failure=failure,
+        metrics_failure=metrics_failure)
 
 
 def run_question(graph, question: str, history: list[str], scratch_dir: Path,
@@ -248,7 +254,10 @@ def run_question(graph, question: str, history: list[str], scratch_dir: Path,
     exception: the run still spent model calls and the metrics event still has
     to report them, and every interface has to say something about a question
     that did not finish. Only a BaseException (Ctrl-C) leaves through here, and
-    even then the metrics event is emitted first.
+    even then the metrics event is emitted first — and a consumer that raises
+    while being handed that event is recorded on the result too
+    (`metrics_failure`), never propagated and never mistaken for the run's own
+    outcome.
 
     `deadline_s` overrides QUESTION_DEADLINE_S for this run (0 = none); the
     loop stops searching once it is spent and answers from what it found.
@@ -303,14 +312,14 @@ def run_question(graph, question: str, history: list[str], scratch_dir: Path,
                         on_event(node_name, update)
                 if not interrupted:
                     break
-            final_state = _state_values(graph, config)
+            # Not guarded: on this path the state is the run's product.
+            final_state = _state_of(graph, config)
         except Exception as error:
             # The question is over, but what it spent is not lost: the state as
             # far as it got is still read, and the metrics event below is
             # emitted for this run exactly as for one that answered.
-            failure = RunFailure(type=type(error).__name__,
-                                 message=redact_paths(f"{error}"), error=error)
-            final_state = _state_values(graph, config)
+            failure = _failure(error)
+            final_state = _state_or_empty(graph, config)
         finally:
             # Every question gets a fresh thread; without cleanup (also on failure)
             # a long-lived web process accumulates checkpoints forever.
@@ -322,7 +331,18 @@ def run_question(graph, question: str, history: list[str], scratch_dir: Path,
         # other — and a Ctrl-C still leaves the account of what was spent.
         seconds = round(time.monotonic() - started, 1)
         usage = usage_snapshot()
-        on_event("metrics", {**usage, "seconds": seconds,
-                             "steps_taken": final_state.get("steps_taken", 0),
-                             "stop_reason": final_state.get("stop_reason", "")})
-    return _result(question, final_state, usage, seconds, scratchpad, clarify_asked, failure)
+        try:
+            on_event("metrics", {**usage, "seconds": seconds,
+                                 "steps_taken": final_state.get("steps_taken", 0),
+                                 "stop_reason": final_state.get("stop_reason", "")})
+            metrics_failure = None
+        except Exception as error:
+            # Delivering the account is the consumer's business and its failure
+            # is its own: a renderer that raises here (the web UI runs Chainlit
+            # inside this callback) must not replace the run's outcome — nor
+            # turn an answered question into an exception, which is exactly what
+            # an unguarded emission in a `finally` does. It is recorded on the
+            # result instead, beside whatever really happened to the run.
+            metrics_failure = _failure(error)
+    return _result(question, final_state, usage, seconds, scratchpad, clarify_asked,
+                   failure, metrics_failure)

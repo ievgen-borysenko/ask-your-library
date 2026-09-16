@@ -20,9 +20,15 @@
   metrics event moved into a `finally`, so a question that dies mid-run still reports the calls,
   tokens and seconds it spent (the partial event at a clarify pause is unchanged), and the failure
   comes back on the result as an exception class plus a message with this machine's paths replaced
-  by `~` or `<repo>`. The CLI prints the same one-line error it always did and still exits 1 in
+  by `~` or `<repo>` (one rule now, `ask_your_library/paths.py`, instead of a copy in the runner and
+  another in the harness). The CLI prints the same one-line error it always did and still exits 1 in
   single-question mode; the eval harness re-raises it so the ERROR row and its "spent before the
-  error" are what they were.
+  error" are what they were. Two edges of that come with it: delivering the metrics event cannot
+  change what the run reports — a consumer that raises while being handed it (the web UI renders
+  inside that callback) is recorded on the result as `metrics_failure` and never propagates — and a
+  final state the graph cannot produce after a finished stream IS the failure, rather than a
+  successful question with an empty answer. The CLI's session line therefore counts questions
+  attempted, not answered: a question that failed spent real money.
 
 - **Seconds per node role in the usage accounting.** `by_role` carried calls and tokens only, so a
   latency budget could not be argued at all on the local backend, where a question costs $0 and

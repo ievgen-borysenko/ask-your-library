@@ -191,7 +191,9 @@ event was emitted after the `try`, so a run that raised reported nothing at all 
 already paid for were invisible; it is emitted in a `finally` now, and the failure comes back on the
 result (exception class and a message with local paths redacted) rather than as an exception through
 every interface. The event contract itself is unchanged — same events, same order, same payloads —
-except that `by_role` gained `seconds`. **Wall clock per node role** is accumulated where tokens are
+except that `by_role` gained `seconds`. Delivery is the consumer's business and stays there: an
+`on_event` that raises on the final metrics event is recorded on the result (`metrics_failure`) and
+neither replaces the run's own outcome nor turns an answered question into an exception. **Wall clock per node role** is accumulated where tokens are
 not: in a `finally` around the model call, so a call that timed out or exhausted its retries still
 reports the time the question spent on it. Locally the cost of a question is $0, and a latency
 budget that is not measured per node cannot be argued at all (#32); the harness report line and the

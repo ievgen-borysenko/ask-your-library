@@ -385,6 +385,27 @@ def test_fingerprint_names_the_observe_window(monkeypatch):
     assert f"deadline={config.QUESTION_DEADLINE_S}s" in fp        # a run cut by the deadline is another run
 
 
+def test_a_state_the_graph_cannot_produce_is_an_error_row_not_an_empty_answer(monkeypatch, tmp_path):
+    """The stream finished and the final state could not be read: that is a
+    failed question, and the report must say so. Scored as an empty answer it
+    would be a silent FAIL with no reason beside it."""
+    import pytest
+
+    class NoStateGraph:
+        checkpointer = None
+
+        def stream(self, run_input, config):
+            yield {"synthesize": {"answer": "Dracula."}}
+
+        def get_state(self, config):
+            raise RuntimeError("no checkpoint for this thread")
+
+    monkeypatch.setattr(harness, "RESULTS_DIR", tmp_path)
+    item = {"id": "x", "type": "answer", "question": "q", "expected_books": ["Dracula"]}
+    with pytest.raises(RuntimeError, match="no checkpoint for this thread"):
+        harness.run_one(NoStateGraph(), item)
+
+
 def test_the_report_row_and_line_carry_the_planner_fallback(monkeypatch, tmp_path):
     """A planner that never produced a plan completes as an ordinary row since
     0.2; the eval must still show it (that is how a local model is judged)."""

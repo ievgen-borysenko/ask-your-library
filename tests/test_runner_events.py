@@ -110,26 +110,77 @@ def test_a_question_that_fails_mid_run_still_reports_its_metrics(tmp_path):
     assert result.usage["llm_calls"] == 1 and result.usage["input_tokens"] == 120
 
 
+class PlainGraph:
+    """Answers in one node, with a state to read at the end."""
+    checkpointer = None
+
+    def __init__(self, state_error=None):
+        self.state_error = state_error
+
+    def stream(self, run_input, config):
+        yield {"synthesize": {"answer": "the answer"}}
+
+    def get_state(self, config):
+        if self.state_error is not None:
+            raise self.state_error
+        return type("S", (), {"values": {"answer": "the answer", "steps_taken": 1,
+                                         "stop_reason": "enough"}})()
+
+
 def test_exactly_one_metrics_event_on_a_run_that_answers(tmp_path):
     """The other half of the count: the event that reports the whole run is
     emitted once, never twice, when nothing goes wrong."""
     from ask_your_library import runner
-
-    class PlainGraph:
-        checkpointer = None
-
-        def stream(self, run_input, config):
-            yield {"synthesize": {"answer": "the answer"}}
-
-        def get_state(self, config):
-            return type("S", (), {"values": {"answer": "the answer", "steps_taken": 1,
-                                             "stop_reason": "enough"}})()
 
     events = []
     result = runner.run_question(PlainGraph(), "q", [], Path(tmp_path),
                                  lambda n, u: events.append((n, u)), lambda question: "")
     assert [n for n, _ in events] == ["synthesize", "metrics"]
     assert result.answer == "the answer" and result.failure is None
+
+
+def test_a_state_that_cannot_be_read_after_a_good_stream_is_a_failed_run(tmp_path):
+    """The read of the final state IS the run on that path: swallowing it would
+    hand the caller a successful question with an empty answer, which is a
+    failure told as a success. (Where a failure is already in hand — the
+    `except`, and the partial metrics at a clarify — the same read stays
+    guarded: it must not raise a second time over what really happened.)"""
+    from ask_your_library import runner
+
+    events = []
+    result = runner.run_question(PlainGraph(state_error=RuntimeError("no checkpoint")),
+                                 "q", [], Path(tmp_path),
+                                 lambda n, u: events.append((n, u)), lambda question: "")
+    assert not result.ok and result.answer == ""
+    assert result.failure.type == "RuntimeError" and result.failure.message == "no checkpoint"
+    assert len([u for n, u in events if n == "metrics"]) == 1      # still accounted for
+
+
+def test_a_consumer_that_raises_on_the_metrics_event_does_not_become_the_runs_outcome(tmp_path):
+    """The event is delivered from a `finally`, and the web UI renders it inside
+    Chainlit: an exception there used to leave `run_question` raising instead of
+    returning — an answered question reported as a crash, and on the failure
+    path the renderer's error REPLACING the run's own. Delivery is the
+    consumer's business and is recorded as such."""
+    from ask_your_library import runner
+
+    def explode_on_metrics(node_name, update):
+        if node_name == "metrics":
+            raise RuntimeError("the renderer is gone")
+
+    answered = runner.run_question(PlainGraph(), "q", [], Path(tmp_path),
+                                   explode_on_metrics, lambda question: "")
+    assert answered.ok and answered.answer == "the answer"      # the run is untouched
+    assert not answered.metrics_delivered
+    assert answered.metrics_failure.type == "RuntimeError"
+    assert answered.metrics_failure.message == "the renderer is gone"
+
+    failed = runner.run_question(BrokenGraph(), "q", [], Path(tmp_path),
+                                 explode_on_metrics, lambda question: "")
+    # the run's own failure survives; the consumer's sits beside it
+    assert failed.failure.message == "the index is gone"
+    assert failed.metrics_failure.message == "the renderer is gone"
+    assert failed.usage["llm_calls"] == 1          # and the account was still taken
 
 
 def test_a_failure_message_names_no_machine(tmp_path):

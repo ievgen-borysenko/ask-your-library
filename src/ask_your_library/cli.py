@@ -34,7 +34,11 @@ from .sanitize import LINE_BREAK_RE, strip_control_chars
 EXIT_WORDS = {"exit", "quit", "q", "вихід"}
 SCRATCH_DIR = Path(os.environ.get("ASK_SCRATCH_DIR", ".scratch"))
 
-# Session totals live in the interface: the metrics event is always about one question.
+# Session totals live in the interface: the metrics event is always about one
+# question. A question that FAILED emits that event too (since 16.09, so the
+# calls it paid for are not lost), so it counts here as well: the session line
+# is what the session spent and how many questions were attempted, not how many
+# were answered. That is what a cost line should say.
 SESSION = {"questions": 0, "cost_usd": 0.0}
 # Per-question memory of the CLI: the passages of this run by hit_id (from the act
 # events), so --verbose can print each evidence item on the text it was checked
