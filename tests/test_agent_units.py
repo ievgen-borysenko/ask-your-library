@@ -1555,6 +1555,9 @@ def test_a_retry_is_bounded_by_the_budget_left_not_by_the_first_attempts_bound(m
     snapshot = llm.usage_snapshot()
     assert snapshot["llm_calls"] == 1 and snapshot["by_role"]["reflect"]["calls"] == 1
     assert snapshot["input_tokens"] == 3 and snapshot["output_tokens"] == 5
+    # Seconds are the exception: what the call cost the question is the whole
+    # span, the failed attempt and the backoff included (100 + 0.5 + 7).
+    assert snapshot["by_role"]["reflect"]["seconds"] == 107.5
 
 
 def test_a_capped_call_stops_retrying_once_the_budget_is_down_to_the_floor(monkeypatch):
@@ -1578,7 +1581,12 @@ def test_a_capped_call_stops_retrying_once_the_budget_is_down_to_the_floor(monke
     assert len(script) == 1             # the second was never asked for
     assert clock[0] == 1_296.0          # 4 s left, 0.5 s of backoff not even waited out
     assert llm.deadline_remaining_s() == 4.0 < llm.MIN_CALL_TIMEOUT_S
-    assert llm.usage_snapshot()["llm_calls"] == 0
+    snapshot = llm.usage_snapshot()
+    assert snapshot["llm_calls"] == 0
+    # A call that produced no reply reports no tokens and no call — and the 296 s
+    # it really spent, because a timeout is time the question paid for.
+    assert snapshot["by_role"]["reflect"] == {"calls": 0, "input_tokens": 0, "output_tokens": 0,
+                                              "seconds": 296.0, "cost_usd": 0.0}
 
 
 def test_an_uncapped_call_retries_at_the_full_bound_and_honours_retry_after(monkeypatch):

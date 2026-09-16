@@ -206,8 +206,11 @@ def test_one_search_enough_answer_and_confirmed_provenance(run, tmp_path):
     assert metrics["llm_calls"] == 4 and set(metrics["by_role"]) == {"plan", "observe", "reflect", "synthesize"}
     assert metrics["input_tokens"] == 400 and metrics["output_tokens"] == 40
     assert metrics["cost_usd"] == llm._cost(400, 40)
-    assert metrics["by_role"]["observe"] == {"calls": 1, "input_tokens": 100, "output_tokens": 10,
-                                             "cost_usd": llm._cost(100, 10)}
+    observe_role = metrics["by_role"]["observe"]
+    assert {k: v for k, v in observe_role.items() if k != "seconds"} == {
+        "calls": 1, "input_tokens": 100, "output_tokens": 10, "cost_usd": llm._cost(100, 10)}
+    # wall clock of the call: measured, so the shape is what a test can pin
+    assert isinstance(observe_role["seconds"], float) and observe_role["seconds"] >= 0.0
     assert metrics["hits_seen"] == 2 and metrics["evidence_distilled"] == 1 and metrics["redacted_lines"] == 0
     assert metrics["model"] == "fake-model" and metrics["steps_taken"] == 1
     assert metrics["stop_reason"] == t("stop_enough") and "partial" not in metrics
