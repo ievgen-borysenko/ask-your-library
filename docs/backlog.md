@@ -320,6 +320,27 @@ open ones often refer to them.
   — and the spread on the behaviour rows is **zero**. No per-question verdict moved on any of
   189 item-attempts; `qwen2.5:32b` was byte-identical on every item of both sets. What the repeat
   measured is latency (30–196 s per question for identical answers on the shipped default).
+- **`--record-plans` writes into a committed directory, so it dirties the code stamp and cannot be
+  combined with `--require-clean`.** `eval/recordings/` is committed by design, the run fingerprint
+  hashes `git diff HEAD` together with the un-ignored untracked files, and the recording is written
+  during the run — so a recording run stamps itself dirty, and in a batch each run is stamped by its
+  predecessor's file (five different `dirty(...)` checksums over the six runs of 16.09). The gate
+  run of the same night is the control: it recorded nothing, still stamped
+  `c79018a+dirty(2005429d26f5)` because the baseline's recordings were untracked in the tree, and
+  stamped the *same* checksum on both its sets. So the trigger is an un-ignored untracked file, not
+  the act of recording. Fix either way: exclude `eval/recordings/` from the dirty hash (it is an
+  input the fingerprint already names by checksum through the golden file, and a recording cannot
+  change the code that produced it), or write to a staging path outside the hashed set and move the
+  file into place once it is finalised. Until then a run whose numbers get published must choose
+  between `--require-clean` and a recording, which is the wrong choice to have to make.
+- **Verify the clarify path is model-independent.** On the runs of 16.09
+  `mistral-small3.2:24b-ctx20k` asked the `c09` clarify, had the choice applied and reported
+  `clarify choice applied`, yet its recording holds exactly one plan call per attempt (33 for 11
+  items × 3), where both qwen models recorded a second plan call for every clarified item
+  (`qwen2.5:14b` 36 calls with one clarify, `qwen2.5:32b` 39 with two). Either the clarify reply
+  re-enters the graph without re-planning on some branch, or the recorder misses that call on one of
+  the two paths; both are defects and they are not the same defect. Read
+  `eval/recordings/en-demo.edc151948a58.*.jsonl` beside the three sidecars' `clarify_*` fields.
 - **A hosted run for behaviour spread.** Next, and the reason the row above is not fully closed: at
   `temperature=0` a local model answers the same way every time, so `--repeat` cannot tell a stable
   9/11 from a lucky one on that backend. The question needs a provider that samples —

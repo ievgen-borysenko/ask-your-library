@@ -67,15 +67,28 @@ corrected inside their own book). All are per question and in totals, in the rep
 sidecar, and every clause is written only where there was something to say, so a run that spent none
 of them writes the line the harness has always written.
 
-The gate's own behavioural effect — whether a set answers as well with it as without — is **not
-measured yet**: the paired baseline on three local models is being produced, the gate's run comes
-after it, and the acceptance agreed in advance is 1.0 confirmed by construction, a published drop
-rate, and behaviour at `--repeat` not below that baseline. Two figures to read beside those, because
-both follow from the gate rather than from the models: the **coverage-probe firing count**
-(`coverage._uncovered_books` subtracts the books the *evidence* names, so thinner evidence makes the
-one probe per run fire more often — ADR-013 spending a step out of the same budget), and the **steps
-per question**, since a step whose quotes were all dropped no longer counts toward the CRAG gate and
-a model that quotes badly now runs to `MAX_STEPS` where it used to stop at two.
+The gate's own behavioural effect — whether a set answers as well with it as without — was measured
+on 2026-09-16/17 **for the shipped default and for no other model**, against the paired baseline of
+the same day
+([`eval-results/2026-09-16-local-models-repeat3.md`](eval-results/2026-09-16-local-models-repeat3.md)).
+`qwen2.5:14b` on `c79018a`, both golden sets, `--repeat 3 --clarify-pick second`, against the same
+model on `169b511`: **behaviour unchanged item for item** (9/11 and 10/10, the same two failures and
+the same single clarify), **broken 2 → 0** with `confirmed == checked_book_text` at 34/34, **2
+quotes dropped per attempt** — both `not_found`, `no_hit`/`cross_book`/`short` all 0, `repinned` 0 —
+and the facts row, the titles row, the LLM calls (79) and the tokens all within a hundred of the
+baseline. All three acceptance conditions met on that model: 1.0 confirmed by construction, a
+published drop rate, and behaviour at `--repeat` not below the baseline.
+
+The two figures to read beside those, because both follow from the gate rather than from the
+models, **did not move**: the **coverage probe** fired once in each run (`c10`), and the **steps per
+question** distribution is identical, 21 attempts at 2 steps, 6 at 3 and 6 at 4 in both. The worry
+behind them — a step whose quotes were all dropped no longer counts toward the CRAG gate, so a model
+that quotes badly runs to `MAX_STEPS` where it used to stop at two — is untested rather than
+refuted: on `qwen2.5:14b` the two drops are one quote each out of three and four, so no step lost
+all of its quotes. **The model that motivated the gate is still unmeasured under it.**
+`mistral-small3.2:24b-ctx20k` leaves 8–9 broken quotes an attempt on the same set against this
+model's 2, and it has the most behaviour to lose, being the only 11/11 in the baseline; it and
+`qwen2.5:32b` on `c79018a` are the run still to make.
 
 **A book card is not the book, and since 2026-09-16 the triple says so.** `validate` splits its
 verdicts by the corpus the matching passage came from: `confirmed / unattributed / broken` are

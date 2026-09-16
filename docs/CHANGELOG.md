@@ -34,6 +34,24 @@
   Correctness is ungraded, on purpose: the manual-correctness checkboxes in all six harness reports
   are unticked.
 
+  **The gate's own run is in the same report** (section added 17.09): `qwen2.5:14b` on `c79018a`,
+  both sets, `--repeat 3 --clarify-pick second`, no recording. **Behaviour unchanged item for
+  item** — 9/11 and 10/10, the same two failures, the same clarify, the same facts and titles rows.
+  **Broken 2 → 0**, `confirmed == checked_book_text` at 34/34 with the same 34 quotes, **2 dropped
+  per attempt** (both `not_found`; `no_hit`, `cross_book`, `short` and `repinned` all 0), from the
+  same two questions that carried the broken quotes before. LLM calls unchanged at 79 and the steps
+  distribution identical per item, so nothing had to compensate for anything: nine of eleven items
+  are byte-identical between the two runs and only `c01` and `c02` moved, by one evidence item each.
+  The catalogue set is unchanged in every field. All three acceptance conditions for `#29` met on
+  this model; the model that motivated the gate is still to be run under it.
+
+  One correction to the earlier finding, and the gate run is its control: **the dirty code stamp is
+  not caused by `--record-plans`.** This run recorded nothing and is still stamped
+  `c79018a+dirty(2005429d26f5)` — with the *same* checksum on both of its sets, where the recording
+  batch produced five different ones — because the six baseline recordings were sitting untracked in
+  the checkout. An un-ignored untracked file in the tree is the cause; recording is only the usual
+  way one gets there. `docs/backlog.md` carries the fix.
+
 - **Quotes are checked before the answer is written, not after it.** #29, step 2 of the sequencing
   in the system design review of 16.09.
 
@@ -92,12 +110,15 @@
   **What this does not do, and is not measured for.** The quotations the answer itself writes are
   not evidence and nothing checks them; citation by evidence id against the answer's sentences is
   the other half of #29 and is not here. A broken quote still does not fail the behavioural
-  evaluation. And the behavioural effect of the gate is **unmeasured**: the baseline it will be
-  compared against (three local models, `--repeat 3`) is being produced now, the gate's own run
-  comes after it, and the acceptance is a confirmed ratio of 1.0 by construction, a published drop
-  rate, and behaviour at repeat not below that baseline — read beside two figures that follow from
-  the gate rather than from the models, the coverage-probe firing count (thinner evidence makes
-  ADR-013's one probe fire more often) and the steps per question.
+  evaluation. And the behavioural effect of the gate is measured **on the shipped default only**
+  (17.09, `docs/eval-results/2026-09-16-local-models-repeat3.md`): `qwen2.5:14b` on `c79018a`
+  against itself on `169b511`, both sets at `--repeat 3`, behaviour unchanged item for item (9/11
+  and 10/10), broken 2 → 0 with confirmed 34/34 of the book text, 2 quotes dropped per attempt (both
+  `not_found`, `repinned` 0), the same 79 LLM calls and the same steps distribution, so the
+  coverage-probe and steps figures did not move. All three acceptance conditions met there.
+  `mistral-small3.2:24b-ctx20k` — 8–9 broken quotes an attempt against the default's 2, and the only
+  11/11 in the baseline — has **not** been run under the gate, and it is the case the gate was
+  argued for.
 
 - **A book card is never a quote from the book, the first screen teaches, and the front page shows
   the work before it explains it.** From the design critique of 16.09, §1 and §2.

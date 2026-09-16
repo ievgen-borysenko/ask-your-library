@@ -2,12 +2,17 @@
 > sets, every one of them at `--repeat 3 --record-plans --clarify-pick second` on the local backend
 > (`LLM_BACKEND=ollama`, `EMBED_BACKEND=ollama`). **Code `169b511`** for all six — the merge of `#64`,
 > which is the commit that first counted book-card matches apart from book text. **The evidence gate
-> (`#65`) is NOT in this code.** Everything `#65` added — the quote check at the `observe` gate, the
-> re-pin, the drop counters — landed after these runs, in `c79018a`, and nothing on this page
-> measures it. That is the point of the page: it is the paired baseline the gate's own run is to be
-> read against, agreed in advance in
+> (`#65`) is NOT in these six runs.** Everything `#65` added — the quote check at the `observe`
+> gate, the re-pin, the drop counters — landed after them, in `c79018a`. That is the point of the
+> batch: it is the paired baseline the gate's own run is read against, agreed in advance in
 > [`../evaluation.md`](../evaluation.md) ("the paired baseline on three local models is being
 > produced, the gate's run comes after it").
+>
+> **The gate's run is on this page too**, added 2026-09-17 in
+> [its own section](#the-observe-gate-65-same-model-same-sets): `qwen2.5:14b` only, both sets,
+> `--repeat 3 --clarify-pick second`, no `--record-plans`, on `c79018a`. Read the six runs above as
+> the baseline and that section as the pair. The other two models have **not** been run on `c79018a`,
+> and the one with 8–9 broken quotes an attempt is among them.
 >
 > Golden files: `en-demo.yaml@edc151948a58` (11 items) and `en-demo-catalog.yaml@72eb2c2b2655`
 > (10 items); corpus `manifest@ed94677aa3a3`, `toc@ef7a347ace1d`; the same 04.09 bge-m3 demo index
@@ -359,6 +364,151 @@ parameter count inside one model family bought no behavioural improvement on the
 between two and a half and three times the wall clock. If the shipped default is to change, the
 evidence here points across families rather than up a size ladder.
 
+## The observe gate (`#65`), same model, same sets
+
+Added 2026-09-17. The gate's own run, made the same night the baseline finished: **`qwen2.5:14b`
+only**, both golden sets, `--repeat 3 --clarify-pick second`, **no `--record-plans`**, on
+**`c79018a`** — `main` at the merge of `#65`. Sources:
+`_data/step0-gate/results/qwen2.5_14b/<set>/answers-*.{md,json}` and
+`_data/step0-gate/step0.log`. 23:02:45 → 23:58:54 CEST, 2,611 s for the research set and 753 s for
+the catalogue set.
+
+**It is not clean-stamped either, and that is the control.** Both runs stamp
+`c79018a+dirty(2005429d26f5)` with `code_clean: false`, and — the informative part — **the same
+checksum on both**, where the three baseline models produced five different ones. The cause is the
+six baseline recordings, which were still untracked in the checkout when this run was made.
+So the dirty stamp is not caused by `--record-plans` *taking* place; it is caused by an un-ignored
+untracked file existing in the tree, and a later run that records nothing inherits the previous
+batch's recordings all the same. The checksum being stable across this batch, where it moved on
+every run of the recording batch, is the paired evidence for that reading. Committing the recordings
+(this PR) is what makes the next run on this tree stamp clean; the general fix is in
+`docs/backlog.md`.
+
+### Paired table — `en-demo`, 11 items, 3 attempts
+
+Baseline column repeats the table above (`169b511`, before the gate); gate column is the new run.
+A single figure means all three attempts agreed exactly.
+
+| Row | Baseline `169b511` | Gate `c79018a` |
+|---|---|---|
+| Behaviour PASS per attempt | 9/11 ×3 | **9/11 ×3** |
+| — by group (`answer` / `identify` / `refusal` / `aggregation`) | 7/7 · 1/2 · 1/1 · 0/1 | 7/7 · 1/2 · 1/1 · 0/1 |
+| Clarify interrupts | 1 | 1 |
+| Confirmed / checked book text | 34 / 36 | **34 / 34** |
+| Confirmed / checked, all quotes | 34 / 45 | 34 / 43 |
+| Unattributed | 0 | 0 |
+| Broken | **2** | **0** |
+| Matched only a book card | 9 | 9 |
+| Evidence items | 45 | 43 |
+| Dropped before the answer | — (no gate in that code) | **2** |
+| — `dropped_by_reason` | — | `not_found` 2 · `no_hit` 0 · `cross_book` 0 · `short` 0 |
+| Re-pinned | — | 0 |
+| Expected facts found | 10 / 24 | 10 / 24 |
+| Answers carrying every fact | 1 / 9 | 1 / 9 |
+| Titles mentioned | 10 / 12 | 10 / 12 |
+| LLM calls | 79 | 79 |
+| Tokens in | 132,375–132,377 | 132,309–132,311 |
+| Tokens out | 7,981–8,015 | 7,863–7,897 |
+| Per-question wall clock, min–max | 30–196 s | 30–196 s |
+| Set wall clock | 2,797 s | 2,611 s |
+| Steps distribution over 33 attempts | 2 steps ×21 · 3 ×6 · 4 ×6 | 2 steps ×21 · 3 ×6 · 4 ×6 |
+| Seconds by role, median | plan 3.4 · observe 45.3 · reflect 8.3 · synth 8.3 | plan 3.3 · observe 41.4 · reflect 7.3 · synth 7.4 |
+
+### Paired table — `en-demo-catalog`, 10 items, 3 attempts
+
+| Row | Baseline `169b511` | Gate `c79018a` |
+|---|---|---|
+| Behaviour PASS per attempt | 10/10 ×3 | **10/10 ×3** |
+| — by group (`catalog` / `answer`) | 6/6 · 4/4 | 6/6 · 4/4 |
+| Clarify interrupts | 0 | 0 |
+| Confirmed / checked book text | 5–7 / 5–7 | 5–7 / 5–7 |
+| Broken · unattributed · card-only | 0 · 0 · 10 | 0 · 0 · 10 |
+| Evidence items | 15–17 | 15–17 |
+| Dropped before the answer · re-pinned | — | **0 · 0** |
+| Expected facts found | 13–14 / 15 | 13–14 / 15 |
+| LLM calls · tokens in · tokens out | 28–30 · 34,483–38,354 · 2,093–2,309 | 28–30 · 34,483–38,354 · 2,093–2,309 |
+| Steps distribution over 30 attempts | 0 ×18 · 1 ×6 · 2 ×3 · 3 ×2 · 4 ×1 | 0 ×18 · 1 ×6 · 2 ×3 · 3 ×2 · 4 ×1 |
+| Set wall clock | 765 s | 753 s |
+
+The catalogue set is **unchanged in every field**, token for token and call for call. It had no
+broken quotes to drop, so the gate had nothing to do on it.
+
+### The reading
+
+**Behaviour is unchanged: 9/11 and 10/10, item for item.** Not merely the same totals — the same
+items, the same groups, the same two failures (`c09` and `c10`), the same single clarify. The facts
+row, the titles row and `facts_ok` are also identical.
+
+**Broken 2 → 0, and `confirmed == checked_book_text` (34/34) as the amendment says it must be.**
+The 34 confirmed quotes are literally the same 34: the gate removed exactly the two broken ones from
+the denominator and touched nothing else. `unattributed` was already 0 in the baseline, so nothing
+had to be re-pinned, and `repinned` is 0.
+
+**Two quotes dropped per attempt, both `not_found`, both from the items that carried the baseline's
+two broken quotes** — `c01-ivanhoe-disguised-knight` (1) and `c02-huck-go-to-hell` (1), on all three
+attempts. `no_hit`, `cross_book` and `short` are 0 across the whole run, so on this model and these
+sets none of the three conservative refusals of ADR-004's re-pin limits fired at all; the only rule
+that did any work is the plain one. The badge flips accordingly, from
+`WARNING: 1 of 2 quotes NOT found verbatim in any retrieved passage (possible hallucination)` to
+`OK: all 1 quotes found verbatim in the passages they cite (1 quotes dropped before the answer: not
+found in the passages they cited)`.
+
+**LLM calls are unchanged at 79 per attempt, and nothing had to compensate for anything.** The steps
+distribution is identical in both runs — 21 attempts at 2 steps, 6 at 3, 6 at 4 — and it is
+identical *per item*, not only in aggregate. `c03-musketeers-women` runs 4 steps in **both** runs and
+`c08-refusal-tom-sawyer` runs 4 in both: neither was pushed to the step limit by the gate, because
+neither had a quote dropped. Nine of the eleven items are byte-identical between the two runs, token
+counts included; **the only two items that changed at all are `c01` and `c02`**, and they changed
+because their answers are written from one evidence item fewer:
+
+| | Baseline | Gate |
+|---|---|---|
+| `c01` tokens in / out | 10,514 / 780 | 10,469 / 652 |
+| `c02` tokens in / out | 9,713 / 538 | 9,692 / 548 |
+
+`c01` is the whole effect in one item. In the baseline its answer ends with two `Sources:` lines, the
+second of which is the fabricated one; in the gate run that sentence never became evidence, the
+answer is a paragraph with a single inline citation, and it still passes with the same `titles 1/1,
+facts 2/3`. The run's 66 fewer input and ~118 fewer output tokens per attempt are that one dropped
+sentence and its knock-on, not a behavioural change.
+
+The 186 s the research set gained (2,797 → 2,611 s) is not attributable to the gate with any
+confidence: role medians moved a little in the same direction (`observe` 45.3 → 41.4 s), the machine
+was the only thing running in both cases, and one item's shorter synthesis cannot account for three
+minutes. Read it as run-to-run noise on the same hardware.
+
+**Determinism holds on the new code too.** All three attempts of the gate run are byte-identical on
+every item of both sets, verification strings included — the same result the baseline gave for this
+model on `en-demo`.
+
+### Acceptance for `#29`
+
+The acceptance agreed in advance ([`../evaluation.md`](../evaluation.md)) was three things. Against
+this run:
+
+1. **`confirmed == checked_book_text` and `broken == 0` by construction** — met: 34/34 and 0 on the
+   research set, 5–7 / 5–7 and 0 on the catalogue set.
+2. **A published drop rate** — met, and published here: 2 per attempt on the research set
+   (`dropped_unverified`), split `not_found` 2 / `no_hit` 0 / `cross_book` 0 / `short` 0, plus
+   `repinned` 0; 0 on the catalogue set. That is 2 of 45 checked quotes, 4.4 %, and it equals the
+   baseline's broken count exactly.
+3. **Behaviour at `--repeat` not below the baseline** — **met on this model**: 9/11 and 10/10, the
+   same items, with no movement in steps, calls or the facts row.
+
+Two figures the same page asked to be read beside those: the **steps per question** did not move at
+all, and the **coverage probe** fired the same once (one clarify, on `c10`, in both runs). The
+concern that a step whose quotes were all dropped would stop counting toward the CRAG gate and push
+models to `MAX_STEPS` did not materialise here, for the plain reason that no step here lost all of
+its quotes — the two drops are one quote each out of three and four.
+
+**What this does not settle is the case the gate was argued for.** `qwen2.5:14b` leaves 2 broken
+quotes an attempt; `mistral-small3.2:24b-ctx20k` leaves **8–9** on the same set, and it is the model
+whose behaviour has the most to lose, being the only 11/11 here. A model that has four times as many
+quotes refused is where "a step whose quotes were all dropped" becomes likely, and nothing in this
+run speaks to it. **The gate is measured on the shipped default and unmeasured on the model that
+motivated it**; `mistral-small3.2:24b-ctx20k` and `qwen2.5:32b` on `c79018a` are the run still to
+make.
+
 ## What this does not prove
 
 - **Nothing here is correctness.** No answer was read against the golden notes. Every
@@ -374,9 +524,11 @@ evidence here points across families rather than up a size ladder.
 - **Three attempts.** Enough to establish that these models return the same text three times in a
   row; not enough to bound how often they would not. A zero spread over three samples is not proof
   of determinism, and one item on the 14b and four on mistral did vary.
-- **The gate is not in this code.** `#65` is entirely outside `169b511`. Nothing here says what the
-  evidence gate does to behaviour, to steps, or to the coverage probe; that is the run this page
-  exists to be compared against.
+- **The gate is measured on one model of three.** `#65` is outside `169b511` and the six runs above;
+  the section that pairs it is `qwen2.5:14b` alone on `c79018a`. What the gate does to
+  `qwen2.5:32b`, and above all to `mistral-small3.2:24b-ctx20k` — the model with 8–9 broken quotes
+  an attempt and the only 11/11 here — is **not** measured, and that is the model the gate was
+  argued for.
 - **The catalogue set no longer separates anything.** All three models score 10/10, and the six
   catalogue questions are answered in one model call from the index tables with no search. It is a
   regression guard, not a discriminator, and reading three identical 10/10 rows as agreement between
