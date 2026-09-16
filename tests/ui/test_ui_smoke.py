@@ -276,9 +276,27 @@ def log_in(page, server) -> None:
 
 
 def ask(page, question: str) -> None:
+    """Type a question and send it — and prove it was sent, not merely typed.
+
+    The wait in the middle is load-bearing. Chainlit keeps the composer's submit
+    disabled until the session is ready, and `fill` writes into the textarea
+    anyway, so an Enter pressed a moment too early is swallowed and the question
+    sits in the box. This file used to have an accidental barrier against that:
+    `on_chat_start` sent a welcome message and the first assertion waited for it,
+    which meant the socket was up before anything was typed. Nothing is sent into
+    an empty chat any more (the welcome screen and its starters need the thread
+    empty), so the barrier is explicit — with text in the composer, `#chat-submit`
+    is disabled for exactly one remaining reason.
+
+    The assertion afterwards is the composer going empty, then the text on the
+    page. "The question is somewhere on the page" alone is true of a question
+    still sitting in the textarea, which is how a swallowed Enter passed this
+    line and failed sixty seconds later on a step that never ran."""
     page.click(COMPOSER)
     page.fill(COMPOSER, question)
+    expect(page.locator("#chat-submit")).to_be_enabled(timeout=RENDER_MS)
     page.keyboard.press("Enter")
+    expect(page.locator(COMPOSER)).to_have_value("", timeout=RENDER_MS)
     expect(body(page)).to_contain_text(question, timeout=RENDER_MS)
 
 
