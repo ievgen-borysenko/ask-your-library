@@ -205,7 +205,7 @@ def test_one_search_enough_answer_and_confirmed_provenance(run, tmp_path):
     assert validate["provenance"] == {"checked": 1, "checked_book_text": 1, "confirmed": 1,
                                       "unattributed": 0, "broken": 0, "card_only": 0,
                                       # the observe gate let this quote through and took nothing
-                                      "dropped_unverified": 0, "repinned": 0,
+                                      "dropped_unverified": 0, "dropped_cross_book": 0, "repinned": 0,
                                       "unused": 0, "broken_items": [],
                                       "items": [{"hit_id": "s1h2", "book": MOBY, "section": "Chapter 1",
                                                  "quote": "Call me Ishmael.", "status": "confirmed",
