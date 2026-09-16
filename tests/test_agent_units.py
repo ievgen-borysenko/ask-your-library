@@ -198,16 +198,78 @@ def test_validate_rejects_non_adjacent_sentences_spliced_together():
     assert _validate([_item("s1h1", adjacent)])["provenance"]["confirmed"] == 1
 
 
-def test_validate_accepts_two_adjacent_card_bullets_merged_in_full():
+def test_validate_matches_two_adjacent_card_bullets_merged_in_full():
+    """The token check itself does not care which corpus a passage came from:
+    a contiguous run of a card matches and a reordered one does not. s1h3 IS a
+    card, so the verdict is card_only rather than confirmed — that is the split,
+    tested next; what this pins is the matching."""
     merged = "Count Dracula — an ancient vampire - Jonathan Harker — a young solicitor"
     p = _validate([_item("s1h3", merged, book="Dracula — Bram Stoker", section="Characters")])["provenance"]
-    assert p["confirmed"] == 1
+    assert (p["card_only"], p["confirmed"], p["broken"]) == (1, 0, 0)
     half_dropped = "Count Dracula — an ancient vampire Jonathan Harker a young"   # contiguous, still verbatim words
     assert _validate([_item("s1h3", half_dropped, book="Dracula — Bram Stoker",
-                            section="Characters")])["provenance"]["confirmed"] == 1
+                            section="Characters")])["provenance"]["card_only"] == 1
     reordered = "Jonathan Harker — a young solicitor Count Dracula"
     assert _validate([_item("s1h3", reordered, book="Dracula — Bram Stoker",
                             section="Characters")])["provenance"]["broken"] == 1
+
+
+# ------------------------------------------------- a card is never a quote (16.09)
+def test_validate_never_traces_a_quote_to_the_book_when_only_a_card_holds_it():
+    """A book card is one model call per book at ingest time, so a quote that is
+    verbatim only inside a card is verbatim in a MODEL's words. It is its own
+    outcome, it is not `confirmed`, and it is not in the denominator the
+    interfaces show ("n/n traced")."""
+    card_line = "Jonathan Harker — a young solicitor"
+    p = _validate([_item("s1h3", card_line, book="Dracula — Bram Stoker",
+                         section="Characters")])["provenance"]
+    assert (p["confirmed"], p["unattributed"], p["broken"]) == (0, 0, 0)
+    assert (p["card_only"], p["checked"], p["checked_book_text"]) == (1, 1, 0)
+    assert p["items"][0]["status"] == "card_only"
+    assert p["items"][0]["source_kind"] == "card"
+
+
+def test_validate_card_only_is_reported_and_never_read_as_a_green_run():
+    """"OK: all 0 quotes found verbatim" is the green sentence for the one run
+    that most needs a different one."""
+    from ask_your_library.i18n import t
+
+    result = _validate([_item("s1h3", "an ancient vampire", book="Dracula — Bram Stoker",
+                              section="Characters")])
+    assert result["verification"].startswith("BOOK CARDS ONLY")
+    assert "OK:" not in result["verification"]
+    # and where book text WAS traced, the card count rides along as a note
+    mixed = _validate([_item("s1h1", "Call me Ishmael."),
+                       _item("s1h3", "an ancient vampire", book="Dracula — Bram Stoker",
+                             section="Characters")])
+    assert mixed["verification"].startswith("OK: all 1 quotes")
+    assert t("card_note", n=1) in mixed["verification"]
+    assert (mixed["provenance"]["confirmed"], mixed["provenance"]["card_only"]) == (1, 1)
+    assert mixed["provenance"]["checked_book_text"] == 1
+
+
+def test_validate_prefers_the_book_text_when_both_a_card_and_a_chapter_hold_the_quote():
+    """The same sentence in a card and in the chapter is a quote from the book:
+    the card haystack is searched only after the book text has failed."""
+    hits = HITS + [{"hit_id": "s2h1", "step": 2, "book": "Dracula — Bram Stoker",
+                    "section": "Summary", "corpus": "cards",
+                    "text": "The castle stood on the very edge of a terrible precipice."}]
+    p = _validate([_item("s2h1", "The castle stood on the very edge of a terrible precipice.",
+                         book="Dracula — Bram Stoker", section="Summary")], hits=hits)["provenance"]
+    # cited the card, but the chapter (s1h2) holds it too: unattributed, not card_only
+    assert (p["unattributed"], p["card_only"], p["confirmed"]) == (1, 0, 0)
+    assert p["items"][0]["source_kind"] == "card"       # the label is still what the reader would open
+
+
+def test_validate_reads_a_hit_without_a_corpus_as_book_text():
+    """An index and a recorded run from before cards existed carry no `corpus`
+    on the hit; guessing "card" there would demote quotes that are the book's
+    own text. The conservative default is the one that does not invent a card."""
+    hits = [{"hit_id": "s1h1", "step": 1, "book": "Moby Dick — Herman Melville",
+             "section": "Chapter 1", "text": "Call me Ishmael."}]
+    p = _validate([_item("s1h1", "Call me Ishmael.")], hits=hits)["provenance"]
+    assert (p["confirmed"], p["card_only"]) == (1, 0)
+    assert p["items"][0]["source_kind"] == "book_text"
 
 
 def test_validate_quote_in_another_hit_than_cited_is_unattributed_not_confirmed():
@@ -246,9 +308,15 @@ def test_validate_statuses_partition_checked_and_keys_are_always_present():
     from ask_your_library import nodes
 
     p = _validate([_item("s1h1", "Call me Ishmael."), _item("s1h2", "Call me Ishmael."),
-                   _item("s1h1", "Not anywhere.")])["provenance"]
-    assert p["confirmed"] + p["unattributed"] + p["broken"] == p["checked"] == 3
-    keys = {"checked", "confirmed", "unattributed", "broken", "unused", "broken_items"}
+                   _item("s1h1", "Not anywhere."),
+                   _item("s1h3", "an ancient vampire", book="Dracula — Bram Stoker",
+                         section="Characters")])["provenance"]
+    # four outcomes partition `checked`; the three older ones partition the book
+    # text alone, which is the denominator every "traced" count is shown over
+    assert p["confirmed"] + p["unattributed"] + p["broken"] + p["card_only"] == p["checked"] == 4
+    assert p["confirmed"] + p["unattributed"] + p["broken"] == p["checked_book_text"] == 3
+    keys = {"checked", "checked_book_text", "confirmed", "unattributed", "broken", "card_only",
+            "unused", "broken_items"}
     assert keys <= set(p)
     assert keys <= set(nodes.validate({"evidence": [], "answer": "", "hits_log": []})["provenance"])
 
@@ -1748,7 +1816,8 @@ def test_validate_reports_every_item_with_its_verdict_in_evidence_order():
                    _item("s1h1", "Not anywhere.")])["provenance"]
     assert [i["status"] for i in p["items"]] == ["confirmed", "unattributed", "broken"]
     assert p["items"][0] == {"hit_id": "s1h1", "book": "Moby Dick — Herman Melville", "section": "Chapter 1",
-                             "quote": "Some years ago I thought I would sail about a little.", "status": "confirmed"}
+                             "quote": "Some years ago I thought I would sail about a little.",
+                             "status": "confirmed", "source_kind": "book_text"}
     assert p["items"][2]["quote"] == "Not anywhere."          # the full quote, not the 120-char preview of broken_items
     assert nodes.validate({"evidence": [], "answer": "", "hits_log": []})["provenance"]["items"] == []
 

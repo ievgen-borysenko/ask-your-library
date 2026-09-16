@@ -75,6 +75,29 @@ def test_badge_is_green_only_when_nothing_is_broken_or_unattributed(ui):
     assert ui.GRAY in badge(checked=0, confirmed=0, broken=0, unattributed=0)
 
 
+def test_the_headline_count_never_includes_a_quote_that_only_matched_a_card(ui):
+    """The badge's "n/n traced to their source" is about the BOOK's own text. A
+    quote whose only match is a book card is a model's summary, so it is
+    reported under the count and never inside it (design critique 16.09 §1.1)."""
+    def badge(**numbers):
+        return ui.verification_badge({"verification": "v", "provenance": numbers})
+
+    green = badge(checked=4, checked_book_text=2, confirmed=2, broken=0, unattributed=0, card_only=2)
+    assert ui.GREEN in green and "2/2 traced to their source" in green
+    assert "4/4" not in green and "2/4" not in green
+    assert "+2 matched only a book card" in green
+
+    # nothing at all traced to the book: amber, and it says so instead of 0/0
+    only_cards = badge(checked=2, checked_book_text=0, confirmed=0, broken=0, unattributed=0, card_only=2)
+    assert ui.YELLOW in only_cards and "nothing traced to the book text: all 2" in only_cards
+    assert "0/0" not in only_cards
+    # and the sentence is not printed twice
+    assert only_cards.count("book card") == 1
+
+    # a record from before the split reads exactly as it read then
+    assert "3/3 traced to their source" in badge(checked=3, confirmed=3, broken=0, unattributed=0)
+
+
 def test_a_catalogue_answer_is_one_step_and_the_titles_render_as_text(ui, monkeypatch):
     shown, sent = [], []
     monkeypatch.setattr(ui, "show_step", lambda name, text: shown.append((name, text)))
@@ -426,6 +449,26 @@ def test_every_evidence_item_opens_on_the_passage_it_was_checked_against(ui, mon
     ui.render_event("validate", {"verification": "OK", "provenance": {"items": [
         {"hit_id": "s1h1", "book": "b", "section": "s", "quote": "q", "status": "confirmed"}]}}, view=other)
     assert t("ui_passage_missing") in sent[-1] and "Call me Ishmael" not in sent[-1]
+
+
+def test_the_evidence_list_says_which_passages_are_book_cards(ui):
+    """A reader who opens a bulleted distillate under a green badge had no way
+    to tell it from a chapter. Each passage now names its kind, and a quote whose
+    only match was a card says what that means in its own words."""
+    from ask_your_library.i18n import t
+
+    items = [{"hit_id": "s1h1", "book": "Dracula — Bram Stoker", "section": "Chapter 27",
+              "quote": "crumbled into dust", "status": "confirmed", "source_kind": "book_text"},
+             {"hit_id": "s1h2", "book": "Dracula — Bram Stoker", "section": "Key Takeaways",
+              "quote": "The hunters chase the count", "status": "card_only", "source_kind": "card"}]
+    block = ui.evidence_passages(items, {"s1h1": "crumbled into dust", "s1h2": "The hunters chase the count"})
+    assert t("ui_source_text") in block and t("ui_source_card") in block
+    assert t("ev_status_card_only") in block
+    # an item from a record written before source_kind existed shows no label
+    plain = ui.evidence_passages([{"hit_id": "s1h1", "book": "b", "section": "s", "quote": "q",
+                                   "status": "confirmed"}], {"s1h1": "q"})
+    assert t("ui_source_text") not in plain and t("ui_source_card") not in plain
+    assert "<code>s1h1</code> · " in plain               # and no empty separator is left behind
 
 
 def test_the_evidence_card_names_its_source_without_the_corpus_formatting_it(ui, monkeypatch,

@@ -58,9 +58,21 @@ _T = {
         "ua": " ({n} доказів для книг, яких відповідь не називає, перевірено теж)",
         "en": " ({n} pieces of evidence for books the answer does not name were checked too)",
     },
+    "verif_cards_only": {
+        "ua": "ЛИШЕ КАРТКИ: жодну з {n} цитат не знайдено в тексті книжки — всі вони збіглися "
+              "тільки з карткою книжки, а картку написала модель{unused}",
+        "en": "BOOK CARDS ONLY: none of the {n} quotes was found in the book text — every one "
+              "matched only a book card, and a card is written by a model{unused}",
+    },
     "unattributed_note": {
         "ua": " ({n} цитат знайдено в іншому уривку, ніж той, на який вони посилаються — не зараховано)",
         "en": " ({n} quotes found in a retrieved passage other than the one cited — not counted as confirmed)",
+    },
+    "card_note": {
+        "ua": " ({n} цитат збіглися тільки з карткою книжки — це переказ, який написала модель, "
+              "а не цитата з книжки, тому не зараховано)",
+        "en": " ({n} quotes matched only a book card — a model-written summary, not a quote from "
+              "the book, so not counted as traced)",
     },
     # ---- stop reasons: the value of state["stop_reason"], and nothing more.
     # Every line that shows one already says that the run stopped — the CLI's
@@ -351,6 +363,8 @@ _T = {
     "ev_status_confirmed": {"ua": "підтверджено", "en": "confirmed"},
     "ev_status_unattributed": {"ua": "знайдено в іншому уривку", "en": "found in another passage"},
     "ev_status_broken": {"ua": "не знайдено дослівно", "en": "not found verbatim"},
+    "ev_status_card_only": {"ua": "з картки книжки, а не цитата з книжки",
+                            "en": "from a book card, not a quote from the book"},
     "m_line1": {
         "ua": "[метрики] {model}: {calls} LLM-викликів, {tin} in / {tout} out токенів, "
               "~${cost:.4f}, {sec}s, пошукових кроків: {steps}",
@@ -426,6 +440,16 @@ _T = {
     "ui_badge_warn": {"ua": "{broken}/{all} цитат не дослівні",
                       "en": "{broken}/{all} quotes not verbatim"},
     "ui_badge_which": {"ua": "які саме", "en": "which ones"},
+    "ui_badge_cards": {"ua": " (+{n} збіглися тільки з карткою книжки — переказ від моделі, не цитата з книжки)",
+                       "en": " (+{n} matched only a book card — a model-written summary, "
+                             "not a quote from the book)"},
+    "ui_badge_cards_only": {"ua": "жодної цитати з тексту книжки: усі {n} збіглися лише з карткою книжки, "
+                                  "яку написала модель",
+                            "en": "nothing traced to the book text: all {n} matched only a book card, "
+                                  "which a model wrote"},
+    "ui_source_text": {"ua": "текст книжки", "en": "book text"},
+    "ui_source_card": {"ua": "картка книжки (переказ від моделі)",
+                       "en": "book card (a model-written summary)"},
     "ui_badge_unused": {"ua": " (+{n} доказів для книг, яких відповідь не називає)",
                         "en": " (+{n} evidence items for books the answer does not name)"},
     "ui_m_summary": {
@@ -459,9 +483,10 @@ _T = {
 
 def status_word(status: str) -> str:
     """The reader's word for a provenance verdict (confirmed / unattributed /
-    broken); an unknown value is shown as is, so a fourth status cannot pass
-    unnoticed in one interface only."""
-    return t(f"ev_status_{status}") if status in ("confirmed", "unattributed", "broken") else status
+    card_only / broken); an unknown value is shown as is, so a fifth status
+    cannot pass unnoticed in one interface only."""
+    return (t(f"ev_status_{status}")
+            if status in ("confirmed", "unattributed", "card_only", "broken") else status)
 
 
 def t(key: str, **kw) -> str:

@@ -198,10 +198,12 @@ def test_one_search_enough_answer_and_confirmed_provenance(run, tmp_path):
     reflect = by_name(events, "reflect")[0]
     assert reflect["current_query"] == "" and reflect["stop_reason"] == t("stop_enough")
     validate = by_name(events, "validate")[0]
-    assert validate["provenance"] == {"checked": 1, "confirmed": 1, "unattributed": 0, "broken": 0,
+    assert validate["provenance"] == {"checked": 1, "checked_book_text": 1, "confirmed": 1,
+                                      "unattributed": 0, "broken": 0, "card_only": 0,
                                       "unused": 0, "broken_items": [],
                                       "items": [{"hit_id": "s1h2", "book": MOBY, "section": "Chapter 1",
-                                                 "quote": "Call me Ishmael.", "status": "confirmed"}]}
+                                                 "quote": "Call me Ishmael.", "status": "confirmed",
+                                                 "source_kind": "book_text"}]}
     metrics = by_name(events, "metrics")[0]
     assert metrics["llm_calls"] == 4 and set(metrics["by_role"]) == {"plan", "observe", "reflect", "synthesize"}
     assert metrics["input_tokens"] == 400 and metrics["output_tokens"] == 40
@@ -259,7 +261,12 @@ def test_clarify_interrupts_resumes_with_the_choice_and_filters_retrieval(run):
     assert [e["book"] for e in second_plan["evidence"]] == [GULLIVER]     # the rejected book's evidence is gone
     assert f'<user_chose_book>\n{GULLIVER}' in model.nth("plan", 1)["user"]
     assert library.searches == [("stranded traveller strange land", None), ("Lilliput tiny people", GULLIVER)]
-    assert by_name(events, "validate")[0]["provenance"]["confirmed"] == 2
+    # Two quotes survive the filter, and they are not the same kind of evidence:
+    # the card line is a model's summary of Gulliver, the chapter line is the
+    # book. Only the second is traced to the book (provenance.validate).
+    final_provenance = by_name(events, "validate")[0]["provenance"]
+    assert (final_provenance["confirmed"], final_provenance["card_only"]) == (1, 1)
+    assert final_provenance["checked"] == 2 and final_provenance["checked_book_text"] == 1
     final = by_name(events, "metrics")[1]
     assert "partial" not in final and final["llm_calls"] == 7 and final["steps_taken"] == 2
     assert answer.startswith("Gulliver's Travels")
@@ -419,8 +426,11 @@ def test_step_limit_ends_the_loop_with_an_honest_stop_reason(run):
     assert names(events).count("act") == steps
     assert by_name(events, "reflect")[-1]["stop_reason"] == t("stop_limit", n=steps)
     assert by_name(events, "metrics")[0]["steps_taken"] == steps
-    # every quote confirmed although the same card was hit each step: ids are per step
-    assert by_name(events, "validate")[0]["provenance"]["confirmed"] == steps
+    # every quote matched although the same card was hit each step: ids are per
+    # step. All of them are card quotes, so none is traced to the book text —
+    # what this pins is that the per-step ids resolve, not the verdict's colour.
+    assert by_name(events, "validate")[0]["provenance"]["card_only"] == steps
+    assert by_name(events, "validate")[0]["provenance"]["broken"] == 0
 
 
 def test_coverage_probe_looks_inside_the_named_uncovered_book_once(run):
@@ -508,7 +518,10 @@ def test_malformed_model_json_degrades_observe_to_a_dry_step_and_reflect_to_a_st
     assert by_name(events, "observe")[0]["empty_streak"] == 1 and by_name(events, "observe")[0]["evidence"] == []
     # reflect: two invalid replies = stop with what we have, the evidence of step 2 survives
     assert by_name(events, "reflect")[1]["stop_reason"] == t("stop_json")
-    assert by_name(events, "validate")[0]["provenance"]["confirmed"] == 1
+    # the surviving item is a card quote, so it is matched but not traced to the
+    # book; what this line is about is that step 2's evidence survived at all
+    assert by_name(events, "validate")[0]["provenance"]["card_only"] == 1
+    assert by_name(events, "validate")[0]["provenance"]["checked"] == 1
     assert model.roles().count("observe") == 3 and model.roles().count("reflect") == 3
 
 
@@ -527,10 +540,16 @@ def test_evidence_that_is_not_in_the_cited_passage_is_unattributed_or_broken(run
     _, events, _ = run(model, FakeLibrary(lambda q: [MOBY]), "Who is Ishmael?")
     assert len(by_name(events, "observe")[0]["evidence"]) == 3      # the unknown hit id is dropped (strict mode)
     p = by_name(events, "validate")[0]["provenance"]
-    assert (p["checked"], p["confirmed"], p["unattributed"], p["broken"]) == (3, 1, 1, 1)
+    # The middle quote IS in this run — inside the card s1h1, not inside the
+    # chapter s1h2 it cites. "Found somewhere else" and "found in the book
+    # somewhere else" are different facts: the only other passage holding it is
+    # a model-written card, so it is card_only, not unattributed.
+    assert (p["checked"], p["confirmed"], p["unattributed"], p["broken"]) == (3, 1, 0, 1)
+    assert (p["card_only"], p["checked_book_text"]) == (1, 2)
     assert p["broken_items"][0]["quote"] == "Ishmael was a lawyer in Boston." and p["broken_items"][0]["hit_id"] == "s1h1"
     # every item with its verdict, in evidence order: what the interfaces open on the passage
-    assert [(i["hit_id"], i["status"]) for i in p["items"]] == [("s1h2", "confirmed"), ("s1h2", "unattributed"), ("s1h1", "broken")]
+    assert [(i["hit_id"], i["status"]) for i in p["items"]] == [("s1h2", "confirmed"), ("s1h2", "card_only"), ("s1h1", "broken")]
+    assert [i["source_kind"] for i in p["items"]] == ["book_text", "book_text", "card"]
     passages = {h["hit_id"]: h["text"] for h in by_name(events, "act")[0]["hits_log"]}
     assert all(i["hit_id"] in passages for i in p["items"])          # the UI can open each one
     assert by_name(events, "metrics")[0]["evidence_dropped_no_hit"] == 1

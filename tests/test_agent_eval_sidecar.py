@@ -513,6 +513,36 @@ def test_repeat_zero_is_refused(monkeypatch, tmp_path):
     assert harness.parse_args(["--repeat", "1"]).repeat == 1
 
 
+def test_a_card_only_match_is_counted_apart_in_the_report_line_and_the_sidecar(
+        monkeypatch, tmp_path):
+    """A quote matched only inside a book card is not a quote from the book
+    (provenance.validate), so it is out of the confirmed ratio's denominator and
+    says so in its own clause. The denominator is `checked_book_text`, not
+    `checked`: 1/1 of the book text, plus one card match, never "1/2"."""
+    card = {"checked": 2, "checked_book_text": 1, "confirmed": 1, "unattributed": 0,
+            "broken": 0, "card_only": 1}
+    out = prepared(monkeypatch, tmp_path, [],
+                   lambda item, attempt: fake_result(item, provenance=card))
+    report = only(out, ".md").read_text(encoding="utf-8")
+    assert "quotes verified 2/2 (confirmed / unattributed / broken = 2 / 0 / 0)" in report
+    assert "; 2 quotes matched only a book card, not the book text;" in report
+    sidecar = json.loads(only(out, ".json").read_text(encoding="utf-8"))
+    per_attempt = sidecar["totals"]["per_attempt"]
+    assert per_attempt["card_only"]["values"] == [2]
+    assert per_attempt["checked_book_text"]["values"] == [2]
+    assert sidecar["questions"][0]["attempts"][0]["provenance"] == card
+
+
+def test_a_run_with_no_card_match_keeps_the_line_it_has_always_written(monkeypatch, tmp_path):
+    """The clause appears only where there was something to say, and a result
+    from before 16.09 — no `card_only`, no `checked_book_text` — reads back as a
+    run with no cards in it rather than as a run with nothing traced."""
+    out = prepared(monkeypatch, tmp_path, [], lambda item, attempt: fake_result(item))
+    report = only(out, ".md").read_text(encoding="utf-8")
+    assert "quotes verified 4/4 (confirmed / unattributed / broken = 4 / 0 / 0); evidence" in report
+    assert "book card" not in report
+
+
 # ---------------------------------------------------------------- byte-compat
 def test_a_single_run_writes_the_markdown_the_pre_sidecar_harness_wrote(monkeypatch, tmp_path):
     """The WHOLE report, against one the harness at `a6c4ccd` produced from the

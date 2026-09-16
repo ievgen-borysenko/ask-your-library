@@ -374,10 +374,14 @@ def walk_through_the_release_check(page, chainlit_server) -> None:
     expect(body(page)).to_contain_text("retrieval limited to it", timeout=RENDER_MS)
     expect(body(page)).to_contain_text("Ishmael narrates Moby Dick", timeout=ANSWER_MS)
 
-    # --- the badge, with its numbers
+    # --- the badge, with its numbers. Two quotes, and only ONE of them is a
+    # quote from the book: the other is verbatim inside the book card, which a
+    # model wrote. The headline counts the book text alone and the card says so
+    # under it (design critique 16.09 §1.1).
     expect(body(page)).to_contain_text(BADGE, timeout=ANSWER_MS)
-    expect(body(page)).to_contain_text("evidence passages 2/2 traced to their source",
+    expect(body(page)).to_contain_text("evidence passages 1/1 traced to their source",
                                        timeout=RENDER_MS)
+    expect(body(page)).to_contain_text("+1 matched only a book card", timeout=RENDER_MS)
     expect(body(page)).to_contain_text("Evidence items (2, in 2 passage(s))", timeout=RENDER_MS)
 
     # --- an evidence passage: OPENED and readable, not merely sent. (2.12
@@ -385,6 +389,10 @@ def walk_through_the_release_check(page, chainlit_server) -> None:
     wait_for_the_run_to_finish(page, ANSWER_MS)
     passage = open_details(page, "s1h1")
     expect(passage).to_contain_text("Moby Dick — Herman Melville — Summary", timeout=RENDER_MS)
+    # and the reader can see WHAT they opened: this one is the card
+    expect(passage).to_contain_text("book card (a model-written summary)", timeout=RENDER_MS)
+    expect(passage).to_contain_text("from a book card, not a quote from the book",
+                                    timeout=RENDER_MS)
     # A sentence that is only in the passage, never in the answer or the quote:
     # seeing it proves the passage body itself is on the screen.
     expect(passage.get_by_text("The voyage ends in ruin", exact=False)).to_be_visible(
@@ -438,8 +446,10 @@ def walk_through_the_release_check(page, chainlit_server) -> None:
     # The ask-back expiring, plus the run that follows it.
     expect(body(page)).to_contain_text("The one hunted across Europe is Dracula",
                                        timeout=chainlit_server.clarify_timeout_s * 1000 + ANSWER_MS)
-    expect(body(page)).to_contain_text("evidence passages 3/3 traced to their source",
+    # Three quotes, two of them off book cards: one quote from a book.
+    expect(body(page)).to_contain_text("evidence passages 1/1 traced to their source",
                                        timeout=RENDER_MS)
+    expect(body(page)).to_contain_text("+2 matched only a book card", timeout=RENDER_MS)
     # Still a working chat: the composer takes the next question.
     expect(page.locator(COMPOSER)).to_be_editable(timeout=RENDER_MS)
     page.fill(COMPOSER, "and who wrote it?")

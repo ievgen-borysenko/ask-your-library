@@ -84,7 +84,15 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   catalogue entry; a name that fits several ("Holmes"), a fragment of a title ("Time"), or a
   longer name that merely contains one ("Dracula's Guest") gets the whole library.
 - **Detail questions may skip drill-down** and be answered from card summaries instead of
-  reading the chapter.
+  reading the chapter. Since 2026-09-16 the answer no longer hides it: a quote whose only verbatim
+  match is a book card is counted apart from the traced quotes (`card_only` in `validate`), the
+  badge says "+N matched only a book card — a model-written summary, not a quote from the book",
+  and the evidence list labels each passage "book text" or "book card". It is a label and a count,
+  not a fix: the agent still answers such questions from the card rather than reading the chapter,
+  and a question answered entirely off cards now says so instead of showing "n/n traced". **Every
+  eval report published before that date counted card matches inside the confirmed / unattributed /
+  broken triple**, so the quote numbers quoted here and in the README's table describe retrieval
+  provenance — the quote is verbatim in the passage it cites — and not that a book said it.
 - **The time budget is coarse, and there is no hard deadline.** `QUESTION_DEADLINE_S` (300 s)
   is a budget for continuing the search: it is checked before each next decision, never
   mid-call, so the step in flight and the synthesis still complete. `LLM_TIMEOUT_S` is httpx's

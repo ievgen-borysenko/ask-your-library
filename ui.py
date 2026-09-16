@@ -340,6 +340,14 @@ def verification_badge(update: dict) -> str:
     # LF. A <br> inside a title attribute would be shown literally.
     tooltip = LINE_BREAK_RE.sub(" ", neutralize_markdown(html.escape(verification, quote=True)))
     title = t("ui_badge_title")
+    # The headline counts quotes traced to the BOOK's own text and nothing else:
+    # a quote whose only match is a book card is verbatim in a model's summary,
+    # not in the book, and is reported under the count, never inside it
+    # (provenance.validate). The fallback keeps a record written before 16.09 —
+    # and any interface reading one — meaning what it meant then.
+    card_only = numbers.get("card_only", 0)
+    book_checked = numbers.get("checked_book_text", numbers.get("checked", 0))
+    card_note = t("ui_badge_cards", n=card_only) if card_only else ""
 
     if numbers.get("catalog"):
         # The catalogue path (ADR-016): a list computed by code from the index
@@ -360,19 +368,27 @@ def verification_badge(update: dict) -> str:
         color = GRAY
         headline = safe_html(verification)
         details = ""
+    elif book_checked == 0:
+        # Every quote matched a book card and nothing else. A card is a
+        # model-written summary, so there is no quote from a book here at all —
+        # amber, and it says which, rather than a green "0/0 traced".
+        color = YELLOW
+        headline = t("ui_badge_cards_only", n=card_only)
+        card_note = ""          # the headline already IS the card sentence
+        details = ""
     elif numbers.get("broken", 0) == 0 and numbers.get("unattributed", 0) == 0:
         color = GREEN
-        headline = t("ui_badge_ok", ok=numbers["confirmed"], all=numbers["checked"])
+        headline = t("ui_badge_ok", ok=numbers["confirmed"], all=book_checked)
         details = ""
     elif numbers.get("broken", 0) == 0:
         # Text found, book not: honest amber, not green.
         color = YELLOW
-        headline = t("ui_badge_unattributed", ok=numbers["confirmed"], all=numbers["checked"],
+        headline = t("ui_badge_unattributed", ok=numbers["confirmed"], all=book_checked,
                      n=numbers["unattributed"])
         details = ""
     else:
         color = YELLOW
-        headline = t("ui_badge_warn", broken=numbers["broken"], all=numbers["checked"])
+        headline = t("ui_badge_warn", broken=numbers["broken"], all=book_checked)
         items_html = ""
         for item in numbers.get("broken_items", []):
             quote_preview = item.get("quote", "")[:160]
@@ -387,7 +403,7 @@ def verification_badge(update: dict) -> str:
 
     return (f'<div title="{tooltip}" style="border-left: 4px solid {color}; '
             f'background: {color}1a; padding: 8px 12px; border-radius: 4px;">'
-            f'<b>{title}</b><br>{headline}{unused_note}{details}</div>')
+            f'<b>{title}</b><br>{headline}{card_note}{unused_note}{details}</div>')
 
 
 class RunView:
@@ -421,9 +437,17 @@ def safe_html(text: str) -> str:
 
 def evidence_passages(items: list[dict], passages: dict[str, str]) -> str:
     """One <details> per PASSAGE (hit id), in evidence order: book, section, hit
-    id and the verdict count in the summary; inside, every quote checked against
-    that passage with its verdict, then the passage as observe saw it. Several
-    items often share one hit, so the passage is rendered once, not per item."""
+    id, WHAT KIND OF SOURCE this passage is, and the verdict count in the
+    summary; inside, every quote checked against that passage with its verdict,
+    then the passage as observe saw it. Several items often share one hit, so
+    the passage is rendered once, not per item.
+
+    The source kind is not decoration: "book text" and "book card (a
+    model-written summary)" are different claims about where a sentence came
+    from, and a reader opening a bulleted distillate had no way to tell which
+    they were reading (design critique 16.09 §1.1). It comes from the provenance
+    record's `source_kind`, which is the corpus of the hit the quote is pinned
+    to; an item from a record written before that field existed shows none."""
     by_hit: dict[str, list[dict]] = {}
     for item in items:
         by_hit.setdefault(item.get("hit_id", ""), []).append(item)
@@ -444,9 +468,11 @@ def evidence_passages(items: list[dict], passages: dict[str, str]) -> str:
                               if any(i.get("status") == s for i in group))
         quotes = "".join(f"<li><b>{safe_html(status_word(i.get('status', '')))}</b>: "
                          f"<q>{safe_html(i.get('quote', ''))}</q></li>" for i in group)
+        kind = {"book_text": t("ui_source_text"), "card": t("ui_source_card")}.get(
+            first.get("source_kind", ""), "")
         blocks.append(
             f"<details><summary>{safe_html(first.get('book', '?'))} — {safe_html(first.get('section', '?'))} · "
-            f"<code>{safe_html(hit_id)}</code> · {verdicts}</summary>"
+            f"<code>{safe_html(hit_id)}</code> · {kind + ' · ' if kind else ''}{verdicts}</summary>"
             f"<ul>{quotes}</ul>{body}</details>")
     return (f'<div style="font-size: 0.9em;"><b>{t("ui_evidence_title", n=len(items), p=len(by_hit))}</b>'
             f'{"".join(blocks)}</div>')

@@ -783,8 +783,9 @@ def spread_line(label: str, values: list, of=None, fmt="{:g}") -> str:
 def empty_totals() -> dict:
     """One attempt's totals: --repeat keeps one of these per attempt index, and
     the report's own block is their sum."""
-    return {"run": 0, "errors": 0, "clarify": 0, "checked": 0, "confirmed": 0, "evidence": 0,
-            "unattributed": 0, "broken": 0,
+    return {"run": 0, "errors": 0, "clarify": 0, "checked": 0, "checked_book_text": 0,
+            "confirmed": 0, "evidence": 0,
+            "unattributed": 0, "broken": 0, "card_only": 0,
             "behavior_ok": 0, "titles_mentioned": 0, "titles_expected": 0,
             "facts_found": 0, "facts_expected": 0, "facts_items": 0, "facts_items_ok": 0,
             "drill_expected": 0, "drill_ok": 0, "cost_usd": 0.0, "llm_calls": 0,
@@ -813,9 +814,15 @@ def render_summary(totals: dict, per_group: dict, repeat: int, attempt_totals: l
                     + ", ".join(f"{g} {p}/{n}" for g, (p, n) in sorted(per_group.items())) + ")")
         return (f"\n---\n{totals['run']} completed, {totals['errors']} errors, "
                 f"{totals['clarify']} clarify interrupts; quotes verified "
-                f"{totals['confirmed']}/{totals['checked']} (confirmed / unattributed / broken = "
-                f"{totals['confirmed']} / {totals['unattributed']} / {totals['broken']}); "
-                f"evidence items {totals['evidence']}\n"
+                f"{totals['confirmed']}/{totals['checked_book_text']} "
+                f"(confirmed / unattributed / broken = "
+                f"{totals['confirmed']} / {totals['unattributed']} / {totals['broken']})"
+                # Only when there are any: a run with no card match writes the
+                # line it has always written, which is the byte-compat contract
+                # with eval/summarize_report.py and docs/eval-results/.
+                + (f"; {totals['card_only']} quotes matched only a book card, "
+                   f"not the book text" if totals["card_only"] else "")
+                + f"; evidence items {totals['evidence']}\n"
                 + headline
                 + f"; expected titles mentioned {totals['titles_mentioned']}/{totals['titles_expected']}"
                 + (f"; chapter drill-down {totals['drill_ok']}/{totals['drill_expected']}"
@@ -855,12 +862,17 @@ def render_summary(totals: dict, per_group: dict, repeat: int, attempt_totals: l
              # max(checked): attempts of 3/3 and 4/10 would print "3–4/10", a
              # ratio no attempt produced and the best-looking one available.
              "- quotes confirmed / checked, per attempt: "
-             + ", ".join(f"{t['confirmed']}/{t['checked']}" for t in attempt_totals),
+             + ", ".join(f"{t['confirmed']}/{t['checked_book_text']}" for t in attempt_totals),
              spread_line("quotes unattributed", column("unattributed")),
              spread_line("quotes broken", column("broken")),
              spread_line("evidence items", column("evidence")),
              spread_line("expected titles mentioned", column("titles_mentioned"),
                          of=expected["titles"])]
+    if any(column("card_only")):
+        # Added only where it happened: a set answered entirely from book text
+        # keeps the block it had, and a reader who sees the line knows the run
+        # quoted something a model wrote.
+        lines.insert(-1, spread_line("quotes matched only a book card", column("card_only")))
     if expected["drill_items"]:
         lines.append(spread_line("chapter drill-down", column("drill_ok"),
                                  of=expected["drill_items"]))
@@ -1145,6 +1157,14 @@ def main(argv: list[str] | None = None) -> None:
                 totals["confirmed"] += r["provenance"].get("confirmed", 0)
                 totals["unattributed"] += r["provenance"].get("unattributed", 0)
                 totals["broken"] += r["provenance"].get("broken", 0)
+                # A quote matched only inside a book card is not traced to the
+                # book (provenance.validate); it is counted apart and it is not
+                # in the denominator of the confirmed ratio. `.get` with the old
+                # meaning as the default: a sidecar written before 16.09 has
+                # neither key, and reads back as a run with no cards in it.
+                totals["card_only"] += r["provenance"].get("card_only", 0)
+                totals["checked_book_text"] += r["provenance"].get(
+                    "checked_book_text", r["provenance"].get("checked", 0))
                 totals["evidence"] += r["evidence_items"]
                 for key in ("cost_usd", "llm_calls", "tokens_in", "tokens_out"):
                     totals[key] += r[key]

@@ -38,7 +38,23 @@ the item names, and the catalogue as a whole must hold the `expected_total` the 
 for, or a run of two or three items could certify a partial index; a research question answered
 by the catalogue path fails, and so does a research control the planner did not route itself,
 where a planner or catalogue fallback searched instead). Quote provenance totals come from
-`validate`. Scoring is heuristic, no LLM judge -
+`validate`.
+
+**A book card is not the book, and since 2026-09-16 the triple says so.** `validate` splits its
+verdicts by the corpus the matching passage came from: `confirmed / unattributed / broken` are
+now about the books' own text alone, and a quote whose only verbatim match is inside a book card —
+a per-book summary written by one model call at ingest time — is counted apart as `card_only`,
+reported in the report line ("N quotes matched only a book card, not the book text", written only
+when there are any) and in the sidecar. The confirmed ratio's denominator is `checked_book_text`
+(= `checked - card_only`), so a run answered half off cards reads "3/3 of the book text, plus 3
+card matches" rather than "6/6 confirmed". **Every report under
+[`eval-results/`](eval-results/) predates this split and counts card matches inside the triple**;
+the numbers in those files are correct for what they measured and are not comparable, quote for
+quote, with a run made after it. Nothing was re-run to change them, and the harness reads a
+sidecar written before the split as a run with no card matches in it rather than as a run with
+nothing traced.
+
+Scoring is heuristic, no LLM judge -
 **answer correctness is still a manual read**, which is why the harness writes every answer
 into a report with a per-question correctness checkbox.
 
@@ -476,6 +492,12 @@ ran the ablation, not a human verdict.
   a question whose answering passage was never retrieved scores the same green as one that was.
   Only a correctness read of the report catches either (the AI pre-check did, and on 07.09 the
   reader graded the eleven v0.2.0-rc1 answers in their report: ten correct, c06 incomplete).
+- **Not that a confirmed quote is a quote from a book.** It was until 2026-09-16: a quote found
+  verbatim inside a book card counted as confirmed, and the card is a model's summary of the book,
+  not the book. `validate` now counts those apart (`card_only`, never in the confirmed ratio) and
+  every interface labels the passage it opens "book text" or "book card". The reports already
+  published counted them in the triple — which is why "quote provenance 73 / 0 / 0" in the table
+  below is a claim about retrieval provenance and not about the author's words.
 - **Not answer quality.** Behavioural PASS means the expected titles were mentioned, a refusal
   refused, a clarify clarified. It does not grade reasoning or prose. c06 (Fogg's missing day)
   is PASS with provenance 2/2 and does not answer the second half of its question: the scene that

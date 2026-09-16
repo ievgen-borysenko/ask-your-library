@@ -141,16 +141,29 @@ book and section on an evidence item are then taken from that passage's record, 
 model's own words. `validate` checks that the WHOLE quote, as a normalized token sequence
 (punctuation and case folded, so honest typographic changes pass while paraphrase fails; signs,
 range dashes and separators inside numbers are kept, with "1,200" and "1.200" treated as the
-same number), is a contiguous whole-token run of the cited passage exactly as the model saw it. Three outcomes, a
-partition of the evidence checked: **confirmed** (found in the cited passage), **unattributed**
-(not in the cited passage, but found in another retrieved passage - reported, never counted as
-confirmed) and **broken** (found in no retrieved passage). Every evidence item is checked, whether or
+same number), is a contiguous whole-token run of the cited passage exactly as the model saw it. Four
+outcomes, a partition of the evidence checked: **confirmed** (found in the cited passage, and that
+passage is the book's own text), **unattributed** (not in the cited passage, but found in another
+retrieved book text - reported, never counted as confirmed), **card_only** (found in no retrieved
+book text, but found in a **book card**) and **broken** (found in no retrieved passage at all).
+Every evidence item is checked, whether or
 not the answer names its book (an answer may cite "Dracula" for the index key "Dracula — Bram Stoker");
 items for books the answer does not name are counted separately for information. There is no section or
 title substring matching and no fallback that confirms; the human-readable scratchpad is a log, not
-an input to the check. The UI badge is green only when both unattributed and broken are zero, and
-under it every evidence item opens to the passage it was checked against (verdict, book, section,
-hit id, the quote, the retrieved text); `ask-library --verbose` prints the same list.
+an input to the check.
+
+**A card is never a quote (16.09).** A book card is one model call per book at ingest time, so a
+sentence that is verbatim only inside a card is verbatim in a model's summary, not in the book.
+`card_only` is therefore outside the traced count: the denominator every interface shows is
+`checked_book_text` (= `checked - card_only`), and the three older counts keep exactly the meaning
+they had, now over the book text alone. Each evidence item also carries `source_kind` ("book_text"
+or "card"), which is the corpus of the passage it is pinned to. The UI badge is green only when
+both unattributed and broken are zero, it names the card matches under the count, and a run whose
+every quote matched only a card is amber and says so instead of showing "0/0". Under the badge every
+evidence item opens to the passage it was checked against (verdict, book, section, hit id, **what
+kind of source that passage is**, the quote, the retrieved text); `ask-library --verbose` prints the
+same list. Reports written before 16.09 counted card matches inside the triple
+([`evaluation.md`](evaluation.md)).
 
 What this rules out: a fabricated sentence appended to a real one, two distant sentences
 spliced into one "quote", a quote filed under the wrong passage, and service text from the
