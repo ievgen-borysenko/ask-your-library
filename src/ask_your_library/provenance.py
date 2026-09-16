@@ -2,11 +2,18 @@
 that every quote is a verbatim, contiguous run inside the retrieved passage it
 is pinned to (ADR-004). No LLM anywhere in this module.
 
-`_valid_evidence` is the entry gate (observe): malformed items are dropped and
+`_valid_evidence` is the entry gate (observe): malformed items are dropped,
 every kept item is pinned to the hit it was copied from (book and section come
-from the hit record, never from the model). `validate` is the exit gate (the
-last graph node): confirmed / unattributed / card-only / broken partition every
-checked item, and nothing that is not a retrieved passage can confirm a quote.
+from the hit record, never from the model), and — since 2026-09-16 (#29) — the
+quote itself is checked against that hit's text before the item becomes
+evidence. `validate` is the exit gate (the last graph node): confirmed /
+unattributed / card-only / broken partition every checked item, and nothing
+that is not a retrieved passage can confirm a quote.
+
+Both gates run ONE function, `classify_quote`, over one index of the run's
+passages (`passage_index`). That is the point of the pair: the entry gate and
+the report cannot drift apart into two different readings of the same quote, so
+what `validate` reports is what the gate already decided, on the same text.
 
 A book card is not the book. `act` records which corpus each passage came from,
 and a quote that is verbatim only inside a card is verbatim in a MODEL's words —
@@ -19,6 +26,7 @@ over the book text alone.
 import os
 import re
 import unicodedata
+from typing import NamedTuple
 
 from .config import SEARCH_HIT_CHARS
 from .i18n import t
@@ -44,17 +52,48 @@ CARD_CORPUS = "cards"
 HIT_ID_STRICT = os.environ.get("AYL_STRICT_HIT_ID", "1") == "1"
 
 
-def _valid_evidence(items, hits: list[dict] | None = None) -> list[dict]:
-    """Keep only well-formed evidence items and pin each one to the hit it was
-    copied from: book and section are taken from the hit record, never from the
-    model. Malformed output is dropped, not crashed on. `hits` is None only in
-    legacy callers/tests; then the model's book/section are kept as given."""
+class EvidenceGate(NamedTuple):
+    """What `observe`'s gate made of one distillate: the evidence that survived
+    it, and how it was spent. `repinned` and `dropped_unverified` are the two
+    numbers #29 adds to the record — an item whose quote sat in a passage other
+    than the one the model cited, and an item whose quote sat in no retrieved
+    passage of this step at all and therefore never became evidence."""
+    evidence: list[dict]
+    repinned: int = 0
+    dropped_unverified: int = 0
+
+
+def _valid_evidence(items, hits: list[dict] | None = None) -> EvidenceGate:
+    """Keep only well-formed, PROVEN evidence items and pin each one to the hit
+    its quote is actually in: book and section are taken from the hit record,
+    never from the model. Malformed output is dropped, not crashed on.
+
+    Three outcomes for a well-formed item, all decided by `classify_quote`
+    against this step's passages — the same function and the same normalization
+    `validate` runs afterwards, so the gate and the report cannot drift:
+
+      confirmed    the quote is a contiguous run of the hit the model cited: kept
+      unattributed the quote is in ANOTHER hit of this step: re-pinned to that
+                   hit (book, section and hit_id come from it) and counted
+                   `repinned`, so the citation names the passage that holds it
+      card_only    the quote is in no retrieved book text but is in a book card:
+                   kept as evidence, pinned to the card — it is real retrieved
+                   text, and `validate` goes on reporting it as a card match and
+                   never as a quote traced to the book (ADR-004, amended 16.09)
+      broken       the quote is in no retrieved passage of this step: DROPPED,
+                   counted `dropped_unverified`. Before #29 it reached
+                   `synthesize` and was only counted afterwards, by the report.
+
+    `hits` is None only in legacy callers/tests; then the model's book/section
+    are kept as given and there is nothing to check a quote against."""
     by_id = {h["hit_id"]: h for h in (hits or []) if h.get("hit_id")}
-    valid = []
+    index = passage_index(hits) if hits is not None else {}
+    valid: list[dict] = []
+    repinned = dropped_unverified = 0
     if not isinstance(items, list):
         # "evidence": 42 or "evidence": "none" is valid JSON and malformed
         # output: dropped like a malformed item, never a TypeError mid-run.
-        return valid
+        return EvidenceGate(valid)
     for e in items or []:
         if not isinstance(e, dict):
             continue
@@ -63,15 +102,28 @@ def _valid_evidence(items, hits: list[dict] | None = None) -> list[dict]:
             continue
         quote = quote.strip()[:MAX_QUOTE_CHARS]
         hit_id = e.get("hit_id") if isinstance(e.get("hit_id"), str) else ""
-        hit = by_id.get(hit_id)
         if hits is not None:
-            if hit is None and not HIT_ID_STRICT:
-                quote_norm = _normalize(quote)
-                hit = next((h for h in hits if quote_norm
-                            and any(_contains_tokens(seg, quote_norm) for seg in _segments(h["text"]))), None)
-            if hit is None:
+            cited = by_id.get(hit_id)
+            if cited is None and HIT_ID_STRICT:
                 llm._usage().evidence_dropped_no_hit += 1
                 continue
+            if cited is None:
+                # Non-strict mode: the model named no usable hit, so there is no
+                # citation to confirm or to correct — the quote itself has to
+                # find its passage, which is what classify_quote does from an
+                # empty cited id. Resolving it is not a re-pin: nothing was
+                # pinned wrong, nothing was pinned at all.
+                hit_id = ""
+            status, holder = classify_quote(quote, hit_id, index)
+            if status == BROKEN:
+                if cited is None:
+                    llm._usage().evidence_dropped_no_hit += 1   # unchanged: no hit could be resolved
+                else:
+                    dropped_unverified += 1
+                continue
+            if cited is not None and holder != hit_id:
+                repinned += 1
+            hit = by_id[holder]
             book, section, hit_id = hit["book"], hit["section"], hit["hit_id"]
         else:
             if not (isinstance(book, str) and book.strip()):
@@ -79,7 +131,7 @@ def _valid_evidence(items, hits: list[dict] | None = None) -> list[dict]:
             book, section = book.strip(), str(e.get("section") or "").strip()
         valid.append({"hit_id": hit_id, "book": book, "section": section, "quote": quote,
                       "why": str(e.get("why") or "").strip()[:300]})
-    return valid
+    return EvidenceGate(valid, repinned, dropped_unverified)
 
 
 # ---------------------------------------------------------------- validate
@@ -151,6 +203,74 @@ def _segments(hit_text: str) -> list[str]:
     return [_normalize(part) for part in body.split(CHUNK_JOINER)]
 
 
+# The four outcomes of the quote check, named once. They are the statuses
+# `validate` reports and the verdicts the `observe` gate acts on, and they must
+# stay one vocabulary: the gate keeps the first three and drops the fourth.
+CONFIRMED, UNATTRIBUTED, CARD_ONLY, BROKEN = "confirmed", "unattributed", "card_only", "broken"
+
+
+def passage_index(hits) -> dict[str, dict]:
+    """The haystack, built once per check: hit_id -> {segments, card}.
+
+    `segments` is the hit's text normalized and split where it is not
+    contiguous in the source; `card` says whether the passage is a book card (a
+    per-book summary one model call wrote at ingest time) rather than the
+    book's own text, because a match in a card means something a match in the
+    book does not (ADR-004, amended 2026-09-16).
+
+    A hit whose record carries no `corpus` counts as book text: that is what an
+    index built before cards existed holds, and the conservative reading is the
+    one that cannot invent a card under a quote. Both callers hand in records of
+    the same shape — `observe` this step's `hits` (cut exactly as its prompt cut
+    them), `validate` the run's `hits_log` (cut by `act`) — so the two read the
+    same text."""
+    index: dict[str, dict] = {}
+    for h in hits or []:
+        hit_id = h.get("hit_id")
+        if not hit_id:
+            continue
+        index[hit_id] = {"segments": _segments(h.get("text", "")),
+                         "card": h.get("corpus", "") == CARD_CORPUS}
+    return index
+
+
+def _found_in(quote_norm: str, segments: list[str]) -> bool:
+    return bool(quote_norm) and any(_contains_tokens(seg, quote_norm) for seg in segments)
+
+
+def classify_quote(quote: str, hit_id: str, index: dict[str, dict]) -> tuple[str, str]:
+    """THE quote check, run by both gates: what is this quote, and which
+    retrieved passage holds it? Returns (status, hit_id of the holder); the
+    holder is "" when nothing holds it.
+
+    The order of the four answers is the order of what they mean. The cited
+    passage's own book text confirms; any other retrieved book text makes the
+    quote real but the citation wrong; a book card makes the quote real and
+    written by a model rather than by the author; nothing at all makes it
+    broken. An empty or punctuation-only quote is broken by construction: there
+    is no word sequence to find.
+
+    `observe` calls this before an item becomes evidence and `validate` calls it
+    on the evidence afterwards. One function, one normalization, one verdict —
+    which is why `confirmed == checked_book_text` holds by construction on a run
+    whose evidence went through the gate."""
+    quote_norm = _normalize(quote)
+    if not quote_norm:
+        return BROKEN, ""
+    cited = index.get(hit_id)
+    if cited is not None and not cited["card"] and _found_in(quote_norm, cited["segments"]):
+        return CONFIRMED, hit_id
+    for other, record in index.items():
+        if not record["card"] and _found_in(quote_norm, record["segments"]):
+            return UNATTRIBUTED, other
+    if cited is not None and cited["card"] and _found_in(quote_norm, cited["segments"]):
+        return CARD_ONLY, hit_id
+    for other, record in index.items():
+        if record["card"] and _found_in(quote_norm, record["segments"]):
+            return CARD_ONLY, other
+    return BROKEN, ""
+
+
 def match_span(passage: str, quote: str) -> tuple[int, int] | None:
     """WHERE the quote sits inside the passage — (start, end) character offsets
     into `passage`, or None when it is not there.
@@ -200,6 +320,16 @@ def match_span(passage: str, quote: str) -> tuple[int, int] | None:
     return None
 
 
+def gate_counts(state: AgentState) -> dict:
+    """What the observe gate spent, as the report carries it (#29). Always both
+    keys and always integers, so an interface, the harness and a sidecar read
+    one shape whether or not this run dropped anything; a state from before the
+    gate (a recording, a legacy caller) reads back as a run that dropped
+    nothing, which is exactly what it was."""
+    return {"dropped_unverified": int(state.get("dropped_unverified") or 0),
+            "repinned": int(state.get("repinned") or 0)}
+
+
 def validate(state: AgentState) -> dict:
     """Quote-provenance guard (plain CODE, no LLM). Every evidence item names the
     hit it was copied from (hit_id, assigned by act; book/section taken from the
@@ -228,9 +358,25 @@ def validate(state: AgentState) -> dict:
     (`unused` counts by title: "Dracula" in the answer covers "Dracula — Bram Stoker".)
 
     Proves retrieval provenance, not that the answer's reasoning is sound: a
-    character's lie quoted verbatim from the right chapter is confirmed."""
+    character's lie quoted verbatim from the right chapter is confirmed.
+
+    Since #29 this is a REPORT on evidence that already passed the same check at
+    the `observe` gate, so on any run whose evidence went through that gate
+    `confirmed == checked_book_text` and `broken == 0` by construction — the
+    numbers are the proof that the gate held, not the first time a quote is
+    looked at. What the gate dropped is carried beside them
+    (`dropped_unverified`, `repinned`) instead of standing in the answer. The
+    quotations the ANSWER itself writes are still unchecked: this module checks
+    the evidence the answer was written from, which is what the watermark and
+    `docs/known-limits.md` say."""
     empty = {"checked": 0, "checked_book_text": 0, "confirmed": 0, "unattributed": 0,
-             "broken": 0, "card_only": 0, "unused": 0, "broken_items": [], "items": []}
+             "broken": 0, "card_only": 0, "unused": 0, "broken_items": [], "items": [],
+             **gate_counts(state)}
+    # What the gate dropped before synthesis is part of THIS report, not a
+    # separate one — and it matters most on the path where there is no evidence
+    # left to report, because then the drops are the whole story of the refusal.
+    dropped_note = (t("dropped_note", n=empty["dropped_unverified"])
+                    if empty["dropped_unverified"] else "")
     if state.get("catalog"):
         # The catalogue path (ADR-016): the answer is a list computed by code
         # from the index tables, with no quotes to check; the report says so,
@@ -240,26 +386,24 @@ def validate(state: AgentState) -> dict:
                 "provenance": {**empty, "catalog": {"op": listing["op"], "count": listing["count"],
                                                     "total": listing["total"]}}}
     if not state["evidence"]:
-        return {"verification": t("verif_no_evidence"), "provenance": empty}
+        return {"verification": t("verif_no_evidence") + dropped_note, "provenance": empty}
 
     answer_norm = _normalize(state.get("answer", ""))
     evidence_to_check = state["evidence"]
     # Information only (checked all the same): items whose book title the
     # answer never mentions, leftovers of abandoned search branches.
     unused = sum(1 for e in evidence_to_check if _normalize(title_of(e["book"])) not in answer_norm)
-    unused_note = t("unused_note", n=unused) if unused else ""
+    unused_note = (t("unused_note", n=unused) if unused else "") + dropped_note
 
     corpus_of = {h["hit_id"]: h.get("corpus", "") for h in state.get("hits_log", [])
                  if h.get("hit_id")}
-    hits = {h["hit_id"]: _segments(h["text"]) for h in state.get("hits_log", [])}
-    # Two haystacks, because a match in one of them means something a match in
-    # the other does not. Only the book text can confirm a quote FROM THE BOOK;
-    # the cards are searched afterwards, to tell "the model wrote this summary
-    # line" apart from "nobody wrote this at all".
-    book_text = {hit_id: segs for hit_id, segs in hits.items()
-                 if corpus_of.get(hit_id, "") != CARD_CORPUS}
-    cards = {hit_id: segs for hit_id, segs in hits.items()
-             if corpus_of.get(hit_id, "") == CARD_CORPUS}
+    # One haystack, built by the same function the observe gate builds it with,
+    # and read by the same `classify_quote`: the book text and the cards are two
+    # populations inside it, because a match in one of them means something a
+    # match in the other does not. Only the book text can confirm a quote FROM
+    # THE BOOK; a card tells "the model wrote this summary line" apart from
+    # "nobody wrote this at all".
+    index = passage_index(state.get("hits_log", []))
 
     def source_kind(hit_id: str) -> str:
         """What a reader opens when they open the cited passage — the label the
@@ -279,30 +423,23 @@ def validate(state: AgentState) -> dict:
             return ""
         return "card" if corpus == CARD_CORPUS else "book_text"
 
-    def found_in(quote_norm: str, segments: list[str]) -> bool:
-        return bool(quote_norm) and any(_contains_tokens(seg, quote_norm) for seg in segments)
-
     confirmed = 0
     unattributed = 0
     card_only = 0
     broken = []
     items = []      # every evidence item with its verdict, in evidence order: what the interfaces open
     for e in evidence_to_check:
-        quote_norm = _normalize(e["quote"])
         hit_id = e.get("hit_id", "")
-        if found_in(quote_norm, book_text.get(hit_id, [])):
+        status, _holder = classify_quote(e["quote"], hit_id, index)
+        if status == CONFIRMED:
             confirmed += 1
-            status = "confirmed"
-        elif any(found_in(quote_norm, segs) for segs in book_text.values()):
+        elif status == UNATTRIBUTED:
             unattributed += 1
-            status = "unattributed"
-        elif any(found_in(quote_norm, segs) for segs in cards.values()):
+        elif status == CARD_ONLY:
             # Real text, really retrieved — and written by a model, so the
             # headline count must not say the book says it.
             card_only += 1
-            status = "card_only"
         else:
-            status = "broken"
             broken.append({"hit_id": hit_id, "book": e["book"],
                            "section": e.get("section", ""), "quote": e["quote"][:120]})
         items.append({"hit_id": hit_id, "book": e["book"], "section": e.get("section", ""),
@@ -311,7 +448,8 @@ def validate(state: AgentState) -> dict:
     checked = len(evidence_to_check)
     stats = {"checked": checked, "checked_book_text": checked - card_only,
              "confirmed": confirmed, "unattributed": unattributed, "broken": len(broken),
-             "card_only": card_only, "unused": unused, "broken_items": broken, "items": items}
+             "card_only": card_only, "unused": unused, "broken_items": broken, "items": items,
+             **gate_counts(state)}
     if not broken and not unattributed and not confirmed and card_only:
         # Nothing at all was traced to the book: saying "OK: all 0 quotes" would
         # be the green sentence for the one case that most needs a different one.

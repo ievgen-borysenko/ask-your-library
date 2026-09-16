@@ -545,7 +545,9 @@ def test_observe_drops_malformed_evidence_and_pins_the_rest_to_its_hit(monkeypat
         {"hit_id": "s1h1", "book": "Moby Dick", "section": "1", "quote": "Call me Ishmael.", "why": "narrator"},
         {"hit_id": "s1h1", "book": "Dracula"},                      # no quote
         "not even a dict",
-        {"hit_id": "s1h2", "book": "", "quote": "x"},               # empty book: fine, the hit knows it
+        # empty book: fine, the hit knows it. The quote has to be IN the hit
+        # since #29 — the gate checks it here, not only in the report.
+        {"hit_id": "s1h2", "book": "", "quote": "A knight."},
         {"hit_id": "s1h2", "book": "Ivanhoe", "quote": "A knight.", "why": None},
         {"book": "Ivanhoe", "quote": "No hit id at all."},          # strict mode: dropped
         {"hit_id": "s9h9", "book": "Ivanhoe", "quote": "Unknown hit id."},   # dropped
@@ -1189,8 +1191,10 @@ def test_valid_evidence_drops_a_non_list_container_instead_of_crashing():
 
     hits = [{"hit_id": "s1h1", "book": "B — A", "section": "S", "text": "the quote"}]
     for bad in (42, "none", {"hit_id": "s1h1"}, None):
-        assert _valid_evidence(bad, hits) == []
-    assert _valid_evidence([42, "x", None, {"hit_id": "s1h1", "quote": "the quote", "why": "w"}], hits)[0]["quote"] == "the quote"
+        assert _valid_evidence(bad, hits).evidence == []
+    kept = _valid_evidence([42, "x", None, {"hit_id": "s1h1", "quote": "the quote", "why": "w"}], hits)
+    assert kept.evidence[0]["quote"] == "the quote"
+    assert (kept.repinned, kept.dropped_unverified) == (0, 0)
 
 # ---------------------------------------------------------------- ADR-013 coverage gate
 def _hit(hit_id, book, step=1):
@@ -1857,6 +1861,36 @@ def test_validate_reports_every_item_with_its_verdict_in_evidence_order():
                              "status": "confirmed", "source_kind": "book_text"}
     assert p["items"][2]["quote"] == "Not anywhere."          # the full quote, not the 120-char preview of broken_items
     assert nodes.validate({"evidence": [], "answer": "", "hits_log": []})["provenance"]["items"] == []
+
+
+def test_the_observe_gate_and_the_report_read_a_quote_the_same_way():
+    """#29 factored the check into one function (`classify_quote`) over one
+    index of the run's passages, and both gates call it. What the entry gate
+    keeps, the report confirms; what it drops is exactly what the report would
+    have called broken. Two readings of the same quote — one at the gate, one in
+    the badge — is the drift this pair exists to prevent, which is why the
+    invariant below (`confirmed == checked_book_text`, `broken == 0`) can be
+    asserted at all."""
+    from ask_your_library import provenance
+
+    hits = [{"hit_id": "s1h1", "corpus": "transcripts", "book": "B — A", "section": "1",
+             "text": "Call me _Ishmael_, and never mind how long precisely."},
+            {"hit_id": "s1h2", "corpus": "cards", "book": "B — A", "section": "Summary",
+             "text": "A sailor joins a whaling ship."}]
+    quotes = ["Call me Ishmael",                    # italics markup: the normalizer sees through it
+              "A sailor joins a whaling ship.",     # the card, cited as the chapter: re-pinned
+              "never mind how long",
+              "Ishmael was a lawyer."]              # in no retrieved passage: dropped
+    gate = provenance._valid_evidence(
+        [{"hit_id": "s1h1", "book": "whatever", "quote": q, "why": "w"} for q in quotes], hits)
+    assert [e["quote"] for e in gate.evidence] == quotes[:3]
+    assert (gate.dropped_unverified, gate.repinned) == (1, 1)
+    assert [e["hit_id"] for e in gate.evidence] == ["s1h1", "s1h2", "s1h1"]
+
+    report = provenance.validate({"answer": "B", "evidence": gate.evidence,
+                                  "hits_log": [{**h, "step": 1} for h in hits]})["provenance"]
+    assert report["broken"] == 0 and report["confirmed"] == report["checked_book_text"] == 2
+    assert (report["checked"], report["card_only"]) == (3, 1)
 
 
 def test_plan_treats_a_non_list_queries_container_as_no_plan(monkeypatch):

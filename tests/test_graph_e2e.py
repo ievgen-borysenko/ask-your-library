@@ -195,11 +195,17 @@ def test_one_search_enough_answer_and_confirmed_provenance(run, tmp_path):
     observe = by_name(events, "observe")[0]
     assert observe["empty_streak"] == 0 and observe["evidence"][0]["hit_id"] == "s1h2"
     assert observe["evidence"][0]["book"] == MOBY and observe["evidence"][0]["section"] == "Chapter 1"
+    # The event contract of a run where every quote checks out is the contract it
+    # has always been: the provenance gate (#29) adds its two counters ONLY to a
+    # step that dropped or re-pinned something.
+    assert set(observe) == {"evidence", "empty_streak"}
     reflect = by_name(events, "reflect")[0]
     assert reflect["current_query"] == "" and reflect["stop_reason"] == t("stop_enough")
     validate = by_name(events, "validate")[0]
     assert validate["provenance"] == {"checked": 1, "checked_book_text": 1, "confirmed": 1,
                                       "unattributed": 0, "broken": 0, "card_only": 0,
+                                      # the observe gate let this quote through and took nothing
+                                      "dropped_unverified": 0, "repinned": 0,
                                       "unused": 0, "broken_items": [],
                                       "items": [{"hit_id": "s1h2", "book": MOBY, "section": "Chapter 1",
                                                  "quote": "Call me Ishmael.", "status": "confirmed",
@@ -342,10 +348,11 @@ def test_chapter_read_carries_the_canonical_key_and_a_repeat_stops_the_loop(run)
     assert by_name(events, "observe")[1]["evidence"][1]["book"] == MOBY   # pinned from the hit record
 
 
-def test_a_cut_chapter_is_partial_and_a_quote_across_the_joiner_is_broken(run):
+def test_a_cut_chapter_is_partial_and_a_quote_across_the_joiner_is_dropped(run):
     """library.join_chapter joins chunks with the joiner and marks a cut in-band;
     reflect sees status partial; a quote that straddles two chunks was never
-    contiguous in the source and must not confirm."""
+    contiguous in the source and must not confirm — since #29 it does not become
+    evidence at all, and neither does the service text of the cut marker."""
     first, second = "The first chunk ends here.", "The second chunk starts there."
     text = f"{first}\n[...]\n{second}\n[chapter continues: 5000 characters not shown]"
     model = ScriptedModel(
@@ -363,8 +370,11 @@ def test_a_cut_chapter_is_partial_and_a_quote_across_the_joiner_is_broken(run):
     _, events, _ = run(model, library, "What does Ishmael say about his purse?")
     assert by_name(events, "act")[1]["read_chapters"] == [f"{MOBY}|Chapter 1|partial"]
     assert f"{MOBY}|Chapter 1|partial" in model.nth("reflect", 1)["user"]
+    observe = by_name(events, "observe")[1]
+    assert len(observe["evidence"]) == 1 and observe["dropped_unverified"] == 2
     p = by_name(events, "validate")[0]["provenance"]
-    assert (p["confirmed"], p["unattributed"], p["broken"]) == (1, 0, 2)
+    assert (p["confirmed"], p["unattributed"], p["broken"]) == (1, 0, 0)
+    assert p["checked"] == 1 and p["dropped_unverified"] == 2
 
 
 def test_an_empty_chapter_read_is_a_dry_step_not_a_hit(run):
@@ -414,6 +424,59 @@ def test_crag_gate_stops_after_two_dry_steps_without_a_reflect_call_and_refuses(
     assert by_name(events, "metrics")[0]["stop_reason"] == t("stop_crag", n=config.MAX_EMPTY_STREAK)
 
 
+def test_two_all_dropped_steps_are_not_dry_and_do_not_stop_the_run(run):
+    """The sharp edge of #29 (system-design review 16.09 §3(a), and the owner's
+    decision of the same day: "dropped" is a counter of its own, never a dry
+    step). A step whose every quote fails the gate DID retrieve passages — the
+    library was not silent on the question — so it must not advance the streak
+    toward MAX_EMPTY_STREAK. Two of them in a row would otherwise end the run at
+    the CRAG gate, which is how this change would have bought provenance with
+    behaviour instead of adding it."""
+    nowhere = "Ishmael was a lawyer in Boston."
+    model = ScriptedModel(
+        plan=[{"mode": "answer", "queries": ["q1", "q2", "q3"]}],
+        observe=[{"evidence": [evidence(MOBY, "transcripts", "s1h2", quote=nowhere)]},
+                 {"evidence": [evidence(MOBY, "transcripts", "s2h2", quote=nowhere)]},
+                 {"evidence": [evidence(MOBY, "transcripts", "s3h2")]}],
+        reflect=[{"decision": "search", "next_query": "q2"},
+                 {"decision": "search", "next_query": "q3"},
+                 {"decision": "enough"}],
+        synthesize=["Call me Ishmael [Moby Dick, Chapter 1]."],
+    )
+    _, events, _ = run(model, FakeLibrary(lambda q: [MOBY]), "Who is Ishmael?")
+    assert names(events).count("act") == 3                    # the run was not cut short at the gate
+    assert [u["empty_streak"] for u in by_name(events, "observe")] == [0, 0, 0]
+    # run totals, and absent from the step that dropped nothing (the event contract)
+    assert [u.get("dropped_unverified") for u in by_name(events, "observe")] == [1, 2, None]
+    assert by_name(events, "reflect")[-1]["stop_reason"] == t("stop_enough")
+    # the planner is told why the evidence is thin, in the call that picks the
+    # next query: the passages were there, the quotes did not survive the gate
+    assert "1 quote(s) from earlier steps were dropped" in model.nth("reflect", 0)["user"]
+    assert "2 quote(s) from earlier steps were dropped" in model.nth("reflect", 1)["user"]
+    p = by_name(events, "validate")[0]["provenance"]
+    assert p["dropped_unverified"] == 2 and p["broken"] == 0
+    assert p["confirmed"] == p["checked_book_text"] == 1
+
+
+def test_synthesize_is_never_given_a_quote_that_failed_the_gate(run):
+    """The headline of #29 in one assertion: an unverified quote is not in the
+    prompt the answer is written from. Before this it was — `validate` only
+    counted it afterwards, under an answer the reader had already read."""
+    model = ScriptedModel(
+        plan=[{"mode": "answer", "queries": ["Ishmael"]}],
+        observe=[{"evidence": [evidence(MOBY, "transcripts", "s1h2"),
+                               evidence(MOBY, "transcripts", "s1h2",
+                                        quote="Ishmael was a lawyer in Boston.")]}],
+        reflect=[{"decision": "enough"}],
+        synthesize=["Call me Ishmael [Moby Dick, Chapter 1]."],
+    )
+    _, events, _ = run(model, FakeLibrary(lambda q: [MOBY]), "Who is Ishmael?")
+    written_from = model.nth("synthesize")["user"]
+    assert "Call me Ishmael." in written_from
+    assert "Ishmael was a lawyer in Boston." not in written_from
+    assert len(by_name(events, "observe")[0]["evidence"]) == 1
+
+
 def test_step_limit_ends_the_loop_with_an_honest_stop_reason(run):
     steps = config.MAX_STEPS
     model = ScriptedModel(
@@ -454,12 +517,13 @@ def test_coverage_probe_looks_inside_the_named_uncovered_book_once(run):
 
 
 # ---------------------------------------------------------------- what observe sees
-def test_hits_are_cut_to_the_observe_window_and_a_quote_past_the_cut_is_broken(run):
+def test_hits_are_cut_to_the_observe_window_and_a_quote_past_the_cut_is_dropped(run):
     """act stores each passage exactly as observe sees it (SEARCH_HIT_CHARS per
-    search hit, CHAPTER_HIT_CHARS for the single chapter hit); validate compares
-    against that cut, so the two budgets must agree or honest quotes from a
-    hit's tail would read as broken. A quote past the cut IS broken: the model
-    never saw it."""
+    search hit, CHAPTER_HIT_CHARS for the single chapter hit); BOTH gates compare
+    against that cut, so the three budgets must agree or honest quotes from a
+    hit's tail would read as broken. A quote past the cut is in no passage the
+    model was shown, so since #29 it is dropped at the observe gate instead of
+    reaching the answer and being counted broken afterwards."""
     filler = " ".join(f"word{i}" for i in range(600))                  # > 4,000 chars
     tail = "The sentence past the cut."
     long_text = filler + " " + tail
@@ -480,9 +544,10 @@ def test_hits_are_cut_to_the_observe_window_and_a_quote_past_the_cut_is_broken(r
     assert len(search_act["hits_log"][1]["text"]) == config.SEARCH_HIT_CHARS
     assert tail not in model.nth("observe")["user"] and head_quote in model.nth("observe")["user"]
     assert len(chapter_act["hits_log"][0]["text"]) == len(chapter) == nodes.per_hit_limit(1) if len(chapter) > config.CHAPTER_HIT_CHARS else len(chapter)
+    assert by_name(events, "observe")[0]["dropped_unverified"] == 1
     p = by_name(events, "validate")[0]["provenance"]
-    assert (p["confirmed"], p["broken"]) == (2, 1)
-    assert p["broken_items"][0]["quote"] == tail
+    assert (p["confirmed"], p["broken"]) == (2, 0) and p["broken_items"] == []
+    assert p["dropped_unverified"] == 1          # the tail quote never became evidence
 
 
 def test_an_injection_line_in_a_hit_is_redacted_before_the_model_and_cannot_be_quoted(run):
@@ -502,7 +567,9 @@ def test_an_injection_line_in_a_hit_is_redacted_before_the_model_and_cannot_be_q
     assert "[REDACTED-INJECTION]" in by_name(events, "act")[0]["hits_log"][1]["text"]
     assert by_name(events, "metrics")[0]["redacted_lines"] == 1
     p = by_name(events, "validate")[0]["provenance"]
-    assert (p["confirmed"], p["broken"]) == (1, 1)          # the redacted line is not a quotable source
+    # the redacted line is not a quotable source, and since #29 a quote of it
+    # does not reach the answer to be counted broken afterwards
+    assert (p["confirmed"], p["broken"]) == (1, 0) and p["dropped_unverified"] == 1
 
 
 # ---------------------------------------------------------------- degradation
@@ -525,34 +592,53 @@ def test_malformed_model_json_degrades_observe_to_a_dry_step_and_reflect_to_a_st
     assert model.roles().count("observe") == 3 and model.roles().count("reflect") == 3
 
 
-def test_evidence_that_is_not_in_the_cited_passage_is_unattributed_or_broken(run):
+def test_a_quote_not_in_the_cited_passage_is_repinned_or_dropped_before_the_answer(run):
+    """#29, the whole of it in one run: the check that used to report on the
+    finished answer decides what the answer may be written from.
+
+    Four shapes of the same mistake, and four different answers to it — a quote
+    where it says it is, a quote in another retrieved chapter (re-pinned to the
+    chapter that holds it, so the citation stops lying), a quote whose only
+    match is a book card (kept, pinned to the card, and never counted as traced
+    to the book), and a quote in nothing this run retrieved (dropped, counted,
+    named to the reader). The unknown hit id is dropped as it always was."""
     model = ScriptedModel(
         plan=[{"mode": "answer", "queries": ["Ishmael"]}],
         observe=[{"evidence": [
-            evidence(MOBY, "transcripts", "s1h2"),                                     # confirmed
-            evidence(MOBY, "cards", "s1h2", quote="Captain Ahab hunts the white whale that took his leg."),  # in s1h1, cited s1h2
-            evidence(MOBY, "cards", "s1h1", quote="Ishmael was a lawyer in Boston."),  # nowhere
+            evidence(MOBY, "transcripts", "s1h2"),                                     # confirmed where it says
+            # Gulliver's chapter (s1h4), cited as Moby Dick's (s1h2): re-pinned to s1h4
+            evidence(MOBY, "transcripts", "s1h2", quote="I felt something alive moving on my left leg"),
+            # the Moby Dick card (s1h1), cited as its chapter: kept, re-pinned to the card
+            evidence(MOBY, "cards", "s1h2", quote="Captain Ahab hunts the white whale that took his leg."),
+            evidence(MOBY, "cards", "s1h1", quote="Ishmael was a lawyer in Boston."),  # nowhere: dropped
             {"hit_id": "s9h9", "book": MOBY, "section": "x", "quote": "Call me Ishmael.", "why": "no such hit"},
         ]}],
         reflect=[{"decision": "enough"}],
         synthesize=["Call me Ishmael [Moby Dick, Chapter 1]."],
     )
-    _, events, _ = run(model, FakeLibrary(lambda q: [MOBY]), "Who is Ishmael?")
-    assert len(by_name(events, "observe")[0]["evidence"]) == 3      # the unknown hit id is dropped (strict mode)
+    _, events, _ = run(model, FakeLibrary(), "Who is Ishmael?")
+    observe = by_name(events, "observe")[0]
+    assert len(observe["evidence"]) == 3     # one unverified, one with an unknown hit id (strict mode)
+    assert (observe["dropped_unverified"], observe["repinned"]) == (1, 2)
+    assert [e["hit_id"] for e in observe["evidence"]] == ["s1h2", "s1h4", "s1h1"]
+    assert observe["evidence"][1]["book"] == GULLIVER      # the citation now names what holds the quote
     p = by_name(events, "validate")[0]["provenance"]
-    # The middle quote IS in this run — inside the card s1h1, not inside the
-    # chapter s1h2 it cites. "Found somewhere else" and "found in the book
-    # somewhere else" are different facts: the only other passage holding it is
-    # a model-written card, so it is card_only, not unattributed.
-    assert (p["checked"], p["confirmed"], p["unattributed"], p["broken"]) == (3, 1, 0, 1)
+    # The report is a report: the evidence it checks has already passed the same
+    # check, on the same text, through the same function — so nothing is broken
+    # and confirmed == checked_book_text, by construction.
+    assert (p["checked"], p["confirmed"], p["unattributed"], p["broken"]) == (3, 2, 0, 0)
+    assert p["confirmed"] == p["checked_book_text"] and p["broken_items"] == []
     assert (p["card_only"], p["checked_book_text"]) == (1, 2)
-    assert p["broken_items"][0]["quote"] == "Ishmael was a lawyer in Boston." and p["broken_items"][0]["hit_id"] == "s1h1"
+    assert (p["dropped_unverified"], p["repinned"]) == (1, 2)
     # every item with its verdict, in evidence order: what the interfaces open on the passage
-    assert [(i["hit_id"], i["status"]) for i in p["items"]] == [("s1h2", "confirmed"), ("s1h2", "card_only"), ("s1h1", "broken")]
+    assert [(i["hit_id"], i["status"]) for i in p["items"]] == [
+        ("s1h2", "confirmed"), ("s1h4", "confirmed"), ("s1h1", "card_only")]
     assert [i["source_kind"] for i in p["items"]] == ["book_text", "book_text", "card"]
     passages = {h["hit_id"]: h["text"] for h in by_name(events, "act")[0]["hits_log"]}
     assert all(i["hit_id"] in passages for i in p["items"])          # the UI can open each one
     assert by_name(events, "metrics")[0]["evidence_dropped_no_hit"] == 1
+    # and the reader is told what the answer was not allowed to rest on
+    assert "1 quotes dropped before the answer" in by_name(events, "validate")[0]["verification"]
 
 
 def test_deadline_spent_after_a_step_answers_from_what_was_found(monkeypatch, tmp_path):

@@ -80,6 +80,25 @@ def test_badge_is_green_only_when_nothing_is_broken_or_unattributed(ui):
     assert ui.GRAY in badge(checked=0, confirmed=0, broken=0, unattributed=0)
 
 
+def test_the_badge_names_the_quotes_the_gate_dropped_before_the_answer(ui):
+    """#29: the counts above are what the answer rests on; this line is what it
+    was not allowed to rest on. It matters most under the grey "no evidence"
+    badge, where the dropped quotes are the whole story of the refusal — and it
+    is absent from a record written before the gate, which dropped nothing."""
+    def badge(**numbers):
+        return ui.verification_badge({"verification": "v", "provenance": numbers})
+
+    green = badge(checked=2, checked_book_text=2, confirmed=2, broken=0, unattributed=0,
+                  dropped_unverified=3)
+    assert ui.GREEN in green and "2/2 traced to their source" in green
+    assert "3 quotes dropped before the answer" in green
+
+    refused = badge(checked=0, confirmed=0, broken=0, unattributed=0, dropped_unverified=1)
+    assert ui.GRAY in refused and "1 quotes dropped before the answer" in refused
+
+    assert "dropped before the answer" not in badge(checked=2, confirmed=2, broken=0, unattributed=0)
+
+
 def test_the_headline_count_never_includes_a_quote_that_only_matched_a_card(ui):
     """The badge's "n/n traced to their source" is about the BOOK's own text. A
     quote whose only match is a book card is a model's summary, so it is

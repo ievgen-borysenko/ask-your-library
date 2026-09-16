@@ -10,7 +10,8 @@ live next door, one module each:
   prompts.py     the rules of the four model-calling nodes
   clarify.py     the clarify resolver: reply -> exactly one candidate key, or None
   coverage.py    the deterministic coverage gate (one extra search before "enough")
-  provenance.py  what counts as evidence, and the code-only quote check (`validate`)
+  provenance.py  what counts as evidence, the quote check both gates run
+                 (`classify_quote`), and the report (`validate`)
 
 Budgets (MAX_STEPS, MAX_EMPTY_STREAK, the per-hit windows) come from config.
 """
@@ -456,19 +457,51 @@ def observe(state: AgentState) -> dict:
         # Distillation failed: count the step as dry and let the loop decide
         distilled = {"evidence": []}
 
-    new_evidence = _valid_evidence(distilled.get("evidence"), state["hits"])
+    # The provenance gate (#29): every quote is checked against the passage it
+    # cites BEFORE it becomes evidence, with the same normalization `validate`
+    # uses afterwards and against the same text — this step's hits, cut exactly
+    # as the prompt above cut them, which is what `act` wrote into hits_log.
+    # Confirmed items are kept, an unattributed one is re-pinned to the hit that
+    # really holds its quote, and one that is in no retrieved passage of this
+    # step is dropped here instead of reaching the answer and being counted
+    # afterwards by a report the reader has already read past.
+    gate = _valid_evidence(distilled.get("evidence"), [{**h, "text": h["text"][:limit]}
+                                                       for h in state["hits"]])
+    new_evidence = gate.evidence
     if state.get("clarify_chosen"):
         # After a resolved clarify, evidence about the rejected candidates
         # must not creep back in through later searches.
         new_evidence = [e for e in new_evidence if e["book"] == state["clarify_chosen"]]
     llm._usage().evidence_distilled += len(new_evidence)
-    # CRAG gate: count "dry" steps — steps that produced NO evidence at all
+    # CRAG gate, and the one place #29 could have cost behaviour instead of
+    # buying provenance (system-design review 16.09 §3(a); the owner's decision
+    # of the same day: "dropped" is a counter of its own, never a dry step).
+    # "Dry" means the library had nothing to give: no evidence AND nothing
+    # dropped. A step that retrieved passages the model then failed to quote
+    # verbatim is a different fact — the retrieval worked — so it does not
+    # advance the streak toward MAX_EMPTY_STREAK. It does not reset it either:
+    # such a step proved nothing about the library, so the dry steps before it
+    # stand. Two all-dropped steps in a row therefore do not end the run; the
+    # loop goes on to the next query and `reflect` is told how many quotes were
+    # dropped, so the planner searches with that in hand.
     if new_evidence:
         empty_streak = 0
+    elif gate.dropped_unverified:
+        empty_streak = state["empty_streak"]
     else:
         empty_streak = state["empty_streak"] + 1
 
-    return {"evidence": state["evidence"] + new_evidence, "empty_streak": empty_streak}
+    update = {"evidence": state["evidence"] + new_evidence, "empty_streak": empty_streak}
+    # Present only when it happened, so a run that drops nothing emits the event
+    # it has always emitted, byte for byte (tests/test_runner_events.py, and the
+    # two keys above that every interface reads by name). Both counters are
+    # run totals, which is what the result object, the badge and the harness
+    # report: a reader wants "this answer lost N quotes", not a per-step ledger.
+    if gate.dropped_unverified:
+        update["dropped_unverified"] = state.get("dropped_unverified", 0) + gate.dropped_unverified
+    if gate.repinned:
+        update["repinned"] = state.get("repinned", 0) + gate.repinned
+    return update
 
 
 # ---------------------------------------------------------------- reflect
@@ -495,13 +528,23 @@ def reflect(state: AgentState) -> dict:
     evidence_lines = "\n".join(f"- {e['book']} ({e['section']}): {e['why']}"
                                for e in state["evidence"]) or "(none)"
     queued = state["queries"]
-    user = "\n".join([
+    lines = [
         data_block("question", state["question"], mode=state["mode"]),
         f"Steps used: {state['steps_taken']} of {MAX_STEPS}.",
         data_block("evidence_so_far", evidence_lines),
         data_block("queued_queries", "\n".join(queued) or "(none)"),
         data_block("chapters_already_read", "\n".join(state.get("read_chapters") or []) or "(none)"),
-    ])
+    ]
+    dropped = state.get("dropped_unverified", 0)
+    if dropped:
+        # Why "evidence_so_far" can be thinner than the steps taken suggest: the
+        # passages were there and the quotes did not survive the gate. Added
+        # only when it happened, so a clean run's prompt is the prompt every
+        # earlier run was decided on — the eval numbers compare like with like.
+        lines.insert(2, f"{dropped} quote(s) from earlier steps were dropped before they became "
+                        f"evidence: they were not found in the passage they cited. Those passages "
+                        f"were retrieved — the library is not necessarily silent on this.")
+    user = "\n".join(lines)
     try:
         decision = llm.ask_json(REFLECT_RULES.format(clarify_lang=t("clarify_lang_instruction")),
                             user, role="reflect")
@@ -616,6 +659,20 @@ def clarify(state: AgentState) -> dict:
 
 # ---------------------------------------------------------------- synthesize
 def synthesize(state: AgentState) -> dict:
+    """The answer, written from the evidence and from nothing else.
+
+    Every item in `state["evidence"]` passed the provenance gate in `observe`
+    (#29): its quote was found, verbatim and contiguous, inside a passage this
+    run retrieved, and it is pinned to that passage. Nothing here re-checks
+    that — the point of the gate is that there is nothing left to re-check — but
+    nothing here may widen it either: this node must keep reading `evidence` and
+    never `hits` or `hits_log`, or an unverified quote would reach the reader
+    around the gate. `validate` runs after this node and reports the same
+    check over the same evidence, which is how the invariant is kept honest.
+
+    What it does NOT cover, and the watermark says so: the sentences the model
+    writes around the evidence, including anything it puts in quotation marks
+    of its own."""
     # The question named a book the catalogue does not hold: the answer comes
     # from the whole library and must say so before anything else (ADR-016).
     note = t("book_not_in_catalog", q=state["book_unresolved"]) + "\n\n" if state.get("book_unresolved") else ""

@@ -541,6 +541,29 @@ def test_a_run_with_no_card_match_keeps_the_line_it_has_always_written(monkeypat
     report = only(out, ".md").read_text(encoding="utf-8")
     assert "quotes verified 4/4 (confirmed / unattributed / broken = 4 / 0 / 0); evidence" in report
     assert "book card" not in report
+    # the same rule for the observe gate (#29): no clause where nothing was spent
+    assert "dropped before the answer" not in report and "re-pinned" not in report
+
+
+def test_what_the_observe_gate_spent_reaches_the_report_line_and_the_sidecar(
+        monkeypatch, tmp_path):
+    """#29: a quote the gate dropped never became evidence, so it is in no
+    denominator above — not in `checked`, not in `checked_book_text`. It gets a
+    clause of its own, next to the one for the quotes the gate re-pinned to the
+    passage that really holds them, and both are written only where there was
+    something to say."""
+    out = prepared(monkeypatch, tmp_path, [],
+                   lambda item, attempt: fake_result(item, dropped_unverified=2, repinned=1))
+    report = only(out, ".md").read_text(encoding="utf-8")
+    assert "quotes verified 4/4 (confirmed / unattributed / broken = 4 / 0 / 0)" in report
+    assert "; 4 quotes dropped before the answer (not in the passage they cited)" in report
+    assert "; 2 quotes re-pinned to the passage that holds them" in report
+    sidecar = json.loads(only(out, ".json").read_text(encoding="utf-8"))
+    attempt = sidecar["questions"][0]["attempts"][0]
+    assert (attempt["dropped_unverified"], attempt["repinned"]) == (2, 1)
+    per_attempt = sidecar["totals"]["per_attempt"]
+    assert per_attempt["dropped_unverified"]["values"] == [4]
+    assert per_attempt["repinned"]["values"] == [2]
 
 
 # ---------------------------------------------------------------- byte-compat

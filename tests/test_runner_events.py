@@ -56,6 +56,9 @@ def test_partial_metrics_at_the_interrupt_and_final_metrics_once(tmp_path):
     assert result.failure is None and result.ok
     assert result.stop_reason == "enough" and result.steps_taken == 2
     assert result.clarify_asked is True          # the runner knows; the resumed state does not say it
+    # the provenance gate's counters are fields of the result, 0 on a state that
+    # never went through it: nothing about a run that drops nothing changes
+    assert (result.dropped_unverified, result.repinned) == (0, 0)
     assert result.question == "q" and result.scratchpad.name.startswith("run-")
     metrics = [u for n, u in events if n == "metrics"]
     assert len(metrics) == 2

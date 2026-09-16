@@ -31,7 +31,13 @@ class AgentState(TypedDict):
     hits_log: Annotated[list[dict], operator.add]
     evidence: list[dict]   # accumulated evidence distillates {hit_id, book, section, quote, why}
     steps_taken: int       # how many search steps have run so far
-    empty_streak: int      # consecutive steps that yielded no evidence (CRAG gate)
+    empty_streak: int      # consecutive DRY steps — no evidence and nothing dropped (CRAG gate).
+                           # A step whose quotes were all dropped as unverified is not dry: the
+                           # passages were there, so it neither advances the streak nor resets it
+    # the observe gate (#29), as run totals: quotes dropped because they were in no retrieved
+    # passage of their step, and quotes re-pinned to the passage that really holds them
+    dropped_unverified: int
+    repinned: int
     read_chapters: list[str]  # chapter reads attempted: "book|section|status", status = complete | partial | empty
     clarification: str     # the user's reply to a clarifying question
     clarify_candidates: list[str]  # book keys the clarify question offered, in the order shown
