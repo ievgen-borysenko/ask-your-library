@@ -63,6 +63,11 @@
   which retires the `subgraph` + `~~~` construction that 0.3.1 named as a suspect for a rendering
   failure whose cause was never established.
 
+  ADR-004 is amended with the split and with what it means for the numbers it quotes. Both
+  README GIFs predate this change — they show the old badge, no source labels and the old
+  watermark — and are captioned as such rather than re-recorded here; the re-record is a
+  backlog item of its own.
+
 - **Seven decisions the code had made without a record; four of them written.** ADR-017 (one passive observer of every JSON model call), ADR-020 (`_index_meta` fingerprints the embedder and nothing else), ADR-021 (the action channel is a reserved string marker in `current_query`) and ADR-022 (conversation memory and the scratchpad are free text) join the index in `docs/adr/`; ADR-018, ADR-019 and ADR-023 are reserved there as one-sentence stubs. Documentation only — no code changed.
 
 - **The runner returns a result, the eval harness consumes it, and a failed question is still

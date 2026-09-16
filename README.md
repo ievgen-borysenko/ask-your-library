@@ -19,14 +19,19 @@ comes from.
 What is the name of the book, and why did that happen?" — the default local model (qwen2.5:14b) on
 the demo corpus, no API key. 147.7 s by the CLI's own metrics line in the last frame — a cold first
 ask, the same band as the 160.8 s a different first question takes from a clean clone
-([`docs/eval-results/2026-09-10-first-question-local.md`](docs/eval-results/2026-09-10-first-question-local.md)).*
+([`docs/eval-results/2026-09-10-first-question-local.md`](docs/eval-results/2026-09-10-first-question-local.md)).
+Recorded before 16.09 — the badge and the evidence labels have since changed (book cards are no
+longer counted as quotes), so the counts in these frames are not the counts a run shows today.*
 
 ![The web UI answering what d'Artagnan said before fighting three men at once: the answer, the quote-provenance badge, and one evidence passage opened under it](docs/img/ask-library-ui.gif)
 
 *"What exactly did Dartangnan say before the fight with not 1 but 3 people? And why?" — the same
 library in the web UI, this run on a hosted model (`LLM_BACKEND=openrouter` with Sonnet 4.6, which
 is not the default and is what the $0.0724 on its metrics line paid for): the verified-quotes
-badge, and the evidence passage under it.*
+badge, and the evidence passage under it. Recorded before 16.09 — the badge and the evidence labels
+have since changed (book cards are no longer counted as quotes), the watermark under the composer
+is different, and the first frame is the login page rather than the chat. Both GIFs are due a
+re-record ([`docs/backlog.md`](docs/backlog.md)).*
 
 ## One question, end to end
 

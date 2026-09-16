@@ -182,16 +182,13 @@ open ones often refer to them.
   both distributions' transports for the same reason (`tests/egress_guard.py`). Recorded, not
   fixed: the fix is in `src/` and belongs to a change of its own.
 
-- **`ui-smoke` flakes on the phone leg, waiting for a link that may not be in the DOM.** Twice on
-  16.09, on the 390x844 leg of `test_the_release_walkthrough_of_the_web_ui`: a Playwright timeout
-  on `Locator.get_attribute` waiting for `a[href*='/thread/']` after the reload, both times on a
-  re-run-green SHA (seen on #62 and on #63). Likely cause to check first: at that width the thread
-  history is off-canvas and is not in the DOM until the drawer is opened, so `thread_address()` can
-  be polling for a link that does not exist yet — its own toggle click may be racing the drawer's
-  animation, or landing before the history has rendered into it. Two candidate fixes, both in the
-  test: wait for the drawer's content rather than for the link, or stop needing the link at all and
-  read the thread id off the URL or the page's own state. Not fixed in the change that recorded
-  this: a flaky release check is worth a change of its own, with the failure reproduced first.
+- **Both README GIFs predate 16.09 and show a badge that no longer exists.** The CLI one shows
+  "5/5 traced" over evidence that now splits into book text and book cards; the web one shows the
+  old watermark, no source labels on the evidence passages, and opens on Chainlit's login page
+  rather than on the chat — its thumbnail, the still a scrolling reader sees, is another product's
+  brand and a password field. Captioned honestly for now. Re-record both after the next eval run,
+  from the composer and not from the login screen, and check the frames against the badge the
+  release actually ships.
 
 ## Product / spec decisions
 
