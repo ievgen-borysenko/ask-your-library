@@ -156,37 +156,55 @@ def read_status(entry: str) -> str:
 
 
 CHAPTER_MARKER = "__chapter__|"
-# What tells a read query apart from the tail of a section name. The field is
-# recognised FROM THE RIGHT and only when it carries this prefix — the same
-# rule, for the same reason, as the "|status" of a read_chapters entry above: a
-# section name may itself contain "|", so the last field of the marker cannot
-# simply be claimed for something new.
-READ_QUERY_PREFIX = "q="
+# The SAME action, carrying one field more: what the model is looking for in
+# that chapter (ADR-025). It is a second marker NAME rather than a fourth field
+# on the first one, and the reason is the section.
+#
+# A section name is the book's own words. It may contain "|", it is looked up
+# literally in the index, and it must come back out of the marker byte for
+# byte — so it is the field that absorbs the rest of the string, and no new
+# field may be recognised after it. Any rule that peels a trailing field off
+# the right can be spelled by a heading: a chapter called `Weird|q=evil query`
+# would hand out a read query the model never wrote and a section the index
+# does not have. A trailing SENTINEL only moves the problem — the sentinel is a
+# string, and a heading can contain it.
+#
+# The marker name cannot be spelled by corpus text, because nothing but this
+# function writes it. So "is there a read query" is answered by which name was
+# used, and the query — the model's own words, which this code may neutralise —
+# goes FIRST, where a "|" of its own would break the parse and is therefore
+# removed. Book and section then sit exactly where they always sat.
+CHAPTER_QUERY_MARKER = "__chapter_q__|"
 
 
 def chapter_marker(book: str, section: str, query: str = "") -> str:
-    """The action marker for a chapter read: "__chapter__|book|section", plus
-    "|q=<what the model is looking for>" when it said (ADR-025).
+    """The action marker for a chapter read: "__chapter__|book|section", or
+    "__chapter_q__|query|book|section" when the model said what it is looking
+    for (ADR-025).
 
-    The query is the model's own words, so it is the one field that may not
-    absorb the rest of the string: any "|" in it becomes a space here, and the
-    section — which is the BOOK's words, and is looked up literally — keeps
-    every character it has."""
-    marker = f"{CHAPTER_MARKER}{book}|{section}"
+    The query gives up its "|" (and its leading/trailing space); the book and
+    the section keep every character they have."""
     query = " ".join(query.replace("|", " ").split())
-    return f"{marker}|{READ_QUERY_PREFIX}{query}" if query else marker
+    if not query:
+        return f"{CHAPTER_MARKER}{book}|{section}"
+    return f"{CHAPTER_QUERY_MARKER}{query}|{book}|{section}"
 
 
 def split_read_query(marker: str) -> tuple[str, str]:
-    """A chapter marker split into (the marker as it has always been, the read
-    query it carries or ""). Anything else is returned untouched: a search
-    query is free text and must never be trimmed by a rule about markers."""
-    if not marker.startswith(CHAPTER_MARKER):
+    """A chapter marker split into (the three-part marker every reader of this
+    channel already understands, the read query or "").
+
+    Nothing is peeled off a plain `__chapter__|` marker — whatever its section
+    contains — and nothing at all off any other string: a search query is free
+    text, and a rule about markers must never trim it."""
+    if not marker.startswith(CHAPTER_QUERY_MARKER):
         return marker, ""
-    head, sep, last = marker.rpartition("|")
-    if sep and last.startswith(READ_QUERY_PREFIX):
-        return head, last[len(READ_QUERY_PREFIX):]
-    return marker, ""
+    parts = marker.split("|", 2)
+    if len(parts) != 3:
+        # A malformed action marker: handed back whole, so `act`'s guard for
+        # exactly that sees it instead of a read of some invented chapter.
+        return marker, ""
+    return f"{CHAPTER_MARKER}{parts[2]}", parts[1]
 
 
 def same_chapter(wanted: str, entry: str) -> bool:

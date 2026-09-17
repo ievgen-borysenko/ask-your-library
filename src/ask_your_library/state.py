@@ -4,8 +4,8 @@ from typing import Annotated, TypedDict
 
 
 def is_loop_marker(query) -> bool:
-    """The loop's own action markers in current_query (__chapter__|book|section
-    with an optional trailing |q=<what to look for>, __book__|key|query,
+    """The loop's own action markers in current_query (__chapter__|book|section,
+    __chapter_q__|what to look for|book|section, __book__|key|query,
     __clarify__) are never search queries. Only reflect writes them; a planner
     query, a queued query or a question that looks like one is not obeyed
     (plan, reflect and the coverage gate all filter with this)."""

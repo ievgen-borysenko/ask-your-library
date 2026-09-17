@@ -66,6 +66,7 @@ from ask_your_library.graph import build_graph                      # noqa: E402
 from ask_your_library.i18n import (LANG, get_lang, set_lang, source_word,  # noqa: E402
                                    status_word, t)
 from ask_your_library.preflight import check_api_key, check_environment  # noqa: E402
+from ask_your_library.bookkey import split_read_query                # noqa: E402
 from ask_your_library.provenance import match_span                  # noqa: E402
 from ask_your_library.runner import failed_result, history_entry, run_question  # noqa: E402
 from ask_your_library.sanitize import LINE_BREAK_RE                 # noqa: E402
@@ -664,7 +665,10 @@ def render_event(node_name: str, update: dict, view: RunView | None = None) -> N
         cl.run_sync(show_step(t("ui_step_observe"), text))
 
     elif node_name == "reflect":
-        next_query = update.get("current_query")
+        # The read query a chapter marker may carry (ADR-025) is not part of
+        # the step line: it comes off here, and the branches below see the
+        # three-part marker they were written for.
+        next_query, _ = split_read_query(update.get("current_query") or "")
         if next_query == "__clarify__":
             text = t("ui_clarify_step")
         elif next_query and next_query.startswith("__chapter__|"):
