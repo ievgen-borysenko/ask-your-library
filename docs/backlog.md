@@ -49,7 +49,7 @@ open ones often refer to them.
   model that never sets the field turns every prompt into the `CONTAINED` outcome (refused for lack
   of evidence, four model calls, a refusal that does not name the library), and whether that is
   worth a code-level fallback is a question for the measurement, not before it. The prompt change
-  also made the six committed plan recordings stale (`PLAN_RULES` `acd673f471d3` → `aabb79d156d6`);
+  also made the six committed plan recordings stale (`PLAN_RULES` `acd673f471d3` → `ab7b9ece3352`);
   re-recording needs a run somebody was going to make anyway.
 - **Identify mode can still stop at one book.** The coverage gate (ADR-013) spends the planner's
   next queued query before "enough" with a single book: c09 and h22 clarify with the right second

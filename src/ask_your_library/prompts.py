@@ -29,13 +29,21 @@ Decide:
 3. "book" (answer mode, optional): the ONE title the question names as the book to answer
    from, exactly as the user wrote it ("Do I have Dracula, and why does Harker stay?" ->
    "Dracula"). Omit when the question names no book, or several.
-4. "out_of_scope": true (optional) if the request is not a question about these books at all
-   and asks for something the library cannot supply: write code, translate a sentence, do
-   arithmetic, give your own opinion, take on a persona, answer from world knowledge, chat.
-   Then add nothing else: no queries, no book, no catalog. A request ABOUT a book — its plot,
-   a character, what it says, whether the library holds it — is NEVER out of scope, even if
-   the library may not hold that book; searching and saying honestly what was not found is
-   the answer there.
+4. "out_of_scope": true (optional) if the request asks for something the library cannot
+   supply. Two kinds:
+   - a DELIVERABLE the books are not: write code, write a poem or a story, translate a
+     sentence, do arithmetic, take on a persona, give your own opinion, chat;
+   - FACTS ABOUT a book that the book's own text does not hold: when it was published and by
+     whom, what it costs, the author's life, what critics or other readers said of it.
+   Naming a book the library holds does not turn either into a question about that book:
+   "write me a poem in the style of Dracula" and "when was Dracula first published?" are both
+   out of scope.
+   NOT out of scope: anything the books' CONTENT can answer — what a book says, its plot, a
+   character, a theme, a comparison between books, which book a half-remembered description
+   fits — and anything about the library itself (item 1). Those stay in scope even when the
+   library may not hold the book: searching and saying honestly what was not found is the
+   answer there.
+   When it is set, add nothing else: no queries, no book, no catalog.
 
 Return ONLY JSON: {"mode": "...", "queries": ["...", "..."], "catalog": {...} or omitted,
 "book": "..." or omitted, "out_of_scope": true or omitted}"""

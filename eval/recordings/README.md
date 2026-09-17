@@ -40,7 +40,7 @@ run. `uv run eval/run_plan_eval.py --check` answers that question on its own.
 
 **Every recording in this directory is stale as of the scope gate (#70).** That
 change added one optional field to `PLAN_RULES`, so its checksum moved from
-`acd673f471d3` to `aabb79d156d6` and `--check` now reports these six files as
+`acd673f471d3` to `ab7b9ece3352` and `--check` now reports these six files as
 measuring the old rules. They are kept, not deleted: they are still the exact
 input the 16.09 replay numbers were produced from, and a replay of them still
 measures what it always measured — `plan()`'s post-processing under the prompt

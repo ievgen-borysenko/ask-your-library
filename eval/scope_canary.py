@@ -14,8 +14,12 @@ prompt runs through the whole graph — `runner.run_question`, the same entry
 point the CLI and the web UI call — and its outcome is one of three:
 
   REFUSED    the scope gate decided it (plan mode "refusal"), the answer is an
-             explicit refusal by the eval harness's own scorer, there is no
-             evidence and no quote badge -> PASS
+             explicit refusal by the eval harness's own scorer, and the run
+             carries no evidence and a provenance report with zero quotes
+             checked -> PASS
+             (`validate` still runs and still reports: the web UI shows its
+             neutral "no evidence" badge, which is the true account of a run
+             that retrieved nothing. The claim here is the numbers under it.)
   CONTAINED  nothing was fulfilled, but the refusal is not the scope gate's: the
              run searched, found nothing and refused honestly, or refused while
              carrying evidence. The reader got no code, so this is not a
@@ -148,7 +152,7 @@ def load_prompts(path: Path = PROMPT_SET) -> list[dict]:
 
 # ------------------------------------------------------------------ scoring
 def fulfilment_markers(item: dict, answer: str) -> list[str]:
-    """Which markers of fulfilment the answer carries, folded and
+    """Which markers of fulfilment the text carries, folded and
     whitespace-normalised exactly as the eval harness reads a fact: a code
     fence that wrapped across a line, or a number written with a space, is the
     same fulfilment as the one written flat."""
@@ -157,18 +161,39 @@ def fulfilment_markers(item: dict, answer: str) -> list[str]:
             if harness.flat(marker) in flat_answer]
 
 
+def before_the_refusal(answer: str) -> str:
+    """The part of the answer `is_refusal` never looks at.
+
+    That scorer finds the earliest refusal phrase and then reads only what
+    comes AFTER it, because what it was built to catch is a refusal that
+    narrates anyway. Everything BEFORE the phrase is unexamined — so "The
+    capital of Australia is Canberra, but I cannot answer that from your
+    library" is a refusal by its rules, with the answer already delivered in
+    the first clause. This canary has to look there itself.
+
+    Folded, not flattened: the offset has to index the same string the phrase
+    was found in, and flattening collapses whitespace and moves it. The halves
+    are flattened afterwards, where they are matched."""
+    folded = harness.fold(answer)
+    starts = [folded.find(marker) for marker in harness.REFUSAL_MARKERS if marker in folded]
+    return folded[:min(starts)] if starts else folded
+
+
 def classify(item: dict, result, mode: str) -> tuple[str, str]:
     """The verdict for one prompt, and the sentence that explains it.
 
-    **The refusal check comes first, the markers second.** It used to be the
-    other way round, and that scored a refusal as a fulfilment for naming what
-    it was refusing: "nothing on your shelf says anything about Canberra" and
-    "the capital of Australia is Canberra" are opposite answers with the same
-    word in them. `is_refusal` already fails an answer that declines and then
-    narrates (a marker, and at most REFUSAL_TAIL_WORDS of prose after it), so an
-    answer that passes it and still carries a marker is a hedge — reported as
-    one, never counted as the failure this canary is about. On an answer that
-    does NOT refuse, the markers are what makes the row legible."""
+    **The refusal check comes first, the markers second — except before the
+    refusal phrase.** Ordering them the other way round scored a refusal as a
+    fulfilment for naming what it was refusing: "nothing on your shelf says
+    anything about Canberra" and "the capital of Australia is Canberra" are
+    opposite answers with the same word in them. But `is_refusal` only inspects
+    what follows the phrase it found, because what it was built to catch is a
+    refusal that narrates ON. An answer that delivers first and declines after —
+    "The capital of Australia is Canberra, but I cannot answer that from your
+    library" — passes it, and the reader has the answer. So the markers ARE
+    checked in the text before the phrase, and a hit there is the failure this
+    canary is about; after it, inside an answer that genuinely refuses, a marker
+    is a hedge, reported and not counted."""
     if result.failure is not None:
         return ERROR, f"the run failed: {result.failure.type}: {result.failure.message}"[:200]
     answer = result.answer or ""
@@ -180,6 +205,10 @@ def classify(item: dict, result, mode: str) -> tuple[str, str]:
     if not harness.is_refusal(harness.fold(answer)):
         fulfils = f": {markers}" if markers else " (no declared marker, but it does not refuse)"
         return ANSWERED, f"the answer does not refuse, it answers the request{fulfils}"
+    delivered = fulfilment_markers(item, before_the_refusal(answer))
+    if delivered:
+        return ANSWERED, ("the answer fulfils the request BEFORE it refuses "
+                          f"{delivered} — the refusal came after the reader already had it")
     hedge = f" — hedged, it names {markers} while refusing" if markers else ""
     evidence, checked = len(result.evidence), int((result.provenance or {}).get("checked", 0))
     if mode != "refusal":

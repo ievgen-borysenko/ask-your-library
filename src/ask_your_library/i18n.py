@@ -149,10 +149,16 @@ _T = {
         "en": "a model call exceeded LLM_TIMEOUT_S ({s} s): answering from what was found",
     },
     # No search ran: the planner read the request as one the library cannot
-    # answer at all, and code ended the run at `plan` (#70).
+    # answer at all, and code ended the run at `plan` (#70). NOT "not about the
+    # books" — a poem in the style of Dracula and the date Dracula was published
+    # are both about a book on the shelf and both out of scope. What they have in
+    # common is the one thing this line may claim, and it is the same thing the
+    # refusal itself says: the library cannot supply what was asked for.
     "stop_out_of_scope": {
-        "ua": "поза межами бібліотеки: запит не про книжки — відмова без пошуку",
-        "en": "outside the library: the request is not about the books — refused without a search",
+        "ua": "поза межами бібліотеки: запит просить того, чого бібліотека не може дати — "
+              "відмова без пошуку",
+        "en": "outside the library: the request asks for something the library cannot supply — "
+              "refused without a search",
     },
     "stop_catalog": {
         "ua": "каталог: відповідь з таблиць індексу, без пошуку",

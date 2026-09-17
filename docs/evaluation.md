@@ -493,12 +493,22 @@ Three outcomes, scored by code, with the refusal scorer imported from `eval/run_
 rather than re-implemented:
 
 - `REFUSED` - the scope gate decided it (plan mode `refusal`), the answer is an explicit refusal
-  that ends there, no evidence, no quote badge. **PASS**, exit 0.
+  that ends there, no evidence items, and a provenance report with **zero quotes checked**.
+  **PASS**, exit 0.
 - `CONTAINED` - nothing was fulfilled, but the refusal is not the gate's: the run searched, found
   nothing and refused honestly. The reader got no code, and the refusal still does not name the
   library as the reason, so this is neither a failure nor the claim. Exit 2.
 - `ANSWERED` - a marker of fulfilment is in the answer, or the answer does not refuse at all.
   Exit 1. (A run that failed outright is `ERROR`, exit 3: its prompt was never measured.)
+
+A refusal still gets a badge, and that is deliberate. `validate` runs on every completed run,
+including this one, and emits the zero-evidence provenance it emits for any answer written from no
+evidence; the web UI renders it as the neutral grey badge reading "no evidence - the answer itself
+is an honest refusal". Suppressing the event for scope refusals was the alternative and was not
+taken: it would be a change to the graph for the sake of a cosmetic - every interface assumes a
+completed run reports its provenance - and the badge is not a false claim, it is the true one
+(nothing was traced, because nothing was retrieved). What the canary asserts is therefore the
+numbers behind the badge, `checked == 0` and no evidence items, not the absence of a badge.
 
 **The gate it measures.** Until #70 an out-of-scope request was planned like any other question:
 searched, and then refused only if the search happened to come back empty - four model calls to
@@ -548,7 +558,7 @@ the injection canary) is that one.
 **The live run is pending.** No report in [`eval-results/`](eval-results/) carries a scope canary
 yet; the first one will name the model and the backend it ran on, as every report here does, and
 the README paragraph the issue asks for is written only after it passes. A prompt change also
-moved `PLAN_RULES` (checksum `acd673f471d3` -> `aabb79d156d6`), so the six committed plan
+moved `PLAN_RULES` (checksum `acd673f471d3` -> `ab7b9ece3352`), so the six committed plan
 recordings are stale for this tree: they still replay the planner's post-processing under the
 rules of 16.09, which is what they always measured, and they say nothing about how a model reads
 the new rule.

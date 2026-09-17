@@ -126,6 +126,28 @@ def test_a_marker_inside_a_refusal_is_reported_as_a_hedge():
     assert verdict == canary.REFUSED and "hedged" in note
 
 
+def test_an_answer_that_delivers_first_and_refuses_after_is_answered():
+    """`is_refusal` only reads what FOLLOWS the refusal phrase it finds — what it
+    was built to catch is a refusal that narrates on. An answer that delivers
+    first and declines after passes it, and the reader has the answer anyway, so
+    the canary looks in the part that scorer ignores."""
+    item = {"id": "sc02", "kind": "world-knowledge", "prompt": "p", "must_refuse": True,
+            "must_not_contain": ["the capital of australia is"]}
+    answered_first = ("The capital of Australia is Canberra, but I cannot answer that "
+                      "from your library.")
+    assert canary.harness.is_refusal(canary.harness.fold(answered_first)), \
+        "the fixture no longer passes is_refusal, so it no longer tests anything"
+    verdict, note = canary.classify(item, Result(answer=answered_first), mode="refusal")
+    assert verdict == canary.ANSWERED and "BEFORE it refuses" in note
+
+
+def test_the_part_before_the_refusal_phrase_is_what_is_read():
+    text = canary.before_the_refusal("Here it is. I cannot answer more than that.")
+    assert text.startswith("here it is.") and "cannot answer" not in text
+    # no phrase at all: the whole answer is "before", and nothing is lost
+    assert canary.before_the_refusal("Here it is.") == "here it is."
+
+
 def test_the_gates_refusal_passes():
     verdict, note = canary.classify(ITEM, Result(answer=REFUSAL), mode="refusal")
     assert verdict == canary.REFUSED and note == ""
@@ -144,6 +166,18 @@ def test_a_refusal_carrying_evidence_is_contained():
     verdict, note = canary.classify(ITEM, Result(answer=REFUSAL, evidence=[{"quote": "x"}],
                                                  checked=1), mode="refusal")
     assert verdict == canary.CONTAINED and "evidence" in note
+
+
+def test_a_pass_is_the_numbers_under_the_badge_not_the_absence_of_one():
+    """`validate` reports on every completed run, this one included, and the web
+    UI renders its neutral "no evidence" badge. That is the true account of a run
+    that retrieved nothing, so the canary asks for the numbers behind it —
+    `checked == 0` and no evidence items — and a run that refused while carrying
+    either is CONTAINED."""
+    assert canary.classify(ITEM, Result(answer=REFUSAL, checked=0), mode="refusal")[0] \
+        == canary.REFUSED
+    assert canary.classify(ITEM, Result(answer=REFUSAL, checked=2), mode="refusal")[0] \
+        == canary.CONTAINED
 
 
 def test_a_run_with_no_answer_is_not_a_pass():
@@ -190,25 +224,40 @@ def test_an_ordinary_plan_is_untouched(monkeypatch):
     assert update["mode"] == "answer" and update["current_query"] == "who narrates Moby Dick"
 
 
-def test_the_gate_does_not_fire_once_the_run_has_something_to_lose(monkeypatch):
-    """`plan` runs again after a clarify. By then the reader has answered a
-    question of the agent's own and the evidence in the state was paid for —
-    and `synthesize` on mode "refusal" answers from no evidence at all, so a
-    gate firing there would throw all of it away and tell the reader their own
-    follow-up was out of scope."""
-    decision = {"mode": "answer", "out_of_scope": True, "queries": []}
-    monkeypatch.setattr(llm, "ask_json", lambda *a, **k: decision)
-    evidence = [{"hit_id": "s1h1", "book": "Dracula — Bram Stoker", "section": "Chapter 1",
-                 "quote": "The castle stood on the edge of a terrible precipice.",
-                 "why": "the castle"}]
-    after_clarify = {"question": "and why does he stay?", "steps_taken": 1,
-                     "evidence": evidence, "clarification": "the first one",
-                     "clarify_asked": True, "clarify_candidates": ["Dracula — Bram Stoker"]}
-    update = nodes.plan(after_clarify)
+OUT_OF_SCOPE_PLAN = {"mode": "answer", "out_of_scope": True, "queries": []}
+EVIDENCE = [{"hit_id": "s1h1", "book": "Dracula — Bram Stoker", "section": "Chapter 1",
+             "quote": "The castle stood on the edge of a terrible precipice.",
+             "why": "the castle"}]
+
+
+def test_the_gate_does_not_fire_on_a_run_that_already_collected_evidence(monkeypatch):
+    """`plan` runs again mid-run, and by then the evidence in the state was paid
+    for. `synthesize` on mode "refusal" answers from no evidence at all, so a
+    gate firing here would throw all of it away."""
+    monkeypatch.setattr(llm, "ask_json", lambda *a, **k: OUT_OF_SCOPE_PLAN)
+    update = nodes.plan({"question": "and why does he stay?", "steps_taken": 1,
+                         "evidence": EVIDENCE, "clarification": "the first one",
+                         "clarify_asked": True})
     assert update["mode"] != "refusal", "the gate ate a run that had already searched"
-    assert update["evidence"] == evidence, "the evidence the run paid for was discarded"
-    # the same reply on a first plan, with nothing behind it, still refuses
-    assert planned(decision, monkeypatch)["mode"] == "refusal"
+    assert update["evidence"] == EVIDENCE, "the evidence the run paid for was discarded"
+
+
+def test_the_gate_does_not_fire_once_the_reader_has_chosen_a_book(monkeypatch):
+    """The other half, with no evidence at all: the reader answered a clarify
+    and named one of the books offered. That reply is the agent's own question
+    being answered, and refusing the follow-up after it would tell the reader
+    their answer was out of scope."""
+    monkeypatch.setattr(llm, "ask_json", lambda *a, **k: OUT_OF_SCOPE_PLAN)
+    update = nodes.plan({"question": "and why does he stay?", "steps_taken": 1, "evidence": [],
+                         "clarification": "the first one", "clarify_asked": True,
+                         "clarify_candidates": ["Dracula — Bram Stoker", "Frankenstein — Mary Shelley"]})
+    assert update["clarify_chosen"] == "Dracula — Bram Stoker", "the fixture resolved no choice"
+    assert update["mode"] != "refusal", "the gate refused the reader's own clarify reply"
+
+
+def test_the_gate_still_fires_on_a_first_plan_with_nothing_behind_it(monkeypatch):
+    """The guard narrows the gate; it must not close it."""
+    assert planned(OUT_OF_SCOPE_PLAN, monkeypatch)["mode"] == "refusal"
 
 
 def test_the_answer_path_never_runs_for_a_refused_request(monkeypatch):

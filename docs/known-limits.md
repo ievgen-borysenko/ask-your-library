@@ -260,9 +260,14 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   it says.** Since #70 the planner may mark a request as one the library cannot answer at all —
   write me code, translate this, what is 1234 × 5678, be my chatbot — and then code ends the run
   at `plan`: no search, no model call for an answer, and a refusal that names the library as the
-  reason. What "scope" means here is exactly that: *the request asks for a deliverable, not for
-  something the books say*. It is **not** a claim that the agent only ever says true things about
-  your library, and it is not a filter on topics. What is NOT covered: the decision is the
+  reason. What "scope" means here is one line: *the request asks for something the library cannot
+  supply*, and that is two things — a **deliverable** the books are not (code, a poem, a
+  translation, arithmetic, a persona, an opinion) and **facts about a book that its own text does
+  not hold** (when it was published and by whom, what it costs, the author's life, what critics
+  said). Naming a book on the shelf does not make either of them in scope: "a poem in the style of
+  Dracula" and "when was Dracula published" are both refused, while anything the books' *content*
+  can answer is not. It is **not** a claim that the agent only ever says true things about your
+  library, and it is not a filter on topics. What is NOT covered: the decision is the
   planner's reading of the question, so a small local model that does not set the field routes
   the request into the ordinary loop (where it is usually refused for lack of evidence — which is
   the `CONTAINED` outcome of the canary, not a pass); a request that hides the deliverable inside

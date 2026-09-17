@@ -186,7 +186,7 @@ def test_a_fresh_recording_is_not_stale():
     checksums were `e7d21ec4bd9b` (golden) and `acd673f471d3` (PLAN_RULES); the
     planner's prompt gained the scope rule (#70), the golden gained the item
     that exercises it (`f05-gate-refusal`), and the fixture was re-stamped to
-    `ee76587c7722` / `aabb79d156d6` with them. Re-stamping is honest HERE and
+    `ee76587c7722` / `ab7b9ece3352` with them. Re-stamping is honest HERE and
     nowhere else:
     these five replies are hand-written fixtures for the post-processing, not a
     measurement of a model, so there is nothing to re-record. The recordings

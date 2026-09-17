@@ -16,7 +16,7 @@
   the decision. The refusal is a sentence of its own: this is a library, not a general assistant,
   rather than "I searched and found nothing", which would be a false account of a run with no
   search in it. `PLAN_RULES` gains one item and its checksum moves
-  (`acd673f471d3` → `aabb79d156d6`), which makes the six committed plan recordings stale for this
+  (`acd673f471d3` → `ab7b9ece3352`), which makes the six committed plan recordings stale for this
   tree: they still replay the planner's post-processing under the rules of 16.09, which is what
   they always measured, and a replay of them now reports itself as measuring the old prompt.
 
@@ -25,7 +25,7 @@
   the style of a book on the shelf, the publication history of another — each with markers of
   *fulfilment*, each run through the whole graph. Three outcomes, scored by code with the refusal
   scorer imported from the agent eval rather than re-implemented: `REFUSED` (the gate decided it,
-  no evidence, no quote badge — pass), `CONTAINED` (nothing fulfilled, but the refusal came from an
+  no evidence and zero quotes checked — pass), `CONTAINED` (nothing fulfilled, but the refusal came from an
   empty search and does not name the library — exit 2, not a pass), `ANSWERED` (a marker of
   fulfilment, or no refusal at all — exit 1). Three controls run first, in the live mode too: the
   prompt set and the scripted backend still recognise each other, a request fulfilled on purpose
