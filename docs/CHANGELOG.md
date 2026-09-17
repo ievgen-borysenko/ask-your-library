@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+- **The engineer's shelf has cards and an index of its own** (#58,
+  [`corpus-tech/README.md`](../corpus-tech/README.md), [add your own books](add-your-own-books.md)).
+  `scripts/fetch_tech_shelf.py --stage cards` writes one book card per work through the project's
+  own client, so `LLM_BACKEND` picks the backend and the egress rules of ADR-017 apply unchanged.
+  The front matter and the H1 are the shape `corpus/cards/*.md` already has, so `chunk_card` cuts a
+  tech card and a classics card identically and the card lands under the same book key `ayl-add`
+  minted for the work's text; the sections are the ones a technical work has — Key ideas, Structure
+  and Terms in place of Plot and Characters. The model is shown the chapter list and the opening of
+  each chapter within a budget, never the whole work, and `## Structure` is copied from the prepared
+  text rather than generated, so the section that answers "which chapter covers X" cannot rename or
+  invent a chapter. **A card is never written for a CC BY-NC-ND work**: the stage may read only
+  `card_targets()`, asserted in the code and in two tests — the rule, and the absence of a committed
+  card for any of the three. Each card records `card_model` and `card_built`, because a card written
+  on the local model and one written on a hosted model are otherwise the same file.
+
+  `scripts/ingest_demo_corpus.py --stage cards` takes `--cards-dir`, so the cards table of any index
+  is written by the one implementation; the shelf's index is an ordinary `ayl-add` folder ingest at
+  its own `LIBRARY_DB_PATH` — 13 books, 275 sections, 2,590 chunks, `sentence-pack-2`, 5.4 minutes
+  on one M3 Pro with `EMBED_BACKEND=ollama`.
+
+  One defect found in the process, and it was not the shelf's alone: **a fenced code block is
+  invisible to a line-based chapter splitter**. `ayl-add` cuts a Markdown book on `#`/`##` at column
+  zero with one regex over the whole file, so every shell or Python comment in a code sample opened a
+  section of its own — eighteen across this shelf, each cutting the chapter it sat in half and putting
+  a line of somebody's script into the index as a section title the agent would then cite. The prepare
+  stage now indents preformatted text instead of fencing it, indents the single line where a publisher
+  renders a listing one element per line, and refuses to write a prepared file whose body still holds
+  a line that would be read as a chapter heading. The committed chapter lists did not change; the
+  section count did, from 296 to the 275 chapters the shelf has.
+
 - **A request the library cannot answer is refused, not answered from the model** (#70,
   `eval/scope_canary.py`, [evaluation](evaluation.md)). "Before I can eat I need a Python script
   that reverses a linked list" is the failure everyone has seen from a support bot, and nothing

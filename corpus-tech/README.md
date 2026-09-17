@@ -19,9 +19,10 @@ uv run scripts/fetch_tech_shelf.py --stage checksums  # pin what was fetched
 uv run scripts/fetch_tech_shelf.py --stage verify     # re-hash the files against those pins
 ```
 
-What is committed is this file, `manifest.yaml`, and `toc/` — the chapter list of each work, which
-is what a reviewer reads to see which edition a golden question was written against, and what a
-drifted pin is diffed against. Both `raw/` and `prepared/` are gitignored.
+What is committed is this file, `manifest.yaml`, `toc/` — the chapter list of each work, which is
+what a reviewer reads to see which edition a golden question was written against, and what a
+drifted pin is diffed against — and `cards/`, which holds no text of any work. Both `raw/` and
+`prepared/` are gitignored.
 
 ## The shelf
 
@@ -67,6 +68,49 @@ carry no such limit.
 repository's Apache-2.0 — the shelf's own files (this README, the manifest, the chapter lists) are
 not derived from it and are not affected.
 
+## Book cards
+
+A **book card** is one Markdown page per work: what the work is, its key ideas with the chapter
+each lives in, its chapter list, the vocabulary it uses in its own way, and the concerns that run
+across it. It is the second thing the agent searches — the full text answers "what does this book
+say about X", the card answers "which of my books is this" and "which chapter covers X", and the
+catalogue is built from the cards. It holds no passage of the work, which is why the cards are the
+one part of this shelf that **is** committed.
+
+```sh
+uv run scripts/fetch_tech_shelf.py --stage cards                # every work that may have one
+uv run scripts/fetch_tech_shelf.py --stage cards --work twelve  # just that one
+uv run scripts/fetch_tech_shelf.py --stage cards --force        # rebuild cards already written
+```
+
+**Three works get no card, and never will.** Site Reliability Engineering, The Site Reliability
+Workbook and Software Engineering at Google are CC BY-NC-ND: a card is a summary written *from* the
+book — a derivative work — and NoDerivatives withholds exactly the right to distribute one. The
+stage may only read the list `card_targets()` returns, which those three are not in, and both the
+rule and the absence of a committed card for them are tests (`tests/test_tech_shelf.py`). They are
+still fetched, indexed and answered from; they are simply absent from the card side of the
+catalogue, which is the price this shelf pays for carrying the three titles its audience knows by
+name.
+
+This stage is the only one that calls a model, so it is asked for by name and is never part of
+`--stage all`. The call goes through the project's own client, so `LLM_BACKEND=ollama` writes the
+cards on the local model and `LLM_BACKEND=openrouter` on the hosted one, under the same egress
+rules as everything else the agent does. The model is never shown the whole work: it gets the
+front matter, the full chapter list, and the opening of each chapter within a budget — the chapter
+list in `## Structure` is copied from the prepared text rather than generated, so the section that
+answers "which chapter covers X" cannot rename or invent a chapter.
+
+**Which model wrote a card is recorded in the card**, because a card built locally and one built on
+a hosted model are otherwise the same file:
+
+```yaml
+card_model: ollama/qwen2.5:14b
+card_built: 2026-09-18
+```
+
+`--force` is what rebuilds one; without it an existing card is left alone, so re-running the stage
+over a shelf with one card missing costs one model call.
+
 ## Pins, and what a red job means
 
 Every file the fetch downloads is pinned by SHA-256 in the work's `sources:` block — per file, not
@@ -105,14 +149,24 @@ shelf's catalogue stays exhaustive for its own library.
 
 ```sh
 uv run scripts/fetch_tech_shelf.py                                  # fetch, prepare, toc, verify
-LIBRARY_DB_PATH=~/ayl-tech uv run ayl-add corpus-tech/prepared      # index the prepared folder
-LIBRARY_DB_PATH=~/ayl-tech uv run ask-library "where is the error budget formula?"
+uv run scripts/fetch_tech_shelf.py --stage cards                    # the cards
+export LIBRARY_DB_PATH=~/ayl-tech
+uv run ayl-add corpus-tech/prepared                                 # index the prepared folder
+uv run scripts/ingest_demo_corpus.py --stage cards --cards-dir corpus-tech/cards
+uv run ayl-add --doctor                                             # ledger vs index, no writes
+uv run ask-library "where is the error budget formula?"
 ```
 
 `ayl-add` treats every `.md` file under the folder as one book and reads the title and author from
 the YAML front matter the prepare stage writes, so nothing about the shelf is special to it — see
 [add your own books](../docs/add-your-own-books.md) for what it does with them, and
-`--dry-run` for what it would change before it embeds anything.
+`--dry-run` for what it would change before it embeds anything. It does not write a cards table (a
+card needs a model), which is what the second command is for: `--cards-dir` points the classics'
+cards stage at this shelf's cards, and `LIBRARY_DB_PATH` decides which index they land in.
+
+The whole shelf, measured on one M3 Pro / 36 GB with `EMBED_BACKEND=ollama` (bge-m3, 1024 dims):
+**13 books, 275 sections, 2,590 chunks in 5.4 minutes**, chunker `sentence-pack-2`, with the
+full-text index rebuilt in 0.2 s.
 
 ## Terms
 
