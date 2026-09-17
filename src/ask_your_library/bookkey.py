@@ -155,6 +155,40 @@ def read_status(entry: str) -> str:
     return last if last in READ_STATUSES else "complete"
 
 
+CHAPTER_MARKER = "__chapter__|"
+# What tells a read query apart from the tail of a section name. The field is
+# recognised FROM THE RIGHT and only when it carries this prefix — the same
+# rule, for the same reason, as the "|status" of a read_chapters entry above: a
+# section name may itself contain "|", so the last field of the marker cannot
+# simply be claimed for something new.
+READ_QUERY_PREFIX = "q="
+
+
+def chapter_marker(book: str, section: str, query: str = "") -> str:
+    """The action marker for a chapter read: "__chapter__|book|section", plus
+    "|q=<what the model is looking for>" when it said (ADR-025).
+
+    The query is the model's own words, so it is the one field that may not
+    absorb the rest of the string: any "|" in it becomes a space here, and the
+    section — which is the BOOK's words, and is looked up literally — keeps
+    every character it has."""
+    marker = f"{CHAPTER_MARKER}{book}|{section}"
+    query = " ".join(query.replace("|", " ").split())
+    return f"{marker}|{READ_QUERY_PREFIX}{query}" if query else marker
+
+
+def split_read_query(marker: str) -> tuple[str, str]:
+    """A chapter marker split into (the marker as it has always been, the read
+    query it carries or ""). Anything else is returned untouched: a search
+    query is free text and must never be trimmed by a rule about markers."""
+    if not marker.startswith(CHAPTER_MARKER):
+        return marker, ""
+    head, sep, last = marker.rpartition("|")
+    if sep and last.startswith(READ_QUERY_PREFIX):
+        return head, last[len(READ_QUERY_PREFIX):]
+    return marker, ""
+
+
 def same_chapter(wanted: str, entry: str) -> bool:
     """Does a read_chapter request name a chapter already in read_chapters?
     "Some Book|Chapter 59" and "Some Book|59" are the same chapter; so are

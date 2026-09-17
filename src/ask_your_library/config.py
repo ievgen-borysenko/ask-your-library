@@ -87,10 +87,19 @@ OPENROUTER_ENV_FILE = Path(_env_file).expanduser() if _env_file else None
 # fails with 402 on a low balance.
 MAX_OUTPUT_TOKENS = int(_env("MAX_OUTPUT_TOKENS", "2048"))
 
-# What observe sees of each retrieved passage (ADR-012). SEARCH_HIT_CHARS caps a
-# search hit (several per step); CHAPTER_HIT_CHARS caps a chapter read (one
-# hit). The provenance check compares quotes against the same cut, so the cut
-# is applied once, in act, and read from here everywhere else.
+# What observe sees of each retrieved passage (ADR-025, superseding ADR-012).
+# SEARCH_HIT_CHARS caps a search hit (several per step); CHAPTER_HIT_CHARS caps
+# a chapter read (one hit). The provenance check compares quotes against the
+# same cut, so the cut is applied once, in act, and read from here everywhere
+# else.
+#
+# SEARCH_HIT_CHARS is no longer a knob over a chunk it cannot reach: the
+# chunker packs transcript chunks to 2,400 characters
+# (`ingest.chunking.TRANSCRIPT_TARGET_CHARS`), so a hit arrives whole and the
+# window is the chunk. RAISING this value now buys nothing — there is no chunk
+# tail behind it to reveal — and LOWERING it cuts real text out of a chunk the
+# retriever ranked whole. Either way the pair is one decision, and the index
+# records which chunker built it (`ingest.chunking.CHUNKER_VERSION`).
 def _positive_int(name: str, default: str, unit: str = "characters", at_most: int | None = None,
                   why_at_most: str = "") -> int:
     value = int(_env(name, default))      # a blank line in a copied .env means the default
@@ -103,6 +112,23 @@ def _positive_int(name: str, default: str, unit: str = "characters", at_most: in
 
 SEARCH_HIT_CHARS = _positive_int("SEARCH_HIT_CHARS", "2500")     # 1,200 until 0.1.0; measured 05.09, see CHANGELOG
 CHAPTER_HIT_CHARS = _positive_int("CHAPTER_HIT_CHARS", "12000")
+# How much of a chapter a read may CHOOSE its window from, when the request
+# says what it is looking for (ADR-025). The chapter is read this far, the
+# window is cut around the best lexical match inside it, and what the model
+# sees is still CHAPTER_HIT_CHARS — so this is a scan budget, not an
+# observation budget: no more text reaches a prompt because of it. 120,000
+# characters covers 1,224 of the 1,228 chapters of the demo corpus whole
+# (median 14,783, the longest 585,482). A read that names no query never scans:
+# it takes the head, as it always did.
+CHAPTER_SCAN_CHARS = _positive_int("CHAPTER_SCAN_CHARS", "120000")
+if CHAPTER_SCAN_CHARS < CHAPTER_HIT_CHARS:
+    # A scan narrower than the window is not a window at all: it would cut the
+    # chapter before the match could be found in it, and then hand the cut text
+    # on as if it had been chosen. Refused with both numbers named, like every
+    # other misconfiguration here.
+    raise ValueError(f"CHAPTER_SCAN_CHARS ({CHAPTER_SCAN_CHARS}) must be at least "
+                     f"CHAPTER_HIT_CHARS ({CHAPTER_HIT_CHARS}): a window cannot be chosen "
+                     f"from less text than it shows")
 
 # --- loop budgets -------------------------------------------------------------
 # The measured numbers in the README are for the defaults; a change here is a

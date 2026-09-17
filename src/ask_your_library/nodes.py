@@ -25,16 +25,17 @@ from .catalog import (mixed_intent, parse_catalog_request, render_catalog, resol
 # read_key / read_status / READ_STATUSES are re-exported, not used here: the
 # grammar is this node's contract with `reflect`, and it is read (and tested)
 # as part of it.
-from .bookkey import READ_STATUSES, read_key, read_status, same_chapter  # noqa: F401
+from .bookkey import (READ_STATUSES, chapter_marker, read_key, read_status,  # noqa: F401
+                      same_chapter, split_read_query)
 from .clarify import _chosen_book, _clarify_candidates, _evidence_after_clarify
-from .config import (CHAPTER_HIT_CHARS, LLM_TIMEOUT_S, MAX_CLARIFY_CANDIDATES, MAX_EMPTY_STREAK,
-                     MAX_STEPS, SEARCH_HIT_CHARS)
+from .config import (CHAPTER_HIT_CHARS, CHAPTER_SCAN_CHARS, LLM_TIMEOUT_S,
+                     MAX_CLARIFY_CANDIDATES, MAX_EMPTY_STREAK, MAX_STEPS, SEARCH_HIT_CHARS)
 from .coverage import coverage_probe
 from .i18n import t
 from .library import BookEntry, chapter_is_cut, list_books, read_chapter, search_both
 from .llm import data_block
 from .prompts import OBSERVE_RULES, PLAN_RULES, REFLECT_RULES, SYNTHESIZE_RULES
-from .provenance import _valid_evidence, validate  # noqa: F401  (validate is wired by graph.py)
+from .provenance import _valid_evidence, validate, window_around  # noqa: F401  (validate is wired by graph.py)
 from .sanitize import sanitize_context, strip_control_chars
 from .state import AgentState, is_loop_marker
 
@@ -51,6 +52,13 @@ CATALOG_FALLBACKS = ("invalid_op", "after_clarify", "mixed_intent")
 # SEARCH_HIT_CHARS: several hits per step. CHAPTER_HIT_CHARS: chapter drill-down,
 # one hit gets the whole read_chapter budget, so the "[chapter continues ...]"
 # marker at its end reaches the model. Both come from config (env-tunable).
+#
+# Since #28 neither limit usually CUTS anything, and that is the point: a
+# transcript chunk is packed to 2,400 characters, under the search budget, and
+# a chapter read that names what it is looking for arrives already windowed to
+# CHAPTER_HIT_CHARS by `act`. The cut stays where it is — it is what makes the
+# two budgets equal by construction, whatever an index or a configuration
+# holds, and ADR-004's guarantee rests on that equality and not on the numbers.
 
 
 def per_hit_limit(hit_count: int) -> int:
@@ -282,7 +290,12 @@ def catalog(state: AgentState) -> dict:
 # ---------------------------------------------------------------- act
 def act(state: AgentState) -> dict:
     # Two kinds of action: a regular search, or reading a whole chapter (drill-down)
-    marker_parts = state["current_query"].split("|", 2) if is_loop_marker(state["current_query"]) else []
+    # A chapter marker may carry one field more than the other two — what the
+    # model is looking for in that chapter — and it is taken off here, from the
+    # right, so everything below reads the three-part marker it always read
+    # (`bookkey.split_read_query`).
+    action, read_query = split_read_query(state["current_query"])
+    marker_parts = action.split("|", 2) if is_loop_marker(action) else []
     if marker_parts and len(marker_parts) != 3:
         # A malformed marker (fewer than three parts) is nothing to act on: no
         # hits, a note in the scratchpad, and the loop's CRAG gate counts the
@@ -290,9 +303,22 @@ def act(state: AgentState) -> dict:
         hits = []
         empty_read_note = f"[malformed action marker ignored: {state['current_query']}]\n"
         read_chapters = state.get("read_chapters", [])
-    elif state["current_query"].startswith("__chapter__|"):
+    elif action.startswith("__chapter__|"):
         _, asked_book, section = marker_parts
-        chapter_text, found_book, resolution = read_chapter(asked_book, section, max_chars=CHAPTER_HIT_CHARS)
+        # The observation window of a chapter read (ADR-025). Without a read
+        # query the chapter is cut at CHAPTER_HIT_CHARS from its FRONT, as it
+        # always was. With one, the chapter is read as far as the scan budget
+        # allows and the window is cut around the best lexical match inside it —
+        # once, HERE, so that the text stored in `hits_log` below, the text the
+        # scratchpad holds and the text `observe` is shown are one string. The
+        # window is the provenance haystack (ADR-004): recomputing it anywhere
+        # downstream would turn quotes copied out of one window into quotes
+        # broken against another.
+        chapter_text, found_book, resolution = read_chapter(
+            asked_book, section,
+            max_chars=CHAPTER_SCAN_CHARS if read_query else CHAPTER_HIT_CHARS)
+        if read_query and chapter_text:
+            chapter_text = window_around(chapter_text, read_query, CHAPTER_HIT_CHARS)
         # The hit carries the index key of the book actually read, not the
         # string reflect asked with: a bare title ("Don Quixote") would otherwise
         # produce evidence that the exact-key filter after a clarify ("Don
@@ -551,9 +577,20 @@ def reflect(state: AgentState) -> dict:
 
     if what == "read_chapter" and state["steps_taken"] < MAX_STEPS:
         wanted = f"{decision['book']}|{decision['section']}"
+        # What the model says it is looking for in that chapter decides WHICH
+        # part of it is read (ADR-025). Read through `str_field` like every
+        # other model-supplied string here, so an off-schema value is "" and
+        # never travels on as free text; empty, the read takes the head of the
+        # chapter, exactly as it did before. The field is not required, and
+        # nothing is invented in its place: the question would be a plausible
+        # substitute and a wrong one — the planner's question is not what this
+        # chapter is being opened for, and a window centred on the wrong words
+        # is worse than an honest beginning.
+        looking_for = llm.str_field(decision, "looking_for") or ""
 
         if not any(same_chapter(wanted, entry) for entry in state.get("read_chapters", [])):
-            return {"current_query": f"__chapter__|{wanted}"}
+            return {"current_query": chapter_marker(decision["book"], decision["section"],
+                                                    looking_for)}
         # Model is asking for the same chapter again: no continuation cursor
         # exists yet, so a repeat cannot show more text — finish with what we have
         return {"current_query": "", "stop_reason": t("stop_chapter_again")}

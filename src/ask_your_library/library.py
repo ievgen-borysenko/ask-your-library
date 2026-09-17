@@ -310,17 +310,39 @@ def join_chapter(rows: list[dict], max_chars: int) -> str:
         return text
     # The marker lives INSIDE the max_chars budget, so every later cut at the
     # same limit (scratchpad, observe) still shows it.
-    marker = f"\n[chapter continues: {len(text) - max_chars} characters not shown]"
+    marker = cut_marker(len(text) - max_chars)
     body = text[:max(0, max_chars - len(marker))]
     return body + marker
 
 
 CUT_MARKER_SUFFIX = "characters not shown]"
+HEAD_MARKER_PREFIX = "[chapter begins earlier:"
+
+
+def cut_marker(hidden: int) -> str:
+    """The in-band note that the text stops before the chapter does, so "not in
+    the text I read" is not mistaken for "not in the chapter"."""
+    return f"\n[chapter continues: {hidden} characters not shown]"
+
+
+def head_marker(hidden: int) -> str:
+    """The same note for the other end: the text STARTS after the chapter does.
+
+    A head-of-chapter read needs no such marker — the text begins where the
+    chapter begins. A window around a match does (ADR-025): without it the
+    model reads a passage from the middle of a chapter as its opening, and
+    "the first thing that happens in this chapter" becomes a sentence from its
+    middle. Same wording and the same suffix as `cut_marker`, so one rule reads
+    both (`chapter_is_cut`) and the provenance gate strips both."""
+    return f"{HEAD_MARKER_PREFIX} {hidden} characters not shown]\n"
 
 
 def chapter_is_cut(text: str) -> bool:
-    """True when join_chapter had to cut the chapter (read status "partial")."""
-    return text.rstrip().endswith(CUT_MARKER_SUFFIX)
+    """True when the chapter did not fit the budget it was read with (read
+    status "partial"): cut at the end by `join_chapter`, or at the front too by
+    the window a read query opens (`provenance.window_around`)."""
+    stripped = text.strip()
+    return stripped.endswith(CUT_MARKER_SUFFIX) or stripped.startswith(HEAD_MARKER_PREFIX)
 
 
 def read_chapter(book: str, section: str, max_chars: int = 12000) -> tuple[str, str, str]:
