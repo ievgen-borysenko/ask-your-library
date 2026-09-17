@@ -193,7 +193,16 @@ def plan(state: AgentState) -> dict:
     # Deliberately BEFORE the catalogue branch and the book resolution: a
     # request that is out of scope is not a listing and names no book to
     # resolve, and a catalogue read here would be a query spent on it.
-    if llm.bool_field(decision, "out_of_scope"):
+    #
+    # And only on a plan that has nothing behind it yet. `plan` also runs a
+    # SECOND time, after a clarify: by then the run has searched, the reader has
+    # answered a question of its own, and the evidence in the state was paid
+    # for. `synthesize` on mode "refusal" answers from no evidence at all, so a
+    # gate firing on that re-plan would throw all of it away and tell the reader
+    # their own follow-up was out of scope. A request that was worth searching
+    # stays worth answering: the gate is a decision about the FIRST reading of a
+    # question, not a veto the loop can acquire halfway through.
+    if llm.bool_field(decision, "out_of_scope") and not evidence and not chosen:
         return {"mode": "refusal", "queries": [], "current_query": "",
                 "book_filter": "", "book_unresolved": "",
                 "stop_reason": t("stop_out_of_scope"), **common}

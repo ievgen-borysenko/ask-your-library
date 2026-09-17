@@ -212,6 +212,19 @@ def test_the_plan_event_of_a_catalogue_question_names_the_operation(capsys):
     assert t("ev_book_filter", book=moby) in out
 
 
+def test_the_plan_event_of_a_refused_request_says_so_instead_of_listing_no_queries(capsys):
+    """The scope gate (#70) plans no query at all. The research-loop line would
+    print `queries: ['']` — the empty current_query in a list — which is the one
+    thing the reader must not read as "it searched for nothing"."""
+    from ask_your_library.i18n import t
+    cli.print_event("plan", {"mode": "refusal", "current_query": "", "queries": [],
+                             "stop_reason": t("stop_out_of_scope")})
+    out = capsys.readouterr().out
+    assert t("ev_plan_refusal") in out
+    assert t("ev_plan", mode="refusal", queries=[""]) not in out
+    assert "queries" not in out
+
+
 def test_the_catalog_event_prints_the_listing_and_keeps_only_its_shape(capsys, monkeypatch):
     """The CLI's history entry after a catalogue answer: the operation and the
     counts, never the titles (they went to the terminal, not to the next

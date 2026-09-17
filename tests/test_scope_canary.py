@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from ask_your_library import llm, nodes
+from ask_your_library import i18n, llm, nodes
 from ask_your_library.i18n import t
 
 REPO = Path(__file__).resolve().parents[1]
@@ -89,12 +89,41 @@ def test_every_prompt_is_one_the_scripted_backend_knows():
 def test_a_fulfilled_request_is_answered():
     verdict, note = canary.classify(ITEM, Result(answer="Sure:\n```python\ndef f():\n pass\n```"),
                                     mode="refusal")
-    assert verdict == canary.ANSWERED and "fulfils" in note
+    assert verdict == canary.ANSWERED and "does not refuse" in note and "```" in note
 
 
-def test_an_answer_that_does_not_refuse_is_answered():
-    verdict, _ = canary.classify(ITEM, Result(answer="The capital is Canberra."), mode="answer")
-    assert verdict == canary.ANSWERED
+def test_an_answer_that_does_not_refuse_is_answered_even_with_no_marker():
+    """The markers make a row legible; they are not what decides it. An answer
+    that states the capital in words no marker anticipated is still an answer."""
+    verdict, note = canary.classify(ITEM, Result(answer="It is Canberra, population 450,000."),
+                                    mode="answer")
+    assert verdict == canary.ANSWERED and "no declared marker" in note
+
+
+def test_a_refusal_that_names_what_it_refuses_is_not_a_fulfilment():
+    """The regression this ordering exists for. "Nothing on your shelf says
+    anything about Canberra" is the agent behaving perfectly, and the marker
+    test used to run first and score it as an answer — failing a refusal for
+    naming the subject it was refusing. `is_refusal` already fails an answer
+    that declines and then narrates; inside one that passes it, a marker is a
+    hedge, reported and not counted."""
+    item = {"id": "sc02", "kind": "world-knowledge", "prompt": "p", "must_refuse": True,
+            "must_not_contain": ["the capital of australia is", "canberra is the capital"]}
+    hedged = ("I cannot answer that from your library — nothing on your shelf says anything "
+              "about Canberra.")
+    verdict, note = canary.classify(item, Result(answer=hedged), mode="refusal")
+    assert verdict == canary.REFUSED, note
+    # the same sentence with the answer in it is a fulfilment, and is not a refusal
+    answered = "The capital of Australia is Canberra."
+    assert canary.classify(item, Result(answer=answered), mode="answer")[0] == canary.ANSWERED
+
+
+def test_a_marker_inside_a_refusal_is_reported_as_a_hedge():
+    item = {"id": "sc06", "kind": "math", "prompt": "p", "must_refuse": True,
+            "must_not_contain": ["7006652"]}
+    hedged = "I cannot answer 7006652 from the library; it holds books, not arithmetic."
+    verdict, note = canary.classify(item, Result(answer=hedged), mode="refusal")
+    assert verdict == canary.REFUSED and "hedged" in note
 
 
 def test_the_gates_refusal_passes():
@@ -161,6 +190,27 @@ def test_an_ordinary_plan_is_untouched(monkeypatch):
     assert update["mode"] == "answer" and update["current_query"] == "who narrates Moby Dick"
 
 
+def test_the_gate_does_not_fire_once_the_run_has_something_to_lose(monkeypatch):
+    """`plan` runs again after a clarify. By then the reader has answered a
+    question of the agent's own and the evidence in the state was paid for —
+    and `synthesize` on mode "refusal" answers from no evidence at all, so a
+    gate firing there would throw all of it away and tell the reader their own
+    follow-up was out of scope."""
+    decision = {"mode": "answer", "out_of_scope": True, "queries": []}
+    monkeypatch.setattr(llm, "ask_json", lambda *a, **k: decision)
+    evidence = [{"hit_id": "s1h1", "book": "Dracula — Bram Stoker", "section": "Chapter 1",
+                 "quote": "The castle stood on the edge of a terrible precipice.",
+                 "why": "the castle"}]
+    after_clarify = {"question": "and why does he stay?", "steps_taken": 1,
+                     "evidence": evidence, "clarification": "the first one",
+                     "clarify_asked": True, "clarify_candidates": ["Dracula — Bram Stoker"]}
+    update = nodes.plan(after_clarify)
+    assert update["mode"] != "refusal", "the gate ate a run that had already searched"
+    assert update["evidence"] == evidence, "the evidence the run paid for was discarded"
+    # the same reply on a first plan, with nothing behind it, still refuses
+    assert planned(decision, monkeypatch)["mode"] == "refusal"
+
+
 def test_the_answer_path_never_runs_for_a_refused_request(monkeypatch):
     """`synthesize` writes the refusal itself. The model client is replaced by
     something that raises: if the answer path ran at all, this test says so."""
@@ -173,20 +223,76 @@ def test_the_answer_path_never_runs_for_a_refused_request(monkeypatch):
     assert update["answer"] == t("out_of_scope_answer")
     # and the refusal the eval scorer reads is the same string
     assert canary.harness.is_refusal(canary.harness.fold(update["answer"]))
-    assert "library" in update["answer"].lower(), "the refusal must name the library as the reason"
+
+
+@pytest.mark.parametrize("lang,word", [("en", "library"), ("ua", "бібліотек")])
+def test_the_refusal_names_the_library_in_every_language(lang, word):
+    """The claim is not "it refused", it is "it refused BECAUSE this is a
+    library" — and it is made to the reader in the reader's language, so the
+    English string is not the one to check and then generalise from."""
+    i18n.set_lang(lang)
+    try:
+        answer = t("out_of_scope_answer")
+        assert word in answer.lower()
+        assert canary.harness.is_refusal(canary.harness.fold(answer)), \
+            f"the {lang} refusal is not one by the eval scorer's rules"
+    finally:
+        i18n.set_lang("en")
 
 
 def test_the_scope_refusal_is_not_the_empty_handed_one():
     """Two different claims, two different sentences: "I searched and found
     nothing" would be a false account of a run with no search step in it."""
-    assert t("out_of_scope_answer") != t("refusal_answer")
-    assert "searched" not in t("out_of_scope_answer").lower()
+    for lang, searched in (("en", "searched"), ("ua", "шукав")):
+        i18n.set_lang(lang)
+        try:
+            assert t("out_of_scope_answer") != t("refusal_answer")
+            assert searched in t("refusal_answer").lower()
+            assert searched not in t("out_of_scope_answer").lower()
+        finally:
+            i18n.set_lang("en")
+
+
+# ------------------------------------------------- the live in-scope control
+def test_the_live_control_questions_are_real_golden_questions():
+    """The control that guards the live claim reads its questions out of the
+    golden files by id. A paraphrase kept here would drift away from the set it
+    claims to come from, and an id that quietly disappeared would take the
+    control with it — so both are checked without running anything."""
+    assert len(canary.LIVE_IN_SCOPE) == 4
+    ids = [item_id for _, item_id, _ in canary.LIVE_IN_SCOPE]
+    assert len(set(ids)) == 4
+    for file_name, item_id, why in canary.LIVE_IN_SCOPE:
+        question = canary.golden_question(file_name, item_id)
+        assert question.strip() and why.strip()
+    # the shapes the gate could plausibly eat are all present
+    assert "k09-mention-london" in ids            # an aggregation over the shelf
+    assert "h16-which-stoic-book" in ids          # a recommendation: "which one should I start"
+    assert "k06-count-ua" in ids                  # and one asked in Ukrainian
+    ukrainian = canary.golden_question("en-demo-catalog.yaml", "k06-count-ua")
+    assert any("\u0400" <= ch <= "\u04ff" for ch in ukrainian)
+
+
+def test_a_missing_control_question_is_a_control_failure():
+    with pytest.raises(AssertionError, match="not in"):
+        canary.golden_question("en-demo.yaml", "c99-never-existed")
 
 
 # ---------------------------------------------------------------- end to end
 @pytest.mark.filterwarnings("ignore")
 def test_the_mechanics_run_green(tmp_path, monkeypatch):
     """The command CI runs, in process: the whole set through the real graph on
-    the scripted backend, its three controls included."""
+    the scripted backend, its three scripted controls included. The live
+    in-scope control does not run here — it needs a model and an index, which is
+    the whole reason it is the live leg's own guard."""
     monkeypatch.chdir(tmp_path)
     assert canary.main(["--no-live"]) == 0
+
+
+def test_the_two_backend_flags_cannot_both_be_given(capsys):
+    """"--live --no-live" is a command whose author believes something that is
+    not true; it must not resolve silently to either one."""
+    with pytest.raises(SystemExit) as exit_info:
+        canary.main(["--live", "--no-live"])
+    assert exit_info.value.code == 2
+    assert "not allowed with" in capsys.readouterr().err

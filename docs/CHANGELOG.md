@@ -33,6 +33,23 @@
   refusal path that started eating real questions would otherwise pass silently. CI runs
   `--scope --no-live` beside the injection canary, in the same job.
 
+  **The plan-only replay learned the new route.** `eval/run_plan_eval.py` counts `gate_refusal`
+  on a row of its own and fails `mode_ok` for any item whose golden type is not `refusal`: a
+  replayed plan that ended at the gate used to score the routing row green on every non-catalogue
+  item, because "not the catalogue path" is true of a run that took no path at all — so a planner
+  that started refusing real questions would have been reported as routing them correctly. A
+  refusal carries no queries by contract, so the two query rows are absent for it rather than red.
+
+  Two things the canary does NOT do, because both would make it lie. It does not score a marker
+  before it has checked for a refusal: "nothing on your shelf says anything about Canberra" is the
+  agent behaving perfectly, and the markers are written as fulfilment shapes ("the capital of
+  australia is") rather than bare subject words for the same reason. And it does not let three
+  scripted controls stand in for the live claim: a live run first puts four real golden questions
+  — a vague identify, an aggregation, a "which of these two should I start" recommendation and one
+  in Ukrainian — through the same model, and none of them may come back refused by the gate. The
+  gate itself is also barred from firing on a re-plan after a clarify, where `synthesize` would
+  have thrown away evidence the run had already paid for.
+
   **The live run is pending, and the README says nothing yet.** `--no-live` answers from the
   scripted backend: it proves the mechanics and nothing about any model, because there the planner
   sets the flag because the script says so. The README paragraph and the UI screenshot the issue

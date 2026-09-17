@@ -1,7 +1,7 @@
 """Replaying the planner: the real `plan()` node over a recorded reply, the
 scores it produces, and the refusals that keep a replayed number honest.
 
-The fixtures are `tests/fixtures/plan-replay-golden.yaml` (four items, one per
+The fixtures are `tests/fixtures/plan-replay-golden.yaml` (five items, one per
 branch of the mapping) and `tests/fixtures/plan-replay-recording.jsonl` beside
 it. Each test stages its own copy of the recording with the header stamped to
 the checksums THIS tree has, so that editing `PLAN_RULES` or the fixture golden
@@ -46,7 +46,9 @@ CLARIFY_GOLDEN = FIXTURES / "plan-replay-clarify-golden.yaml"
 CLARIFY_RECORDING = FIXTURES / "plan-replay-clarify-recording.jsonl"
 # what the fixture recording makes the planner decide, item by item
 EXPECTED = {"f01-count": True, "f02-named-book": True, "f03-research-control": True,
-            "f04-planner-gave-nothing": False}
+            "f04-planner-gave-nothing": False,
+            # the scope gate on a question this set expects an answer to (#70)
+            "f05-gate-refusal": False}
 
 
 def staged(tmp_path, *, golden=None, source=None, golden_sha=None, prompt_sha=None,
@@ -114,7 +116,7 @@ def test_the_recorded_planner_is_replayed_through_the_real_node(replayed):
     assert result["code"] == 0
     sidecar = result["sidecar"]
     assert sidecar["model_called"] is False and sidecar["cost_usd"] == 0.0
-    assert sidecar["replayed"] == 4 and sidecar["missing"] == []
+    assert sidecar["replayed"] == 5 and sidecar["missing"] == []
     verdicts = {a["id"]: a["score"]["plan_ok"] for a in sidecar["attempts"]}
     assert verdicts == EXPECTED
     # the deterministic half really ran: a catalogue request was parsed, a named
@@ -127,7 +129,14 @@ def test_the_recorded_planner_is_replayed_through_the_real_node(replayed):
     assert by_id["f04-planner-gave-nothing"]["plan_fallback"] is True
     # ... and a fallback is not a routing decision, so it is not a correct route
     assert by_id["f04-planner-gave-nothing"]["mode_ok"] is False
-    assert result["sidecar"]["totals"]["mode_ok"] == {"ok": 3, "of": 4}
+    # ... and the recorded out-of-scope plan really reached the gate: no query,
+    # straight to synthesize, and not a correct route for an item of type answer
+    assert by_id["f05-gate-refusal"]["gate_refusal"] is True
+    assert by_id["f05-gate-refusal"]["route"] == "synthesize"
+    assert by_id["f05-gate-refusal"]["mode_ok"] is False
+    assert "REFUSED AT THE SCOPE GATE" in result["report"]
+    assert result["sidecar"]["totals"]["gate_refusal"] == {"ok": 1, "of": 5}
+    assert result["sidecar"]["totals"]["mode_ok"] == {"ok": 3, "of": 5}
     assert result["sidecar"]["payload_drift"] == {}
 
 
@@ -173,9 +182,11 @@ def test_a_fresh_recording_is_not_stale():
     here, where the message is about the fixtures, instead of somewhere the
     stamping would have hidden it. At the commit that added them the two
     checksums were `e7d21ec4bd9b` (golden) and `acd673f471d3` (PLAN_RULES); the
-    planner's prompt gained the scope rule (#70) and the fixture was re-stamped
-    to `aabb79d156d6` with it. Re-stamping is honest HERE and nowhere else:
-    these four replies are hand-written fixtures for the post-processing, not a
+    planner's prompt gained the scope rule (#70), the golden gained the item
+    that exercises it (`f05-gate-refusal`), and the fixture was re-stamped to
+    `ee76587c7722` / `aabb79d156d6` with them. Re-stamping is honest HERE and
+    nowhere else:
+    these five replies are hand-written fixtures for the post-processing, not a
     measurement of a model, so there is nothing to re-record. The recordings
     under `eval/recordings/` are measurements and were NOT re-stamped: they
     still carry `acd673f471d3` and replay the rules as they were."""
@@ -246,7 +257,7 @@ def test_an_item_the_recording_does_not_hold_exits_one(replayed):
     # the run still happened and still reported: the exit code is the verdict,
     # not a reason to write nothing
     assert result["sidecar"]["missing"] == ["f02-named-book"]
-    assert result["sidecar"]["replayed"] == 3
+    assert result["sidecar"]["replayed"] == 4
     assert "NOT IN THE RECORDING" in result["report"]
 
 
@@ -287,6 +298,30 @@ def test_a_catalogue_item_wants_the_catalogue_path_and_the_named_operation():
     assert wrong_op["op_ok"] is False and wrong_op["plan_ok"] is False
     took_the_loop = replay.score_plan(item("catalog", expected_op="count"), update(), "act")
     assert took_the_loop["mode_ok"] is False
+
+
+def test_a_gate_refusal_is_a_route_of_its_own_and_a_wrong_one_on_an_answerable_item():
+    """The scope gate (#70) ends the run at plan. Before this row existed, such
+    an attempt scored `mode_ok` GREEN on any non-catalogue item — "not the
+    catalogue path" is true of a run that took no path at all — so a planner
+    that started refusing real questions would have been reported as routing
+    them correctly."""
+    refused = replay.score_plan(item("answer"),
+                                update(mode="refusal", queries=[], current_query=""),
+                                "synthesize")
+    assert refused["gate_refusal"] is True
+    assert refused["mode_ok"] is False and refused["plan_ok"] is False
+    # a refusal carries no queries by contract: absent rows, not red ones
+    assert "queries_ok" not in refused and "queries_range" not in refused
+    # on an item whose expected outcome IS a refusal, reaching it early is not
+    # failed here — `mode_ok` is about the route the set pins
+    expected = replay.score_plan(item("refusal"),
+                                 update(mode="refusal", queries=[], current_query=""),
+                                 "synthesize")
+    assert expected["gate_refusal"] is True and expected["mode_ok"] is True
+    assert expected["plan_ok"] is True
+    # and an ordinary plan carries the row as False, so the count is a count
+    assert replay.score_plan(item("answer"), update(), "act")["gate_refusal"] is False
 
 
 def test_a_content_item_fails_when_the_planner_sent_it_to_the_catalogue():
@@ -451,7 +486,7 @@ def test_a_payload_the_node_no_longer_builds_is_reported_and_exits_one(replayed)
     assert "PAYLOAD DRIFT" in result["report"]
     # the item still replayed and still scored: drift says the replay is
     # questionable, not that the planner decided wrongly
-    assert result["sidecar"]["replayed"] == 4
+    assert result["sidecar"]["replayed"] == 5
     assert {a["id"]: a["score"]["plan_ok"] for a in result["sidecar"]["attempts"]} == EXPECTED
 
 
@@ -529,12 +564,12 @@ def test_a_subset_recording_is_reported_as_one(replayed, tmp_path):
     run over the set would be a smaller measurement wearing a bigger name."""
     path = staged(tmp_path, drop={"f04-planner-gave-nothing"})
     lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
-    lines[0].update({"subset": True, "subset_items": 3, "golden_items": 4})
+    lines[0].update({"subset": True, "subset_items": 4, "golden_items": 5})
     path.write_text("".join(json.dumps(line, ensure_ascii=False) + "\n" for line in lines),
                     encoding="utf-8")
     result = replayed("--allow-missing", recording=path)
     assert result["code"] == 0
-    assert "a SUBSET recording: 3 of 4 items" in result["report"]
+    assert "a SUBSET recording: 4 of 5 items" in result["report"]
     assert "not the set" in result["report"]
     assert result["sidecar"]["subset"].startswith("a SUBSET recording")
 
