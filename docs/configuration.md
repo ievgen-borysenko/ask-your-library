@@ -98,10 +98,23 @@ context length, not this project: the local backend speaks to it through the Ope
 configure here. A model that defaults to 128k — `mistral-small3.2:24b` does — is loaded at that size
 and can need tens of gigabytes of weights plus KV cache, spill onto the CPU, and take minutes per
 call; what you see then is a question deadline running out inside a model call, not an out-of-memory
-error. Fix it before measuring anything: derive a model with an explicit window
-(`printf 'FROM mistral-small3.2:24b\nPARAMETER num_ctx 20480\n' | ollama create
-mistral-small3.2:24b-ctx20k -f -`) and point `OLLAMA_LLM_MODEL` at that, or set
-`OLLAMA_CONTEXT_LENGTH` on the Ollama server. The shipped default `qwen2.5:14b` needs none of this.
+error. Fix it before measuring anything: derive a model with an explicit window and point
+`OLLAMA_LLM_MODEL` at it. `ollama create` takes a Modelfile **path** (`-f` is not a `-`-reading
+flag), so write the two lines to a file first:
+
+```
+# Modelfile
+FROM mistral-small3.2:24b
+PARAMETER num_ctx 20480
+```
+
+```sh
+ollama create mistral-small3.2:24b-ctx20k -f Modelfile
+```
+
+That is the derived model measured below, on Ollama 0.34. Setting `OLLAMA_CONTEXT_LENGTH` on the
+Ollama server is the other way, and it applies to every model that server loads rather than to
+one. The shipped default `qwen2.5:14b` needs none of this.
 Measured on 2026-09-16
 ([`eval-results/2026-09-16-local-models-repeat3.md`](eval-results/2026-09-16-local-models-repeat3.md)).
 

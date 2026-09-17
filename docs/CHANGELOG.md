@@ -44,7 +44,8 @@
   same two questions that carried the broken quotes before. LLM calls unchanged at 79 and the steps
   distribution identical per item, so nothing had to compensate for anything: nine of eleven items
   are byte-identical between the two runs and only `c01` and `c02` moved, by one evidence item each.
-  The catalogue set is unchanged in every field. All three acceptance conditions for `#29` met on
+  On the catalogue set every count is unchanged (only the wall clock differs). All three acceptance
+  conditions for `#29` met on
   this model.
 
   `mistral-small3.2:24b-ctx20k`, the model the gate was argued for, is where the trade shows.

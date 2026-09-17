@@ -156,8 +156,8 @@ at the gate and another in the report. The cost is stated rather than hidden —
 say it too, the count credits the card and not the book, which is the conservative direction and the
 house rule for cards.
 
-Measured 2026-09-17 on two local models, each against itself on `169b511`, both golden sets at
-`--repeat 3`
+Measured 2026-09-17 on two local models, each run under the gate on `c79018a` and compared with the
+same model's pre-gate run on `169b511`, both golden sets at `--repeat 3`
 ([`../eval-results/2026-09-16-local-models-repeat3.md`](../eval-results/2026-09-16-local-models-repeat3.md))
 — **and the two do not agree, which is why the acceptance is recorded per model.** `qwen2.5:14b`
 kept its behaviour item for item (9/11 and 10/10), `broken` went 2 → 0 with

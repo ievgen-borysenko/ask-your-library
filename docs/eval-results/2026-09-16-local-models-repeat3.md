@@ -31,9 +31,12 @@
 > `--record-plans` writes its recording into `eval/recordings/` (a committed directory), and so run
 > *n* is measured against a tree that already holds run *n-1*'s recording. The five checksums are a
 > record of which recordings existed when each run started, not of five different codebases. This is
-> the first thing on this page that a reader should not have to work out for themselves, and it is
-> the reason `--require-clean` and `--record-plans` cannot both be used on the same run as the code
-> stands.
+> the first thing on this page that a reader should not have to work out for themselves. To be exact
+> about what it does and does not mean: the clean check runs **before** the recorder writes anything,
+> so a single run can be both `--require-clean` and `--record-plans` — run 1 of this batch was, and
+> stamped `code_clean: true`. What cannot survive is a **batch**: from run 2 onward each run is
+> measured against a tree holding its predecessors' recordings, untracked in a committed directory.
+> The fix is to commit them (this PR does) or to exclude `eval/recordings/` from the dirty hash.
 >
 > **First runs on this project to carry a spread.** Until today every published number was a single
 > sample (`docs/evaluation.md`: "No repeated run has been made yet"). These are also the first runs
@@ -56,7 +59,7 @@
 > Machine: one Apple M3 Pro, 36 GB, everything sequential — one model, one set, nothing else heavy
 > alongside (`_data/step0/run-step0.sh`). Wall clock 16:38:44 → 23:00:15 CEST, 6 h 21 min for the
 > batch, of which 21 minutes were spent on an attempt that was abandoned (see
-> [The 131k-context trap](#the-131k-context-trap)).
+> [The 131k-context trap](#5-the-131k-context-trap)).
 >
 > **Not reader-graded.** Every manual-correctness checkbox in every one of the six harness reports is
 > unticked. Behaviour PASS is the harness's own heuristic; the facts row is substring presence;
@@ -92,9 +95,12 @@ Wall clock per model and set, from `_data/step0/step0.log`:
 ## `en-demo` — the research set, 11 items, 3 attempts each
 
 Sources: `_data/step0/results/<model>/en-demo/answers-*.md` (totals block after the last `---`) and
-`answers-*.json` (`totals.per_attempt`, `per_group`, `questions[].spread`). Every figure below is
-copied from those files; nothing on this page is recomputed from the answers. A single number means
-the three attempts agreed exactly.
+`answers-*.json` (`totals.per_attempt`, `per_group`, `questions[].spread`). **Every figure in the
+tables is copied from those files**, never recomputed from the answers. Four kinds of figure on this
+page *are* derived, all of them from sidecar fields and none from answer text: the role-second
+medians and percentage shares and the cold/warm split (from `by_role_seconds`), the steps
+histograms (from `steps_taken`), the card-only percentages (`card_only / checked`), and the wall-clock
+ratios between models. A single number means the three attempts agreed exactly.
 
 | Row | `qwen2.5:14b` | `qwen2.5:32b` | `mistral-small3.2:24b-ctx20k` |
 |---|---|---|---|
@@ -187,9 +193,12 @@ the same item with the same filter and the same stop reason. All three miss both
   4 calls, 5,230 tokens in**, no clarify at all. It retrieved both works on the first query, which
   is the cheapest pass anywhere in this batch and the only aggregation pass.
 
-**`mistral-small3.2:24b-ctx20k` is 11/11 on `en-demo`** — the only 11/11 on the local backend in this
-project's record, hosted Sonnet 4.6 on `v0.2.0-rc1` being the other one. Read it beside its broken
-count.
+**`mistral-small3.2:24b-ctx20k` is 11/11 on `en-demo`** — the first 11/11 on the local backend in
+this project's record. It is not the first 11/11: the hosted core runs of `v0.2.0-rc1` (07.09) and of
+the catalogue branch (09.09) reach it, and so do two conditions of the 05.09 ablation (`cards-only`
+and `agent`, on the clarify-adjusted denominator that page explains) — all of them hosted
+`anthropic/claude-sonnet-4.6`, on other code and in two cases another golden checksum. Read this one
+beside its broken count.
 
 ### The facts row, and what it misses
 
@@ -256,7 +265,9 @@ measurement, and it costs money.
 
 `observe` is 70–76 % of all model seconds in every one of the six runs — `en-demo`: 72 % (14b),
 70 % (32b), 74 % (mistral); catalogue: 76 %, 67 %, 74 %. Nothing else comes close: `plan` is 4–8 %,
-`reflect` 8–11 %, `synthesize` 9–15 %. Medians per call, `en-demo`:
+`reflect` 8–11 %, `synthesize` 9–15 %. Median of the per-item-attempt role totals — `by_role_seconds`
+sums a role's calls within one attempt, so an item with two `observe` calls contributes their sum,
+not each call — on `en-demo`:
 
 | Role | `14b` | `32b` | `mistral` |
 |---|---|---|---|
@@ -325,22 +336,66 @@ to show, for each of the three models and both sets:
    will show plainly against these numbers.
 
 **Answered 2026-09-17, in [the gate section below](#the-observe-gate-65-same-model-same-sets).**
-Points 1 and 2 came out as written. Point 4 came out as written on mistral and not at all on the 14b:
-`c10` really did go from 1 step to 2 and `c04` from 2 to 4, and the coverage probe did not move on
-either model. Point 3 did **not** hold on mistral — it kept the aggregation pass this paragraph
+Points 1 and 2 came out as written. Point 4 came out half-answerable: the steps half came out as
+written on mistral and not at all on the 14b — `c10` really did go from 1 step to 2 and `c04` from 2
+to 4 — while **the coverage-probe half cannot be answered from these runs at all**, because the probe
+has no counter in the sidecar and leaves no marker in `steps_log`. Asking for it was a mistake in the
+prediction, not a result. Point 3 did **not** hold on mistral — it kept the aggregation pass this paragraph
 worried about and lost a different item, `c03`, on two attempts of three, for a reason that has
 nothing to do with step counts. The prediction was right about the mechanism and wrong about which
 item it would cost.
+
+### 4b. The recordings replay, and one of the six disagrees with the golden set
+
+Added 2026-09-17, after review round 1 observed that nothing had replayed them. All six recordings
+were fed back through the real `plan()` with `eval/run_plan_eval.py` — no model call, no network —
+against the golden files in this tree:
+
+| Recording | Plan PASS | Exit (with `--allow-unreplayed`) | Exit (no flags) |
+|---|---|---|---|
+| `en-demo` · `qwen2.5:14b` | 33/33 | 0 | **1** — 1 attempt unreplayed (`c10` call 1/2) |
+| `en-demo` · `qwen2.5:32b` | 33/33 | 0 | **1** — 2 unreplayed (`c09`, `c10`, call 1/2 each) |
+| `en-demo` · `mistral-small3.2:24b-ctx20k` | 33/33 | 0 | 0 |
+| `en-demo-catalog` · `qwen2.5:14b` | 30/30 | 0 | 0 |
+| `en-demo-catalog` · `qwen2.5:32b` | 30/30 | 0 | 0 |
+| `en-demo-catalog` · `mistral-small3.2:24b-ctx20k` | **27/30** | 0 | 0 |
+
+All six pass `--check`, so the golden and `PLAN_RULES` checksums in every header still describe this
+tree: `PLAN_RULES@acd673f471d3`, no payload drift, no stale recording, nothing replayed under
+`--allow-stale`.
+
+Three things to read off it, and one caveat about the exit codes.
+
+**`k10-hybrid-named-book` fails the plan check on mistral, three attempts of three:**
+`FAIL: mode answer -> act, queries 1 OUTSIDE 2-4, book filter Dracula — Bram Stoker`. The mode and
+the named-book resolution are right — it is the same `Dracula` filter the two qwens produce — and the
+planner issues **one** query where the golden item requires two to four. That is a deterministic-half
+defect, visible for free, on the one item of the catalogue set that already varies across attempts in
+the full runs. The other 29 attempts of that file pass, and `mode_exact` is 30/30 on it.
+
+**The unreplayed attempts corroborate the clarify anomaly already in `docs/backlog.md`.** Only an
+item's first plan call can be replayed, since a re-plan after a clarify needs graph state the
+recording does not hold. Both qwen `en-demo` recordings therefore report unreplayed attempts —
+`qwen2.5:14b` one, `qwen2.5:32b` two, matching their clarify counts exactly — and the mistral
+`en-demo` recording reports **none**, because it holds no second plan call to skip. The replay
+harness reaches the same conclusion from the other side.
+
+**Exit 0 is not "everything passed".** The mistral catalogue replay exits 0 while failing three
+attempts, because a pass floor is opt-in (`--min-pass N`); the two qwen `en-demo` replays exit 1
+without `--allow-unreplayed` for a reason that is a property of clarify, not a defect in the
+recording. Read the PASS column, not the exit code.
 
 ### 5. The 131k-context trap
 
 `mistral-small3.2:24b` could not be measured as pulled. Ollama loaded it with `num_ctx 131072`,
 which on this machine means roughly 36 GB of weights-plus-KV and about 28 % of the model offloaded
-to CPU (`_data/step0/step0.log`, 20:41). The first plan call of the first attempt of the first item
-never returned: `c01-ivanhoe-disguised-knight (identify, 1 steps, 1201s, 1 calls, 603 in / 55 out
-tokens, attempt 1/3) — FAIL: titles 0/1, stop: question deadline (1200 s) ran out during a model
-call`. Its `by_role_seconds` reads `plan 192.2, observe 1005.4` — 603 input tokens took over three
-minutes to plan against, and the deadline arrived inside `observe`. The run was stopped 21 minutes
+to CPU (`_data/step0/step0.log`, 20:41). The first attempt of the first item spent the whole question
+budget without finishing a search: `c01-ivanhoe-disguised-knight (identify, 1 steps, 1201s, 1 calls,
+603 in / 55 out tokens, attempt 1/3) — FAIL: titles 0/1, stop: question deadline (1200 s) ran out
+during a model call: answering from what was found` (the report line quoted in full). Its
+`by_role_seconds` reads `plan 192.2, observe 1005.4`: the plan call **did** return — 603 input tokens
+took over three minutes to plan against — and the deadline then arrived inside `observe`, 1,005 s
+into a single call. The run was stopped 21 minutes
 in and the `.partial` recording removed; the one report it wrote is kept at
 `_data/step0/results/mistral-small3.2_24b-ctx131k-aborted/`.
 
@@ -440,7 +495,8 @@ A single figure means all three attempts agreed exactly.
 | Steps distribution over 30 attempts | 0 ×18 · 1 ×6 · 2 ×3 · 3 ×2 · 4 ×1 | 0 ×18 · 1 ×6 · 2 ×3 · 3 ×2 · 4 ×1 |
 | Set wall clock | 765 s | 753 s |
 
-The catalogue set is **unchanged in every field**, token for token and call for call. It had no
+On the catalogue set **every count is unchanged** — behaviour, quotes, evidence, calls, tokens and
+steps, item for item. Only the wall clock differs (765 → 753 s), which is machine noise. It had no
 broken quotes to drop, so the gate had nothing to do on it.
 
 ### The reading — qwen2.5:14b
@@ -487,9 +543,10 @@ confidence: role medians moved a little in the same direction (`observe` 45.3 �
 was the only thing running in both cases, and one item's shorter synthesis cannot account for three
 minutes. Read it as run-to-run noise on the same hardware.
 
-**Determinism holds on the new code too.** All three attempts of the gate run are byte-identical on
-every item of both sets, verification strings included — the same result the baseline gave for this
-model on `en-demo`.
+**Determinism is exactly as it was on the old code.** All three attempts of the gate run are
+byte-identical on all 11 items of `en-demo` and on 9 of the 10 catalogue items, verification strings
+included; `k10-hybrid-named-book` returns two distinct answers over three attempts, which is what it
+did in the baseline too. The gate changed nothing about that.
 
 ### Paired table — `mistral-small3.2:24b-ctx20k`
 
@@ -642,6 +699,15 @@ Not measured either way: `qwen2.5:32b` under the gate, and any hosted model unde
   it cannot tell a fact in a right sentence from the same fact in a wrong one; quote provenance says
   a quote is verbatim in the passage it cites, not that the answer reasons well from it. Three rows
   that cannot be confused (ADR-010), and none of them is the fourth.
+- **One corpus, 21 questions.** Everything here is the 33-book demo corpus at one index build, and
+  the two golden sets are 11 and 10 items. Four `en-demo` items carry every failure discussed on this
+  page, and a single item moving is worth 9 percentage points of a behaviour row. Differences of one
+  question between two columns are not effects, and no claim here generalises past this corpus.
+- **The recordings were published before they had been replayed.** They were committed, scanned and
+  checksum-matched, but nothing had fed them back through `plan()` until review round 1 asked; the
+  replay is [finding 4b](#4b-the-recordings-replay-and-one-of-the-six-disagrees-with-the-golden-set)
+  and it found a real defect (mistral `k10`). "Committed" was not the same as "exercised", and this
+  page said more than it had checked for a day.
 - **One machine.** Every second on this page was measured on one M3 Pro with 36 GB. The role
   seconds, the cold/warm ratio and the 2.6× are properties of this machine and this Ollama build as
   much as of the models; the token counts and the verdicts are not.

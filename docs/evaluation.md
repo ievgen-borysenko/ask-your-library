@@ -68,8 +68,8 @@ sidecar, and every clause is written only where there was something to say, so a
 of them writes the line the harness has always written.
 
 The gate's own behavioural effect — whether a set answers as well with it as without — was measured
-on 2026-09-16/17 on **two local models**, each against itself on `169b511`, both golden sets,
-`--repeat 3 --clarify-pick second`
+on 2026-09-16/17 on **two local models**, each run under the gate on `c79018a` and compared with the
+same model's baseline run on `169b511`, both golden sets, `--repeat 3 --clarify-pick second`
 ([`eval-results/2026-09-16-local-models-repeat3.md`](eval-results/2026-09-16-local-models-repeat3.md)).
 **The two do not agree, so the acceptance is stated per model.**
 
@@ -90,7 +90,10 @@ therefore NOT met on this model**, on one item, on two attempts of three. The ca
 unaffected (10/10, 2 dropped, 20/20 confirmed).
 
 The two figures to read beside those, because both follow from the gate rather than from the models,
-behave differently on the two models as well. The **coverage probe** fired once in each run on both.
+behave differently on the two models as well — where they can be read at all. **The coverage-probe
+firing count was not measured**: the probe has no counter in the sidecar and leaves no marker in
+`steps_log`, so neither run says how often it fired, and asking for it in advance was a mistake in
+the acceptance rather than a result (recording it is in `docs/backlog.md`).
 The **steps per question** did not move at all on `qwen2.5:14b` — no step there lost all of its
 quotes — but moved on mistral exactly as predicted: a step whose quotes were all dropped is held
 rather than counted as dry, the empty-streak stop does not fire, and `c04` went 2 → 4 steps and
@@ -452,12 +455,17 @@ The first recordings of real golden sets were made on 2026-09-16 and are committ
 [`eval/recordings/`](../eval/recordings/), both sets against all three local models of
 [`eval-results/2026-09-16-local-models-repeat3.md`](eval-results/2026-09-16-local-models-repeat3.md)
 (`en-demo.edc151948a58.*` and `en-demo-catalog.72eb2c2b2655.*`, 30 to 39 plan calls each, three
-attempts per item). Nothing on this page was produced by replaying them yet — they are the input a
-replayed number will be attributable to. One thing those runs settled about the recorder itself:
-a run cannot be both `--record-plans` and `--require-clean` as the code stands, because the
-recording lands in a committed directory and the fingerprint hashes un-ignored untracked files, so
-each run in a batch is stamped dirty by its predecessor's recording (the checksums are read in that
-report's header).
+attempts per item). All six were replayed for the first time on 2026-09-17, and what that measured
+is in the report; until then nothing on this page had been produced this way, and they remain the
+input a replayed number is attributable to.
+
+One thing those runs settled about the recorder itself, stated exactly. The clean check runs before
+the recorder writes anything, so a **single** run can be both `--require-clean` and
+`--record-plans`; the first run of the 16.09 batch was, and stamped `code_clean: true`. A **batch**
+cannot: `eval/recordings/` is committed by design and the fingerprint hashes un-ignored untracked
+files, so from the second run onward each is stamped dirty by its predecessors' recordings (the
+checksums are read in that report's header). Committing the recordings ends it for this tree;
+excluding `eval/recordings/` from the dirty hash would end it generally (`backlog.md`).
 
 ## Where the measured code lives
 

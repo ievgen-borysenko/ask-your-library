@@ -331,19 +331,32 @@ open ones often refer to them.
   unverifiable quotes are being discarded, which is the only option that could move `c03` and is a
   prompt change, so it invalidates every recording and needs its own baseline. `qwen2.5:32b` under
   the gate is unmeasured and would inform the choice.
-- **`--record-plans` writes into a committed directory, so it dirties the code stamp and cannot be
-  combined with `--require-clean`.** `eval/recordings/` is committed by design, the run fingerprint
-  hashes `git diff HEAD` together with the un-ignored untracked files, and the recording is written
-  during the run — so a recording run stamps itself dirty, and in a batch each run is stamped by its
-  predecessor's file (five different `dirty(...)` checksums over the six runs of 16.09). The gate
-  run of the same night is the control: it recorded nothing, still stamped
-  `c79018a+dirty(2005429d26f5)` because the baseline's recordings were untracked in the tree, and
-  stamped the *same* checksum on both its sets. So the trigger is an un-ignored untracked file, not
-  the act of recording. Fix either way: exclude `eval/recordings/` from the dirty hash (it is an
-  input the fingerprint already names by checksum through the golden file, and a recording cannot
-  change the code that produced it), or write to a staging path outside the hashed set and move the
-  file into place once it is finalised. Until then a run whose numbers get published must choose
-  between `--require-clean` and a recording, which is the wrong choice to have to make.
+- **A recording batch self-dirties its own code stamp from the second run onward.**
+  `eval/recordings/` is committed by design and the run fingerprint hashes `git diff HEAD` together
+  with the un-ignored untracked files. A *single* run is fine — the clean check runs before the
+  recorder writes, so run 1 of the 16.09 batch was `--require-clean --record-plans` and stamped
+  `code_clean: true` — but every later run is measured against a tree holding its predecessors'
+  recordings (five different `dirty(...)` checksums over the six runs). The gate run of the same
+  night is the control: it recorded nothing, still stamped `c79018a+dirty(2005429d26f5)` because the
+  baseline's recordings were untracked in the tree, and stamped the *same* checksum on both its sets.
+  So the trigger is an un-ignored untracked file, not the act of recording. Two fixes: commit the
+  recordings as soon as they are made (which is what closes it for this tree), or exclude
+  `eval/recordings/` from the dirty hash — it is an input the fingerprint already names by checksum
+  through the golden file, and a recording cannot change the code that produced it.
+- **`k10-hybrid-named-book` plans one query on `mistral-small3.2:24b-ctx20k` where the golden item
+  requires two to four.** Found by replaying the 16.09 recordings on 17.09
+  (`eval/run_plan_eval.py`, `docs/eval-results/2026-09-16-local-models-repeat3.md`): three attempts
+  of three, `FAIL: mode answer -> act, queries 1 OUTSIDE 2-4, book filter Dracula — Bram Stoker`. The
+  mode and the named-book resolution are right and match both qwen models; only the query count is
+  wrong. It is the deterministic half of `plan()` on a recorded reply, so it is reproducible for free
+  and needs no run: `uv run eval/run_plan_eval.py --recording
+  eval/recordings/en-demo-catalog.72eb2c2b2655.mistral-small3.2-24b-ctx20k.jsonl k10-hybrid-named-book`.
+- **Record how often the coverage probe fires.** ADR-013's probe spends a search step out of the
+  question's budget, and the acceptance for `#29` asked for its firing count as one of two figures to
+  read beside the gate's numbers — but it has no counter in the sidecar and leaves no marker in
+  `steps_log`, so neither the baseline nor either gate run can answer it. A counter per question and
+  in totals, alongside `dropped_unverified`, would make the question answerable next time it is
+  asked.
 - **Verify the clarify path is model-independent.** On the runs of 16.09
   `mistral-small3.2:24b-ctx20k` asked the `c09` clarify, had the choice applied and reported
   `clarify choice applied`, yet its recording holds exactly one plan call per attempt (33 for 11
