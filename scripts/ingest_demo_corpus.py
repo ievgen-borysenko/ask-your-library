@@ -15,6 +15,7 @@ Stages (all cached in data/, safe to re-run):
   uv run scripts/ingest_demo_corpus.py --stage prepare-canaries
   uv run scripts/ingest_demo_corpus.py --stage ingest      # transcripts table
   uv run scripts/ingest_demo_corpus.py --stage cards       # cards table
+  uv run scripts/ingest_demo_corpus.py --stage cards --cards-dir corpus-tech/cards
   uv run scripts/ingest_demo_corpus.py --book alice        # filter by substring
   uv run scripts/ingest_demo_corpus.py --stage stamp-meta  # fingerprint pre-existing tables
   uv run scripts/ingest_demo_corpus.py --stage checksums   # pin source sha256 into the manifest
@@ -554,10 +555,17 @@ def ingest_transcripts_table(backend: str, book_filter: str | None, entry_ids: l
           f"(FTS rebuild {fts_seconds:.1f}s)")
 
 
-def ingest_cards_table(backend: str) -> None:
-    cards = sorted(CARDS_DIR.glob("*.md"))
+def ingest_cards_table(backend: str, cards_dir: Path = CARDS_DIR) -> None:
+    """Rebuild this index's cards table from a folder of `*.md` cards.
+
+    The folder is a parameter because the engineer's shelf (#58) is a second
+    index with cards of its own: `--cards-dir corpus-tech/cards` together with
+    LIBRARY_DB_PATH pointing at that index writes the shelf's `cards_<backend>`
+    table through this same code, so both shelves' cards are cut, embedded and
+    stamped by one implementation rather than two."""
+    cards = sorted(cards_dir.glob("*.md"))
     if not cards:
-        sys.exit(f"no cards in {CARDS_DIR} — generate them first")
+        sys.exit(f"no cards in {cards_dir} — generate them first")
     embedder = get_embedder(backend)
     db = lancedb.connect(DB_PATH)
     name = f"cards_{backend}"
@@ -581,7 +589,7 @@ def ingest_cards_table(backend: str) -> None:
     # touch cards.
     write_index_meta(db, name, backend, embedder.model, embedder.dims,
                      chunker=CARD_CHUNKER_VERSION)
-    print(f"cards done: {len(cards)} cards -> {table.count_rows()} chunks")
+    print(f"cards done: {len(cards)} cards from {cards_dir} -> {table.count_rows()} chunks")
 
 
 def stamp_existing_tables(backend: str, chunker: str | None = None) -> None:
@@ -644,6 +652,10 @@ def main() -> None:
                          "when such a backup is already there)")
     ap.add_argument("--retranscribe", action="store_true",
                     help="ignore shipped audio transcripts and run Whisper (macOS)")
+    ap.add_argument("--cards-dir", type=Path, default=CARDS_DIR, metavar="DIR",
+                    help="--stage cards only: the folder of *.md cards to index "
+                         f"(default {CARDS_DIR.relative_to(REPO)}; the engineer's shelf "
+                         "passes corpus-tech/cards together with its own LIBRARY_DB_PATH)")
     args = ap.parse_args()
     if args.chunker and args.stage != "stamp-meta":
         # Silently ignoring it would let somebody believe they had asserted a
@@ -680,7 +692,7 @@ def main() -> None:
         if args.stage in ("all", "cards"):
             print("== ingest cards ==")
             with ingest_lock(DB_PATH, command=f"ingest_demo_corpus.py --stage {args.stage}"):
-                ingest_cards_table(args.backend)
+                ingest_cards_table(args.backend, args.cards_dir)
         if args.stage == "checksums":
             print("== pin source checksums into the manifest ==")
             write_checksums()
