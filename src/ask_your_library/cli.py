@@ -24,7 +24,7 @@ import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-from .bookkey import split_read_query
+from .bookkey import split_read_query, unescape_marker
 from .config import QUESTION_DEADLINE_S, SUPPORTED_LANGS
 from .graph import build_graph
 from .i18n import set_lang, source_word, status_word, t
@@ -105,11 +105,11 @@ def print_event(node_name: str, update: dict) -> None:
         if nxt == "__clarify__":
             say(t("ev_reflect_clarify"))
         elif nxt and nxt.startswith("__chapter__|"):
-            _, book, section = nxt.split("|", 2)
+            _, book, section = (unescape_marker(part) for part in nxt.split("|", 2))
             say(t("ev_reflect_chapter", book=book, section=section))
         elif nxt and nxt.startswith("__book__|"):
             _, book, _ = nxt.split("|", 2)
-            say(t("ev_reflect_probe", book=book))
+            say(t("ev_reflect_probe", book=unescape_marker(book)))
         elif nxt:
             say(t("ev_reflect_search", q=nxt))
         elif update.get("stop_reason"):

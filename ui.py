@@ -66,7 +66,7 @@ from ask_your_library.graph import build_graph                      # noqa: E402
 from ask_your_library.i18n import (LANG, get_lang, set_lang, source_word,  # noqa: E402
                                    status_word, t)
 from ask_your_library.preflight import check_api_key, check_environment  # noqa: E402
-from ask_your_library.bookkey import split_read_query                # noqa: E402
+from ask_your_library.bookkey import split_read_query, unescape_marker  # noqa: E402
 from ask_your_library.provenance import match_span                  # noqa: E402
 from ask_your_library.runner import failed_result, history_entry, run_question  # noqa: E402
 from ask_your_library.sanitize import LINE_BREAK_RE                 # noqa: E402
@@ -672,11 +672,11 @@ def render_event(node_name: str, update: dict, view: RunView | None = None) -> N
         if next_query == "__clarify__":
             text = t("ui_clarify_step")
         elif next_query and next_query.startswith("__chapter__|"):
-            _, book, section = next_query.split("|", 2)
+            _, book, section = (unescape_marker(part) for part in next_query.split("|", 2))
             text = t("ui_chapter", book=book, section=section)
         elif next_query and next_query.startswith("__book__|"):
             _, book, _ = next_query.split("|", 2)
-            text = t("ui_probe", book=book)
+            text = t("ui_probe", book=unescape_marker(book))
         elif next_query:
             text = t("ui_search_more", q=next_query)
         elif update.get("stop_reason"):

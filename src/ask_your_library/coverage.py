@@ -6,7 +6,7 @@ no effect (04.09).
 import re
 
 from .config import MAX_STEPS
-from .bookkey import TITLE_SEPARATOR, title_of
+from .bookkey import TITLE_SEPARATOR, escape_marker, title_of
 from .state import AgentState, is_loop_marker
 
 def _uncovered_books(state: AgentState) -> list[tuple[str, int]]:
@@ -67,6 +67,9 @@ def coverage_probe(state: AgentState, decision: str | None) -> str:
         return queued[0] if queued else ""
     for book, _count in _uncovered_books(state):
         if _named_in(state["question"], book):
-            return f"__book__|{book}|{state['question']}"
+            # The key is escaped and the question is not: the question is last
+            # and takes the rest of the string, the key is a lookup value that
+            # has to come back out of `act` exactly as it went in.
+            return f"__book__|{escape_marker(book)}|{state['question']}"
     return ""
 

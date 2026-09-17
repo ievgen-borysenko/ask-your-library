@@ -26,7 +26,7 @@ from .catalog import (mixed_intent, parse_catalog_request, render_catalog, resol
 # grammar is this node's contract with `reflect`, and it is read (and tested)
 # as part of it.
 from .bookkey import (READ_STATUSES, chapter_marker, read_key, read_status,  # noqa: F401
-                      same_chapter, split_read_query)
+                      same_chapter, split_read_query, unescape_marker)
 from .clarify import _chosen_book, _clarify_candidates, _evidence_after_clarify
 from .config import (CHAPTER_HIT_CHARS, CHAPTER_SCAN_CHARS, LLM_TIMEOUT_S,
                      MAX_CLARIFY_CANDIDATES, MAX_EMPTY_STREAK, MAX_STEPS, SEARCH_HIT_CHARS)
@@ -305,7 +305,10 @@ def act(state: AgentState) -> dict:
         empty_read_note = f"[malformed action marker ignored: {state['current_query']}]\n"
         read_chapters = state.get("read_chapters", [])
     elif action.startswith("__chapter__|"):
-        _, asked_book, section = marker_parts
+        # Decoded here, once, so everything downstream — the read itself, the
+        # hit's metadata, the read_chapters entry — carries the book key and
+        # the section the index actually holds, separators and all.
+        _, asked_book, section = (unescape_marker(part) for part in marker_parts)
         # The observation window of a chapter read (ADR-025). Without a read
         # query the chapter is cut at CHAPTER_HIT_CHARS from its FRONT, as it
         # always was. With one, the chapter is read as far as the scan budget
@@ -358,7 +361,7 @@ def act(state: AgentState) -> dict:
     elif state["current_query"].startswith("__book__|"):
         # Coverage probe (ADR-013): one search inside a single candidate book.
         _, probe_book, probe_query = marker_parts
-        hits = search_both(probe_query, k=4, book=probe_book)
+        hits = search_both(probe_query, k=4, book=unescape_marker(probe_book))
         empty_read_note = ""
         read_chapters = state.get("read_chapters", [])
     else:
