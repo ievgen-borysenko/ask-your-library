@@ -154,6 +154,20 @@ def test_a_catalogue_answer_is_one_step_and_the_titles_render_as_text(ui, monkey
     assert "retrieval limited to it" in shown[-1][1]
 
 
+def test_a_refused_request_renders_as_one_plan_step_with_no_query_list(ui, monkeypatch):
+    """The gate's plan step (#70): what happened, not an empty query list."""
+    shown = []
+    monkeypatch.setattr(ui, "show_step",
+                        lambda name, text, default_open=False: shown.append((name, text, default_open)))
+    from ask_your_library.i18n import t as _t
+    ui.render_event("plan", {"mode": "refusal", "current_query": "", "queries": [],
+                             "book_filter": "", "book_unresolved": ""})
+    name, text, opened = shown[-1]
+    assert name == _t("ui_step_plan") and opened is True
+    assert text == _t("ui_plan_refusal")
+    assert _t("ui_queries") not in text and _t("ui_mode", mode="refusal") not in text
+
+
 def test_plan_step_book_names_are_escaped_by_the_real_step_writer(ui, monkeypatch):
     """show_step itself, not a pass-through: a crafted book name in the plan
     step is text, not DOM."""

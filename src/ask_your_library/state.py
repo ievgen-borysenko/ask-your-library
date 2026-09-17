@@ -15,8 +15,10 @@ def is_loop_marker(query) -> bool:
 class AgentState(TypedDict):
     question: str          # the user's original question
     history: list[str]     # prior chat turns: "Q: ... -> A: ..." (context for follow-ups)
-    mode: str              # "identify" (find which book), "answer" (answer from content)
-                           # or "catalog" (what the library holds, answered by code: ADR-016)
+    mode: str              # "identify" (find which book), "answer" (answer from content),
+                           # "catalog" (what the library holds, answered by code: ADR-016)
+                           # or "refusal" (the request is not about the books at all: the scope
+                           # gate in plan, #70 — no query, no search step, no second model call)
     catalog_request: dict  # plan, mode catalog: the validated operation {op, title, author}
     catalog: dict          # catalog node: op, count (= len(books)), total, books (index keys),
                            # query, resolved, suggestions; empty on every other path

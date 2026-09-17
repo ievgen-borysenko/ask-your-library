@@ -39,6 +39,23 @@ open ones often refer to them.
 
 ## Agent behaviour
 
+- **The scope gate is measured at 7/9; the two misses both name a book on the shelf** (#70,
+  17.09). An out-of-scope request — code, a translation, arithmetic, a persona — is decided by the
+  planner (one optional `out_of_scope` field) and refused by code at `plan`, and
+  `eval/scope_canary.py` runs nine such requests through the whole graph with three controls. CI
+  runs it on the scripted backend, which proves the mechanics and nothing about any model; the
+  live run on the local default is recorded
+  ([`eval-results/2026-09-17-scope-canary-qwen2-5-14b.md`](eval-results/2026-09-17-scope-canary-qwen2-5-14b.md)).
+  Open: a poem in the style of a shelved book and that book's publication history are both
+  answered rather than refused, which says the planner reads the named title and not the
+  deliverable — the second iteration has to move that number, and only then do the README
+  paragraph and the web UI screenshot the issue asks for get written. Open beside it: a small local
+  model that never sets the field turns every prompt into the `CONTAINED` outcome (refused for lack
+  of evidence, four model calls, a refusal that does not name the library), and the first live run
+  says nothing about it — the local default does set the field, on seven of nine — so whether a
+  code-level fallback is worth it waits for a run on a smaller model. The prompt change
+  also made the six committed plan recordings stale (`PLAN_RULES` `acd673f471d3` → `ab7b9ece3352`);
+  re-recording needs a run somebody was going to make anyway.
 - **Identify mode can still stop at one book.** The coverage gate (ADR-013) spends the planner's
   next queued query before "enough" with a single book: c09 and h22 clarify with the right second
   candidate. Still open: q06 (still does not clarify) and any candidate no query retrieves. The

@@ -76,6 +76,10 @@ def print_event(node_name: str, update: dict) -> None:
     if node_name == "plan":
         if update["mode"] == "catalog":
             say(t("ev_plan_catalog", op=update["catalog_request"]["op"]))
+        elif update["mode"] == "refusal":
+            # The scope gate (#70): there is no query list to print, and
+            # "queries: ['']" would be the only thing this line said.
+            say(t("ev_plan_refusal"))
         else:
             say(t("ev_plan", mode=update["mode"],
                   queries=[update["current_query"]] + update["queries"]))

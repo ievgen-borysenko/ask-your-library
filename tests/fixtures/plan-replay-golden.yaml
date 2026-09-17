@@ -1,8 +1,10 @@
 # A synthetic golden set for the plan-only replay tests (tests/test_plan_replay.py).
-# Four items, one per branch of the mapping in eval/run_plan_eval.py: a catalogue
+# Five items, one per branch of the mapping in eval/run_plan_eval.py: a catalogue
 # question with an expected operation, a content question that names one book and
 # pins the retrieval filter, a research control that must NOT take the catalogue
-# path, and one item the paired recording deliberately fails.
+# path, one item the paired recording deliberately fails, and one where the
+# recorded planner sets `out_of_scope` on a question this set expects an answer
+# to (the scope gate, #70: a third route, and a wrong one here).
 #
 # EDITING THIS FILE CHANGES ITS CHECKSUM, and tests/fixtures/plan-replay-recording.jsonl
 # carries that checksum in its header — which is the staleness rule under test.
@@ -35,4 +37,9 @@ questions:
   type: identify
   question: What was that novel about a whale?
   expected_books: [Moby Dick]
+  expected_facts: []
+- id: f05-gate-refusal
+  type: answer
+  question: Why does Harker write his journal in shorthand?
+  expected_books: [Dracula]
   expected_facts: []
