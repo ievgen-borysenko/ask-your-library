@@ -615,12 +615,23 @@ def _snap_back(text: str, at: int) -> int:
     return at
 
 
-def _hidden_after(text: str) -> int:
-    """How many characters a chapter read already reported as not shown at its
-    end — the number inside `library.cut_marker`, so a window cut out of an
-    already-cut read reports the whole remainder and not only its own part."""
+def _body_and_tail(text: str) -> tuple[str, int]:
+    """A chapter read split into (its text, the characters of the chapter that
+    are NOT in it).
+
+    The second number is the marker's own count PLUS the marker's own length.
+    A cut marker does not sit beside the text it replaces, it sits INSIDE the
+    budget (`library.join_chapter`), so stripping it removes both what it says
+    was hidden and the characters it was written over. Counting only the first
+    loses the marker's length on every arithmetic done afterwards — which is
+    how a chapter longer than the scan budget came back with a head cut whose
+    "characters not shown" was short by exactly one marker, and therefore not
+    the head cut an unaimed read of the same chapter produces."""
     marker = CUT_MARKER_RE.search(text)
-    return int(re.search(r"\d+", marker.group()).group()) if marker else 0
+    if not marker:
+        return text, 0
+    hidden = int(re.search(r"\d+", marker.group()).group())
+    return text[:marker.start()], hidden + len(marker.group())
 
 
 def window_around(text: str, query: str, budget: int) -> str:
@@ -648,14 +659,16 @@ def window_around(text: str, query: str, budget: int) -> str:
     all: `act` reads the head directly."""
     if len(text) <= budget and not CUT_MARKER_RE.search(text):
         return text                      # the whole chapter fits; nothing to choose
-    already_hidden = _hidden_after(text)
-    body = CUT_MARKER_RE.sub("", text)
+    # `hidden_beyond` is everything of the chapter that is not in `body`: what
+    # an earlier cut said it left out, and the characters that cut wrote its own
+    # marker over. len(body) + hidden_beyond is the chapter as it was.
+    body, hidden_beyond = _body_and_tail(text)
     # Both markers live INSIDE the budget, like `join_chapter`'s does, so every
     # later cut at the same limit (the scratchpad, the observe prompt) still
     # shows them. Their length depends on numbers the window has not been
     # chosen yet, so the room reserved is an upper bound on both: the digits of
     # a count that cannot be larger than the chapter itself.
-    reserve = len(head_marker(len(body))) + len(cut_marker(len(body) + already_hidden))
+    reserve = len(head_marker(len(body))) + len(cut_marker(len(body) + hidden_beyond))
     width = max(1, budget - reserve)
     span = best_match_span(body, query, width)
     if span is None:
@@ -676,21 +689,23 @@ def window_around(text: str, query: str, budget: int) -> str:
         # is the difference between "this query found nothing, so you get the
         # opening as always" and a second, slightly shorter kind of head read
         # that only ever happens when a query was named and missed.
-        return _head_cut(body, budget, already_hidden)
-    hidden_after = (len(body) - end) + already_hidden
+        return _head_cut(body, budget, hidden_beyond)
+    hidden_after = (len(body) - end) + hidden_beyond
     return f"{head_marker(start)}{body[start:end]}" \
            f"{cut_marker(hidden_after) if hidden_after else ''}"
 
 
-def _head_cut(body: str, budget: int, already_hidden: int = 0) -> str:
+def _head_cut(body: str, budget: int, hidden_beyond: int = 0) -> str:
     """The head of a chapter at `budget` characters — `library.join_chapter`'s
     own arithmetic, reproduced here so that a windowed read that lands on the
     head is byte-identical to a read that never asked for a window.
 
-    `already_hidden` is what an earlier cut (the scan budget) had already left
-    out, so the marker counts the whole remainder of the chapter rather than
-    only this function's share of it."""
-    hidden = len(body) + already_hidden - budget
+    `hidden_beyond` is the rest of the chapter: what an earlier cut (the scan
+    budget) left out and the characters it wrote its marker over. `len(body) +
+    hidden_beyond` is therefore the chapter's own length, which is what
+    `join_chapter` counts from — so the count in the marker is the same number
+    down to the digit whether the chapter fitted the scan budget or not."""
+    hidden = len(body) + hidden_beyond - budget
     if hidden <= 0:
         return body[:budget]
     marker = cut_marker(hidden)

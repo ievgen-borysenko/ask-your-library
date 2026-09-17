@@ -236,30 +236,37 @@ def cap_sentence(sentence: str) -> list[str]:
 
     The break is on whitespace, the only boundary below a sentence that is not
     mid-word; a single "word" longer than the cap (a run of digits, a URL) is
-    cut where the cap falls, because nothing else is left. Runs of whitespace
-    inside a capped piece collapse to one space — the pieces are re-joined by
-    the packer anyway, and normalization collapses them on both sides of every
-    comparison (`provenance._normalize`)."""
+    cut where the cap falls, because nothing else is left.
+
+    **Every piece is a SLICE of the text it came from.** The tab, the double
+    space, the non-breaking space a book actually prints stay exactly as the
+    book printed them — an earlier version of this split on whitespace and
+    re-joined the words with ASCII spaces, which rewrote the inside of a
+    passage the index then stored and the reader is later shown. The quote
+    check would not have noticed (it normalizes both sides), which is precisely
+    why it had to be fixed here: what is stored has to be the book's text, not
+    a version of it this function found convenient. The one thing not
+    preserved is the whitespace AT a break, which belongs to neither piece;
+    the packer joins pieces with a single space."""
     if len(sentence) <= MAX_SENTENCE_CHARS:
         return [sentence]
     pieces: list[str] = []
-    buffer = ""
-    for word in sentence.split():
-        while len(word) > MAX_SENTENCE_CHARS:
-            if buffer:
-                pieces.append(buffer)
-                buffer = ""
-            pieces.append(word[:MAX_SENTENCE_CHARS])
-            word = word[MAX_SENTENCE_CHARS:]
-        if not word:
-            continue
-        if buffer and len(buffer) + 1 + len(word) > MAX_SENTENCE_CHARS:
-            pieces.append(buffer)
-            buffer = word
-        else:
-            buffer = f"{buffer} {word}" if buffer else word
-    if buffer:
-        pieces.append(buffer)
+    start: int | None = None      # where the piece being filled begins
+    end: int | None = None        # just past the last whole word it holds
+    for word in re.finditer(r"\S+", sentence):
+        first, last = word.span()
+        if start is None:
+            start = first
+        if last - start > MAX_SENTENCE_CHARS:
+            if end is not None:           # close the piece on the words that fit
+                pieces.append(sentence[start:end])
+                start, end = first, None
+            while last - first > MAX_SENTENCE_CHARS:   # a single word over the cap
+                pieces.append(sentence[first:first + MAX_SENTENCE_CHARS])
+                first = start = first + MAX_SENTENCE_CHARS
+        end = last
+    if start is not None and end is not None and end > start:
+        pieces.append(sentence[start:end])
     return pieces
 
 
