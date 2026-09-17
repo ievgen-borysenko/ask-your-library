@@ -19,16 +19,26 @@ questions:
   type: answer
   expected_books:
   - Site Reliability Engineering
+  - The Site Reliability Workbook
   expected_facts:
-  - one minus
-  - 99.99%
-  - 0.01%
+  - minus
   notes: 'PROPOSED 2026-09-17, needs the reader''s verdict; facts text-verified against
     corpus-tech/prepared/sre-book.md. Chapter "3. Embracing Risk": "Once that target is
     established, the error budget is one minus the availability target. A service that''s
-    99.99% available is 0.01% unavailable." The Workbook restates it ("a budget is simply
-    1 minus a service''s SLO"), so naming the Workbook instead is not a failure of retrieval;
-    naming neither is.'
+    99.99% available is 0.01% unavailable." The Workbook restates it, in its own numbers,
+    in "Appendix B. Example Error Budget Policy": "An error budget is 1 minus the SLO of
+    the service. A 99.9% SLO service has a 0.1% error budget."
+
+    CORRECTED after the first local run of 2026-09-18, which answered it from the Workbook
+    and was scored FAIL. The item was wrong, not the answer: this note always said that
+    naming the Workbook instead is not a failure of retrieval and that only naming neither
+    is, and `expected_books` listed one book, so the two halves of the item contradicted
+    each other. Both books are now expected, either of which passes. The numbers left
+    `expected_facts` for the same reason — the two books work the same formula through
+    different examples (99.99%/0.01% in the 2016 book, 99.9%/0.1% in the Workbook), so a
+    numeric fact would score which book was retrieved rather than whether the formula was
+    given. What is left is the subtraction itself, which both books state and which no
+    non-answer contains; the numbers are above, for the reader''s manual check.'
 
 - id: t02-toil-clarify
   question: I'm after the one about toil — the chapter that defines what counts as toil
@@ -48,7 +58,17 @@ questions:
     ("the 2016 book or the Workbook?"). expected_facts is empty on purpose: the two
     candidates would contradict each other. Neither book has a card (CC BY-NC-ND), so the
     clarify has to be built from the text hits alone — which is exactly the case this item
-    exists to measure.'
+    exists to measure.
+
+    First local run 2026-09-18 (qwen2.5:14b, text-only index, one card on the shelf): no
+    clarify, and NOT because the clarify was declined — `clarify_candidates` was EMPTY.
+    All four evidence items came from one chapter of one book, "5. Eliminating Toil" of the
+    2016 book, quoted verbatim and correctly; the Workbook''s "6. Eliminating Toil" never
+    entered the candidate set at all. The first step went straight to a chapter read in that
+    one book, so nothing in the run ever held two books to ask about. The item is left
+    exactly as written — there is nothing here to fix in the question, and the measurement
+    is about the shelf''s retrieval and the missing cards, which is what it was written to
+    measure.'
 
 - id: t03-twelve-factor-config
   question: Which of the twelve factors is the one about configuration, and what does it
@@ -81,7 +101,15 @@ questions:
     ReAct, so the description fits both. The pass is a question that separates them
     (something like "within one attempt, or learning between attempts?"); a confident single
     pick is a fail. Both papers have cards, unlike t02, so this pair also says whether the
-    clarify path behaves differently when cards are there.'
+    clarify path behaves differently when cards are there.
+
+    First local run 2026-09-18: no clarify and no answer. The run stopped after one step on
+    a single piece of evidence — one sentence from ReAct''s "Appendix A Additional Results"
+    about human-in-the-loop interaction — and then said that evidence does not describe the
+    loop, which is true of that sentence and false of the paper. Reflexion never appeared,
+    so `clarify_candidates` was empty here too. Neither paper had a card in that run, which
+    is precisely the condition this item was written to be measured WITHOUT: re-run it once
+    the cards are built before drawing any conclusion about the clarify path.'
 
 - id: t05-owasp-llm01
   question: In the OWASP top ten for LLM applications, what is number one, and what does it
@@ -96,7 +124,11 @@ questions:
     chapter "LLM01:2025 Prompt Injection": "A Prompt Injection Vulnerability occurs when
     user prompts alter the LLM''s behavior or output in unintended ways." The 2025 edition
     is pinned in corpus-tech/manifest.yaml; a 2026 edition exists upstream and would be a
-    different document with different numbering, which is what the checksum is for.'
+    different document with different numbering, which is what the checksum is for.
+
+    First local run 2026-09-18: ERROR, not a verdict. Ollama aborted a call with "prediction
+    aborted, token repeat limit reached" after seven calls — the local model looped on its
+    own output. Nothing about the item was measured.'
 
 - id: t06-rules-of-ml-first-model
   question: There is a numbered rule about what your very first machine-learned model should
@@ -234,4 +266,12 @@ questions:
     chapter "Testing Overview": "If you liked it, you should have put a CI test on it," which
     we call "The Beyoncé Rule." The meaning is the half that matters: a test that is not
     triggered by the common CI system does not count. Third of the three cardless CC BY-NC-ND
-    works, and the item that says whether a quote question works over text alone.'
+    works, and the item that says whether a quote question works over text alone.
+
+    First local run 2026-09-18: refused in one second, with no search at all — the planner''s
+    out-of-scope gate (#70) read it as a request the library cannot supply and routed it to
+    `refusal`. It is not: the answer is in a book on this shelf, in the chapter "Testing
+    Overview". The question is left exactly as written, because it is phrased the way a
+    reader phrases it and rewording it would hide the finding rather than measure it. What
+    this item now also measures is the gate''s false-positive rate on a real book question
+    that happens to sound like trivia.'
