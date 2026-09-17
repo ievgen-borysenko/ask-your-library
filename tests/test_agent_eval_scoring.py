@@ -382,8 +382,11 @@ def test_fingerprint_names_the_observe_window(monkeypatch):
     # the scan budget decides WHICH part of a long chapter a read may show, so
     # two runs that differ only in it are two systems (#28)
     assert f"(scan {config.CHAPTER_SCAN_CHARS})" in fp
-    # the loop budgets are knobs since the nodes split: a run at MAX_STEPS=6 is another system
-    assert f"steps={config.MAX_STEPS}/{config.MAX_EMPTY_STREAK}" in fp
+    # the loop budgets are knobs since the nodes split: a run at MAX_STEPS=6 is another system,
+    # and so is one that lets a different number of all-dropped steps run before the CRAG gate
+    # sees them (#29)
+    assert (f"steps={config.MAX_STEPS}/{config.MAX_EMPTY_STREAK}"
+            f"/{config.MAX_DROPPED_STREAK} " in fp)
     assert f"candidates={config.MAX_CLARIFY_CANDIDATES}" in fp     # the clarify list length changes clarify behaviour
     assert f"deadline={config.QUESTION_DEADLINE_S}s" in fp        # a run cut by the deadline is another run
 

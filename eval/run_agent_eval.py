@@ -71,7 +71,7 @@ from ask_your_library.bookkey import title_of
 from ask_your_library.i18n import t
 from ask_your_library import library
 from ask_your_library.config import (CHAPTER_HIT_CHARS, CHAPTER_SCAN_CHARS, MAX_CLARIFY_CANDIDATES,
-                                     MAX_EMPTY_STREAK, MAX_STEPS,
+                                     MAX_DROPPED_STREAK, MAX_EMPTY_STREAK, MAX_STEPS,
                                      PRICE_IN_PER_MTOK, PRICE_OUT_PER_MTOK, QUESTION_DEADLINE_S, SEARCH_HIT_CHARS)
 from ask_your_library.llm import usage_snapshot
 # The one home of the rule (it used to live here and in the runner, with the
@@ -199,6 +199,10 @@ def run_facts(repeat: int = 1) -> dict:
         "chapter_scan_chars": CHAPTER_SCAN_CHARS,
         "max_steps": MAX_STEPS,
         "max_empty_streak": MAX_EMPTY_STREAK,
+        # The ceiling on a run of all-dropped steps (#29). It decides when the
+        # loop stops, so two runs that differ only in it are two systems — the
+        # same reason the two budgets above are named.
+        "max_dropped_streak": MAX_DROPPED_STREAK,
         "max_clarify_candidates": MAX_CLARIFY_CANDIDATES,
         "question_deadline_s": QUESTION_DEADLINE_S,
         "price_in_per_mtok": PRICE_IN_PER_MTOK,
@@ -228,7 +232,7 @@ def render_fingerprint(f: dict) -> str:
             f"clarify_pick={f['clarify_pick'] or 'default'} | "
             f"hit_chars={f['search_hit_chars']}/{f['chapter_hit_chars']}"
             f"(scan {f['chapter_scan_chars']}) | "
-            f"steps={f['max_steps']}/{f['max_empty_streak']} | "
+            f"steps={f['max_steps']}/{f['max_empty_streak']}/{f['max_dropped_streak']} | "
             f"candidates={f['max_clarify_candidates']} | "
             f"deadline={f['question_deadline_s']}s | "
             + ("single run" if repeat == 1 else f"{repeat} attempts per item"))
