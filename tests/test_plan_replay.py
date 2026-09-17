@@ -172,8 +172,13 @@ def test_a_fresh_recording_is_not_stale():
     planner's prompt without regenerating the recording beside it and this fails
     here, where the message is about the fixtures, instead of somewhere the
     stamping would have hidden it. At the commit that added them the two
-    checksums are `e7d21ec4bd9b` (golden) and `acd673f471d3` (PLAN_RULES);
-    regenerate the recording if they have moved for a good reason."""
+    checksums were `e7d21ec4bd9b` (golden) and `acd673f471d3` (PLAN_RULES); the
+    planner's prompt gained the scope rule (#70) and the fixture was re-stamped
+    to `aabb79d156d6` with it. Re-stamping is honest HERE and nowhere else:
+    these four replies are hand-written fixtures for the post-processing, not a
+    measurement of a model, so there is nothing to re-record. The recordings
+    under `eval/recordings/` are measurements and were NOT re-stamped: they
+    still carry `acd673f471d3` and replay the rules as they were."""
     recording = plan_recording.load_recording(RECORDING)
     golden_sha = plan_recording.sha12(GOLDEN.read_text(encoding="utf-8"))
     assert recording.header["golden_sha256_12"] == golden_sha

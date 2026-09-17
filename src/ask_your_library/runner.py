@@ -11,6 +11,10 @@ Event contract (node_name -> keys present in update):
              plan_fallback (present, True, only when the planner returned no valid JSON
              twice and the raw question became the one query);
              mode "catalog": catalog_request {op, title, author} and no query (ADR-016);
+             mode "refusal": the scope gate (#70) — the planner read the request as one the
+             library cannot answer at all (code, a translation, arithmetic, an opinion, a
+             persona), so there is no query, no search step and no second model call:
+             synthesize writes the refusal by code and stop_reason says why;
              book_filter (a book the question names, resolved against the catalogue:
              retrieval is limited to it) or book_unresolved (the name matched nothing:
              the whole library is searched and the answer says so); catalog_fallback (present

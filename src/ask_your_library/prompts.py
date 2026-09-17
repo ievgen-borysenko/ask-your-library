@@ -29,9 +29,16 @@ Decide:
 3. "book" (answer mode, optional): the ONE title the question names as the book to answer
    from, exactly as the user wrote it ("Do I have Dracula, and why does Harker stay?" ->
    "Dracula"). Omit when the question names no book, or several.
+4. "out_of_scope": true (optional) if the request is not a question about these books at all
+   and asks for something the library cannot supply: write code, translate a sentence, do
+   arithmetic, give your own opinion, take on a persona, answer from world knowledge, chat.
+   Then add nothing else: no queries, no book, no catalog. A request ABOUT a book — its plot,
+   a character, what it says, whether the library holds it — is NEVER out of scope, even if
+   the library may not hold that book; searching and saying honestly what was not found is
+   the answer there.
 
 Return ONLY JSON: {"mode": "...", "queries": ["...", "..."], "catalog": {...} or omitted,
-"book": "..." or omitted}"""
+"book": "..." or omitted, "out_of_scope": true or omitted}"""
 
 OBSERVE_RULES = """You distill search results for a research agent.
 The user message holds the question being researched, the search query used,
