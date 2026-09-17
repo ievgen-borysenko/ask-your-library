@@ -8,11 +8,13 @@
 > [`../evaluation.md`](../evaluation.md) ("the paired baseline on three local models is being
 > produced, the gate's run comes after it").
 >
-> **The gate's run is on this page too**, added 2026-09-17 in
-> [its own section](#the-observe-gate-65-same-model-same-sets): `qwen2.5:14b` only, both sets,
-> `--repeat 3 --clarify-pick second`, no `--record-plans`, on `c79018a`. Read the six runs above as
-> the baseline and that section as the pair. The other two models have **not** been run on `c79018a`,
-> and the one with 8–9 broken quotes an attempt is among them.
+> **The gate's runs are on this page too**, added 2026-09-17 in
+> [their own section](#the-observe-gate-65-same-model-same-sets): `qwen2.5:14b` and
+> `mistral-small3.2:24b-ctx20k`, both sets each, `--repeat 3 --clarify-pick second`, no
+> `--record-plans`, on `c79018a`. Read the six runs above as the baseline and that section as the
+> pair. **They do not agree**: the gate is behaviour-neutral on the shipped default and costs
+> `mistral-small3.2:24b-ctx20k` one item on two attempts of three, so the acceptance for `#29` is
+> stated per model rather than once. `qwen2.5:32b` has not been run on `c79018a`.
 >
 > Golden files: `en-demo.yaml@edc151948a58` (11 items) and `en-demo-catalog.yaml@72eb2c2b2655`
 > (10 items); corpus `manifest@ed94677aa3a3`, `toc@ef7a347ace1d`; the same 04.09 bge-m3 demo index
@@ -322,6 +324,14 @@ to show, for each of the three models and both sets:
    mistral passes `c10` in 1 step — so a rise to `MAX_STEPS` on items whose quotes were all dropped
    will show plainly against these numbers.
 
+**Answered 2026-09-17, in [the gate section below](#the-observe-gate-65-same-model-same-sets).**
+Points 1 and 2 came out as written. Point 4 came out as written on mistral and not at all on the 14b:
+`c10` really did go from 1 step to 2 and `c04` from 2 to 4, and the coverage probe did not move on
+either model. Point 3 did **not** hold on mistral — it kept the aggregation pass this paragraph
+worried about and lost a different item, `c03`, on two attempts of three, for a reason that has
+nothing to do with step counts. The prediction was right about the mechanism and wrong about which
+item it would cost.
+
 ### 5. The 131k-context trap
 
 `mistral-small3.2:24b` could not be measured as pulled. Ollama loaded it with `num_ctx 131072`,
@@ -366,12 +376,12 @@ evidence here points across families rather than up a size ladder.
 
 ## The observe gate (`#65`), same model, same sets
 
-Added 2026-09-17. The gate's own run, made the same night the baseline finished: **`qwen2.5:14b`
-only**, both golden sets, `--repeat 3 --clarify-pick second`, **no `--record-plans`**, on
-**`c79018a`** — `main` at the merge of `#65`. Sources:
-`_data/step0-gate/results/qwen2.5_14b/<set>/answers-*.{md,json}` and
-`_data/step0-gate/step0.log`. 23:02:45 → 23:58:54 CEST, 2,611 s for the research set and 753 s for
-the catalogue set.
+Added 2026-09-17. Two runs under the gate, both on **`c79018a`** — `main` at the merge of `#65` —
+both golden sets each, `--repeat 3 --clarify-pick second`, **no `--record-plans`**:
+**`qwen2.5:14b`** (23:02:45 → 23:58:54 CEST) and **`mistral-small3.2:24b-ctx20k`** (00:04 → 02:29).
+Sources: `_data/step0-gate/results/<model>/<set>/answers-*.{md,json}` and
+`_data/step0-gate/step0.log`. `qwen2.5:32b` was not run. The two models do not give the same answer
+about the gate, so each gets its own paired table and the acceptance is stated per model.
 
 **It is not clean-stamped either, and that is the control.** Both runs stamp
 `c79018a+dirty(2005429d26f5)` with `code_clean: false`, and — the informative part — **the same
@@ -384,7 +394,7 @@ every run of the recording batch, is the paired evidence for that reading. Commi
 (this PR) is what makes the next run on this tree stamp clean; the general fix is in
 `docs/backlog.md`.
 
-### Paired table — `en-demo`, 11 items, 3 attempts
+### Paired table — `qwen2.5:14b`, `en-demo`, 11 items, 3 attempts
 
 Baseline column repeats the table above (`169b511`, before the gate); gate column is the new run.
 A single figure means all three attempts agreed exactly.
@@ -414,7 +424,7 @@ A single figure means all three attempts agreed exactly.
 | Steps distribution over 33 attempts | 2 steps ×21 · 3 ×6 · 4 ×6 | 2 steps ×21 · 3 ×6 · 4 ×6 |
 | Seconds by role, median | plan 3.4 · observe 45.3 · reflect 8.3 · synth 8.3 | plan 3.3 · observe 41.4 · reflect 7.3 · synth 7.4 |
 
-### Paired table — `en-demo-catalog`, 10 items, 3 attempts
+### Paired table — `qwen2.5:14b`, `en-demo-catalog`, 10 items, 3 attempts
 
 | Row | Baseline `169b511` | Gate `c79018a` |
 |---|---|---|
@@ -433,7 +443,7 @@ A single figure means all three attempts agreed exactly.
 The catalogue set is **unchanged in every field**, token for token and call for call. It had no
 broken quotes to drop, so the gate had nothing to do on it.
 
-### The reading
+### The reading — qwen2.5:14b
 
 **Behaviour is unchanged: 9/11 and 10/10, item for item.** Not merely the same totals — the same
 items, the same groups, the same two failures (`c09` and `c10`), the same single clarify. The facts
@@ -481,33 +491,147 @@ minutes. Read it as run-to-run noise on the same hardware.
 every item of both sets, verification strings included — the same result the baseline gave for this
 model on `en-demo`.
 
-### Acceptance for `#29`
+### Paired table — `mistral-small3.2:24b-ctx20k`
 
-The acceptance agreed in advance ([`../evaluation.md`](../evaluation.md)) was three things. Against
-this run:
+Added 2026-09-17. The second gate run, on the model the gate was argued for: same code `c79018a`,
+same flags, no recording, 00:04 → 02:29 CEST.
+Sources: `_data/step0-gate/results/mistral-small3.2_24b-ctx20k/<set>/answers-*.{md,json}`.
 
-1. **`confirmed == checked_book_text` and `broken == 0` by construction** — met: 34/34 and 0 on the
-   research set, 5–7 / 5–7 and 0 on the catalogue set.
-2. **A published drop rate** — met, and published here: 2 per attempt on the research set
-   (`dropped_unverified`), split `not_found` 2 / `no_hit` 0 / `cross_book` 0 / `short` 0, plus
-   `repinned` 0; 0 on the catalogue set. That is 2 of 45 checked quotes, 4.4 %, and it equals the
-   baseline's broken count exactly.
-3. **Behaviour at `--repeat` not below the baseline** — **met on this model**: 9/11 and 10/10, the
-   same items, with no movement in steps, calls or the facts row.
+`en-demo`, 11 items, 3 attempts:
 
-Two figures the same page asked to be read beside those: the **steps per question** did not move at
-all, and the **coverage probe** fired the same once (one clarify, on `c10`, in both runs). The
-concern that a step whose quotes were all dropped would stop counting toward the CRAG gate and push
-models to `MAX_STEPS` did not materialise here, for the plain reason that no step here lost all of
-its quotes — the two drops are one quote each out of three and four.
+| Row | Baseline `169b511` | Gate `c79018a` |
+|---|---|---|
+| Behaviour PASS per attempt | 11/11 ×3 | **11/11, 10/11, 10/11** |
+| — by group (`answer` / `identify` / `refusal` / `aggregation`) | 7/7 · 2/2 · 1/1 · 1/1 | **6–7/7** · 2/2 · 1/1 · 1/1 |
+| Clarify interrupts | 1 | 1 |
+| Confirmed / checked book text | 42–43 / 50–52 | **50 / 50** |
+| Confirmed / checked, all quotes | 42–43 / 67–69 | 50 / 68 |
+| Unattributed | 0 | 0 |
+| Broken | **8–9** | **0** |
+| Matched only a book card | 17 | 18 |
+| Evidence items | 67–69 | 68 |
+| Dropped before the answer | — | **10–11** |
+| — `dropped_by_reason`, summed over 3 attempts | — | `not_found` 26 · `no_hit` 6 · `cross_book` 0 · `short` 0 |
+| Re-pinned | — | 0 |
+| Expected facts found | 11 / 24 | 12 / 24 |
+| Answers carrying every fact | 2 / 9 | 2 / 9 |
+| Titles mentioned | 11 / 12 | 10–11 / 12 |
+| LLM calls | 82 | **88** |
+| Tokens in | 139,688–140,398 | 153,109–154,451 |
+| Tokens out | 12,700–12,803 | 14,011–14,053 |
+| Per-question wall clock, min–max | 73–399 s | 96–403 s |
+| Set wall clock | 6,061 s | 6,563 s |
+| Steps distribution over 33 attempts | 1 step ×3 · 2 ×15 · 3 ×3 · 4 ×12 | **2 ×15 · 3 ×3 · 4 ×15** |
+| Seconds by role, median | plan 7.2 · observe 107.5 · reflect 18.5 · synth 20.1 | plan 6.7 · observe 138.6 · reflect 23.6 · synth 17.6 |
 
-**What this does not settle is the case the gate was argued for.** `qwen2.5:14b` leaves 2 broken
-quotes an attempt; `mistral-small3.2:24b-ctx20k` leaves **8–9** on the same set, and it is the model
-whose behaviour has the most to lose, being the only 11/11 here. A model that has four times as many
-quotes refused is where "a step whose quotes were all dropped" becomes likely, and nothing in this
-run speaks to it. **The gate is measured on the shipped default and unmeasured on the model that
-motivated it**; `mistral-small3.2:24b-ctx20k` and `qwen2.5:32b` on `c79018a` are the run still to
-make.
+`en-demo-catalog`, 10 items, 3 attempts:
+
+| Row | Baseline `169b511` | Gate `c79018a` |
+|---|---|---|
+| Behaviour PASS per attempt | 10/10 ×3 | **10/10 ×3** |
+| — by group (`catalog` / `answer`) | 6/6 · 4/4 | 6/6 · 4/4 |
+| Confirmed / checked book text | 20 / 22 | **20 / 20** |
+| Confirmed / checked, all quotes | 20 / 34 | 20 / 32 |
+| Broken · unattributed · card-only | **2** · 0 · 12 | **0** · 0 · 12 |
+| Evidence items | 34 | 32 |
+| Dropped before the answer · re-pinned | — | **2 · 0** (`not_found` 6 over 3 attempts) |
+| Expected facts found · answers with every fact | 14 / 15 · 7 / 8 | 14 / 15 · 7 / 8 |
+| LLM calls · tokens in · tokens out | 32 · 44,676 · 5,098–5,137 | 32 · 44,540 · 5,079–5,120 |
+| Steps distribution over 30 attempts | 0 ×18 · 1 ×3 · 2 ×6 · 4 ×3 | 0 ×18 · 1 ×3 · 2 ×6 · 4 ×3 |
+| Set wall clock | 2,250 s | 2,130 s |
+
+### The reading — mistral
+
+**The provenance side is everything it was meant to be.** `broken` goes **8–9 → 0**,
+`confirmed == checked_book_text` at **50/50**, `unattributed` 0, `repinned` 0. On the catalogue set,
+2 → 0 and 20/20. Ten to eleven quotes an attempt are refused on the research set and 2 on the
+catalogue set, split `not_found` 26 and `no_hit` 6 over the three research attempts — `cross_book`
+and `short` never fired on either model, so nothing was lost to ADR-004's conservative re-pin
+limits. Drops are concentrated: `c04` and `c10` 6 each over three attempts, `c06` 6 (all of them
+`no_hit`), `c03` 5, and `c02`, `c05`, `c08` 3 each. `c01`, `c07`, `c09` and `h06` lose nothing.
+
+**And the behaviour cost is real: 11/11 → 11/11, 10/11, 10/11.** One item, two of three attempts.
+`c03-musketeers-women`, in the `answer` group:
+
+- Baseline, all three attempts: `PASS: titles 1/1, facts 1/3 NO, named book -> retrieval filter The
+  Three Musketeers — Alexandre Dumas, stop: step limit (4) — wanted to keep searching`.
+- Gate attempt 1, **1 quote dropped**: `PASS: titles 1/1, facts 1/3 NO, 1 quotes dropped before the
+  answer (not in the passage they cited), ... stop: step limit (4) — wanted to keep searching`.
+- Gate attempts 2 and 3, **2 quotes dropped**: `FAIL: titles 0/1, facts 1/3 NO, 2 quotes dropped
+  before the answer (not in the passage they cited), named book -> retrieval filter The Three
+  Musketeers — Alexandre Dumas, stop: step limit (4) — wanted to keep searching`.
+
+**The failure is not the step-limit mechanism, and the report should not pretend it is.** `c03`
+takes 4 steps and 10 calls in *both* runs; only the number of surviving quotes differs. With one
+quote dropped the answer still lists Madame Coquenard and the lady with the red cushion, each with a
+`[The Three Musketeers — Alexandre Dumas, Chapter …]` citation. With two dropped, the surviving
+evidence carries no usable citation and the model writes a hedge instead — "the women connected with
+Porthos and Aramis are not explicitly named or detailed … The following is missing:" — with no book
+name anywhere in it. `titles 0/1` is a substring check, so an answer that never names the book fails
+it. The retrieval filter had resolved to the right book in every attempt; the answer stopped saying
+so.
+
+**The step-limit mechanism is real, and it is visible on two other items — both of which still
+pass.** A step whose quotes are all dropped no longer counts as a dry step, the empty-streak stop
+does not fire, and the loop keeps going:
+
+| Item | Baseline steps / calls / tokens in | Gate steps / calls / tokens in |
+|---|---|---|
+| `c04-crusoe-cannibals` | 2 · 6 · 9,561 | **4** · 10 · 18,009 |
+| `c10-chivalry-two-books` | 1 · 4 · 5,230 | **2** · 6 · 9,427 |
+
+That is the whole of the `+6` LLM calls (82 → 88) and most of the ~14,000 extra input tokens per
+attempt: `c04` gains 4 calls, `c10` gains 2, and every other item keeps its step count. It is also
+why the steps histogram moves — the three 1-step attempts disappear and the 4-step bucket grows from
+12 to 15 — and why the set costs 502 s more (6,061 → 6,563 s) with `observe` median up from 107.5 to
+138.6 s. `c10`, the aggregation item, keeps `titles 2/2` and its PASS while doing twice the work;
+`c04` keeps its PASS while doing twice the work. The cost here is time and tokens, not verdicts.
+
+Determinism loosens slightly under the gate: 3 of 11 items differ across the run's own attempts
+(`c03`, `c04`, `c08`) against 2 in the baseline (`c03`, `c08`), and `c03`'s difference is now the
+one that decides a verdict.
+
+The catalogue set is unaffected: same behaviour, same calls, same steps, 2 quotes dropped, and
+136 fewer input tokens per attempt.
+
+### Acceptance for `#29`, per model
+
+The acceptance agreed in advance ([`../evaluation.md`](../evaluation.md)) was three conditions.
+They do not come out the same way on the two models that have been run.
+
+| Condition | `qwen2.5:14b` | `mistral-small3.2:24b-ctx20k` |
+|---|---|---|
+| 1. `confirmed == checked_book_text`, `broken == 0` by construction | **met** — 34/34 and 5–7/5–7, 0 broken | **met** — 50/50 and 20/20, 0 broken |
+| 2. A published drop rate | **met** — 2/attempt research, 0 catalogue; `not_found` 2, rest 0; `repinned` 0 | **met** — 10–11/attempt research, 2 catalogue; `not_found` 26 + `no_hit` 6 over 3 attempts; `cross_book` 0, `short` 0, `repinned` 0 |
+| 3. Behaviour at `--repeat` not below baseline | **met** — 9/11 and 10/10, item for item | **NOT met** — 11/11 → 10/11 on two of three attempts (`c03`), catalogue unchanged at 10/10 |
+
+**Condition 3 fails on one model, one item, two of three attempts.** That is the honest size of it:
+not a collapse, and not nothing. Stated in full — the gate buys 8–9 fewer broken quotes an attempt
+on this model and costs one behavioural PASS on two attempts of three, plus 6 LLM calls, ~14,000
+input tokens and 502 s per set.
+
+**The mechanism behind the extra work is a decision that was taken deliberately.** A step whose
+quotes were all dropped is held rather than counted as dry, so the empty-streak stop does not fire
+and the loop spends the steps it has (`c04` 2 → 4, `c10` 1 → 2). That decision is what keeps `c10`
+and `c04` passing while they search longer; it is also what makes a badly-quoting model run to the
+step limit. `c03`'s failure is a separate effect — thinner evidence producing a hedged answer with
+no citation in it — and no change to the hold decision would address it.
+
+**What the owner can decide next**, named without a recommendation:
+
+1. **Accept the trade as the price of zero broken quotes.** Publish 10–11/11 for this model with the
+   drop rate beside it, and treat `c03`'s hedge as the correct behaviour of a model that has been
+   denied the evidence it was going to misquote.
+2. **Change hold → count-as-dry after N dropped steps.** Keep the hold for the first dropped step
+   and let the second (or Nth) count toward the empty streak, which would return `c04` and `c10`
+   toward their baseline step counts and give back most of the 6 calls and 502 s. It does not touch
+   `c03`.
+3. **Re-plan with a "quote verbatim" nudge in the `reflect` context.** Tell the model, in the loop,
+   that quotes not present in the passage are being discarded, so the next step's quoting is aimed at
+   the text rather than at the summary. This is the only one of the three that could move `c03`, and
+   it is also a prompt change — so it invalidates every recording and needs its own baseline.
+
+Not measured either way: `qwen2.5:32b` under the gate, and any hosted model under it.
 
 ## What this does not prove
 
@@ -524,11 +648,12 @@ make.
 - **Three attempts.** Enough to establish that these models return the same text three times in a
   row; not enough to bound how often they would not. A zero spread over three samples is not proof
   of determinism, and one item on the 14b and four on mistral did vary.
-- **The gate is measured on one model of three.** `#65` is outside `169b511` and the six runs above;
-  the section that pairs it is `qwen2.5:14b` alone on `c79018a`. What the gate does to
-  `qwen2.5:32b`, and above all to `mistral-small3.2:24b-ctx20k` — the model with 8–9 broken quotes
-  an attempt and the only 11/11 here — is **not** measured, and that is the model the gate was
-  argued for.
+- **The gate is measured on two models of three, and they disagree.** `#65` is outside `169b511`
+  and the six runs above. Under it, `qwen2.5:14b` keeps its behaviour exactly and
+  `mistral-small3.2:24b-ctx20k` loses one item on two attempts of three — so "the gate is
+  behaviour-neutral" is not a sentence this data supports, and neither is "the gate costs behaviour".
+  It costs behaviour on a model that quotes badly, on one item, sometimes. `qwen2.5:32b` under the
+  gate is not measured at all, and no hosted model is.
 - **The catalogue set no longer separates anything.** All three models score 10/10, and the six
   catalogue questions are answered in one model call from the index tables with no search. It is a
   regression guard, not a discriminator, and reading three identical 10/10 rows as agreement between

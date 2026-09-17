@@ -320,6 +320,17 @@ open ones often refer to them.
   — and the spread on the behaviour rows is **zero**. No per-question verdict moved on any of
   189 item-attempts; `qwen2.5:32b` was byte-identical on every item of both sets. What the repeat
   measured is latency (30–196 s per question for identical answers on the shipped default).
+- **Open decision: the evidence gate's acceptance is met on the shipped default and not on
+  `mistral-small3.2:24b-ctx20k`.** Measured 17.09
+  (`docs/eval-results/2026-09-16-local-models-repeat3.md`): that model goes `broken` 8–9 → 0 and
+  `confirmed == checked_book_text` 50/50, and loses one behavioural PASS on two attempts of three
+  (`c03`, `titles 0/1`) plus 6 LLM calls and 502 s a set. Three options are on the table and none is
+  adopted: accept the trade as the price of zero broken quotes; let a step whose quotes were all
+  dropped count toward the empty streak after the Nth rather than being held (returns `c04` and `c10`
+  toward their baseline step counts, does not touch `c03`); or tell `reflect` in-loop that
+  unverifiable quotes are being discarded, which is the only option that could move `c03` and is a
+  prompt change, so it invalidates every recording and needs its own baseline. `qwen2.5:32b` under
+  the gate is unmeasured and would inform the choice.
 - **`--record-plans` writes into a committed directory, so it dirties the code stamp and cannot be
   combined with `--require-clean`.** `eval/recordings/` is committed by design, the run fingerprint
   hashes `git diff HEAD` together with the un-ignored untracked files, and the recording is written

@@ -25,18 +25,30 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   `synthesize` sees it, one found in another passage is re-pinned to the passage that holds it, and
   the report after the answer reports on evidence that already passed the same check. The numbers
   above were produced before that and are what they are — the 1 unattributed and 2 broken of 61 are
-  quotes that reached a reader. **What the gate does to behaviour is now measured for this model and
-  no other.** `qwen2.5:14b` on `c79018a` against itself on `169b511`, both golden sets at
-  `--repeat 3` ([`eval-results/2026-09-16-local-models-repeat3.md`](eval-results/2026-09-16-local-models-repeat3.md)):
-  behaviour unchanged item for item — 9/11 on the research set and 10/10 on the catalogue set, the
-  same two failures, the same clarify — with **broken 2 → 0**, `confirmed == checked_book_text` at
-  34/34, **2 quotes dropped per attempt** (both `not_found`; `no_hit`, `cross_book` and `short` all
-  0; `repinned` 0), the same 79 LLM calls and the same steps distribution. The two quotes dropped are
-  the two the 2026-09-10 report published as broken, from the same two questions. **The model the
-  gate was argued for is still unmeasured under it**: `mistral-small3.2:24b-ctx20k` leaves 8–9 broken
-  quotes an attempt where the default leaves 2, and nothing yet says what the gate costs it. What the
-  gate does NOT reach is unchanged: it checks the evidence the answer is written from, never the
-  sentences the answer writes around it.
+  quotes that reached a reader. **What the gate does to behaviour is now measured on two local
+  models, and they do not agree**
+  ([`eval-results/2026-09-16-local-models-repeat3.md`](eval-results/2026-09-16-local-models-repeat3.md),
+  each model on `c79018a` against itself on `169b511`, both golden sets at `--repeat 3`).
+
+  On the shipped default `qwen2.5:14b` the gate is free: behaviour unchanged item for item — 9/11 on
+  the research set and 10/10 on the catalogue set, the same two failures, the same clarify — with
+  **broken 2 → 0**, `confirmed == checked_book_text` at 34/34, **2 quotes dropped per attempt** (both
+  `not_found`; `no_hit`, `cross_book` and `short` all 0; `repinned` 0), the same 79 LLM calls and the
+  same steps distribution. The two dropped are the two this page publishes above as broken, from the
+  same two questions.
+
+  **On `mistral-small3.2:24b-ctx20k` it is not free, and this page will not round that off.** That
+  model leaves 8–9 broken quotes an attempt without the gate. Under it: **broken 8–9 → 0**,
+  `confirmed == checked_book_text` at 50/50, **10–11 quotes dropped per attempt** — and behaviour
+  **11/11 → 11/11, 10/11, 10/11**, because `c03` fails two attempts of three with `titles 0/1`: with
+  two quotes dropped rather than one, the surviving evidence carries no citation and the answer
+  hedges without naming the book. The run also costs 6 more LLM calls, ~14,000 more input tokens an
+  attempt and 502 s, because a step whose quotes were all dropped is held rather than counted as dry,
+  so two other items search to the step limit — both of those still pass. **So the agreed acceptance
+  for the gate is met on the default and not met on the model it was argued for**, on one item, on
+  two attempts of three; the report names the options and adopts none. `qwen2.5:32b` under the gate
+  is unmeasured. What the gate does NOT reach is unchanged: it checks the evidence the answer is
+  written from, never the sentences the answer writes around it.
 
   **The gate throws away some true evidence, on purpose.** A quote whose only holder is a passage of
   a *different* book is dropped rather than re-attributed: the book on an evidence item is the book

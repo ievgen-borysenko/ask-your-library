@@ -68,27 +68,38 @@ sidecar, and every clause is written only where there was something to say, so a
 of them writes the line the harness has always written.
 
 The gate's own behavioural effect — whether a set answers as well with it as without — was measured
-on 2026-09-16/17 **for the shipped default and for no other model**, against the paired baseline of
-the same day
+on 2026-09-16/17 on **two local models**, each against itself on `169b511`, both golden sets,
+`--repeat 3 --clarify-pick second`
 ([`eval-results/2026-09-16-local-models-repeat3.md`](eval-results/2026-09-16-local-models-repeat3.md)).
-`qwen2.5:14b` on `c79018a`, both golden sets, `--repeat 3 --clarify-pick second`, against the same
-model on `169b511`: **behaviour unchanged item for item** (9/11 and 10/10, the same two failures and
-the same single clarify), **broken 2 → 0** with `confirmed == checked_book_text` at 34/34, **2
-quotes dropped per attempt** — both `not_found`, `no_hit`/`cross_book`/`short` all 0, `repinned` 0 —
-and the facts row, the titles row, the LLM calls (79) and the tokens all within a hundred of the
-baseline. All three acceptance conditions met on that model: 1.0 confirmed by construction, a
-published drop rate, and behaviour at `--repeat` not below the baseline.
+**The two do not agree, so the acceptance is stated per model.**
 
-The two figures to read beside those, because both follow from the gate rather than from the
-models, **did not move**: the **coverage probe** fired once in each run (`c10`), and the **steps per
-question** distribution is identical, 21 attempts at 2 steps, 6 at 3 and 6 at 4 in both. The worry
-behind them — a step whose quotes were all dropped no longer counts toward the CRAG gate, so a model
-that quotes badly runs to `MAX_STEPS` where it used to stop at two — is untested rather than
-refuted: on `qwen2.5:14b` the two drops are one quote each out of three and four, so no step lost
-all of its quotes. **The model that motivated the gate is still unmeasured under it.**
-`mistral-small3.2:24b-ctx20k` leaves 8–9 broken quotes an attempt on the same set against this
-model's 2, and it has the most behaviour to lose, being the only 11/11 in the baseline; it and
-`qwen2.5:32b` on `c79018a` are the run still to make.
+On `qwen2.5:14b`, the shipped default: **behaviour unchanged item for item** (9/11 and 10/10, the
+same two failures and the same single clarify), **broken 2 → 0** with
+`confirmed == checked_book_text` at 34/34, **2 quotes dropped per attempt** (both `not_found`;
+`no_hit`, `cross_book`, `short` and `repinned` all 0), the same 79 LLM calls, and an identical steps
+distribution. All three acceptance conditions met.
+
+On `mistral-small3.2:24b-ctx20k`, the model the gate was argued for: the provenance side is
+everything it was meant to be — **broken 8–9 → 0**, `confirmed == checked_book_text` at **50/50**,
+`repinned` 0, with **10–11 quotes dropped per attempt** (`not_found` 26 and `no_hit` 6 over three
+attempts; `cross_book` and `short` never fired on either model). **Behaviour went 11/11 → 11/11,
+10/11, 10/11**: `c03-musketeers-women` fails attempts 2 and 3 with `titles 0/1`, because with two
+quotes dropped instead of one the surviving evidence carries no citation and the answer hedges
+without ever naming the book. **Condition 3 — behaviour at `--repeat` not below the baseline — is
+therefore NOT met on this model**, on one item, on two attempts of three. The catalogue set is
+unaffected (10/10, 2 dropped, 20/20 confirmed).
+
+The two figures to read beside those, because both follow from the gate rather than from the models,
+behave differently on the two models as well. The **coverage probe** fired once in each run on both.
+The **steps per question** did not move at all on `qwen2.5:14b` — no step there lost all of its
+quotes — but moved on mistral exactly as predicted: a step whose quotes were all dropped is held
+rather than counted as dry, the empty-streak stop does not fire, and `c04` went 2 → 4 steps and
+`c10` 1 → 2, which is the whole of that run's +6 LLM calls, its ~14,000 extra input tokens per
+attempt and its 502 s. Both of those items still pass; the cost there is time, not verdicts. The
+item that failed took 4 steps in both runs, so the hold decision is not what failed it. The options
+on the table are named in the report and none is adopted here.
+
+Still unmeasured: `qwen2.5:32b` under the gate, and every hosted model under it.
 
 **A book card is not the book, and since 2026-09-16 the triple says so.** `validate` splits its
 verdicts by the corpus the matching passage came from: `confirmed / unattributed / broken` are

@@ -156,14 +156,21 @@ at the gate and another in the report. The cost is stated rather than hidden —
 say it too, the count credits the card and not the book, which is the conservative direction and the
 house rule for cards.
 
-Measured 2026-09-17 on the shipped default, against the same model on `169b511`
-([`../eval-results/2026-09-16-local-models-repeat3.md`](../eval-results/2026-09-16-local-models-repeat3.md)):
-`qwen2.5:14b` at `--repeat 3` on both golden sets kept its behaviour item for item (9/11 and 10/10),
-`broken` went 2 → 0 with `confirmed == checked_book_text` at 34/34 over the same 34 quotes,
-`dropped_unverified` was 2 per attempt — `not_found` 2, `no_hit` / `cross_book` / `short` 0,
-`repinned` 0 — from the two questions that had carried the broken quotes, and the LLM calls (79) and
-the steps distribution did not move; `mistral-small3.2:24b-ctx20k`, which leaves 8–9 broken quotes an
-attempt, has not been run under it.
+Measured 2026-09-17 on two local models, each against itself on `169b511`, both golden sets at
+`--repeat 3`
+([`../eval-results/2026-09-16-local-models-repeat3.md`](../eval-results/2026-09-16-local-models-repeat3.md))
+— **and the two do not agree, which is why the acceptance is recorded per model.** `qwen2.5:14b`
+kept its behaviour item for item (9/11 and 10/10), `broken` went 2 → 0 with
+`confirmed == checked_book_text` at 34/34 over the same 34 quotes, `dropped_unverified` was 2 per
+attempt (`not_found` 2; `no_hit` / `cross_book` / `short` 0; `repinned` 0) from the two questions
+that had carried the broken quotes, and the LLM calls (79) and the steps distribution did not move.
+`mistral-small3.2:24b-ctx20k` went `broken` 8–9 → 0 with `confirmed == checked_book_text` at 50/50
+and 10–11 dropped per attempt (`not_found` 26, `no_hit` 6 over three attempts), and **lost one
+behavioural PASS on two attempts of three** — `c03` with `titles 0/1`, its surviving evidence
+carrying no citation once a second quote was refused. `cross_book` and `short` fired on neither
+model, so the conservative re-pin limits above cost nothing measured so far; the hold on a
+fully-dropped step did cost 6 LLM calls and 502 s on that model, on two items that still pass.
+`qwen2.5:32b` has not been run under the gate.
 
 The two gates run **one** function over one index of the run's passages (`classify_quote`,
 `passage_index`), and `validate`'s own classification was rewritten onto it. That is the decision,
