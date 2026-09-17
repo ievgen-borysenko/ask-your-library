@@ -39,6 +39,18 @@ open ones often refer to them.
 
 ## Agent behaviour
 
+- **The scope gate is built and measured on a script only; the live run is pending** (#70,
+  17.09). An out-of-scope request — code, a translation, arithmetic, a persona — is decided by the
+  planner (one optional `out_of_scope` field) and refused by code at `plan`, and
+  `eval/scope_canary.py` runs nine such requests through the whole graph with three controls. CI
+  runs it on the scripted backend, which proves the mechanics and nothing about any model. Open:
+  the live run on the local default, its report in `docs/eval-results/`, and — only if it passes —
+  the README paragraph and the web UI screenshot the issue asks for. Open beside it: a small local
+  model that never sets the field turns every prompt into the `CONTAINED` outcome (refused for lack
+  of evidence, four model calls, a refusal that does not name the library), and whether that is
+  worth a code-level fallback is a question for the measurement, not before it. The prompt change
+  also made the six committed plan recordings stale (`PLAN_RULES` `acd673f471d3` → `aabb79d156d6`);
+  re-recording needs a run somebody was going to make anyway.
 - **Identify mode can still stop at one book.** The coverage gate (ADR-013) spends the planner's
   next queued query before "enough" with a single book: c09 and h22 clarify with the right second
   candidate. Still open: q06 (still does not clarify) and any candidate no query retrieves. The

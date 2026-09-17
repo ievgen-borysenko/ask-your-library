@@ -215,6 +215,14 @@ What it does not cover: those stages say nothing about whether a hosted model re
 injection. Live resistance is checked for `observe` only, by the last stage, the single paid
 call in the file.
 
+A hostile *reader* is a different question from a hostile *passage*, and it has its own canary
+(`eval/scope_canary.py`, #70): a request the library cannot answer - code, a translation,
+arithmetic, a persona - must end in a refusal that names the library as the reason, decided at
+`plan` and enforced by code, never in an answer from the model's own memory under this agent's
+provenance footer. It is not an injection defense and does not make one: it only fences what this
+agent agrees to be asked for. Its mechanics run in CI; the live run against the answering model is
+pending ([`evaluation.md`](evaluation.md), "Scope canary").
+
 Limits: the regex layer covers English and Ukrainian phrasings only, so paraphrase, other
 languages and unicode obfuscation walk past it into layer 2. The XML-like delimiters are a
 prompting convention, not a security boundary - nothing enforces them. The canary exercises one

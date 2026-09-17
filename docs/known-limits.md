@@ -256,6 +256,23 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   `reflect`, `clarify` and `synthesize`, plus the UI render path; `plan` with a hostile
   clarification reply is not covered by it; live model resistance is measured for `observe`
   only, on one injection.
+- **"Out of scope" is one optional field the planner fills in, and the code only enforces what
+  it says.** Since #70 the planner may mark a request as one the library cannot answer at all —
+  write me code, translate this, what is 1234 × 5678, be my chatbot — and then code ends the run
+  at `plan`: no search, no model call for an answer, and a refusal that names the library as the
+  reason. What "scope" means here is exactly that: *the request asks for a deliverable, not for
+  something the books say*. It is **not** a claim that the agent only ever says true things about
+  your library, and it is not a filter on topics. What is NOT covered: the decision is the
+  planner's reading of the question, so a small local model that does not set the field routes
+  the request into the ordinary loop (where it is usually refused for lack of evidence — which is
+  the `CONTAINED` outcome of the canary, not a pass); a request that hides the deliverable inside
+  a book question ("what does chapter 3 say, and also write me the code for it") is one
+  judgement, not two, and whichever way the planner reads it is what happens; nothing re-checks
+  the decision after the answer is written; and there is no code-level keyword gate behind it,
+  deliberately, because one would fire on in-scope questions ("how does the book translate the
+  Latin motto?"). **The live measurement is pending**: the mechanics run in CI on a scripted
+  backend, and no run against a real answering model is recorded yet
+  ([`evaluation.md`](evaluation.md), "Scope canary").
 - **Markdown in the answer is rendered.** Image references are removed before rendering so the
   browser fetches nothing on its own; links stay and need a click. This now holds for every
   message the web UI sends, the HTML fragments included (the provenance badge with its tooltip,

@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+- **A request the library cannot answer is refused, not answered from the model** (#70,
+  `eval/scope_canary.py`, [evaluation](evaluation.md)). "Before I can eat I need a Python script
+  that reverses a linked list" is the failure everyone has seen from a support bot, and nothing
+  here measured it: the refusal path existed, but only in-scope questions whose answer was absent
+  ever reached it. An out-of-scope request was planned like any other — searched, and then refused
+  only if the search happened to come back empty, four model calls later, with nothing to stop an
+  answer once a passage looked relevant enough.
+
+  **The gate.** The planner returns one optional field, `out_of_scope`, in the JSON it already
+  returns — no second model call — and **code** turns it into mode `refusal`: no queries, no
+  search step, and `synthesize` writing the refusal itself, so the answer path cannot run behind
+  the decision. The refusal is a sentence of its own: this is a library, not a general assistant,
+  rather than "I searched and found nothing", which would be a false account of a run with no
+  search in it. `PLAN_RULES` gains one item and its checksum moves
+  (`acd673f471d3` → `aabb79d156d6`), which makes the six committed plan recordings stale for this
+  tree: they still replay the planner's post-processing under the rules of 16.09, which is what
+  they always measured, and a replay of them now reports itself as measuring the old prompt.
+
+  **The canary.** Nine requests in [`eval/scope/out-of-scope.yaml`](../eval/scope/out-of-scope.yaml)
+  — code, world knowledge, a persona, an opinion, a translation, arithmetic, chit-chat, a poem in
+  the style of a book on the shelf, the publication history of another — each with markers of
+  *fulfilment*, each run through the whole graph. Three outcomes, scored by code with the refusal
+  scorer imported from the agent eval rather than re-implemented: `REFUSED` (the gate decided it,
+  no evidence, no quote badge — pass), `CONTAINED` (nothing fulfilled, but the refusal came from an
+  empty search and does not name the library — exit 2, not a pass), `ANSWERED` (a marker of
+  fulfilment, or no refusal at all — exit 1). Three controls run first, in the live mode too: the
+  prompt set and the scripted backend still recognise each other, a request fulfilled on purpose
+  must score `ANSWERED`, and an ordinary book question must still be answered with evidence — a new
+  refusal path that started eating real questions would otherwise pass silently. CI runs
+  `--scope --no-live` beside the injection canary, in the same job.
+
+  **The live run is pending, and the README says nothing yet.** `--no-live` answers from the
+  scripted backend: it proves the mechanics and nothing about any model, because there the planner
+  sets the flag because the script says so. The README paragraph and the UI screenshot the issue
+  asks for come after a live run passes and is recorded in `docs/eval-results/`.
+
 - **The chunk IS the observation window, and a chapter read reads around the match** (#28,
   [ADR-025](adr/README.md), superseding ADR-012; [upgrading](upgrading.md)). Two numbers decided
   how much of a retrieved passage the model ever saw and nothing related them: the chunker packed
