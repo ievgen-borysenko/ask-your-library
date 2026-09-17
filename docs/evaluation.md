@@ -667,6 +667,22 @@ independent runs, not a second measurement. Full table, per-question pre-check a
 The pre-check column is an AI reading of every answer against the golden notes by the session that
 ran the ablation, not a human verdict.
 
+## The documentation is checked by tests
+
+Every release re-reads all documentation against the release commit, and the half of that pass a
+machine can do runs in the ordinary `pytest` job, offline, as `tests/test_docs_as_code.py` (#72).
+Five things are checked over every tracked `.md` file: that each relative link and image resolves
+inside the tree and that a `#fragment` names a heading of the file it points at; that every file
+path written in a code span or a fenced block is a file this tree holds; that the version in
+`pyproject.toml` is the newest released heading of [`CHANGELOG.md`](CHANGELOG.md), with an empty
+`Unreleased` section required on a tagged commit; that the ADR index counts its own entries,
+numbers them contiguously and gives each one a `Status:` line; and that the settings in
+[`configuration.md`](configuration.md) and the `ayl-add` flags in
+[`add-your-own-books.md`](add-your-own-books.md), [`upgrading.md`](upgrading.md) and the README
+are read by the code and accepted by the parser. External links are never fetched, and whether a
+sentence is still true is not a thing a test can know: the read-through stays a human step of
+every release PR.
+
 ## What the green numbers do NOT prove
 
 - **Not correctness.** A 100% confirmed quote-provenance score means every quote really came
