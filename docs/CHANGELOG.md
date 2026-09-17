@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+- **An upgrade cannot quietly invalidate an index, and a backup survives one that can**
+  (#27, [ADR-020](adr/README.md) amended, [docs/upgrading.md](upgrading.md)). Each index table is
+  stamped with the chunker that cut its rows and the shape those rows have; from this release
+  something acts on both. A **read warns** — one line naming the stamped version, the version this
+  code writes and the way out, logged once per table and shown as a startup notice, while the index
+  goes on answering. A **write refuses**: `ayl-add` stops before it embeds or deletes anything, and
+  so does the demo corpus's `--book` upsert. The asymmetry is the decision: differently-cut text
+  still retrieves and still quotes verbatim, so refusing to *read* it would throw away half an hour
+  of building over a degradation — but one append leaves two chunkers' rows in a table with nothing
+  to tell them apart, and that cannot be undone. (The embedding model keeps its own, stricter rule:
+  fatal on read, because a query vector from one model against documents from another is not a
+  search.)
+
+  Two absences deliberately stay silent, which is most of the work: an unrecorded chunker means
+  nobody recorded it, not that it disagrees, and an *older* row schema is the upgrade this project
+  performs in place — so neither warns. `--doctor` now reads every stamp out whether or not it
+  agrees, because that is where somebody looks before upgrading, and exits non-zero on a mismatch.
+  `CHUNKER_VERSION` moved into the chunking module, which is the only thing that decides what a
+  chunk is; the ledger and both `_index_meta` writers record that one constant.
+
+  **`ayl-add --backup <dir>`** copies the LanceDB directory and the web UI's `chat.db` into a
+  timestamped directory with a `MANIFEST.json` — what was copied, the stamps, the row count per
+  table, the ledger size, the code version, a sha256 per file and one over the set. The copy is the
+  easy half; the product is the statement that it was taken when the index was whole. Both write
+  paths now hold an ingest lock inside the index directory and the backup takes the same one, so a
+  copy cannot start mid-ingest and an ingest cannot start mid-copy (a second `ayl-add` in another
+  terminal is refused, naming the command and pid that holds it; a lock left by a crash is taken
+  over, one from another machine is refused by name). Any staged rebuild caught half-swapped is
+  finished first, because a copy taken in that window restores to a missing table.
+  **`--restore`** re-verifies every digest before touching anything, refuses to overwrite a live
+  index without `--force`, refuses while an ingest is in flight, and **moves the index it replaces
+  aside rather than deleting it**. `--stage stamp-meta --chunker current` lets an operator vouch
+  for the chunker of an old index the way they already vouch for its embedder.
+
 - **A book has an identity a correction survives, and an ingest ledger says what went in**
   (#26, [ADR-024](adr/README.md)). A `books` table beside the index tables carries a `book_id`
   minted once and never derived from title, author or path, with the book's source, digest,

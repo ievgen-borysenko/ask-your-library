@@ -648,21 +648,44 @@ alone is the cheap half of that — 1024 is bge-m3 and several other models. A f
 everything that shaped a table — chunker, splitter version, schema, source digests — was rejected as
 more than could be kept truthful at the time, and it is still the direction.
 
-So the row answers exactly one question, "which embedder built this table", and answers it before a
-search rather than after a bad answer. It cannot answer which chunker or which schema: after a
-re-chunk (#28) a half-rebuilt index is a mixed index nothing can detect, and nothing records which
-files were requested at all. #27 is to extend the row with `chunker` and `schema_version`; **none of
-that is implemented yet**, and the policy decided for it when it is — recorded here so the change
-starts from it — is *warn on read, refuse on write*: a chunker or schema that disagrees degrades
-retrieval rather than breaking it, and refusing on read would invalidate an index that took about
-half an hour to build, while a write that mixes two chunkers cannot be undone at all. That is
-deliberately **not** the embedder's rule above, which is fatal on read and stays so. `created` is
-there for a human reading the table; no code routes on it.
+So the row answered exactly one question, "which embedder built this table", and answered it before
+a search rather than after a bad answer. It could not answer which chunker or which schema: after a
+re-chunk (#28) a half-rebuilt index is a mixed index nothing can detect, and nothing recorded which
+files were requested at all. #27 was to extend the row with `chunker` and `schema_version`, and the
+policy decided for it — recorded here before the change, so the change would start from it — was
+*warn on read, refuse on write*: a chunker or schema that disagrees degrades retrieval rather than
+breaking it, and refusing on read would invalidate an index that took about half an hour to build,
+while a write that mixes two chunkers cannot be undone at all. That is deliberately **not** the
+embedder's rule above, which is fatal on read and stays so. `created` is there for a human reading
+the table; no code routes on it.
 
-**Half of that is now done** (ADR-024, 2026-09-17): the row carries `chunker` and
-`schema_version`, written by both ingest paths. The *policy* is not — nothing warns and nothing
-refuses — so a table stamped with another chunker is still read without a word, and #27 is now
-exactly the enforcement and nothing else.
+**Amended 2026-09-17 (#27): the policy above is implemented, in these words.**
+ADR-024 added the two fields; this is what now acts on them.
+
+*What counts as a mismatch* (`index_meta.version_mismatch`): a stamped chunker that differs from
+`chunking.CHUNKER_VERSION`, or a stamped `schema_version` HIGHER than this code's — an index
+written by a newer release. Two things deliberately do not: an **older** stamped schema, which is
+the migration this project actually performs (ADR-024 added `book_id`/`book_rev` to existing tables
+in place, and the next `ayl-add` migrates and re-stamps), and would otherwise warn every reader of
+every index built before the last release about something the next ingest fixes; and an **absent**
+chunker — empty, or the ledger's `legacy` — which means nobody recorded it, and inventing a
+disagreement out of an absence is what `legacy` exists to avoid.
+
+*On read*, one warning line naming both values and the way out, logged once per table per process
+in `library.open_table` and shown by preflight as a **notice**, not a problem: the interfaces
+start, the index answers from the chunks it holds. *On write*, `ayl-add` refuses before it embeds
+or deletes anything (`refuse_chunker_mismatch`, beside the embedder's refusal), and so does the
+demo corpus's `--book` upsert — but **not** its full rebuild, which replaces every row and is
+therefore the repair rather than a mix. `--doctor` reads every stamp out whether or not it
+disagrees, because it is where somebody looks *before* an upgrade, and exits non-zero on a
+mismatch.
+
+*And the half a refusal cannot supply*: a rebuild discards the rows it replaces, so `ayl-add
+--backup <dir>` copies the index directory and the chat database with a manifest (the stamps, the
+row counts, a sha256 per file), taking the ingest lock and finishing any staged rebuild first, and
+`--restore` verifies that manifest before it puts anything back. The refusal names it in its own
+text: the remedy sentence is one constant, so the warning and the refusal cannot drift into
+recommending two different things. See [`docs/upgrading.md`](../upgrading.md).
 
 ## ADR-021: The action channel is a reserved string marker in `current_query`
 
@@ -782,8 +805,8 @@ pass at the start of every run. Rows carry `book_id` **beside** `note` for one r
 chunk id stays byte-compatible. `_index_meta` gains `chunker` and `schema_version`; readers
 tolerate their absence and nothing refuses on them here. The version is derived from the stamped
 table's own columns rather than asserted, because a version is a claim about the rows and a stamp
-that claims what the rows do not have is worse than no stamp — it is what a later refusal (#27)
-would act on.
+that claims what the rows do not have is worse than no stamp — it is what the refusal added in #27
+acts on (ADR-020, amended 2026-09-17).
 
 **The alternatives.** *(A) The staged rebuild as it was* — crash-safe and simple, but it has no
 identity at all, which is the actual defect; the cost argument for replacing it turned out to be
@@ -831,8 +854,7 @@ the exact keys, row keys and chunk ids of both ingest paths were frozen from the
 before (`tests/fixtures/book_identity.json`, generated at `b2157cb`) and checked against the built
 index: all 35 book keys and all 1,228 chapter-level chunk-id prefixes reproduce exactly.
 
-**Still open.** The enforcement half of #27 (warn on read, refuse on write for a chunker or schema
-mismatch). A book backfilled from a pre-ledger index records neither a digest nor a file, so the
+**Still open.** A book backfilled from a pre-ledger index records neither a digest nor a file, so the
 first correction after that upgrade still mints a second id — `--doctor` reports the pair. The
 cards table is joined to the transcripts table by the book key string alone; no card row carries a
 `book_id`, and the ledger does not reconcile the two corpora — `--doctor` says so in its report

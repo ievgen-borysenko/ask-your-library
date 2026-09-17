@@ -109,10 +109,12 @@ open ones often refer to them.
 - **Book identity, and the ingest ledger: done for `ayl-add`, open in three places (17.09,
   ADR-024).** A `books` ledger now carries a minted `book_id` per book with its source, digest,
   chunker, embedding model and status, `ayl-add` updates one book at a time by that id, and
-  `ayl-add --doctor` reconciles the ledger against the index tables. What remains: (a) the
-  enforcement half of #27 — `_index_meta` records `chunker` and `schema_version`, nothing warns
-  or refuses on them; (b) a book backfilled from a pre-ledger index records neither a digest nor a
-  file, so the *first* correction after that upgrade still mints a second id (reported by
+  `ayl-add --doctor` reconciles the ledger against the index tables. What remains: (a) — **done
+  17.09 (#27):** a disagreeing chunker, or a row schema newer than this code's, now warns on read
+  (once per table, and as a preflight notice) and refuses on write, `--doctor` reads every stamp
+  out, and `ayl-add --backup` / `--restore` copy and verify the index and `chat.db` around the
+  rebuild such a mismatch asks for; (b) a book backfilled from a pre-ledger index records neither a
+  digest nor a file, so the *first* correction after that upgrade still mints a second id (reported by
   `--doctor`, not prevented); (c) the cards table is joined to the transcripts table by the book
   key string alone, so a card whose heading differs by one character is still two books in the
   catalogue — no card row carries a `book_id`, and the ledger does not reconcile the two corpora

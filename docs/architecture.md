@@ -150,10 +150,14 @@ in [`adr/README.md`](adr/README.md), each with the measurement that settled it.
   sanitized passages, cut to the same budget, to a per-run scratchpad (a human-readable log) and
   keeps each passage, as observe saw it, in state under a stable hit id; plan, reflect and synthesize work on the distilled evidence,
   never on raw hits.
-- **Embedding index fingerprint.** Ingest stamps every table with the embedding model and
-  dimensionality; readers refuse an index built by another model, which otherwise degrades
-  retrieval silently when the dims happen to match. The stamp also carries the chunker and a
-  schema version (17.09), which nothing refuses on yet.
+- **Embedding index fingerprint, and the upgrade policy.** Ingest stamps every table with the
+  embedding model and dimensionality; readers refuse an index built by another model, which
+  otherwise degrades retrieval silently when the dims happen to match. The stamp also carries the
+  chunker and a row-schema version (17.09), and those two are enforced the other way round:
+  **warn on read, refuse on write** (#27). Differently-cut text still retrieves, so an index keeps
+  answering and says so once per table; the next `ayl-add` into it stops before writing, because
+  one append mixes two chunkers in a table with nothing to tell them apart. `ayl-add --backup` is
+  what survives the rebuild that resolves it — see [upgrading](upgrading.md).
 - **A book has a minted identity, kept in a ledger beside the index (17.09, ADR-024).** The
   `books` table records what was requested, what is indexed and what failed, under a `book_id`
   assigned once and never derived from title, author or path — so a corrected author renames a
