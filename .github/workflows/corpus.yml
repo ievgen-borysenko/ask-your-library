@@ -7,6 +7,12 @@ on:
     paths:
       - "corpus/**"
       - "scripts/ingest_demo_corpus.py"
+      # The second shelf (#58), verified by the same job: its pins answer to
+      # four publishers rather than to Project Gutenberg, and the works are not
+      # committed either, so a changed page upstream is invisible here until
+      # something re-fetches and re-hashes them.
+      - "corpus-tech/**"
+      - "scripts/fetch_tech_shelf.py"
       # The toc files this job diffs are written by split_chapters, which lives
       # in the package, not in the script — a change there moves chapter
       # boundaries with nothing under corpus/ or scripts/ touched. Only this
@@ -30,10 +36,11 @@ permissions:
 jobs:
   pins:
     runs-on: ubuntu-latest
-    # 31 downloads plus a chapter split; a run that has not finished in twenty
-    # minutes is a hung request, not a slow one, and holds a runner until the
-    # six-hour default gives up on it.
-    timeout-minutes: 20
+    # 31 downloads and a chapter split for the classics, plus about 170 polite
+    # (one-at-a-time, paced) requests for the engineer's shelf. A run that has
+    # not finished in thirty minutes is a hung request, not a slow one, and
+    # holds a runner until the six-hour default gives up on it.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -63,6 +70,21 @@ jobs:
         # downloaded. Without this stage the two canary toc files were the only
         # ones the diff below could never have anything to say about.
         run: uv run scripts/ingest_demo_corpus.py --stage prepare-canaries
+      - name: Re-fetch the engineer's shelf and verify every pinned file
+        # One step, not a job of its own: the required checks are named after
+        # jobs, and a new job would have to be added to the branch protection
+        # before it could ever block anything. The two stages are the whole
+        # check — fetch (cached per run, so this downloads each file once) and
+        # verify, which re-hashes every file against corpus-tech/manifest.yaml
+        # and exits 1 on the first page a publisher has edited.
+        #
+        # `prepare` is deliberately NOT run here: it reads the PDF works through
+        # pdftotext, which is not part of this image's contract, and it would
+        # add nothing — a changed page fails the pins above before any text is
+        # built from it.
+        run: |
+          uv run scripts/fetch_tech_shelf.py --stage fetch
+          uv run scripts/fetch_tech_shelf.py --stage verify
       - name: The chapter split still matches the committed tables of contents
         # The stages above rewrite corpus/toc/*.json from the sources they just
         # read. A re-pin makes the checksums green by construction; this is what
