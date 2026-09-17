@@ -192,23 +192,34 @@ questions:
     paper named here is a failure. Both expected books are CC BY-NC-ND and cardless, so this
     is the aggregation case measured over text hits alone.'
 
-- id: t12-catalog-anything-by-google
-  question: Do I have anything by Google on this shelf?
+- id: t12-catalog-by-betsy-beyer
+  question: Do I have anything by Betsy Beyer on this shelf?
   type: catalog
   expected_op: by_author
-  expected_resolved: false
-  expected_count: 0
-  expected_books: []
+  expected_resolved: true
+  expected_count: 3
+  expected_books:
+  - Site Reliability Engineering — Betsy Beyer, Chris Jones, Jennifer Petoff, Niall Richard
+    Murphy (eds.)
+  - The Site Reliability Workbook — Betsy Beyer, Niall Richard Murphy, David K. Rensin, Kent
+    Kawahara, Stephen Thorne (eds.)
+  - Building Secure and Reliable Systems — Heather Adkins, Betsy Beyer, Paul Blankinship,
+    Piotr Lewandowski, Ana Oprea, Adam Stubblefield
   expected_total: 13
-  notes: 'PROPOSED 2026-09-17, and the item most likely to be reworded after the first run.
-    Four works here were published by Google, but corpus-tech/manifest.yaml credits every one
-    of them to its named authors and editors (Betsy Beyer, Titus Winters, Martin Zinkevich
-    ...), because that is who wrote them — so the catalogue holds no author called Google and
-    the honest structured answer is "no author of that name", over the whole shelf of 13.
-    That is what this item expects. The open question for the reader: if the demo should
-    answer "yes, four of them", the publisher has to become part of the manifest''s author
-    field, and that is a change to the shelf, not to this question.'
   expected_facts: []
+  notes: 'PROPOSED 2026-09-17. Reworded from "do I have anything by Google?", which asked
+    about a publisher: corpus-tech/manifest.yaml credits every work to the people who wrote
+    or edited it, so no author called Google exists and the only honest expectation was that
+    the catalogue resolve nothing — a catalogue question that measures an empty answer.
+    Betsy Beyer is the real version of the same question: she is an editor of the SRE book
+    and of the Workbook and a co-author of Building Secure and Reliable Systems, and her
+    name is spelled identically in all three author fields (verified against the manifest;
+    nothing had to be normalised). The three expected_books are those manifest keys in full,
+    because a catalogue item is scored on set equality against the keys the code listed.
+    What this item really measures is the contained-name path in catalog.py: each author
+    field holds several names in one string, so "Betsy Beyer" resolves by being contained in
+    it as whole words, not by equalling it. Software Engineering at Google is the near miss
+    — same house, same series, and she is not on it.'
 
 - id: t13-beyonce-rule
   question: There is a testing rule at Google named after a pop song. What is it called, and

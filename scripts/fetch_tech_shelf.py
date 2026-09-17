@@ -38,7 +38,11 @@ Fetch kinds, one per shape of source (`fetch:` in the manifest):
                  reliable-systems ships the book's HTML, not Markdown)
   pdf            a published PDF, split into chapters by `chapter_regex`
   arxiv-html     arXiv's own HTML rendering, https://arxiv.org/html/<id>
-  arxiv-pdf      the paper's PDF, https://arxiv.org/pdf/<id>
+  arxiv-pdf      the paper's PDF, https://arxiv.org/pdf/<id>. No work on the
+                 shelf uses it: #58 planned it for ReAct and Chain-of-Thought,
+                 on the rule that arXiv renders HTML only for submissions from
+                 December 2023 on, and arXiv has since rendered both. The kind
+                 stays because the next paper added may be one it has not.
 
 Nothing here needs a dependency the lockfile does not already have: `requests`
 and `pyyaml` are the project's, the HTML is converted by a small reader built on
