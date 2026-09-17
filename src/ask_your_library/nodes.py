@@ -179,6 +179,34 @@ def plan(state: AgentState) -> dict:
     mode = llm.str_field(decision, "mode", ("identify", "answer", "catalog")) or "answer"
     common = {"evidence": evidence, "clarify_unresolved": unresolved, "clarify_chosen": chosen,
               "steps_taken": state.get("steps_taken", 0), "empty_streak": 0}
+
+    # The scope gate (#70). A request that is not a question about these books
+    # at all — write me code, translate this, what is 1234 × 5678, be my
+    # chatbot — has nothing in the library to answer it, and answering it from
+    # the model's own memory under this agent's badge is the failure the scope
+    # canary measures. The PLANNER reads the intent (one optional boolean in
+    # the JSON it already returns, so no second model call) and CODE enforces
+    # the consequence: mode "refusal", no query, no search step, and
+    # `synthesize` writing the refusal itself, so the answer path cannot run
+    # behind the decision. route_after_plan needs nothing new — a plan with no
+    # current_query already goes straight to synthesize.
+    # Deliberately BEFORE the catalogue branch and the book resolution: a
+    # request that is out of scope is not a listing and names no book to
+    # resolve, and a catalogue read here would be a query spent on it.
+    #
+    # And only on a plan that has nothing behind it yet. `plan` also runs a
+    # SECOND time, after a clarify: by then the run has searched, the reader has
+    # answered a question of its own, and the evidence in the state was paid
+    # for. `synthesize` on mode "refusal" answers from no evidence at all, so a
+    # gate firing on that re-plan would throw all of it away and tell the reader
+    # their own follow-up was out of scope. A request that was worth searching
+    # stays worth answering: the gate is a decision about the FIRST reading of a
+    # question, not a veto the loop can acquire halfway through.
+    if llm.bool_field(decision, "out_of_scope") and not evidence and not chosen:
+        return {"mode": "refusal", "queries": [], "current_query": "",
+                "book_filter": "", "book_unresolved": "",
+                "stop_reason": t("stop_out_of_scope"), **common}
+
     catalog_request = parse_catalog_request(decision) if mode == "catalog" else None
     named_book = llm.str_field(decision, "book")
     # One catalogue read per plan, and only when a name has to be resolved
@@ -692,6 +720,15 @@ def synthesize(state: AgentState) -> dict:
     What it does NOT cover, and the watermark says so: the sentences the model
     writes around the evidence, including anything it puts in quotation marks
     of its own."""
+    # Out of scope (#70): `plan` decided the request is not a question about
+    # the books, and no search ran. The answer is the refusal itself, written
+    # HERE by code and never by the model — that is what makes "the answer path
+    # does not run for an out-of-scope request" a property of this file rather
+    # than of a prompt. First in the node, before the catalogue note: a run
+    # that searched nothing resolved no book name either.
+    if state.get("mode") == "refusal":
+        return {"answer": t("out_of_scope_answer")}
+
     # The question named a book the catalogue does not hold: the answer comes
     # from the whole library and must say so before anything else (ADR-016).
     note = t("book_not_in_catalog", q=state["book_unresolved"]) + "\n\n" if state.get("book_unresolved") else ""

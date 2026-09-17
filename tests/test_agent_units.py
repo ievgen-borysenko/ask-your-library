@@ -1468,6 +1468,19 @@ def test_str_field_is_the_one_schema_helper_for_model_json():
     assert llm.str_field({"next_query": "who is Mr Brown"}, "next_query") == "who is Mr Brown"
 
 
+def test_bool_field_is_its_boolean_half():
+    """The same rule for a flag (plan's `out_of_scope`, #70): absent, `false`
+    and anything off-schema are "not set", and a model that quotes its booleans
+    is still read — a missed `true` there is a request answered that the gate
+    was supposed to refuse."""
+    assert llm.bool_field({"out_of_scope": True}, "out_of_scope") is True
+    for quoted in ("true", "TRUE", " yes ", "1"):
+        assert llm.bool_field({"out_of_scope": quoted}, "out_of_scope") is True, quoted
+    for absent in (False, "false", "no", "", "later", 0, 1, None, [], {}):
+        assert llm.bool_field({"out_of_scope": absent}, "out_of_scope") is False, absent
+    assert llm.bool_field({}, "out_of_scope") is False
+
+
 def test_loop_budgets_are_config_knobs_read_once():
     """MAX_STEPS / MAX_EMPTY_STREAK / MAX_CLARIFY_CANDIDATES come from the
     environment through config, like the observe window; a non-positive value

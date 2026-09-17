@@ -38,6 +38,15 @@ and a changed prompt means the recorded replies answer something nobody asks any
 more. A prompt change therefore needs a **new recording**, which needs a paid
 run. `uv run eval/run_plan_eval.py --check` answers that question on its own.
 
+**Every recording in this directory is stale as of the scope gate (#70).** That
+change added one optional field to `PLAN_RULES`, so its checksum moved from
+`acd673f471d3` to `ab7b9ece3352` and `--check` now reports these six files as
+measuring the old rules. They are kept, not deleted: they are still the exact
+input the 16.09 replay numbers were produced from, and a replay of them still
+measures what it always measured — `plan()`'s post-processing under the prompt
+that was in the tree on 16.09. What they cannot do any more is say anything
+about how a model reads the new rule; that needs a new recording from a new run.
+
 A `*.jsonl.partial` beside a recording is a run that did not finish. The calls in
 it were paid for all the same; rename it by hand if you want to keep them, after
 reading what it holds.
