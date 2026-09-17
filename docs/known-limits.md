@@ -213,10 +213,12 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   gate baseline
   ([`eval-results/2026-09-18-rechunk-and-observe-feedback.md`](eval-results/2026-09-18-rechunk-and-observe-feedback.md)),
   and behaviour is identical item for item — 9/11 and 10/10, the same two failures, 10/12 titles and
-  10/24 facts on both sides — at +2 LLM calls on the research set and −2 on the catalogue set. In the
-  same pair, evidence items rise 43 -> 50 while book-text matches fall 34 -> **33**, so the extra
-  evidence is card matches rather than more of the books: treat the re-chunk as a defect removed at
-  no behavioural cost, not as better answers. Every published eval report other than that one was
+  10/24 facts on both sides — at +2 LLM calls on the research set and −2 on the catalogue set. That
+  pair is a before/after over six merges of `main`, not an isolated measurement of the chunker, and
+  the report lists what else was in the gap. In the
+  same pair, evidence items rise 43 -> 50 — **eight more card matches** (9 -> 17) against **one
+  fewer book-text match** (34 -> 33), so seven more in net and none of it more of the books: treat
+  the re-chunk as a defect removed at no behavioural cost, not as better answers. Every published eval report other than that one was
   produced against the old chunker and is not comparable, chunk for chunk, with a run made after it
   — nothing was re-run to change a published number. Raising `SEARCH_HIT_CHARS`
   now buys nothing (there is no chunk tail behind it) and lowering it cuts a chunk the retriever

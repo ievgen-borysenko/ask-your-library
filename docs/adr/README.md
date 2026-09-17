@@ -223,12 +223,18 @@ the USER message of an `observe` step that lost nothing is byte for byte what it
 update, but the SYSTEM message changed for every run — `OBSERVE_RULES` and `SYNTHESIZE_RULES` are
 where the new sentences live. No run of this release is prompt-identical to one made before it.
 `PLAN_RULES` did not change, so the plan recordings still replay. **Measured 2026-09-18**
-([report][rechunk-feedback], part B): on the re-chunked index, `mistral-small3.2:24b-ctx20k` is
-10/11 with 0 broken of 32 checked and `c03` back — PASS at `titles 1/1`, on six evidence items where
-the attempts it failed on had nine, so the naming rule did its work on evidence thinner than the
-evidence that defeated it. `qwen2.5:14b`, paired against the same index without this change, goes
-9/11 → 10/11 and is below its baseline on no item. Two things the run says that the reasoning above
-did not anticipate. **The failure moved**: `c05-quixote-windmills` passed three baseline attempts
+([report][rechunk-feedback], part B), on the re-chunked index and with **one attempt per model**.
+`mistral-small3.2:24b-ctx20k` is 10/11 with 0 broken of 32 checked, and `c03` is back — PASS at
+`titles 1/1`, on six evidence items where the attempts it failed on had nine, so the naming rule did
+its work on evidence thinner than the evidence that defeated it. Said exactly: the baseline is
+11/11, 10/11, 10/11 over three attempts, so the branch run matches two of the three and is one item
+below the best of them. `qwen2.5:14b`, against the same index, goes 9/11 → 10/11 and is below its
+baseline on no item; that pair is the closest on the page but is not a one-change pair either, since
+`#29` is only in the branch column and `#71` is only in the other. **One attempt is not three**: the
+baseline page found low observed variability on both models — identical answers across attempts on
+the 14b, four varying items on mistral, `c03` among them — and low variability is not determinism,
+so a single run cannot reproduce the 11/11 ↔ 10/11 spread or say which side of it these numbers sit
+on. Two things the run says that the reasoning above did not anticipate. **The failure moved**: `c05-quixote-windmills` passed three baseline attempts
 and now fails, with five quotes refused and no evidence at all surviving — and `synthesize` returns
 the fixed refusal by code when `evidence` is empty, so `SYNTHESIZE_RULES` is never sent and the
 naming rule cannot reach the answer that needs a name most. **The cap is not visible in the data**:
@@ -236,15 +242,26 @@ naming rule cannot reach the answer that needs a name most. **The cap is not vis
 no artifact records `dropped_streak` or the per-step refusal counts, so whether it fired is
 undecidable from a report. A counter in the item header would close that.
 
-**What the hold decision really costs, said as a number.** A model that quotes badly is no longer
-stopped after two steps. Where the CRAG gate used to end such a run at step 2, it now runs to
-`MAX_STEPS` (4), and every extra step is a search plus an `observe` call plus a `reflect` call — on
-the local default, roughly the difference between a question of five model calls and one of nine.
-That is the price of not shortening the search, paid exactly by the runs that produce the least, and
-it is the reason the acceptance below is about behaviour at repeat and not only about the quote
-counts. (Bounded by the amendment of 2026-09-17 above: the `MAX_DROPPED_STREAK`th all-dropped step
-in a row is dry itself, so the price is paid for the steps under the cap and not for the whole step
-budget.)
+**What the hold decision really costs, said as a number — in the shipped configuration.** Take a
+model that retrieves passages and quotes none of them verbatim, so every step drops everything.
+At the defaults (`MAX_EMPTY_STREAK` 2, `MAX_DROPPED_STREAK` 2) the sequence is: **step 1 is held**
+(`dropped_streak` 1, the empty streak untouched — this is the case the hold was decided for);
+**step 2 is the `MAX_DROPPED_STREAK`th in a row and counts dry** (`empty_streak` 1); **step 3 counts
+dry too** (`empty_streak` 2) **and the CRAG gate ends the run there**. Three steps, not four: one
+plan call, three `observe` calls and the `reflect` calls between them — and no `synthesize` call at
+all when no evidence survived, because `synthesize` writes the honest refusal itself in that case.
+Against the two steps such a run took before `#65`, the hold costs one extra step and its calls.
+
+**The nine-call figure is the pre-17.09 behaviour and is kept here for the history.** Between `#65`
+and the amendment above, a dropped step neither advanced nor reset the empty streak, so a run like
+this reached `MAX_STEPS` (4) — roughly the difference between a question of five model calls and one
+of nine. The cap is what removed the fourth step; the first held step, which is what the decision was
+about, is untouched by it. (One caution, from the measurement: `c05-quixote-windmills` on
+`mistral-small3.2:24b-ctx20k` stops at 3 steps on the CRAG gate in exactly this shape, but no
+artifact records `dropped_streak` per step, so that run is consistent with the sequence above and
+does not confirm it — [the report][rechunk-feedback] says so, and a counter in the item header is
+what would settle it.) The price is still paid exactly by the runs that produce the least, which is
+why the acceptance below is about behaviour at repeat and not only about the quote counts.
 
 **A second coupling, not decided here: the coverage gate (ADR-013).** `coverage._uncovered_books` is
 the hits of the run minus the books the *evidence* names, so evidence the gate thinned makes a book
@@ -1049,11 +1066,16 @@ frozen beside it, and book keys and row keys are byte-for-byte unchanged. The ro
 about 55%, which moves a real library toward the ANN trigger #33 names. `reflect`'s prompt gains
 one optional field. **Measured 2026-09-18** ([report][rechunk-feedback], part A): the corpus was
 re-ingested at `sentence-pack-2` (11,282 rows, `--doctor` clean) and both golden sets re-run on
-`qwen2.5:14b` at `--repeat 3` against the `#65` gate baseline. Behaviour is unchanged item for item
-— 9/11 and 10/10, the same two failures, the same clarify, 10/12 titles and 10/24 facts on both
-sides — so the defect is closed without the answers moving. The optional field is filled on every
-read (`chapter_reads_aimed` 7/7, five windows off the head), which was the first question this
-record said the measurement had to answer.
+`qwen2.5:14b` at `--repeat 3` against the `#65` gate baseline. **It is a before/after over six
+merges and not an isolated measurement of this decision** — `c79018a` → `c9e12bc` carries `#66`,
+`#67`, `#68`, `#71` and `#74` alongside the re-chunk, `#67` and `#71` both touch the answer path,
+and the report lists what is controlled for and what is not. What the pair shows: behaviour
+unchanged item for item — 9/11 and 10/10, the same two failures, the same clarify, 10/12 titles and
+10/24 facts on both sides — so nothing in that gap, the re-chunk included, moved an answer's verdict.
+One row in it belongs to `#71` and not here: the items whose plan sets a retrieval book filter go
+5 → 2, and a control run of `#71` on the *old* index shows the same 2. The optional field is filled
+on every read (`chapter_reads_aimed` 7/7, five windows off the head), which was the first question
+this record said the measurement had to answer.
 
 **The acceptance.** Chunks over the window 90.3% -> 0 (met, on the prepared texts; the index the
 re-run read holds exactly the 11,282 rows that measurement predicted, which ties the two together
@@ -1061,8 +1083,8 @@ without re-measuring the distribution). A free local core re-run with c03 intact
 comes out, and behaviour not below the #66 gate baseline — **met**: c03 PASSES on both sides, c06
 passes with `facts 0/3` on both sides and now reports a chapter read that aimed and kept the head,
 and no item is below the baseline. What the re-run does not buy, and the report says it plainly:
-evidence items rise 43 -> 50 while book-text matches fall 34 -> 33, so the growth is card matches
-and not more of the books.
+evidence items rise 43 -> 50, which is eight more card matches (9 -> 17) against one fewer
+book-text match (34 -> 33) — seven more in net, and none of it more of the books.
 
 [reports]: ../eval-results/
 [backlog]: ../backlog.md

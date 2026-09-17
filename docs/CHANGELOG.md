@@ -37,19 +37,24 @@
   `PLAN_RULES` is untouched by this entry; what makes the committed plan recordings stale for this
   tree is `#70` below, and not anything `#29` changed.
 
-  **Measured on both local models, on the re-chunked index**
+  **Measured on both local models, on the re-chunked index, one attempt each**
   ([`eval-results/2026-09-18-rechunk-and-observe-feedback.md`](eval-results/2026-09-18-rechunk-and-observe-feedback.md),
-  part B). `mistral-small3.2:24b-ctx20k` is **10/11** with **0 broken quotes** out of 32 checked, and
-  `c03` — the regression this change was written for — now PASSES with `titles 1/1` on *fewer*
-  evidence items than the attempts it failed on (6 against 9): the answer opens by naming *The
-  Three Musketeers* while hedging exactly as before. **The failure moved rather than disappeared.**
+  part B). `mistral-small3.2:24b-ctx20k` is **10/11** with **0 broken quotes** out of 32 checked —
+  its baseline was 11/11, 10/11, 10/11 over three attempts, so this run matches two of those three
+  and is one item below the best of them — and `c03`, the regression this change was written for,
+  now PASSES with `titles 1/1` on *fewer* evidence items than the attempts it failed on (6 against
+  9): the answer opens by naming *The Three Musketeers* while hedging exactly as before. **The failure moved rather than disappeared.**
   `c05-quixote-windmills`, which passed all three baseline attempts, now fails with `titles 0/1`,
   5 quotes refused as not character-exact and **zero** evidence surviving — and with no evidence
   `synthesize` returns the fixed refusal by code, so the new naming rule is never even sent.
-  `qwen2.5:14b`, paired against the same index without this change, goes **9/11 -> 10/11** and is
-  below its baseline on no item, at 0 broken out of 34 and one extra dropped quote. Whether
-  `MAX_DROPPED_STREAK` ever fired is **not** decidable from these runs: no artifact records the
-  streak or the per-step refusals, and the report says so rather than claiming the cap.
+  `qwen2.5:14b`, against the same index, goes **9/11 -> 10/11** and is below its baseline on no
+  item, at 0 broken out of 34 and one extra dropped quote; that pair is the closest on the page but
+  is not a one-change pair either, since #29 is only in the branch column and #71 only in the other.
+  **One attempt is not three**: the baseline measured low variability on both models and low
+  variability is not determinism, so neither number here carries a spread, and `c03` is one of the
+  items that did vary across the baseline's attempts. Whether `MAX_DROPPED_STREAK` ever fired is
+  **not** decidable from these runs either: no artifact records the streak or the per-step refusals,
+  and the report says so rather than claiming the cap.
 
 - **A request the library cannot answer is refused, not answered from the model** (#70,
   `eval/scope_canary.py`, [evaluation](evaluation.md)). "Before I can eat I need a Python script
@@ -169,16 +174,22 @@
   first thing the measurement had to answer. It answers it `7/7`: every chapter read the model made
   named what it was looking for, and five of the seven moved the window off the head.
 
-  **Measured, and it costs nothing behavioural.**
+  **Measured, as a before/after, and no answer's verdict moved.**
   [`eval-results/2026-09-18-rechunk-and-observe-feedback.md`](eval-results/2026-09-18-rechunk-and-observe-feedback.md),
   part A: the corpus re-ingested at `sentence-pack-2` (11,282 rows, `--doctor` clean) and both
   golden sets re-run on `qwen2.5:14b` at `--repeat 3` against the `#65` gate baseline of 16.09.
-  Behaviour is unchanged item for item — **9/11 and 10/10**, the same two failures, the same single
-  clarify, the same 10/12 titles and 10/24 facts — at +2 LLM calls and +8.9% wall clock on the
-  research set, and −2 calls and −13% on the catalogue set. What is not a gain: evidence items go
-  43 -> 50 while book-text matches go 34 -> **33**, so the seven extra items are card matches, and
-  the report says so. Whether answers get *better* is still not a claim these rows can make; they
-  are behaviour, provenance and cost, and correctness remains the reader's separate pass.
+  **Read it as a before/after over six merges, not as an isolated measurement of this entry**: the
+  code goes `c79018a` -> `c9e12bc`, which carries #66, #67, #68, #71 and #74 beside the re-chunk,
+  and the report lists what each one touches and which of them has a control run. What the pair
+  shows: behaviour unchanged item for item — **9/11 and 10/10**, the same two failures, the same
+  single clarify, the same 10/12 titles and 10/24 facts — at +2 LLM calls and +8.9% wall clock on
+  the research set, and −2 calls and −13% on the catalogue set. One row in it is **not** this
+  entry's: the items whose plan sets a retrieval book filter go 5 -> 2, and a control run of #71 on
+  the *old* index shows the same 2, so that belongs to #71's change to `PLAN_RULES`. What is not a
+  gain either: evidence items go 43 -> 50, but that is **eight more card matches and one fewer
+  book-text match** (card-only 9 -> 17, `checked_book_text` 34 -> 33) — seven more in net, none of
+  them more of the books. Whether answers get *better* is still not a claim these rows can make;
+  they are behaviour, provenance and cost, and correctness remains the reader's separate pass.
 
 - **An upgrade cannot quietly invalidate an index, and a backup survives one that can**
   (#27, [ADR-020](adr/README.md) amended, [docs/upgrading.md](upgrading.md)). Each index table is

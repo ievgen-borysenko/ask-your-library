@@ -299,8 +299,10 @@ this page's configuration**:
 [`2026-09-18-rechunk-and-observe-feedback.md`](eval-results/2026-09-18-rechunk-and-observe-feedback.md)
 runs both golden sets on `qwen2.5:14b` before and after the re-chunk and finds behaviour unchanged
 item for item (9/11 and 10/10 on both sides), at +2 LLM calls on the research set and −2 on the
-catalogue set. That is one model on the local backend; nothing hosted has been re-run, and no number
-in the tables below has moved.
+catalogue set. **It is a before/after over six merges rather than an isolated measurement of the
+re-chunk** — the code moves `c79018a` -> `c9e12bc` and the report names every change in that gap,
+which of them has a control run and which does not. That is one model on the local backend; nothing
+hosted has been re-run, and no number in the tables below has moved.
 
 Two measured trees, both single runs, clean tree (`--require-clean`), strict hit-id mode, the same
 bge-m3 index: **v0.1.0**, 2026-09-05 on code `88881ee` (the last code commit before tag `v0.1.0`;
