@@ -208,6 +208,10 @@ PAGE = """
     <blockquote><p class="quote">If a human operator needs to touch your system.</p></blockquote>
     <ul><li>Manual</li><li>Repetitive</li></ul>
     <p>Not every task has all of these attributes.</p>
+    <figure class="ltx_figure"><object data="diagram.svg"></object>
+      <figcaption>Figure 1: toil over time.</figcaption></figure>
+    <figure class="ltx_table"><pre>Question: how much toil?\nAnswer: less than 50%.</pre></figure>
+    <figure class="ltx_figure"><img src="graph.png" alt="a graph"></figure>
   </div>
   <footer>&copy; Google</footer>
 </body></html>
@@ -235,6 +239,24 @@ def test_the_reader_drops_the_page_around_the_chapter():
     for absent in ("Home", "Next chapter", "Site banner", "color:red", "© Google"):
         assert absent not in rendered, f"{absent!r} is page furniture and must not be indexed"
     assert "work.19" not in rendered and "19" not in rendered
+
+
+def test_a_figure_is_kept_when_it_carries_text_and_dropped_when_it_is_a_picture():
+    """arXiv renders a paper's appendices as figures: ReAct's prompt
+    trajectories and Chain-of-Thought's exemplars are `<figure>` elements full
+    of text, and they are what a reader of those papers quotes. So a figure is
+    read like any other block — its listing, its table, its caption — and what
+    is dropped is the picture itself, whether it arrives as `<img>` or as an
+    `<object>`. A figure that held nothing but the picture leaves no text to
+    flush and disappears on its own, with no rule of its own to say so."""
+    rendered = shelf.render(blocks_of(PAGE), demote=1)
+    assert "Question: how much toil?" in rendered, "a listing inside a figure is text"
+    assert "Figure 1: toil over time." in rendered, "a caption is text too"
+    for absent in ("diagram.svg", "graph.png", "a graph"):
+        assert absent not in rendered, f"{absent!r} is a picture, not text"
+    # Nothing is left behind by the image-only figure: no empty block, no stray
+    # separator between the caption above it and whatever follows.
+    assert "\n\n\n" not in rendered
 
 
 def test_no_heading_inside_a_chapter_is_rendered_at_the_level_that_splits_chapters():

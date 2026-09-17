@@ -175,10 +175,18 @@ def raw_dir(work: dict) -> Path:
 # marker renders as a digit glued to the last word of a sentence ("goals,19"),
 # which is a word the full-text index would then hold and nobody would search.
 SKIP_TAGS = {"script", "style", "nav", "footer", "header", "aside", "form",
-             "svg", "noscript", "sup", "figure", "iframe", "button", "select"}
+             "svg", "noscript", "sup", "iframe", "button", "select",
+             # An image, however it is embedded. `object` is here and `figure`
+             # is NOT: a figure is dropped in the shape that holds a picture and
+             # kept in the shape that holds text. On arXiv that distinction is
+             # the whole appendix of a paper — ReAct's prompt trajectories and
+             # Chain-of-Thought's exemplars are `<figure>`s of text, and they are
+             # what a reader of those papers quotes. A figure that really is only
+             # a picture leaves nothing behind to flush and disappears by itself.
+             "object", "picture", "video", "audio"}
 VOID_TAGS = {"br", "img", "hr", "input", "meta", "link", "col", "source"}
 BLOCK_TAGS = {"p", "div", "section", "article", "ul", "ol", "dl", "table",
-              "tr", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6",
+              "tr", "figure", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6",
               "li", "dt", "dd", "pre", "td", "th", "figcaption", "main"}
 HEADINGS = {f"h{level}": level for level in range(1, 7)}
 
