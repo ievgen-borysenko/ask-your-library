@@ -677,7 +677,9 @@ disagreement out of an absence is what `legacy` exists to avoid.
 *On read*, one warning line naming both values and the way out, logged once per table per process
 in `library.open_table` and shown by preflight as a **notice**, not a problem: the interfaces
 start, the index answers from the chunks it holds. *On write*, `ayl-add` refuses before it embeds
-or deletes anything (`refuse_chunker_mismatch`, beside the embedder's refusal), and so does the
+or deletes anything — and before it RECOVERS anything: both checks are reads (`read_index_meta`
+never recovers, and takes a staged fingerprint table read-only), so they run ahead of
+`recover_staging` and a refused run promotes and drops nothing on its way to saying no (`refuse_chunker_mismatch`, beside the embedder's refusal), and so does the
 demo corpus's `--book` upsert — but **not** its full rebuild, which replaces every row and is
 therefore the repair rather than a mix. `--doctor` reads every stamp out whether or not it
 disagrees, because it is where somebody looks *before* an upgrade, and exits non-zero on a

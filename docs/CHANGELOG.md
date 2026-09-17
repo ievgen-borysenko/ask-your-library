@@ -47,8 +47,15 @@
   easy half; the product is the statement that it was taken when the index was whole. Both write
   paths now hold an ingest lock inside the index directory and the backup takes the same one, so a
   copy cannot start mid-ingest and an ingest cannot start mid-copy (a second `ayl-add` in another
-  terminal is refused, naming the command and pid that holds it; a lock left by a crash is taken
-  over, one from another machine is refused by name). Any staged rebuild caught half-swapped is
+  terminal is refused, naming the command and pid that holds it). The lock sits **beside** the
+  index, keyed by its name and by its resolved path, so it survives the rename a restore publishes
+  with and two spellings of one index are one lock; exactly one leftover is cleared automatically —
+  this host, a pid that is not running — and one from another machine or one this process cannot
+  read is refused by name, because the file is owner-only and clearing another account's would let
+  two ingests write one index. The chat database is taken through **SQLite's own backup**, one
+  consistent snapshot in one file rather than a main file copied beside somebody else's
+  write-ahead log. The restore is staged beside the target and published by rename, rolling back
+  if the swap fails. Any staged rebuild caught half-swapped is
   finished first, because a copy taken in that window restores to a missing table.
   **`--restore`** re-verifies every digest before touching anything, refuses to overwrite a live
   index without `--force`, refuses while an ingest is in flight, and **moves the index it replaces

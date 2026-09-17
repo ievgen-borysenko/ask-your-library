@@ -485,6 +485,11 @@ def ingest_transcripts_table(backend: str, book_filter: str | None, entry_ids: l
     embedder = get_embedder(backend)
     db = lancedb.connect(DB_PATH)
     name = f"transcripts_{backend}"
+    # Before the recoveries: both guards are reads (`read_index_meta` never
+    # recovers), so a run that is going to be refused promotes and drops
+    # nothing on its way to saying no.
+    if book_filter and name in table_names(db):
+        refuse_unsafe_partial_reingest(db, name, embedder)
     recover_staging(db, name)
     recover_staging(db, META_TABLE)     # a widening left half-done; a write may finish it
     started = time.time()

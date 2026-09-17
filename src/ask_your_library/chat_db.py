@@ -86,16 +86,45 @@ def stored_version(connection) -> int | None:
     return int(row[0]) if row else None
 
 
-def record_version(connection, version: int = SCHEMA_VERSION) -> None:
-    """Write the version this code's schema is. Called after the check, never
-    before it: stamping first would erase the one piece of evidence the next
-    start has about which release wrote the file."""
+def record_version(connection, version: int = SCHEMA_VERSION) -> bool:
+    """Write the version this code's schema is, unless that would LOWER what is
+    already recorded. Returns whether it wrote.
+
+    A version only ever goes up. Running an older release against a database a
+    newer one wrote must not restamp it downwards: the stamp would then say the
+    file is something this code can fully write, the next start of the newer
+    release would find its own version missing, and the one piece of evidence
+    about which release shaped the file would be gone — overwritten by the
+    release that knows least about it.
+
+    Called after the column check and only when it passed, never before it:
+    stamping a database that is missing columns as current makes the stamp a
+    claim about a shape the file does not have."""
     connection.executescript(VERSION_DDL)
+    recorded = stored_version(connection)
+    if recorded is not None and recorded >= int(version):
+        return False
     connection.execute(
         f'INSERT INTO {VERSION_TABLE} ("component", "version", "updated") VALUES (?, ?, ?) '
         f'ON CONFLICT("component") DO UPDATE SET "version" = excluded."version", '
         f'"updated" = excluded."updated"',
         (CHAT_COMPONENT, int(version), time.strftime("%Y-%m-%dT%H:%M:%S")))
+    return True
+
+
+def check_and_record(connection, ddl: str, path: str = "the chat database",
+                     version: int = SCHEMA_VERSION) -> list[str]:
+    """The startup sequence, in one call so the ORDER is a property of this
+    module and not of its caller: check first, stamp only when there is nothing
+    to report. Returns the problems, for the caller to log.
+
+    A database that is missing columns, or was written by a newer release, is
+    left exactly as it is — including its stamp, which is what the next start
+    reads."""
+    problems = check_chat_db(connection, ddl, path=path, version=version)
+    if not problems:
+        record_version(connection, version)
+    return problems
 
 
 def check_chat_db(connection, ddl: str, path: str = "the chat database",

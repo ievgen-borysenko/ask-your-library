@@ -7,17 +7,21 @@ which rotted is found before it replaces a working index rather than after.
 
 No network: the embedder is faked and every path is under tmp_path.
 """
+import contextlib
 import json
 import os
+import sqlite3
+from pathlib import Path
 
 import lancedb
 import pytest
 
 from ask_your_library.ingest import add_folder, backup as backup_module
-from ask_your_library.ingest.backup import BackupError, backup, restore, verify
+from ask_your_library.ingest.backup import (BackupError, backup, manifest_lines,
+                                            restore, verify)
 from ask_your_library.ingest.doctor import check_ledger
-from ask_your_library.ingest.lock import (IngestBusy, LOCK_NAME, acquire, ingest_lock,
-                                          lock_path, read_lock, release)
+from ask_your_library.ingest.lock import (IngestBusy, acquire, ingest_lock, lock_path,
+                                          read_lock, release)
 from test_add_folder import PARA, fake_embedder, write  # noqa: F401
 
 BODY = PARA * 4
@@ -34,11 +38,24 @@ def built(tmp_path, fake_embedder):  # noqa: F811
     return folder
 
 
-def chat_db(tmp_path, text=b"SQLite format 3\x00 pretend"):
+def chat_db(tmp_path, rows=("what is the ledger for",), wal=False):
+    """A real SQLite chat database: the backup goes through SQLite's own backup
+    API now, so a file of plausible bytes is not a substitute for one."""
     path = tmp_path / "chainlit" / "chat.db"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(text)
+    with contextlib.closing(sqlite3.connect(path)) as conn:
+        if wal:
+            conn.execute("PRAGMA journal_mode=WAL")
+        with conn:
+            conn.execute('CREATE TABLE IF NOT EXISTS steps ("id" TEXT, "output" TEXT)')
+            conn.executemany("INSERT INTO steps VALUES (?, ?)",
+                             [(str(i), text) for i, text in enumerate(rows)])
     return path
+
+
+def chat_rows(path):
+    with contextlib.closing(sqlite3.connect(path)) as conn:
+        return [row[0] for row in conn.execute('SELECT "output" FROM steps ORDER BY "id"')]
 
 
 # --- the lock ----------------------------------------------------------------
@@ -53,7 +70,7 @@ def test_a_second_writer_is_refused_while_the_first_holds_the_lock(built, tmp_pa
             add_folder.add_books(add_folder.read_folder(built), "ollama", tmp_path / "db", built)
     assert "an ingest is writing" in str(error.value)
     assert "pretend ingest" in str(error.value)
-    assert LOCK_NAME in str(error.value)          # the file to delete, named
+    assert str(lock_path(tmp_path / "db")) in str(error.value)   # the file to delete, named
 
 
 def test_a_lock_left_by_a_dead_process_is_taken_over(tmp_path, caplog):
@@ -124,10 +141,13 @@ def test_a_fresh_backup_verifies(built, tmp_path):
 
 
 def test_the_lock_is_never_copied_into_the_backup(built, tmp_path):
+    """It lives BESIDE the index now, so this holds by construction — asserted
+    anyway, because the reason it moved there was a different one (surviving a
+    rename), and nothing should quietly put it back inside."""
     target = backup(tmp_path / "db", tmp_path / "backups")
-    assert not (target / "lancedb" / LOCK_NAME).exists()
-    assert not any(LOCK_NAME in entry["path"] for entry in
-                   json.loads((target / "MANIFEST.json").read_text())["files"])
+    names = [entry["path"] for entry in
+             json.loads((target / "MANIFEST.json").read_text())["files"]]
+    assert not any("ayl-ingest" in name for name in names)
 
 
 def test_a_backup_refuses_while_an_ingest_is_in_flight(built, tmp_path):
@@ -360,7 +380,180 @@ def test_the_lock_file_is_never_observed_empty(tmp_path):
         info = read_lock(db_path)
         assert info["pid"] == os.getpid() and info["command"] == "ayl-add ~/books"
         assert info["host"] and info["started"]
-        # and nothing left beside it
-        assert [p.name for p in db_path.iterdir()] == [LOCK_NAME]
+        # and nothing left beside it, and nothing inside the index at all
+        assert list(db_path.iterdir()) == []
+        assert lock_path(db_path).parent == db_path.parent
     finally:
         release(db_path)
+
+
+# --- the chat database is one consistent snapshot ----------------------------
+
+def test_the_chat_db_is_copied_through_sqlites_own_backup(built, tmp_path):
+    """A WAL database is two files plus a shared-memory index, and copying them
+    one after another is three reads at three different moments — the result can
+    hold a page the log has already superseded. `Connection.backup()` takes the
+    snapshot the engine itself calls consistent, and produces ONE file, which is
+    also what makes the per-file digest mean anything."""
+    live = chat_db(tmp_path, rows=("committed one", "committed two"), wal=True)
+
+    # a second connection with a write in flight and NOT committed
+    with contextlib.closing(sqlite3.connect(live)) as writer:
+        writer.execute("INSERT INTO steps VALUES ('99', 'never committed')")
+        target = backup(tmp_path / "db", tmp_path / "backups", chat_db=live)
+        writer.rollback()
+
+    copied = target / "chat.db"
+    assert copied.is_file()
+    assert not (target / "chat.db-wal").exists() and not (target / "chat.db-shm").exists()
+    with contextlib.closing(sqlite3.connect(copied)) as conn:
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert chat_rows(copied) == ["committed one", "committed two"]
+    # and the one file is what the manifest digests
+    files = [entry["path"] for entry in
+             json.loads((target / "MANIFEST.json").read_text())["files"]]
+    assert "chat.db" in files and not any(name.startswith("chat.db-") for name in files)
+
+
+def test_a_chat_db_that_is_not_a_database_does_not_lose_the_index_backup(built, tmp_path,
+                                                                        capsys):
+    broken = tmp_path / "chainlit" / "broken.db"
+    broken.parent.mkdir(parents=True, exist_ok=True)
+    broken.write_bytes(b"SQLite format 3\x00 but not really")
+
+    target = backup(tmp_path / "db", tmp_path / "backups", chat_db=broken)
+
+    manifest = json.loads((target / "MANIFEST.json").read_text())
+    assert manifest["chat_db_error"] and manifest["source"]["chat_db"] is None
+    assert not (target / "chat.db").exists()
+    assert manifest["tables"]["transcripts_ollama"] > 0        # the index is there
+    assert verify(target) == []
+    assert any("NOT copied" in line for line in manifest_lines(target, manifest))
+
+
+def test_a_restored_chat_db_is_a_database_again(built, tmp_path):
+    live = chat_db(tmp_path, rows=("keep me",), wal=True)
+    target = backup(tmp_path / "db", tmp_path / "backups", chat_db=live)
+    import shutil
+    shutil.rmtree(tmp_path / "db")
+
+    restore(target, tmp_path / "db", chat_db=tmp_path / "back" / "chat.db")
+
+    # no journal beside it: `backup()` writes one file, and a stale sidecar of
+    # the database being replaced would be read as this one's journal
+    assert not (tmp_path / "back" / "chat.db-wal").exists()
+    assert chat_rows(tmp_path / "back" / "chat.db") == ["keep me"]
+
+
+# --- the restore is staged, locked and reversible ----------------------------
+
+def test_a_restore_into_a_fresh_path_still_holds_the_lock(built, tmp_path):
+    """It used to take none at all, so an ingest could start into a directory
+    that was half-restored."""
+    target = backup(tmp_path / "db", tmp_path / "backups")
+    fresh = tmp_path / "fresh"
+
+    with ingest_lock(fresh, command="ayl-add ~/books"):
+        with pytest.raises(IngestBusy):
+            restore(target, fresh)
+
+    assert not fresh.exists() or list(fresh.iterdir()) == []
+
+
+def test_the_lock_is_held_across_the_swap_and_survives_the_rename(built, tmp_path):
+    """The lock lives beside the index, so renaming the directory does not
+    carry it away and leave the name it guards unguarded mid-swap."""
+    lock = lock_path(tmp_path / "db")
+    assert lock.parent == tmp_path                      # beside, not inside
+    seen = {}
+    real_copy = backup_module._copy_tree
+
+    def watching(source, target, skip=frozenset()):
+        seen["locked_during_copy"] = lock.exists()
+        return real_copy(source, target, skip)
+
+    target = backup(tmp_path / "db", tmp_path / "backups")
+    backup_module._copy_tree = watching
+    try:
+        restore(target, tmp_path / "db", force=True)
+    finally:
+        backup_module._copy_tree = real_copy
+    assert seen["locked_during_copy"] is True
+    assert not lock.exists()                            # and released at the end
+
+
+def test_a_failure_mid_copy_leaves_the_old_index_exactly_where_it_was(built, tmp_path,
+                                                                     monkeypatch):
+    """The copy is staged BESIDE the target and only a complete one is swapped
+    in, so a full disk or an interrupt costs nothing."""
+    target = backup(tmp_path / "db", tmp_path / "backups")
+    before = lancedb.connect(tmp_path / "db").open_table("transcripts_ollama").count_rows()
+    monkeypatch.setattr(backup_module, "_copy_tree",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("disk went away")))
+
+    with pytest.raises(OSError, match="disk went away"):
+        restore(target, tmp_path / "db", force=True)
+
+    assert lancedb.connect(tmp_path / "db").open_table("transcripts_ollama").count_rows() == before
+    assert not list(tmp_path.glob("db.replaced-*"))     # nothing was moved aside
+    assert not list(tmp_path.glob("db.restoring-*"))    # and nothing half-written is left
+
+
+def test_a_failed_swap_puts_the_moved_aside_index_back(built, tmp_path, monkeypatch):
+    target = backup(tmp_path / "db", tmp_path / "backups")
+    before = lancedb.connect(tmp_path / "db").open_table("transcripts_ollama").count_rows()
+    real_rename = Path.rename
+
+    def fail_on_publish(self, other):
+        if ".restoring-" in self.name:
+            raise OSError("cross-device link")
+        return real_rename(self, other)
+
+    monkeypatch.setattr(Path, "rename", fail_on_publish)
+    with pytest.raises(OSError, match="cross-device link"):
+        restore(target, tmp_path / "db", force=True)
+    monkeypatch.undo()
+
+    assert (tmp_path / "db").is_dir()
+    assert lancedb.connect(tmp_path / "db").open_table("transcripts_ollama").count_rows() == before
+    assert not list(tmp_path.glob("db.replaced-*")) and not list(tmp_path.glob("db.restoring-*"))
+
+
+# --- a lock this process cannot validate is never cleared --------------------
+
+def test_a_lock_that_cannot_be_read_is_refused_not_taken_over(tmp_path):
+    """The file is 0600, so on a shared directory another account sees a lock
+    it cannot parse. Clearing it would let two ingests write one index — which
+    is the single thing this file exists to prevent."""
+    db_path = tmp_path / "db"
+    db_path.mkdir()
+    lock_path(db_path).write_bytes(b"not json at all")
+
+    with pytest.raises(IngestBusy) as error:
+        acquire(db_path)
+
+    assert "cannot be read" in str(error.value) and "owner-only" in str(error.value)
+    assert str(lock_path(db_path)) in str(error.value)
+    assert lock_path(db_path).read_bytes() == b"not json at all"    # untouched
+
+
+def test_a_lock_with_no_pid_or_host_is_refused_too(tmp_path):
+    db_path = tmp_path / "db"
+    db_path.mkdir()
+    lock_path(db_path).write_text(json.dumps({"started": "2026-01-01T00:00:00"}))
+    with pytest.raises(IngestBusy, match="cannot be read"):
+        acquire(db_path)
+
+
+def test_two_spellings_of_one_index_are_one_lock(tmp_path):
+    """`~/index`, `./index` and a symlink to it must exclude each other, or the
+    lock is decoration."""
+    real = tmp_path / "db"
+    real.mkdir()
+    link = tmp_path / "linked"
+    link.symlink_to(real, target_is_directory=True)
+    assert lock_path(link) == lock_path(real)
+
+    with ingest_lock(real, command="ayl-add ~/books"):
+        with pytest.raises(IngestBusy):
+            acquire(link)

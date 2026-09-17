@@ -290,11 +290,15 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   `ayl-add --backup <dir>` copies the LanceDB directory and the web UI's `chat.db` with a manifest
   (the stamps, the row counts, a sha256 per file), after taking the ingest lock and finishing any
   interrupted staged rebuild — those two are what make the copy a copy of a whole index rather
-  than of one caught mid-write. The lock is **advisory and single-machine**: it is a file inside
+  than of one caught mid-write. The lock is **advisory and single-machine**: it is a file beside
   the index directory honoured by this project's own write paths, and nothing stops `cp`, another
-  program, or a second checkout with a different `LIBRARY_DB_PATH` pointing at the same directory
-  from writing while it is held. A lock left by a crash is taken over on the next run (it records
-  a pid); one from another host is refused, because nothing here can ask that machine whether its
-  process is alive. Restoring **never deletes** the index it replaces — it is moved aside and
-  named — so a restore costs the disk of both until you remove one, and `.scratch/` and `.env`
-  are not copied at all.
+  program, or a second checkout pointing at the same directory from writing while it is held. A
+  lock left by a crash is taken over only when it names this host and a pid that is not running;
+  one from another host, and one this process cannot read (the file is owner-only, so another
+  account's looks like that), are refused by name rather than cleared, which means a lock file
+  nobody can identify blocks every write until somebody deletes it. Restoring stages its copy
+  beside the target and publishes by rename, and **never deletes** the index it replaces — it is
+  moved aside and named — so a restore costs the disk of both until you remove one. `.scratch/`
+  and `.env` are not copied at all, and the chat database is snapshotted through SQLite rather
+  than copied as files, so a `chat.db` SQLite cannot open is reported and skipped rather than
+  copied as bytes.

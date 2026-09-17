@@ -61,7 +61,7 @@ from ask_your_library.fake_backend import install_fake_backend
 install_fake_backend()
 
 from ask_your_library import nodes                                  # noqa: E402
-from ask_your_library.chat_db import check_chat_db, record_version  # noqa: E402
+from ask_your_library.chat_db import check_and_record                # noqa: E402
 from ask_your_library.graph import build_graph                      # noqa: E402
 from ask_your_library.i18n import (LANG, get_lang, set_lang, source_word,  # noqa: E402
                                    status_word, t)
@@ -303,12 +303,14 @@ with contextlib.closing(sqlite3.connect(CHAT_DB_PATH)) as _connection:
     # SQLite error in a log. Checked here instead, against the columns THIS
     # schema declares, and warned about rather than refused: the remedy throws
     # away the reader's history and has to be their decision (#27).
-    for _problem in check_chat_db(_connection, CHAT_DB_SCHEMA, str(CHAT_DB_PATH)):
-        log.warning("%s", _problem)
-    # After the check, never before it: the stamp is the evidence the next
-    # start has about which release wrote this file.
+    # Check first, then stamp, and stamp only when there was nothing to report:
+    # marking a database that is missing columns as current would make the
+    # stamp a claim about a shape the file does not have, and a version is
+    # never lowered, so an older release cannot restamp what a newer one wrote.
+    # The order lives in `chat_db.check_and_record`, not here.
     with _connection:
-        record_version(_connection)
+        for _problem in check_and_record(_connection, CHAT_DB_SCHEMA, str(CHAT_DB_PATH)):
+            log.warning("%s", _problem)
 own_read_write_only(CHAT_DB_PATH)
 
 

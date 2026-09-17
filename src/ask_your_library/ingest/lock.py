@@ -13,18 +13,23 @@ length of a run; `--backup` takes it too, which does double duty: it refuses to
 copy an index somebody is writing, and it stops an ingest from starting while
 the copy is being taken.
 
-The lock is a file inside the index directory (`.ayl-ingest.lock`), created
-with `O_CREAT | O_EXCL` so that taking it is one atomic syscall rather than a
-check followed by a write. It is NOT a distributed lock and does not pretend to
-be one: this is one user, one machine, and the failure it is built for is the
-ordinary one — a second `ayl-add` in another terminal, or a backup taken while
-the first is running.
+The lock is a file BESIDE the index directory, named after it
+(`.ayl-ingest-<name>.lock`), and it is beside rather than inside for one
+reason: `--restore` publishes by renaming the directory, and a lock living
+inside it would travel with the rename and leave the name it guards unguarded
+exactly while it is being swapped. It is written by hard-linking a complete
+temporary file into place, so the name never exists with a partial body.
+
+It is NOT a distributed lock and does not pretend to be one: this is one user,
+one machine, and the failure it is built for is the ordinary one — a second
+`ayl-add` in another terminal, or a backup taken while the first is running.
 
 **A crash leaves the file behind**, so the file names the process that holds
-it. A lock whose pid is not running ON THIS HOST is stale and is taken over,
-with a warning. A lock from another host cannot be judged from here — a network
-share is the only way that happens — so it is refused, and the message names
-the file to delete.
+it. One case and one only is cleared automatically: this host, a pid that is
+not running. Anything else is refused by name — another host cannot be
+judged from here, and a lock this process cannot READ is most likely another
+account's (the file is 0600), where clearing it would let two ingests write one
+index.
 """
 import contextlib
 import json
@@ -36,13 +41,22 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-# Inside the index directory rather than beside it: the index is the thing
-# being protected, a directory is what gets moved and copied as a unit, and a
-# sibling file is left behind by every `mv`. It starts with a dot and is not a
-# `.lance` directory, so nothing in LanceDB lists it — and `--backup` excludes
-# it by name, because a lock copied into a backup would be restored as a lock
-# held by a pid from another era.
-LOCK_NAME = ".ayl-ingest.lock"
+# BESIDE the index directory, keyed by its name, not inside it. Inside was the
+# obvious place and it is wrong for the one operation that most needs a lock: a
+# restore publishes by RENAMING the directory, and a lock that lives inside it
+# travels with the rename, leaving the name it was guarding unguarded for the
+# length of the swap. A sibling file survives a rename of its neighbour, is
+# never copied into a backup by construction, and is still invisible to LanceDB
+# (a dotfile, not a `.lance` directory).
+#
+# The name is derived from the RESOLVED path, so `~/index`, `./index` and a
+# symlink pointing at it are one lock and not three.
+LOCK_PREFIX = ".ayl-ingest-"
+LOCK_SUFFIX = ".lock"
+# Where the lock used to live, for one release: skipped when copying a backup
+# and removed after a restore, so a copy taken by the previous version is not
+# restored as a lock held by a pid from another era.
+LEGACY_LOCK_NAME = ".ayl-ingest.lock"
 
 
 class IngestBusy(RuntimeError):
@@ -50,7 +64,15 @@ class IngestBusy(RuntimeError):
 
 
 def lock_path(db_path: Path | str) -> Path:
-    return Path(db_path) / LOCK_NAME
+    """The lock that guards this index, beside it.
+
+    `resolve()` and not the path as typed: two spellings of one directory must
+    be one lock, or `ayl-add ~/books --db data/lancedb` and a restore through
+    the symlink that `data/lancedb` is would not exclude each other at all. It
+    is called on paths that do not exist yet (an ingest creates its index), and
+    a non-strict resolve normalizes those too."""
+    real = Path(db_path).resolve()
+    return real.parent / f"{LOCK_PREFIX}{real.name}{LOCK_SUFFIX}"
 
 
 def read_lock(db_path: Path | str) -> dict | None:
@@ -85,18 +107,29 @@ def _alive(pid: int) -> bool:
 
 
 def _is_stale(info: dict) -> bool:
-    """A lock left behind by a process that is gone.
+    """A lock left behind by a process that is gone — and ONLY that.
 
-    Judged only where it can be: the same host, a pid that is not running. A
-    lock with no pid or no host recorded (a truncated write, a file somebody
-    created by hand) is stale too — nothing can ever clear it otherwise, and
-    the alternative is an index that refuses every write until a human deletes
-    a file they have never heard of. The takeover is logged either way."""
+    Exactly one thing makes a lock stale: it names this host and a pid that is
+    not running. Everything else is refused, including the cases an earlier
+    version cleared automatically, and the reason is the file's own mode. The
+    lock is written 0600, so on a directory two accounts share, the OTHER
+    account cannot read it — it sees a file it cannot parse. Treating that as
+    stale would have one user silently unlink the live lock of another and
+    start a second ingest into the same index, which is the single thing this
+    file exists to prevent. An index that will not be written to until somebody
+    deletes a named file is a much better failure, and the message names it.
+
+    An unreadable lock also cannot be an artefact of this program's own
+    writing: the payload is hard-linked into place complete (`acquire`), so the
+    name never exists with an empty or partial body. If one is ever seen, it
+    was not written here.
+
+    A lock from another host cannot be judged from this one at all."""
     if not info:
-        return True
+        return False        # unreadable: not ours to clear — see above
     host, pid = info.get("host"), info.get("pid")
     if not host or not isinstance(pid, int):
-        return True
+        return False        # nothing to validate it by
     if host != socket.gethostname():
         return False        # another machine: not ours to judge
     return not _alive(pid)
@@ -112,8 +145,20 @@ def describe(info: dict) -> str:
 
 
 def busy_message(db_path: Path | str, info: dict, doing: str) -> str:
-    """The one refusal text, so the ingest and the backup refuse in the same
-    words and point at the same file."""
+    """The one refusal text, so the ingest, the backup and the restore refuse
+    in the same words and point at the same file.
+
+    A lock that cannot be read gets its own sentence. "An ingest is writing it
+    (an unreadable lock file)" invites the reader to wait for something that
+    may not exist; what is true is that there is a lock here, this process
+    cannot tell whose it is — most likely another account's, since the file is
+    0600 — and only its owner can clear it."""
+    if not info or not info.get("host") or not isinstance(info.get("pid"), int):
+        return (f"refusing to {doing} {db_path}: there is a lock at {lock_path(db_path)} that "
+                f"cannot be read — it is another account's (the file is owner-only), or it was "
+                f"not written by this program. It is not cleared automatically, because doing "
+                f"that would let two ingests write one index. If you own it and nothing is "
+                f"running, delete it and try again.")
     return (f"refusing to {doing} {db_path}: an ingest is writing it "
             f"({describe(info)}). Wait for it to finish — or, if you are certain nothing "
             f"is running, delete {lock_path(db_path)} and try again.")
@@ -141,7 +186,7 @@ def acquire(db_path: Path | str, command: str = "", doing: str = "write") -> Pat
                           "command": command}).encode("utf-8")
     # Same directory, so the link below is within one filesystem; the pid makes
     # it this process's own even if two race here.
-    staging = path.with_name(f"{LOCK_NAME}.{os.getpid()}.tmp")
+    staging = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     try:
         fd = os.open(staging, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
         with os.fdopen(fd, "wb") as handle:

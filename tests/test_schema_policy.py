@@ -311,3 +311,74 @@ def test_the_warning_is_logged_once_per_process_across_call_sites(index, tmp_pat
 
     assert first == second and first is not None      # every caller still gets the line
     assert sum("sentence-pack-2" in r.message for r in caplog.records) == 1
+
+
+# --- a refusal writes nothing, not even a recovery ---------------------------
+
+def test_a_refused_run_does_not_finish_somebody_elses_staged_rebuild(index, tmp_path, capsys):
+    """The checks are reads — `read_index_meta` never recovers — so they come
+    BEFORE `recover_staging`. Otherwise a run on its way to saying no could
+    still drop or promote a staging table, which is a write nobody asked for."""
+    from ask_your_library.ingest.publish import copy_table, table_names
+
+    db = lancedb.connect(tmp_path / "db")
+    copy_table(db, "transcripts_ollama", "transcripts_ollama__staging")   # live + staging
+    restamp(tmp_path / "db")
+
+    assert add_folder.main([str(index), "--db", str(tmp_path / "db")]) == 1
+
+    names = table_names(lancedb.connect(tmp_path / "db"))
+    assert "transcripts_ollama__staging" in names and "transcripts_ollama" in names
+    assert "refusing to write" in capsys.readouterr().err
+
+
+def test_a_refused_run_leaves_a_staging_only_fingerprint_table_alone(index, tmp_path):
+    """The sharper shape: the fingerprint table is mid-widening, so only the
+    staged copy exists. A reader takes it read-only (ADR-024); a refusal must
+    not promote it on the way out."""
+    from ask_your_library.ingest.publish import copy_table, table_names
+
+    restamp(tmp_path / "db")
+    db = lancedb.connect(tmp_path / "db")
+    copy_table(db, index_meta.META_TABLE, index_meta.META_TABLE + "__staging")
+    db.drop_table(index_meta.META_TABLE)
+
+    assert add_folder.main([str(index), "--db", str(tmp_path / "db")]) == 1
+
+    names = table_names(lancedb.connect(tmp_path / "db"))
+    assert index_meta.META_TABLE + "__staging" in names
+    assert index_meta.META_TABLE not in names          # not promoted by a refusal
+
+
+# --- the doctor example in the docs, kept true -------------------------------
+
+def test_the_doctor_output_matches_the_example_in_the_upgrading_page(index, tmp_path, capsys,
+                                                                    fake_embedder):  # noqa: F811
+    """The page shows a `--doctor` run with a stamp line per table. It had the
+    cards table stamped with the sentence packer, which is exactly the mistake
+    the two constants exist to prevent — so the example is asserted here rather
+    than proof-read."""
+    from pathlib import Path
+
+    from ask_your_library.index_meta import write_index_meta
+    from ask_your_library.ingest.chunking import CARD_CHUNKER_VERSION
+
+    db = lancedb.connect(tmp_path / "db")
+    db.create_table("cards_ollama", [{"chunk_id": "c/1", "note": "c", "book": "A — B",
+                                      "source": "card", "section": "One", "text": "t",
+                                      "vector": [0.0] * 4}])
+    write_index_meta(db, "cards_ollama", "ollama", "fake-embed", 4,
+                     chunker=CARD_CHUNKER_VERSION)
+    capsys.readouterr()
+
+    add_folder.main(["--doctor", "--db", str(tmp_path / "db")])
+
+    out = capsys.readouterr().out
+    assert f"stamp: transcripts_ollama: fake-embed / 4d, chunker {add_folder.CHUNKER_VERSION}, " \
+           f"row schema 2" in out
+    assert f"stamp: cards_ollama: fake-embed / 4d, chunker {CARD_CHUNKER_VERSION}, " \
+           f"row schema 1" in out
+
+    page = (Path(__file__).resolve().parents[1] / "docs" / "upgrading.md").read_text()
+    assert f"chunker {CARD_CHUNKER_VERSION}, row schema 1" in page
+    assert f"chunker {add_folder.CHUNKER_VERSION}, row schema 2" in page

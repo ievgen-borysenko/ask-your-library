@@ -81,7 +81,7 @@ uv run ayl-add --doctor --db ~/ayl-index
 index /Users/…/ayl-index
 ledger: 33 book(s); index (transcripts_ollama, cards_ollama): 33 book key(s)
   stamp: transcripts_ollama: bge-m3 / 1024d, chunker sentence-pack-1, row schema 2, stamped 2026-09-17T05:12:44
-  stamp: cards_ollama: bge-m3 / 1024d, chunker sentence-pack-1, row schema 1, stamped 2026-09-17T05:19:02
+  stamp: cards_ollama: bge-m3 / 1024d, chunker card-sections-1, row schema 1, stamped 2026-09-17T05:19:02
   no drift: every indexed book has its rows, and every row its book
 ```
 
@@ -107,9 +107,11 @@ writes `~/ayl-backups/<timestamp>/` holding
 
 - `lancedb/` — the whole index directory: every table, the `books` ledger, the `_index_meta`
   stamps and the BM25 index;
-- `chat.db` (and its `-wal` / `-shm` sidecars, when present) — the web UI's history, from
-  `AYL_CHAINLIT_DIR` or `.chainlit/`, or wherever `--chat-db` names. Absent if you never started
-  the web UI, and the report says so;
+- `chat.db` — the web UI's history, from `AYL_CHAINLIT_DIR` or `.chainlit/`, or wherever
+  `--chat-db` names. Taken through SQLite's own backup, so it is **one consistent snapshot in one
+  file** rather than a main file copied beside somebody else's write-ahead log. Absent if you never
+  started the web UI, and the report says so; a file SQLite cannot open is reported and the index
+  is still backed up without it;
 - `MANIFEST.json` — what was copied, the `_index_meta` rows, the row count per table, the number
   of ledger rows, the version of the code that took it, and a sha256 of every file plus one
   digest over the whole set.
@@ -118,16 +120,24 @@ writes `~/ayl-backups/<timestamp>/` holding
 the command exists rather than a line in the README:
 
 1. **No ingest is running.** Both write paths (`ayl-add`, the demo corpus's ingest stages) hold a
-   lock file inside the index directory for the length of a run, and `--backup` takes the same
-   lock. A backup started while an ingest is writing is refused, naming the command and pid that
-   holds it; an ingest started while a backup is being taken is refused the same way. A lock left
-   behind by a crash is taken over automatically — it records the pid, and a pid that is not
-   running on this machine is not a lock.
+   lock file **beside** the index directory, named after it (`.ayl-ingest-<name>.lock`), for the
+   length of a run, and `--backup` and `--restore` take the same lock. Beside rather than inside,
+   because a restore publishes by renaming the directory and a lock living in it would travel with
+   the rename. A backup started while an ingest is writing is refused, naming the command and pid
+   that holds it; an ingest started while a backup or restore is under way is refused the same way.
+   Exactly one kind of leftover lock is cleared automatically: this machine, a pid that is no
+   longer running. One from another machine, or one this process cannot read — the file is
+   owner-only, so on a shared directory another account's lock looks like that — is refused by
+   name, because clearing it would let two ingests write one index.
 2. **No staged rebuild is half-finished.** LanceDB has no rename, so replacing a table goes
    through a staging copy, and there is a moment with the live table dropped and the staged one
    not yet promoted. A copy taken there restores to an index with a table missing. `--backup`
    finishes or discards any such rebuild before it copies, and the manifest records that it did.
 3. **Nothing rotted since.** `--restore` recomputes every digest before it touches anything.
+
+And the restore itself is staged: the verified copy is built **beside** the target and only a
+complete one is swapped in, by rename. A failure while copying leaves the index that is there
+exactly as it was; a failure in the swap puts the moved-aside index back.
 
 A destination **inside** the index directory is refused: that is a copy of a directory into
 itself. A failure part-way through removes the half-written directory rather than leaving something

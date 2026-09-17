@@ -15,7 +15,8 @@ from pathlib import Path
 import pytest
 
 from ask_your_library.chat_db import (SCHEMA_VERSION, VERSION_TABLE, actual_columns,
-                                      check_chat_db, declared_columns, record_version,
+                                      check_and_record, check_chat_db,
+                                      declared_columns, record_version,
                                       stored_version)
 
 # A miniature of `ui.py`'s schema: the two shapes that matter are a plain
@@ -147,3 +148,44 @@ def test_a_chat_db_from_before_the_steps_table_grew_is_caught(tmp_path):
         problems = check_chat_db(conn, shipped_schema(), path="chat.db")
     conn.close()
     assert len(problems) == 1 and "\'steps\'" in problems[0] and "defaultOpen" in problems[0]
+
+
+# --- check first, stamp only when it passed, and never downwards -------------
+
+def test_a_matching_database_is_stamped(connection):
+    connection.executescript(SCHEMA)
+    assert check_and_record(connection, SCHEMA) == []
+    assert stored_version(connection) == SCHEMA_VERSION
+
+
+def test_an_older_database_is_reported_and_NOT_stamped_as_current(connection):
+    """Stamping it would make the stamp a claim about a shape the file does not
+    have — and the next start would then believe it."""
+    connection.executescript(OLDER_SCHEMA)
+    connection.executescript(SCHEMA)
+
+    problems = check_and_record(connection, SCHEMA)
+
+    assert len(problems) == 1 and "defaultOpen" in problems[0]
+    assert stored_version(connection) is None
+
+
+def test_a_newer_stored_version_is_never_lowered(connection):
+    """An older release run against a database a newer one wrote must not
+    restamp it downwards: the newer release's next start would find its own
+    version gone, overwritten by the release that knows least about the file."""
+    connection.executescript(SCHEMA)
+    record_version(connection, SCHEMA_VERSION + 3)
+
+    problems = check_and_record(connection, SCHEMA)
+
+    assert any("newer ask-your-library" in problem for problem in problems)
+    assert stored_version(connection) == SCHEMA_VERSION + 3
+
+
+def test_record_version_says_whether_it_wrote(connection):
+    connection.executescript(SCHEMA)
+    assert record_version(connection, SCHEMA_VERSION) is True
+    assert record_version(connection, SCHEMA_VERSION) is False      # already there
+    assert record_version(connection, SCHEMA_VERSION - 1) is False  # never downwards
+    assert stored_version(connection) == SCHEMA_VERSION

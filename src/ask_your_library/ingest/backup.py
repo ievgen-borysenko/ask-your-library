@@ -32,11 +32,13 @@ index that was.
 What is NOT backed up: `.scratch/` (the passages as a model saw them, deleted
 per run by design) and `.env` (secrets; a backup is a second copy of them).
 """
+import contextlib
 import hashlib
 import json
 import logging
 import os
 import shutil
+import sqlite3
 import time
 from pathlib import Path
 
@@ -47,7 +49,7 @@ from ..index_meta import (CARD_CHUNKER_VERSION, CHUNKER_VERSION, META_TABLE,
                           SCHEMA_VERSION)
 from ..paths import redact_paths
 from .ledger import open_ledger
-from .lock import LOCK_NAME, ingest_lock, lock_path
+from .lock import LEGACY_LOCK_NAME, ingest_lock, lock_path
 from .publish import STAGING_SUFFIX, recover_staging, table_names
 
 log = logging.getLogger(__name__)
@@ -117,6 +119,31 @@ def _directory_digest(entries: list[dict]) -> str:
 def _copy_tree(source: Path, target: Path, skip: set[str] = frozenset()) -> None:
     shutil.copytree(source, target, symlinks=False,
                     ignore=shutil.ignore_patterns(*skip) if skip else None)
+
+
+def copy_chat_db(source: Path, target: Path) -> bool:
+    """One consistent snapshot of the chat database, or False when there is
+    none to take.
+
+    Through SQLite's OWN backup API (`Connection.backup`), not a file copy.
+    A chat database in WAL mode is two files plus a shared-memory index, and
+    copying them one after another is three reads at three different moments:
+    the result can hold a page the write-ahead log has already superseded, or a
+    log that refers to pages the main file does not have yet. `backup()` takes
+    the snapshot the database engine itself would call consistent, and produces
+    ONE file — which is also what makes a per-file digest meaningful, since the
+    thing being hashed is now the whole database rather than one third of it.
+
+    Copied with the same mode the web UI keeps it at: this file holds every
+    question, answer and passage of every session."""
+    source, target = Path(source), Path(target)
+    if not source.is_file():
+        return False
+    with contextlib.closing(sqlite3.connect(source)) as live, \
+            contextlib.closing(sqlite3.connect(target)) as copy:
+        live.backup(copy)
+    target.chmod(0o600)
+    return True
 
 
 def _index_state(db_path: Path) -> dict:
@@ -198,16 +225,19 @@ def backup(db_path: Path, dest: Path, chat_db: Path | None = None,
         try:
             # The lock is ours and is in the directory being copied; a restored
             # lock would be one held by a pid from another era.
-            _copy_tree(db_path, target / INDEX_DIR, skip={LOCK_NAME})
-            copied_chat = False
-            if chat_db.is_file():
-                # The WAL and shm sidecars too, when they are there: a chat.db
-                # copied without its -wal is a database missing its last writes.
-                for suffix in ("", "-wal", "-shm"):
-                    sidecar = Path(str(chat_db) + suffix)
-                    if sidecar.is_file():
-                        shutil.copy2(sidecar, target / (CHAT_DB_NAME + suffix))
-                copied_chat = True
+            _copy_tree(db_path, target / INDEX_DIR, skip={LEGACY_LOCK_NAME})
+            chat_error = None
+            try:
+                copied_chat = copy_chat_db(chat_db, target / CHAT_DB_NAME)
+            except sqlite3.DatabaseError as error:
+                # A chat database SQLite cannot open is news, not a reason to
+                # abandon the index copy — which is the artefact an upgrade is
+                # about to put at risk. Reported in the manifest and on the run,
+                # so a backup is never quietly one file short.
+                copied_chat, chat_error = False, f"{type(error).__name__}: {error}"
+                (target / CHAT_DB_NAME).unlink(missing_ok=True)
+                log.warning("%s could not be read as a SQLite database (%s); "
+                            "the index was backed up without it", chat_db, chat_error)
 
             entries = [{"path": str(relative), "bytes": (target / relative).stat().st_size,
                         "sha256": _sha256(target / relative)}
@@ -225,6 +255,7 @@ def backup(db_path: Path, dest: Path, chat_db: Path | None = None,
                             "chat_schema_version": CHAT_SCHEMA_VERSION},
                 "source": {"index": redact_paths(str(resolved_db)),
                            "chat_db": redact_paths(str(chat_db)) if copied_chat else None},
+                "chat_db_error": chat_error,
                 "recovered_staging": recovered,
                 "index_meta": state["index_meta"],
                 "tables": state["tables"],
@@ -308,6 +339,13 @@ def restore(backup_dir: Path, db_path: Path, chat_db: Path | None = None,
     reaches for when something has already gone wrong, and deleting the only
     other copy of an index at that moment is the last thing this should do.
 
+    The publish is STAGED: the verified copy is built beside the target, and
+    only a complete one is swapped in, by rename. A failure while copying
+    leaves the index that is there exactly as it was; a failure in the swap
+    itself puts the moved-aside index back. And the lock is held across all of
+    it, including a restore into a path where no index exists yet — that one
+    took no lock at all, so an ingest could start into a half-written directory.
+
     A SYMLINKED index path is followed, not overwritten. `data/lancedb` is a
     symlink in this project's own dev checkout, and renaming the link would
     move the link, leave the real directory where it was, and write the restored
@@ -344,28 +382,58 @@ def restore(backup_dir: Path, db_path: Path, chat_db: Path | None = None,
     report = [f"backup {backup_dir} verified: {len(manifest.get('files', []))} file(s), "
               f"digest {str(manifest.get('digest'))[:16]}",
               f"taken {manifest.get('created')} by ask-your-library {manifest.get('code_version')}"]
-    if existing:
-        # The live index is about to be moved out from under anything reading
-        # or writing it: the lock is held ACROSS the move, not merely tested
-        # before it. It travels with the directory (it is a file inside it), so
-        # it is dropped from the copy that is kept — an index nobody can write
-        # to is not much of a fallback.
-        with ingest_lock(target_dir, command="ayl-add --restore", doing="restore over"):
-            aside = target_dir.with_name(
-                f"{target_dir.name}.replaced-{time.strftime('%Y%m%d-%H%M%S')}")
-            target_dir.rename(aside)
-            lock_path(aside).unlink(missing_ok=True)
-        report.append(f"the index that was there is kept at {aside} — delete it yourself once "
-                      f"you are satisfied with the restore")
+
+    target_dir.parent.mkdir(parents=True, exist_ok=True)
+    # The lock is held across the WHOLE of it — the copy, the swap and the chat
+    # database — and it is held at the target whether or not an index is there
+    # yet: restoring into a fresh path and then having an ingest start into it
+    # half-written is the same race as any other. The lock lives BESIDE the
+    # directory, so it survives the renames below; one that lived inside would
+    # travel with the rename and leave the name it guards unguarded exactly
+    # while it is being swapped.
+    with ingest_lock(target_dir, command="ayl-add --restore", doing="restore over"):
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        staged = target_dir.with_name(f"{target_dir.name}.restoring-{stamp}")
+        shutil.rmtree(staged, ignore_errors=True)
+        aside = None
+        try:
+            # Built in full BESIDE the target, so a failure here — a full disk,
+            # an interrupt, an unreadable backup — leaves the index that is
+            # there untouched. Only a complete copy is ever swapped in.
+            _copy_tree(source_index, staged, skip={LEGACY_LOCK_NAME})
+            (staged / LEGACY_LOCK_NAME).unlink(missing_ok=True)
+            if existing:
+                aside = target_dir.with_name(f"{target_dir.name}.replaced-{stamp}")
+                target_dir.rename(aside)
+            try:
+                staged.rename(target_dir)
+            except BaseException:
+                # The swap is two renames and the window between them is the
+                # only moment the index is absent. If the second fails, the
+                # first is undone rather than left as a missing index.
+                if aside is not None and not target_dir.exists():
+                    aside.rename(target_dir)
+                    aside = None
+                raise
+        except BaseException:
+            shutil.rmtree(staged, ignore_errors=True)
+            raise
+
+        if aside is not None:
+            report.append(f"the index that was there is kept at {aside} — delete it yourself "
+                          f"once you are satisfied with the restore")
         if target_dir != db_path:
             report.append(f"{db_path} is a link to {target_dir}: the link is untouched and "
                           f"still points at the restored index")
-    target_dir.parent.mkdir(parents=True, exist_ok=True)
-    _copy_tree(source_index, target_dir, skip={LOCK_NAME})
-    # A lock restored or left over would refuse every later ingest.
-    lock_path(target_dir).unlink(missing_ok=True)
-    report.append(f"index restored to {db_path}")
+        report.append(f"index restored to {db_path}")
 
+        _restore_chat_db(backup_dir, chat_db, force, report)
+    return report
+
+
+def _restore_chat_db(backup_dir: Path, chat_db: Path | None, force: bool,
+                     report: list[str]) -> None:
+    """The chat database half of a restore, inside the caller's lock."""
     source_chat = backup_dir / CHAT_DB_NAME
     if source_chat.is_file():
         target_chat = Path(chat_db) if chat_db is not None else default_chat_db()
@@ -374,18 +442,15 @@ def restore(backup_dir: Path, db_path: Path, chat_db: Path | None = None,
                           f"(--force replaces it)")
         else:
             target_chat.parent.mkdir(parents=True, exist_ok=True)
-            for suffix in ("", "-wal", "-shm"):
-                sidecar = backup_dir / (CHAT_DB_NAME + suffix)
-                out = Path(str(target_chat) + suffix)
-                if sidecar.is_file():
-                    shutil.copy2(sidecar, out)
-                    out.chmod(0o600)          # as ui.py keeps it: owner only
-                elif out.exists():
-                    # A stale sidecar of the database being replaced would be
-                    # read as this one's journal.
-                    out.unlink()
+            # Through the backup API again, so the restored file is one
+            # consistent database and never a main file beside somebody else's
+            # write-ahead log. The target's own sidecars go: left behind, they
+            # would be read as this database's journal.
+            target_chat.unlink(missing_ok=True)      # `backup()` writes INTO a database
+            copy_chat_db(source_chat, target_chat)
+            for suffix in ("-wal", "-shm"):
+                Path(str(target_chat) + suffix).unlink(missing_ok=True)
             report.append(f"chat database restored to {target_chat}")
-    return report
 
 
 def _describe_live(db_path: Path) -> str:
@@ -407,8 +472,12 @@ def manifest_lines(target: Path, manifest: dict) -> list[str]:
         lines.append(f"  stamp {row.get('table')}: {row.get('model')} / {row.get('dims')}d, "
                      f"chunker {row.get('chunker') or '(none recorded)'}, "
                      f"row schema {row.get('schema_version')}")
-    if manifest["source"].get("chat_db"):
-        lines.append(f"  chat database from {manifest['source']['chat_db']}")
+    if manifest.get("chat_db_error"):
+        lines.append(f"  chat database NOT copied: it could not be read as a SQLite database "
+                     f"({manifest['chat_db_error']})")
+    elif manifest["source"].get("chat_db"):
+        lines.append(f"  chat database from {manifest['source']['chat_db']} "
+                     f"(one consistent snapshot, through SQLite's own backup)")
     else:
         lines.append("  no chat database found (the web UI has not been used, or it keeps "
                      "one elsewhere: --chat-db names it)")

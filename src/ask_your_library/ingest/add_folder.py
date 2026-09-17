@@ -614,26 +614,36 @@ def _write_books(books: list[Book], backend: str, db_path: Path, folder: Path | 
     embedder = get_embedder(backend)
     db = lancedb.connect(db_path)
     table_name = f"transcripts_{backend}"
+    counts = {"books": 0, "sections": 0, "chunks": 0, "merged_headings": 0,
+              "recovered": [], "vanished": [], "pruned": 0, "orphaned_by_rebuild": []}
+
+    if not rebuild:
+        # BEFORE any recovery, and that ordering is the whole of it. Both
+        # checks are reads — `read_index_meta` never recovers, and takes the
+        # staged copy read-only when the live fingerprint table is mid-swap —
+        # so a refused run touches nothing at all. Recovering first meant a run
+        # that was about to be refused could still promote or drop a staging
+        # table on its way to saying no, which is a write nobody asked for and
+        # the one thing a refusal is supposed to guarantee it did not do.
+        refuse_model_mismatch(db, table_name, embedder)
+        refuse_chunker_mismatch(db, table_name)
+
     recover_staging(db, table_name)
     # The fingerprint table has its own staged rebuild (a widening), and
     # recovering it is a write — so it happens here, on the write path, and
     # never in the readers that check a stamp before every search.
     recover_staging(db, META_TABLE)
-    counts = {"books": 0, "sections": 0, "chunks": 0, "merged_headings": 0,
-              "recovered": [], "vanished": [], "pruned": 0, "orphaned_by_rebuild": []}
 
     if rebuild:
-        # Before the two refusals, and that is the point: a rebuild is the
-        # remedy they name. Once the table is gone there is nothing to
-        # mismatch, nothing to mix, and the run takes the staged-publish path.
+        # No refusal above: a rebuild is the remedy they name. Once the table is
+        # gone there is nothing to mismatch, nothing to mix, and the run takes
+        # the staged-publish path.
         ledger = open_book_ledger(db, backend, embedder)
         counts["orphaned_by_rebuild"] = drop_for_rebuild(
             db, table_name, ledger, {book.book for book in books})
         say(f"  --rebuild: dropped {table_name}; every book in {folder or 'this run'} is "
             f"re-indexed from scratch, and the books ledger keeps its ids")
     else:
-        refuse_model_mismatch(db, table_name, embedder)
-        refuse_chunker_mismatch(db, table_name)
         ledger = open_book_ledger(db, backend, embedder)
 
     counts["recovered"] = recover_interrupted(db, table_name, ledger,
