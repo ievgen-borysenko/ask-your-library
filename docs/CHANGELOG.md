@@ -742,6 +742,19 @@
   was made here either — the facts column has not been measured once, on any configuration, and no
   published number changed.
 
+- **The documentation is checked by tests, not by memory** (#72). `tests/test_docs_as_code.py`
+  runs offline in the ordinary `pytest` job over every tracked `.md` file and fails with a list of
+  `file:line` to fix: relative links and images that do not resolve (and `#fragment`s that name no
+  heading), file paths written in code that this tree does not hold, a `pyproject.toml` version
+  that is not the newest released heading of this file (with an empty `Unreleased` section
+  required at a tag), an ADR index whose count, numbering or `Status:` lines have drifted, and
+  settings or `ayl-add` flags the pages name that the code no longer reads or accepts. It found
+  one defect on arrival: [`adr/README.md`](adr/README.md) opened by promising twenty-four
+  decisions over twenty-five entries, ADR-024 and ADR-025 having been appended without the
+  paragraph above them being re-read. `ayl-add`'s parser moved into `build_parser()` so the check
+  can ask it what it accepts. External links are not fetched and prose is not read: the
+  release read-through stays a human step.
+
 ## 0.3.1 (2026-09-15)
 
 A documentation and CI patch over `v0.3.0`; nothing under `src/` changed. It exists because at
