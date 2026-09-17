@@ -53,6 +53,12 @@ Layer 2b (the last stage) is the live call — the ONLY paid one.
 
 Exit codes: 0 pass, 1 FAILED (or a misbehaving control), 2 CONTAINED,
 3 INCOMPLETE (a stage was skipped; --allow-skipped downgrades it to 0).
+
+`--scope` runs the SCOPE canary instead (`eval/scope_canary.py`, #70): what a
+poisoned passage can make the agent do is one question, what a READER can ask it
+to do is another. Same exit codes, one entry point:
+
+  uv run eval/injection_canary.py --scope --no-live     # free: the mechanics (CI runs this)
 """
 import argparse
 import asyncio
@@ -632,6 +638,18 @@ def live_observe_stage(scratchpad_path: str, number: int, total: int) -> int:
     return 0
 
 
+def scope_canary():
+    """The sibling canary, loaded the way eval/ loads its siblings (these are
+    scripts, not a package). Imported inside the dispatch and not at module
+    level: a run of THIS canary must not pay for a file it never uses, and the
+    two share no state, only the exit-code contract."""
+    spec = importlib.util.spec_from_file_location(
+        "scope_canary", Path(__file__).resolve().parent / "scope_canary.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Prompt-injection canary.")
     parser.add_argument("--no-live", action="store_true",
@@ -640,7 +658,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--allow-skipped", action="store_true",
                         help="exit 0 on an INCOMPLETE run (a stage skipped for a missing "
                              "optional dependency); the report still says INCOMPLETE")
-    args = parser.parse_args(argv)
+    parser.add_argument("--scope", action="store_true",
+                        help="run the SCOPE canary instead (eval/scope_canary.py, #70): an "
+                             "out-of-scope request must be refused, not answered from the "
+                             "model. Same exit codes; the other flags are passed through")
+    args, extra = parser.parse_known_args(argv)
+    if args.scope:
+        # One entry point, one exit-code contract. The flags this canary and
+        # the scope one share keep their spelling, and anything else the caller
+        # typed is handed over untouched (--report, --no-report).
+        passed = [flag for flag, on in (("--no-live", args.no_live),
+                                        ("--allow-skipped", args.allow_skipped)) if on]
+        return scope_canary().main(passed + extra)
+    if extra:
+        parser.error(f"unrecognized arguments: {' '.join(extra)}")
     total = len(STAGES) + (0 if args.no_live else 1)
 
     # Which system this run tested. The live stage puts a poisoned passage in

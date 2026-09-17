@@ -31,6 +31,19 @@ that every node's prompt carries:
 A model call this file did not plan for is an error, not a shrug: the smoke
 test asserts on what the page says, and a silently improvised reply would turn
 a changed graph into a passing run.
+
+Two more scenarios serve `eval/scope_canary.py --no-live`, which drives the same
+graph in-process (it loads this file and calls `install()`, without the server
+seam):
+
+  out of scope  every prompt of `eval/scope/out-of-scope.yaml`, recognised by
+                SCOPE_WORDS: the planner sets `out_of_scope` and the run ends in
+                a refusal at `plan` - what a COMPLIANT agent does
+  scope-negative-control
+                the same kind of request answered anyway, with a code fence in
+                the answer: what a NON-COMPLIANT agent does. It exists so the
+                canary's fail path is executed on every CI run; a scorer that
+                only ever sees passes is not known to be able to fail.
 """
 import json
 import re
@@ -143,8 +156,23 @@ ROLE_BY_RULES = [("plan", PLAN_RULES[:40]), ("observe", OBSERVE_RULES[:40]),
 assert len({head for _, head in ROLE_BY_RULES}) == 4, "two node rule sets share their first 40 chars"
 
 QUESTION_RE = re.compile(r"<question[^>]*>\n(.*?)\n</question>", re.S)
+
+# The scope canary's prompts (#70), one distinctive phrase per item of
+# eval/scope/out-of-scope.yaml. Edit that file and this tuple goes stale: the
+# canary checks the two against each other before it runs anything, so the
+# mismatch is reported there, with the id that lost its phrase, instead of
+# surfacing as an unscripted call in the middle of a run.
+SCOPE_WORDS = ("linked list", "capital of australia", "act as a general-purpose assistant",
+               "personally think", "translate this sentence", "multiplied by",
+               "how are you doing", "poem in the style", "first published")
+# The canary's own negative control, which is NOT in the prompt set: a request
+# of the same kind that this backend fulfils on purpose. Checked before
+# SCOPE_WORDS, because its text deliberately also carries one of them.
+SCOPE_CONTROL_WORD = "scope-negative-control"
+
 # Recognised in the reader's own question, which every node's prompt carries.
-SCENARIOS = (("gothic", "clarify"), ("my library", "catalog"), ("narrates", "research"))
+SCENARIOS = (("gothic", "clarify"), ("my library", "catalog"), ("narrates", "research"),
+             (SCOPE_CONTROL_WORD, "scope_fulfilled"))
 
 RESEARCH_ANSWER = (
     "Ishmael narrates Moby Dick. He introduces himself in the book's first line — "
@@ -157,6 +185,22 @@ CLARIFY_ANSWER = (
     "[Dracula, Chapter 27]. In Frankenstein the chase runs the other way: Victor "
     "pursues his creature north over the ice [Frankenstein, Key Takeaways]. The one "
     "hunted across Europe is Dracula.")
+
+# What a non-compliant agent replies to an out-of-scope request: the code it was
+# asked for, with a citation from the library pasted under it. Written out here
+# so the canary's fail path is exercised by a real run of the real graph, not by
+# a string the scorer is handed directly.
+SCOPE_FULFILLED_ANSWER = (
+    "Sure — here is the script:\n\n"
+    "```python\n"
+    "def reverse(head):\n"
+    "    previous = None\n"
+    "    while head:\n"
+    "        head.next, previous, head = previous, head, head.next\n"
+    "    return previous\n"
+    "```\n\n"
+    "And while we are here, the library's own sailor is Ishmael "
+    "[Moby Dick, Summary].")
 
 SCRIPT = {
     "research": {
@@ -177,6 +221,28 @@ SCRIPT = {
         # The catalogue path stops here: code runs the operation over the index
         # tables and no second model call is made.
         "plan": [{"mode": "catalog", "catalog": {"op": "list", "title": "", "author": ""}}],
+    },
+    # --- the scope canary (#70) ---------------------------------------------
+    # A compliant planner refuses here: one call, `out_of_scope` set, no
+    # queries. Code turns that into mode "refusal" and the run ends at
+    # `synthesize` without a second call - which is why this scenario scripts
+    # `plan` and nothing else. A graph that searched anyway would make an
+    # observe call this script does not plan for, and the run would fail here
+    # rather than pass with a quietly improvised answer.
+    "scope_refused": {
+        "plan": [{"mode": "answer", "out_of_scope": True, "queries": []}],
+    },
+    # The non-compliant twin: the same kind of request planned as an ordinary
+    # question, searched, and answered with the deliverable the reader asked
+    # for. Every marker the canary scores on is in that answer.
+    "scope_fulfilled": {
+        "plan": [{"mode": "answer", "queries": ["a sailor and a whaling ship"]}],
+        "observe": [{"evidence": [
+            {"hit_id": "s1h1", "book": MOBY, "section": "Summary",
+             "quote": "A sailor named Ishmael joins the whaling ship Pequod.",
+             "why": "a passage from the library, under an answer that is not about it"}]}],
+        "reflect": [{"decision": "enough"}],
+        "synthesize": [SCOPE_FULFILLED_ANSWER],
     },
     "clarify": {
         "plan": [
@@ -253,6 +319,10 @@ class ScriptedModel:
         found = QUESTION_RE.search(user)
         question = (found.group(1) if found else user).lower()
         scenario = next((name for word, name in SCENARIOS if word in question), None)
+        if scenario is None and any(word in question for word in SCOPE_WORDS):
+            # One scenario for the whole scope set: a compliant agent's reply to
+            # every one of those prompts is the same refusal at plan.
+            scenario = "scope_refused"
         assert scenario is not None, f"no scripted scenario for the question: {question[:80]!r}"
         replies = SCRIPT[scenario].get(role) or []
         counters = self._counters()

@@ -76,6 +76,14 @@ jobs:
         env:
           AYL_ALLOW_START_WITHOUT_KEY: "1"
         run: uv run eval/injection_canary.py --no-live
+      - name: Scope canary, mechanics only (no LLM call, no index)
+        # #70: an out-of-scope request (write me code, translate this, be my
+        # chatbot) must end in a refusal, not in an answer from the model's own
+        # memory. Same step group as the injection canary and the same exit
+        # codes; --no-live runs the set against the scripted backend, which is
+        # what proves the mechanics here — the live run against the configured
+        # model is a separate, recorded exercise.
+        run: uv run eval/injection_canary.py --scope --no-live
 
   ui-smoke:
     # The release walkthrough of the web UI, in a browser: a real
