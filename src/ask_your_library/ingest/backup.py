@@ -121,6 +121,39 @@ def _copy_tree(source: Path, target: Path, skip: set[str] = frozenset()) -> None
                     ignore=shutil.ignore_patterns(*skip) if skip else None)
 
 
+def symlinks_under(root: Path) -> list[Path]:
+    """Every symlink INSIDE `root`, as paths relative to it.
+
+    The root itself is not one of them: `data/lancedb` is a symlink in this
+    project's own dev checkout, and following the path you were handed is the
+    point. What is refused is a link found inside the tree, and the reason is a
+    disagreement that would otherwise be silent. `copytree(symlinks=False)`
+    FOLLOWS a link and writes the file it points at, while `_files_under`
+    excludes links from the digest — so a linked file would be copied into the
+    backup, never hashed, and the manifest would describe a set of files that
+    is not the set of files in the directory. Worse, a link pointing outside
+    the index would pull whatever it names into the copy: the very thing
+    `ayl-add` refuses when it reads a folder of books.
+
+    LanceDB writes no symlinks, so finding one means somebody put it there, and
+    the honest answer is to name it and stop."""
+    root = Path(root)
+    return sorted(p.relative_to(root) for p in root.rglob("*") if p.is_symlink())
+
+
+def _refuse_symlinks(root: Path, what: str) -> None:
+    found = symlinks_under(root)
+    if not found:
+        return
+    named = ", ".join(str(link) for link in found[:3])
+    more = f", and {len(found) - 3} more" if len(found) > 3 else ""
+    raise BackupError(
+        f"refusing to {what} {root}: it contains symlink(s) — {named}{more}. A copy would "
+        f"follow them and write whatever they point at, while the manifest's digests skip "
+        f"them, so the backup would not be the directory it claims to be. LanceDB writes no "
+        f"symlinks; remove them (or copy the real files in) and try again.")
+
+
 def copy_chat_db(source: Path, target: Path) -> bool:
     """One consistent snapshot of the chat database, or False when there is
     none to take.
@@ -219,6 +252,9 @@ def backup(db_path: Path, dest: Path, chat_db: Path | None = None,
     chat_db = Path(chat_db) if chat_db is not None else default_chat_db()
 
     with ingest_lock(db_path, command="ayl-add --backup", doing="back up"):
+        # Before anything is written: a tree that cannot be copied faithfully
+        # must not produce a directory that looks like a backup of it.
+        _refuse_symlinks(resolved_db, "back up")
         recovered = _recover_all(db_path)
         state = _index_state(db_path)
         target.mkdir(parents=True)
@@ -316,6 +352,10 @@ def verify(backup_dir: Path) -> list[str]:
     on_disk = {str(p) for p in _files_under(backup_dir)} - {MANIFEST_NAME}
     for extra in sorted(on_disk - set(listed)):
         problems.append(f"in the directory but not in the manifest: {extra}")
+    # A link inside the copy is a file the digests never covered — planted
+    # after the backup was written, or by something other than this command.
+    for link in symlinks_under(backup_dir):
+        problems.append(f"a symlink, which no digest covers: {link}")
     if not problems and manifest.get("digest") != _directory_digest(
             [listed[name] for name in sorted(listed)]):
         problems.append("the manifest's own directory digest does not match the files it lists")
@@ -367,6 +407,9 @@ def restore(backup_dir: Path, db_path: Path, chat_db: Path | None = None,
     source_index = backup_dir / INDEX_DIR
     if not source_index.is_dir():
         raise BackupError(f"refusing to restore {backup_dir}: it holds no {INDEX_DIR}/ directory")
+    # `verify` reports these as problems and so has already refused above; this
+    # is the belt for the case of a backup directory written by something else.
+    _refuse_symlinks(source_index, "restore")
 
     existing = db_path.exists()
     # The place the index really lives. `exists()` follows the link, so a live
@@ -446,9 +489,23 @@ def _restore_chat_db(backup_dir: Path, chat_db: Path | None, force: bool,
             # consistent database and never a main file beside somebody else's
             # write-ahead log. The target's own sidecars go: left behind, they
             # would be read as this database's journal.
-            target_chat.unlink(missing_ok=True)      # `backup()` writes INTO a database
-            copy_chat_db(source_chat, target_chat)
+            # Built beside the live file and moved over it, never deleted
+            # first: `Connection.backup()` writes INTO a database, so the old
+            # code unlinked the target before it had a replacement — and a
+            # failure there (a full disk, an unreadable snapshot, an interrupt)
+            # destroyed the reader's history with nothing to put back.
+            staged_chat = target_chat.with_name(
+                f"{target_chat.name}.restoring-{time.strftime('%Y%m%d-%H%M%S')}")
+            staged_chat.unlink(missing_ok=True)
+            try:
+                copy_chat_db(source_chat, staged_chat)
+                os.replace(staged_chat, target_chat)
+            except BaseException:
+                staged_chat.unlink(missing_ok=True)
+                raise
             for suffix in ("-wal", "-shm"):
+                # The replaced database's journal, which would otherwise be
+                # read as this one's.
                 Path(str(target_chat) + suffix).unlink(missing_ok=True)
             report.append(f"chat database restored to {target_chat}")
 

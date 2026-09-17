@@ -8,9 +8,12 @@ which rotted is found before it replaces a working index rather than after.
 No network: the embedder is faked and every path is under tmp_path.
 """
 import contextlib
+import fcntl
 import json
 import os
 import sqlite3
+import subprocess
+import sys
 from pathlib import Path
 
 import lancedb
@@ -58,10 +61,48 @@ def chat_rows(path):
         return [row[0] for row in conn.execute('SELECT "output" FROM steps ORDER BY "id"')]
 
 
-# --- the lock ----------------------------------------------------------------
+# --- the lock: the kernel's, not a file whose presence is the lock -----------
 
-def test_an_ingest_holds_the_lock_and_drops_it_at_the_end(built, tmp_path):
-    assert not lock_path(tmp_path / "db").exists()
+def held_by_somebody(db_path) -> bool:
+    """Is this index's lock held? Asked the only way that is true by
+    construction — by trying to take it on a descriptor of our own. flock is
+    per open file description, so this conflicts with a holder in this process
+    exactly as it would with one in another."""
+    fd = os.open(lock_path(db_path), os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return False
+    except OSError:
+        return True
+    finally:
+        os.close(fd)
+
+
+HOLDER_SCRIPT = """
+import sys, time
+from ask_your_library.ingest.lock import acquire
+acquire(sys.argv[1], command=sys.argv[2])
+print("held", flush=True)
+time.sleep(600)
+"""
+
+
+def a_holder(db_path, command="ayl-add ~/books"):
+    """Another process holding the lock, ready when it says so."""
+    process = subprocess.Popen(
+        [sys.executable, "-c", HOLDER_SCRIPT, str(db_path), command],
+        stdout=subprocess.PIPE, text=True)
+    assert process.stdout.readline().strip() == "held"
+    return process
+
+
+def test_an_ingest_drops_the_lock_at_the_end(built, tmp_path):
+    """The file stays — it is not the lock, only the thing the lock is held on
+    — and the note in it is truncated away, so a reader of a lock nobody holds
+    sees nothing rather than the last holder's line."""
+    assert not held_by_somebody(tmp_path / "db")
+    assert read_lock(tmp_path / "db") == {}
 
 
 def test_a_second_writer_is_refused_while_the_first_holds_the_lock(built, tmp_path):
@@ -70,51 +111,82 @@ def test_a_second_writer_is_refused_while_the_first_holds_the_lock(built, tmp_pa
             add_folder.add_books(add_folder.read_folder(built), "ollama", tmp_path / "db", built)
     assert "an ingest is writing" in str(error.value)
     assert "pretend ingest" in str(error.value)
-    assert str(lock_path(tmp_path / "db")) in str(error.value)   # the file to delete, named
+    # and no instruction to delete anything: deleting the file releases nothing
+    assert "delete" not in str(error.value)
 
 
-def test_a_lock_left_by_a_dead_process_is_taken_over(tmp_path, caplog):
-    """A power cut leaves the file behind. The pid is what makes that
-    recoverable without a human deleting a file they have never heard of."""
+def test_exactly_one_of_two_contending_processes_wins(tmp_path):
+    """The race the old scheme could not close: two contenders that both read
+    the same stale lock, the first replacing it and the second unlinking the
+    first's live one. There is nothing to read and nothing to replace now."""
     db_path = tmp_path / "db"
     db_path.mkdir()
-    lock_path(db_path).write_text(json.dumps(
-        {"pid": _a_pid_that_is_not_running(), "host": os.uname().nodename,
-         "started": "2026-01-01T00:00:00", "command": "ayl-add ~/books"}))
-
-    with caplog.at_level("WARNING"):
-        acquire(db_path, command="ayl-add again")
-
-    assert read_lock(db_path)["pid"] == os.getpid()
-    assert any("clearing a lock" in record.message for record in caplog.records)
-    release(db_path)
+    holder = a_holder(db_path)
+    try:
+        with pytest.raises(IngestBusy) as error:
+            acquire(db_path)
+        assert str(holder.pid) in str(error.value)
+    finally:
+        holder.kill()
+        holder.wait()
 
 
-def test_a_lock_from_another_machine_is_never_taken_over(tmp_path):
-    """A network share is the only way this happens, and nothing here can ask
-    that machine whether its process is alive. Refuse, and name the file."""
+def test_the_lock_dies_with_its_holder_and_needs_no_reclaim(tmp_path):
+    """SIGKILL runs no code of ours — no `finally`, no unlink, no recorded pid
+    consulted. The kernel closes the descriptor and the lock is simply gone,
+    which is the whole reason for holding it this way."""
     db_path = tmp_path / "db"
     db_path.mkdir()
-    lock_path(db_path).write_text(json.dumps(
-        {"pid": _a_pid_that_is_not_running(), "host": "some-other-laptop",
-         "started": "2026-01-01T00:00:00", "command": "ayl-add"}))
+    holder = a_holder(db_path)
+    assert held_by_somebody(db_path)
 
-    with pytest.raises(IngestBusy) as error:
-        acquire(db_path)
-    assert "some-other-laptop" in str(error.value)
+    holder.kill()
+    holder.wait()
+
+    acquire(db_path, command="the next run")          # no reclaim, no warning, no delay
+    try:
+        assert read_lock(db_path)["pid"] == os.getpid()
+    finally:
+        release(db_path)
 
 
-def _a_pid_that_is_not_running() -> int:
-    """A pid nothing holds. Searching downwards from a high number, because a
-    fixed one might be in use on the machine running the tests."""
-    for pid in range(99999, 40000, -1):
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            return pid
-        except OSError:
-            continue
-    raise AssertionError("no free pid found")
+def test_an_unreadable_note_does_not_affect_taking_the_lock(tmp_path):
+    """The payload is for the message and nothing else. Under the old scheme
+    an unparseable file was a decision — stale, or refuse — and both answers
+    were wrong for somebody."""
+    db_path = tmp_path / "db"
+    db_path.mkdir()
+    lock_path(db_path).write_bytes(b"not json at all")
+
+    acquire(db_path, command="ayl-add ~/books")
+    try:
+        assert read_lock(db_path)["command"] == "ayl-add ~/books"   # overwritten, not consulted
+    finally:
+        release(db_path)
+
+
+def test_a_note_from_another_host_only_changes_the_words(tmp_path):
+    """flock on a network share is the share's to implement. The refusal says
+    so instead of implying a guarantee this code cannot make."""
+    from ask_your_library.ingest import lock as lock_module
+
+    message = lock_module.busy_message(tmp_path / "db", {"pid": 7, "host": "some-other-laptop"},
+                                       "back up")
+    assert "shared volume" in message and "some-other-laptop" in message
+
+
+def test_two_spellings_of_one_index_are_one_lock(tmp_path):
+    """`~/index`, `./index` and a symlink to it must exclude each other, or the
+    lock is decoration."""
+    real = tmp_path / "db"
+    real.mkdir()
+    link = tmp_path / "linked"
+    link.symlink_to(real, target_is_directory=True)
+    assert lock_path(link) == lock_path(real)
+
+    with ingest_lock(real, command="ayl-add ~/books"):
+        with pytest.raises(IngestBusy):
+            acquire(link)
 
 
 # --- the backup --------------------------------------------------------------
@@ -244,7 +316,7 @@ def test_a_restored_index_can_be_written_to_again(built, tmp_path, fake_embedder
     shutil.rmtree(tmp_path / "db")
     restore(target, tmp_path / "db")
 
-    assert not lock_path(tmp_path / "db").exists()
+    assert not held_by_somebody(tmp_path / "db")
     counts = add_folder.add_books(add_folder.read_folder(built), "ollama", tmp_path / "db", built)
     assert counts["books"] == 2
 
@@ -344,7 +416,7 @@ def test_a_failed_copy_leaves_no_half_written_backup(built, tmp_path, monkeypatc
 
     assert not any((tmp_path / "backups").iterdir())
     # and the lock was released, so the index is still usable
-    assert not lock_path(tmp_path / "db").exists()
+    assert not held_by_somebody(tmp_path / "db")
 
 
 # --- a symlinked index path --------------------------------------------------
@@ -366,25 +438,6 @@ def test_a_restore_follows_a_symlinked_index_path(built, tmp_path, fake_embedder
     # the REAL directory is what was moved aside, not the link
     assert list(tmp_path.glob("db.replaced-*")) and not list(tmp_path.glob("linked-db.replaced-*"))
     assert any("still points at the restored index" in line for line in report)
-
-
-# --- the lock is complete from the instant its name exists -------------------
-
-def test_the_lock_file_is_never_observed_empty(tmp_path):
-    """The window this closes: create-then-write lets a competitor read `{}`,
-    call it a lock nobody can be identified from, and take it over."""
-    db_path = tmp_path / "db"
-    db_path.mkdir()
-    acquire(db_path, command="ayl-add ~/books")
-    try:
-        info = read_lock(db_path)
-        assert info["pid"] == os.getpid() and info["command"] == "ayl-add ~/books"
-        assert info["host"] and info["started"]
-        # and nothing left beside it, and nothing inside the index at all
-        assert list(db_path.iterdir()) == []
-        assert lock_path(db_path).parent == db_path.parent
-    finally:
-        release(db_path)
 
 
 # --- the chat database is one consistent snapshot ----------------------------
@@ -463,13 +516,12 @@ def test_a_restore_into_a_fresh_path_still_holds_the_lock(built, tmp_path):
 def test_the_lock_is_held_across_the_swap_and_survives_the_rename(built, tmp_path):
     """The lock lives beside the index, so renaming the directory does not
     carry it away and leave the name it guards unguarded mid-swap."""
-    lock = lock_path(tmp_path / "db")
-    assert lock.parent == tmp_path                      # beside, not inside
+    assert lock_path(tmp_path / "db").parent == tmp_path        # beside, not inside
     seen = {}
     real_copy = backup_module._copy_tree
 
     def watching(source, target, skip=frozenset()):
-        seen["locked_during_copy"] = lock.exists()
+        seen["locked_during_copy"] = held_by_somebody(tmp_path / "db")
         return real_copy(source, target, skip)
 
     target = backup(tmp_path / "db", tmp_path / "backups")
@@ -479,7 +531,7 @@ def test_the_lock_is_held_across_the_swap_and_survives_the_rename(built, tmp_pat
     finally:
         backup_module._copy_tree = real_copy
     assert seen["locked_during_copy"] is True
-    assert not lock.exists()                            # and released at the end
+    assert not held_by_somebody(tmp_path / "db")                 # and released at the end
 
 
 def test_a_failure_mid_copy_leaves_the_old_index_exactly_where_it_was(built, tmp_path,
@@ -519,41 +571,78 @@ def test_a_failed_swap_puts_the_moved_aside_index_back(built, tmp_path, monkeypa
     assert not list(tmp_path.glob("db.replaced-*")) and not list(tmp_path.glob("db.restoring-*"))
 
 
-# --- a lock this process cannot validate is never cleared --------------------
+# --- a tree that cannot be copied faithfully ---------------------------------
 
-def test_a_lock_that_cannot_be_read_is_refused_not_taken_over(tmp_path):
-    """The file is 0600, so on a shared directory another account sees a lock
-    it cannot parse. Clearing it would let two ingests write one index — which
-    is the single thing this file exists to prevent."""
-    db_path = tmp_path / "db"
-    db_path.mkdir()
-    lock_path(db_path).write_bytes(b"not json at all")
+def test_a_symlink_inside_the_index_is_named_and_refused(built, tmp_path):
+    """`copytree(symlinks=False)` FOLLOWS a link and writes what it points at,
+    while the digests skip links entirely — so a linked file would be in the
+    backup and in no digest, and the manifest would describe a set of files
+    that is not the set of files in the directory. A link pointing outside the
+    index would pull whatever it names into the copy."""
+    secret = tmp_path / "outside.txt"
+    secret.write_text("not part of any index")
+    (tmp_path / "db" / "pointer.txt").symlink_to(secret)
 
-    with pytest.raises(IngestBusy) as error:
-        acquire(db_path)
+    with pytest.raises(BackupError) as error:
+        backup(tmp_path / "db", tmp_path / "backups")
 
-    assert "cannot be read" in str(error.value) and "owner-only" in str(error.value)
-    assert str(lock_path(db_path)) in str(error.value)
-    assert lock_path(db_path).read_bytes() == b"not json at all"    # untouched
-
-
-def test_a_lock_with_no_pid_or_host_is_refused_too(tmp_path):
-    db_path = tmp_path / "db"
-    db_path.mkdir()
-    lock_path(db_path).write_text(json.dumps({"started": "2026-01-01T00:00:00"}))
-    with pytest.raises(IngestBusy, match="cannot be read"):
-        acquire(db_path)
+    assert "pointer.txt" in str(error.value) and "symlink" in str(error.value)
+    assert not (tmp_path / "backups").exists()
 
 
-def test_two_spellings_of_one_index_are_one_lock(tmp_path):
-    """`~/index`, `./index` and a symlink to it must exclude each other, or the
-    lock is decoration."""
-    real = tmp_path / "db"
-    real.mkdir()
-    link = tmp_path / "linked"
-    link.symlink_to(real, target_is_directory=True)
-    assert lock_path(link) == lock_path(real)
+def test_a_symlinked_index_ROOT_is_still_fine(built, tmp_path):
+    """Only links INSIDE the tree are refused: `data/lancedb` is itself a
+    symlink in this project's own dev checkout, and following the path you were
+    handed is the point."""
+    link = tmp_path / "linked-db"
+    link.symlink_to(tmp_path / "db", target_is_directory=True)
+    assert verify(backup(link, tmp_path / "backups")) == []
 
-    with ingest_lock(real, command="ayl-add ~/books"):
-        with pytest.raises(IngestBusy):
-            acquire(link)
+
+def test_a_symlink_planted_in_a_backup_fails_verification_and_the_restore(built, tmp_path):
+    target = backup(tmp_path / "db", tmp_path / "backups")
+    (target / "lancedb" / "sneaky").symlink_to(tmp_path / "db")
+
+    assert any("symlink" in problem for problem in verify(target))
+    with pytest.raises(BackupError):
+        restore(target, tmp_path / "fresh")
+    assert not (tmp_path / "fresh").exists()
+
+
+# --- the chat restore is staged too ------------------------------------------
+
+def test_a_failed_chat_restore_leaves_the_live_history_alone(built, tmp_path, monkeypatch):
+    """`Connection.backup()` writes INTO a database, so the target used to be
+    deleted first — and a failure there destroyed the reader's history with
+    nothing to put back."""
+    live = chat_db(tmp_path, rows=("the history I still have",), wal=True)
+    target = backup(tmp_path / "db", tmp_path / "backups", chat_db=live)
+    calls = {"n": 0}
+    real = backup_module.copy_chat_db
+
+    def fail_on_the_restore(source, dest):
+        calls["n"] += 1
+        raise OSError("disk went away")
+
+    monkeypatch.setattr(backup_module, "copy_chat_db", fail_on_the_restore)
+    with pytest.raises(OSError, match="disk went away"):
+        restore(target, tmp_path / "db", chat_db=live, force=True)
+    monkeypatch.setattr(backup_module, "copy_chat_db", real)
+
+    assert calls["n"] == 1
+    assert chat_rows(live) == ["the history I still have"]
+    assert not list(live.parent.glob("chat.db.restoring-*"))
+
+
+def test_the_chat_restore_replaces_by_rename(built, tmp_path):
+    live = chat_db(tmp_path, rows=("old history",), wal=True)
+    target = backup(tmp_path / "db", tmp_path / "backups", chat_db=live)
+    with contextlib.closing(sqlite3.connect(live)) as conn:
+        with conn:
+            conn.execute("INSERT INTO steps VALUES ('9', 'written after the backup')")
+    assert chat_rows(live) == ["old history", "written after the backup"]
+
+    restore(target, tmp_path / "db", chat_db=live, force=True)
+
+    assert chat_rows(live) == ["old history"]
+    assert not list(live.parent.glob("chat.db.restoring-*"))

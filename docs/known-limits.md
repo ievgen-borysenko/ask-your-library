@@ -290,15 +290,16 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   `ayl-add --backup <dir>` copies the LanceDB directory and the web UI's `chat.db` with a manifest
   (the stamps, the row counts, a sha256 per file), after taking the ingest lock and finishing any
   interrupted staged rebuild — those two are what make the copy a copy of a whole index rather
-  than of one caught mid-write. The lock is **advisory and single-machine**: it is a file beside
-  the index directory honoured by this project's own write paths, and nothing stops `cp`, another
-  program, or a second checkout pointing at the same directory from writing while it is held. A
-  lock left by a crash is taken over only when it names this host and a pid that is not running;
-  one from another host, and one this process cannot read (the file is owner-only, so another
-  account's looks like that), are refused by name rather than cleared, which means a lock file
-  nobody can identify blocks every write until somebody deletes it. Restoring stages its copy
+  than of one caught mid-write. The lock is an **`flock`** on a file beside the index directory, so
+  a crash never leaves it held — the kernel releases it with the process — but it is still
+  **advisory and single-machine**: only this project's own write paths take it, nothing stops `cp`
+  or any other program from writing while it is held, and on a network share `flock` means whatever
+  that share implements (a refusal naming another machine says so). Restoring stages its copy
   beside the target and publishes by rename, and **never deletes** the index it replaces — it is
   moved aside and named — so a restore costs the disk of both until you remove one. `.scratch/`
   and `.env` are not copied at all, and the chat database is snapshotted through SQLite rather
   than copied as files, so a `chat.db` SQLite cannot open is reported and skipped rather than
-  copied as bytes.
+  copied as bytes. A **symlink inside the index** is refused outright rather than copied or
+  followed: a copy follows links while the digests skip them, so the manifest would describe a set
+  of files that is not the set of files in the directory. LanceDB writes none, so this only ever
+  refuses something somebody put there.

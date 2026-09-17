@@ -119,16 +119,21 @@ writes `~/ayl-backups/<timestamp>/` holding
 **When a copy is safe.** This is the part a plain `cp -r` cannot give you, and it is the reason
 the command exists rather than a line in the README:
 
-1. **No ingest is running.** Both write paths (`ayl-add`, the demo corpus's ingest stages) hold a
-   lock file **beside** the index directory, named after it (`.ayl-ingest-<name>.lock`), for the
-   length of a run, and `--backup` and `--restore` take the same lock. Beside rather than inside,
-   because a restore publishes by renaming the directory and a lock living in it would travel with
-   the rename. A backup started while an ingest is writing is refused, naming the command and pid
-   that holds it; an ingest started while a backup or restore is under way is refused the same way.
-   Exactly one kind of leftover lock is cleared automatically: this machine, a pid that is no
-   longer running. One from another machine, or one this process cannot read — the file is
-   owner-only, so on a shared directory another account's lock looks like that — is refused by
-   name, because clearing it would let two ingests write one index.
+1. **No ingest is running.** Both write paths (`ayl-add`, the demo corpus's ingest stages) hold an
+   **`flock`** for the length of a run, on a file **beside** the index directory and named after it
+   (`.ayl-ingest-<name>.lock`); `--backup` and `--restore` take the same lock. Beside rather than
+   inside, because a restore publishes by renaming the directory and a lock living in it would
+   travel with the rename; keyed by the resolved path, so two spellings of one index are one lock.
+   A backup started while an ingest is writing is refused, naming the command and pid that holds
+   it; an ingest started while a backup or restore is under way is refused the same way.
+
+   The lock is held by the operating system, not by the file's existence, and **there is nothing
+   to clear**: the kernel releases it when the holding process ends, however it ends — including a
+   crash, a `kill -9` or a power cut. The file is never deleted (it is only what the lock is held
+   on) and the line inside it, naming the pid and the command, exists so a refusal can say who is
+   holding it; nothing is decided from that line. On a network share `flock` means whatever the
+   share implements, and a refusal that names another machine says so rather than promising
+   something this code cannot.
 2. **No staged rebuild is half-finished.** LanceDB has no rename, so replacing a table goes
    through a staging copy, and there is a moment with the live table dropped and the staged one
    not yet promoted. A copy taken there restores to an index with a table missing. `--backup`
@@ -137,7 +142,14 @@ the command exists rather than a line in the README:
 
 And the restore itself is staged: the verified copy is built **beside** the target and only a
 complete one is swapped in, by rename. A failure while copying leaves the index that is there
-exactly as it was; a failure in the swap puts the moved-aside index back.
+exactly as it was; a failure in the swap puts the moved-aside index back. The chat database is
+restored the same way — snapshotted to a file beside the live one and renamed over it — so a
+failure there cannot leave you with no history at all.
+
+A **symlink inside the index** is refused, at backup and at restore: a copy follows links while the
+manifest's digests skip them, so a linked file would be in the backup and in no digest, and one
+pointing outside the index would pull whatever it names into the copy. LanceDB writes none. The
+index path itself may of course be a link — that is the case above.
 
 A destination **inside** the index directory is refused: that is a copy of a directory into
 itself. A failure part-way through removes the half-written directory rather than leaving something

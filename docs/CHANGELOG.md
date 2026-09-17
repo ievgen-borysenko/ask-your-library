@@ -45,17 +45,18 @@
   timestamped directory with a `MANIFEST.json` — what was copied, the stamps, the row count per
   table, the ledger size, the code version, a sha256 per file and one over the set. The copy is the
   easy half; the product is the statement that it was taken when the index was whole. Both write
-  paths now hold an ingest lock inside the index directory and the backup takes the same one, so a
+  paths now hold an ingest lock beside the index directory and the backup takes the same one, so a
   copy cannot start mid-ingest and an ingest cannot start mid-copy (a second `ayl-add` in another
-  terminal is refused, naming the command and pid that holds it). The lock sits **beside** the
-  index, keyed by its name and by its resolved path, so it survives the rename a restore publishes
-  with and two spellings of one index are one lock; exactly one leftover is cleared automatically —
-  this host, a pid that is not running — and one from another machine or one this process cannot
-  read is refused by name, because the file is owner-only and clearing another account's would let
-  two ingests write one index. The chat database is taken through **SQLite's own backup**, one
-  consistent snapshot in one file rather than a main file copied beside somebody else's
-  write-ahead log. The restore is staged beside the target and published by rename, rolling back
-  if the swap fails. Any staged rebuild caught half-swapped is
+  terminal is refused, naming the command and pid that holds it). The lock is an **`flock`** held
+  by the operating system on a file **beside** the index, keyed by its resolved path — so it
+  survives the rename a restore publishes with, two spellings of one index are one lock, and there
+  is no stale state to detect and nothing to clear by hand: the kernel releases it when the holder
+  ends, however it ends. The file is never deleted, and the pid and command written in it exist
+  only so a refusal can say who is holding it. The chat database is taken through **SQLite's own
+  backup**, one consistent snapshot in one file rather than a main file copied beside somebody
+  else's write-ahead log. The index restore is staged beside the target and published by rename,
+  rolling back if the swap fails, and so is the chat database's; a **symlink inside the index** is
+  refused at backup and at restore, because a copy follows links while the digests skip them. Any staged rebuild caught half-swapped is
   finished first, because a copy taken in that window restores to a missing table.
   **`--restore`** re-verifies every digest before touching anything, refuses to overwrite a live
   index without `--force`, refuses while an ingest is in flight, and **moves the index it replaces

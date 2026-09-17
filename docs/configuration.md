@@ -13,7 +13,7 @@ the hosted lines ship commented out with what they cost written beside them.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `LIBRARY_DB_PATH` | `data/lancedb` | LanceDB with `cards_<backend>` / `transcripts_<backend>`, the `books` ledger and the `_index_meta` stamps. It is a directory, so a backup of it is a file copy — `ayl-add --backup <dir>` is the one that says when a copy is safe ([upgrading](upgrading.md)). While an ingest runs it holds `.ayl-ingest.lock` inside this directory; a second `ayl-add` or a backup is refused until it finishes |
+| `LIBRARY_DB_PATH` | `data/lancedb` | LanceDB with `cards_<backend>` / `transcripts_<backend>`, the `books` ledger and the `_index_meta` stamps. It is a directory, so a backup of it is a file copy — `ayl-add --backup <dir>` is the one that says when a copy is safe ([upgrading](upgrading.md)). While an ingest runs it holds an `flock` on `.ayl-ingest-<name>.lock` BESIDE this directory (`data/.ayl-ingest-lancedb.lock` for the default); a second `ayl-add`, a backup or a restore is refused until it finishes. The lock is the operating system's, so it is released the moment the holder ends, however it ends — there is nothing to clear by hand |
 | `EMBED_BACKEND` | `ollama` | `ollama` (local bge-m3) or `openrouter`; also selects the table suffix |
 | `OLLAMA_URL` | `http://localhost:11434` | Local Ollama endpoint |
 | `OLLAMA_EMBED_MODEL` | `bge-m3` | Embedding model, 1024 dims, multilingual |

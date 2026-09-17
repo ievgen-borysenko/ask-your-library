@@ -102,9 +102,10 @@ keeps its minted id; books the ledger holds that this folder does not lose their
 table, go back to `requested` and are named at the end of the run. It needs `--backup <dir>` in
 the same command (taken first) or `--force`.
 
-`--backup` refuses while an ingest is running (both write paths hold a lock inside the index
-directory) and finishes any half-swapped staged rebuild before it copies, which is what makes the
-copy a copy of a *whole* index. `--restore` verifies every digest before it touches anything and
+`--backup` refuses while an ingest is running (both write paths hold an `flock` on a lock file
+beside the index directory, `.ayl-ingest-<name>.lock`) and finishes any half-swapped staged rebuild
+before it copies, which is what makes the copy a copy of a *whole* index. `--restore` verifies every
+digest before it touches anything, stages the copy beside the target and publishes it by rename, and
 moves the index it replaces aside rather than deleting it. The whole procedure, and what each kind
 of upgrade costs, is [`docs/upgrading.md`](upgrading.md).
 
