@@ -285,6 +285,16 @@ that varied were seconds. So `--repeat` on a local model measures a latency dist
 behaviour spread it was built for has to be measured on a hosted run**, where the provider samples.
 Nothing in the tables below has been re-measured, and the numbers in them are what they always were.
 
+**Every number on this page was produced against the old chunker.** On 2026-09-17 (#28,
+[ADR-025](adr/README.md)) transcript chunks went from a 4,000-character target to 2,400, so that a
+hit is no longer longer than the window `observe` reads it through — 90.3% of them were. That
+changes what is retrieved and what is ranked, on every question. No run in
+[`eval-results/`](eval-results/) has been re-made against a re-chunked index, and none was re-run
+to change a published number; the first one that is will say so in its own fingerprint, which
+names the index build it ran on. Until then the tables below describe the system as it was on the
+index they were measured on, and the comparison that matters — the same sets on the same code
+before and after the re-chunk — **is pending**.
+
 Two measured trees, both single runs, clean tree (`--require-clean`), strict hit-id mode, the same
 bge-m3 index: **v0.1.0**, 2026-09-05 on code `88881ee` (the last code commit before tag `v0.1.0`;
 the tag's commit adds documentation only), with a 1,200-character observe window, summarised in
@@ -604,7 +614,11 @@ ran the ablation, not a human verdict.
   the window at all and the answer stops short and says the discovery moment is not in the
   evidence; on the v0.2.0-rc1 run it is not in the window either and the answer fills the gap from
   the book card's plot summary without saying so. PASS and green provenance every time. Widening the observe window (measured during
-  development, ADR-012) does not fix c06, because the passage is not in the window to widen. c05 (the windmills) once read an empty chapter because `reflect` passed the
+  development, ADR-012) does not fix c06, because the passage is not in the window to widen — and
+  neither, by itself, does #28's re-chunk: it makes every ranked chunk readable whole, which c06
+  was never short of, while the chapter that answers it is retrieved by no query at all. What
+  could reach it is a drill-down that names what it is looking for (ADR-025's second half), and
+  that has not been run. c05 (the windmills) once read an empty chapter because `reflect` passed the
   bare title while the index keys rows as "Title — Author"; fixed, and the tagged run quotes the Friston passage.
 - **Not that the expected facts are used correctly.** `facts_ok` asks whether each expected string
   occurs in the answer and nothing else. "Saturday" is equally present in "Passepartout burst in:

@@ -160,7 +160,13 @@ def run_facts(repeat: int = 1) -> dict:
         for name in TABLES.values():
             meta = read_index_meta(db, name) or {}
             table = db.open_table(name)
+            # The chunker is in the stamp because it decides what a row IS: a
+            # re-chunk changes what is retrieved for every question, so two
+            # reports from two chunkers are not comparable however alike their
+            # other fields look (#28, ADR-025). An index built before the stamp
+            # existed records nothing, and prints as "?" rather than a guess.
             stamps.append(f"{name}={meta.get('model', '?')}/{meta.get('dims', '?')}d "
+                          f"chunker={meta.get('chunker') or '?'} "
                           f"rows={table.count_rows()} v{getattr(table, 'version', '?')} "
                           f"built={meta.get('created', '?')}")
     except Exception as error:  # the report must not fail on fingerprinting

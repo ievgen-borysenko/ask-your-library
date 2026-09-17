@@ -180,16 +180,45 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   guaranteed upper bound on a question. When the deadline is spent the
   answer is written from the evidence so far and the stop reason says so. The web UI
   additionally waits at most 300 s for a clarify reply.
-- **Chapter reads are capped at 12,000 characters** and the cut is marked in-band within that
-  budget; an empty read (chapter not in the index) yields no hit at all and is logged in the
+- **Chapter reads are capped at 12,000 characters**, and since 2026-09-17 (#28,
+  [ADR-025](adr/README.md)) that budget is spent around the match rather than at the head of the
+  chapter — but only when the request says what it is looking for. 61% of the demo corpus's 1,228
+  chapters are longer than one read (median 14,783 characters, the longest 585,482), so until this
+  change a question about the end of a long chapter was answered from its beginning. Now `reflect`
+  may name a phrase, `act` reads up to `CHAPTER_SCAN_CHARS` (120,000) of the chapter and cuts the
+  window around the best lexical match in it, and what is left out is stated in band at both ends.
+  **The limits of that.** The match is lexical — the query's own words over the raw text, because
+  neither retriever returns offsets — so a chapter that never spells the words it is asked about
+  gets the head, exactly as before; so does a read decision that names no phrase, which is every
+  decision a model makes that ignores the new optional field. A chapter longer than the scan
+  budget is still cut at 120,000 characters before the window is chosen. There is no cursor: a
+  second request for the same chapter cannot show the next window, it stops the loop
+  (`stop_chapter_again`). And **no behavioural measurement of this exists yet** — see the entry
+  below. An empty read (chapter not in the index) still yields no hit at all and is logged in the
   scratchpad, so nothing synthetic can be quoted as evidence.
+- **The chunk is now the observation window, and what that bought is not measured yet.** Until
+  2026-09-17 the chunker packed transcript chunks to 4,000 characters while `observe` read 2,500
+  of a hit: **90.3% of the demo corpus's 7,285 chunks were longer than the window** (median 3,922,
+  the longest 10,778 — raw Whisper output, where a "sentence" with no punctuation in it ran to
+  10,140 characters), so the retriever ranked and fused text that was cut off before the model
+  read it. The chunker now packs to 2,400 with a hard cap on such a run: on the 35 prepared demo
+  texts, **11,282 chunks, median 2,304, the longest 2,400, 0% over the window**, at 55% more rows.
+  That is a measurement of the chunks and of nothing else. **Whether answers get better is
+  unmeasured**: it needs a full re-ingest of the corpus and a paired eval run, and until those
+  numbers are published here, treat this as a defect removed rather than a result. Every published
+  eval report was produced against the old chunker and is not comparable, chunk for chunk, with a
+  run made after it — nothing was re-run to change a published number. Raising `SEARCH_HIT_CHARS`
+  now buys nothing (there is no chunk tail behind it) and lowering it cuts a chunk the retriever
+  ranked whole.
 - **Corpus changes are per book, and a re-chunk is still a full rebuild.** `ayl-add` updates one
   book at a time — resolve to a `book_id` in the `books` ledger, delete that book's rows, append
   the new ones, write the ledger row before and after — so the books a run does not name are
   neither read nor rewritten. The demo corpus keeps its staged whole-table rebuild (and its
   `--book` upsert): it builds a pinned corpus from scratch and has no run that adds one book. What
-  still costs a full rebuild: a change of embedding model, and a change of chunker (#28) — both
-  invalidate every vector or every chunk id in the table. Neither happens silently: the index is
+  still costs a full rebuild: a change of embedding model, and a change of chunker — both
+  invalidate every vector or every chunk id in the table. #28 is the first chunker change this
+  project has shipped, so every index built before 2026-09-17 needs that rebuild
+  ([upgrading](upgrading.md)). Neither happens silently: the index is
   stamped with both, a reader warns and a write refuses (see the entry below and
   [upgrading](upgrading.md)), and `ayl-add --backup` is what survives the rebuild. The BM25 index
   is rebuilt whole after every run, measured at 0.8 s for the demo corpus's 7,285 rows.
@@ -232,8 +261,9 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   does not stop a blank line from ending the message's HTML block and handing what follows back
   to the markdown renderer.
 - **Heuristic behavioural scoring**, no LLM judge: refusals detected by phrase markers,
-  titles by substring match. `get_chapter` caps at 1000 chunks / 12k chars and reconciles
-  section naming (`Chapter 59` vs `59`) heuristically.
+  titles by substring match. `get_chapter` caps at 1000 chunks and reconciles section naming
+  (`Chapter 59` vs `59`) heuristically; the 12k it returns is a window inside up to 120k of the
+  chapter, not its first 12k, when the request names what it is looking for.
 - **A book's identity is minted; its NAME is still a derived string.** Every book has a `book_id`
   in the `books` ledger, assigned once and never recomputed, and `ayl-add` updates by that id. A
   book is recognised by its key, or — when the key is what changed — by being the same file in the

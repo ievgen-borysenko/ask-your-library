@@ -229,8 +229,9 @@ gate, and every hosted model under it.
 
 ## ADR-005: `observe` sees a fixed budget of each hit; the rest of the loop sees only evidence
 
-Status: accepted; the size of the budget was revised by ADR-012, and 2026-09-16 added one number to
-what `reflect` sees (see below). The budget itself is unchanged.
+Status: accepted; the size of the budget was revised by ADR-012 and its MEANING by ADR-025
+(2026-09-17), and 2026-09-16 added one number to what `reflect` sees (see below). The budget
+itself is unchanged.
 
 Raw hits never reach `plan`, `reflect` or `synthesize`. `observe` receives one `<result>` block
 per hit, carrying that hit's id, book and section, with the text cut to `SEARCH_HIT_CHARS`
@@ -245,6 +246,15 @@ passage is not in the window at any size — a retrieval problem, traced in
 [`docs/examples/c06-fogg-missing-day.md`][c06-trace]. That `reflect` decides on a thin summary,
 with no quotes and no candidate set, is the mechanism behind "identify rarely clarifies", which
 ADR-013 addressed.
+
+Amended 2026-09-17 (#28, ADR-025): **the budget is the same number and it is no longer a cut.** A
+transcript chunk is packed to 2,400 characters, under `SEARCH_HIT_CHARS`, so a search hit arrives
+whole — for two years' worth of this record's life the budget quietly discarded a third of the
+median chunk after the retriever had ranked all of it. A chapter read still gets a budget, and
+where the request says what it is looking for the budget is spent around the match instead of at
+the head. What this ADR decides — a FIXED budget, applied once in `act`, with only evidence
+travelling on — is unchanged, and it is what makes the window safe to move: `observe` sees the
+string `act` stored, never a second computation of it.
 
 Amended 2026-09-16 (#29): the budget is the same and no passage text moved, but `reflect` now sees
 one more thing — **a count**, how many quotes the provenance gate dropped before they became
@@ -454,7 +464,15 @@ review and the ruleset, not by that tool.
 
 ## ADR-012: Widen what `observe` sees — 1,200 to 2,500 characters per search hit
 
-Status: accepted (measured and merged on 2026-09-06).
+Status: **superseded by [ADR-025](#adr-025-the-chunk-is-the-observation-window-and-a-chapter-read-reads-around-the-match) (2026-09-17)**; accepted, measured and merged on 2026-09-06.
+The number it chose is still the number (`SEARCH_HIT_CHARS` = 2,500) and the measurements below
+still stand; what is superseded is the decision's *shape*. This record treated the window as a
+knob over a chunk it could not reach, and named the alternative it did not build — "a window
+centred on the matching span instead of the head of the chunk". #28 measured the consequence:
+90.3% of transcript chunks were longer than this window, so the retriever was ranking text the
+model never read, and widening the knob could not fix what the chunker had already cut. The
+chunker and the window became one decision instead, and the alternative this record declined is
+what a chapter read now does.
 
 `SEARCH_HIT_CHARS` becomes a configuration knob and its default rises from 1,200 to 2,500
 characters. Measured on the core set at 1,200 / 2,500 / 4,000, one run each: provenance clean at
@@ -874,6 +892,15 @@ the exact keys, row keys and chunk ids of both ingest paths were frozen from the
 before (`tests/fixtures/book_identity.json`, generated at `b2157cb`) and checked against the built
 index: all 35 book keys and all 1,228 chapter-level chunk-id prefixes reproduce exactly.
 
+*Re-scoped 2026-09-17 (ADR-025).* Half of that gate could not survive a re-chunk and was never
+going to: a chunk id ends in the chunk's position inside its section, so packing to 2,400
+characters instead of 4,000 renumbers ids that are already in an index. The fixture was
+regenerated deliberately with the chunker bump, every `ayl-add` case going from 2 chunk ids to 3,
+and the fixture now records the chunker that produced it — an id that moves without a version bump
+fails the gate, which is the mixed index #27's policy refuses. The byte-compatibility CLAIM is
+narrowed to what can hold: the book keys and the row keys, which are what a delete matches by, and
+which are byte-for-byte what they were.
+
 **Still open.** A book backfilled from a pre-ledger index records neither a digest nor a file, so the
 first correction after that upgrade still mints a second id — `--doctor` reports the pair. The
 cards table is joined to the transcripts table by the book key string alone; no card row carries a
@@ -881,6 +908,85 @@ cards table is joined to the transcripts table by the book key string alone; no 
 rather than leaving it to be discovered, and `--prune` keeps a card whose book it removes rather
 than deleting from a table `ayl-add` never writes. And the per-book write is visible to a concurrent reader:
 see `known-limits.md`.
+
+## ADR-025: The chunk IS the observation window, and a chapter read reads around the match
+
+Status: accepted (2026-09-17). **Supersedes ADR-012**; amends ADR-005's second paragraph.
+
+Two numbers decided how much of a retrieved passage the model ever saw, and nothing related them.
+The chunker packed transcript chunks to 4,000 characters; `observe` read `SEARCH_HIT_CHARS` =
+2,500 of a hit. Measured on the demo corpus as it stands: **7,285 chunks, median 3,922, the
+longest 10,778, and 90.3% of them longer than the window** — so the retriever ranked, and the RRF
+fused, text that was then cut off before the model read it. The 10,778 came from raw Whisper
+output, where a "sentence" the splitter cannot end is the whole of a passage of speech: the
+longest in the corpus is 10,140 characters. One scale up, the same defect: a chapter read took the
+first 12,000 characters of the chapter, and **61% of the corpus's 1,228 chapters are longer than
+that** (median 14,783, the longest 585,482), so a question about the end of a long chapter was
+answered from its beginning.
+
+**Decision, in two halves.**
+
+*(A) For search, the chunk and the window become one decision.* `TRANSCRIPT_TARGET_CHARS` drops to
+2,400 — under the window, with room for the sentence-level overlap a chunk carries from its
+predecessor — a "sentence" with no punctuation in it is broken on whitespace at 2,000 characters
+rather than packed whole, and the length the packer counts is the length of the string it returns,
+joining spaces included (a chapter of one-word lines used to pack to a "target" of 2,400 and come
+back a quarter longer). `CHUNKER_VERSION` becomes `sentence-pack-2`. Measured on the 35 prepared
+demo texts: **11,282 chunks, median 2,304, the longest 2,400, 0% over the window**, at +55% rows.
+`SEARCH_HIT_CHARS` stops being a knob worth turning: there is no chunk tail left behind it to
+reveal, and lowering it would cut text out of a chunk the retriever ranked whole.
+
+*(B) For `read_chapter`, the window is cut around the match.* `reflect` may say what it is opening
+the chapter for (`looking_for`); `act` reads the chapter as far as `CHAPTER_SCAN_CHARS` (120,000 —
+1,224 of the 1,228 chapters whole) and cuts a `CHAPTER_HIT_CHARS` window around the best lexical
+match inside it, scored by how many DISTINCT words of the query a run covers, then by density,
+then by position. No stop-word list: the library is not one language, and "distinct words covered"
+already prices a common word at what it is worth. A request that names no query, and a query whose
+words the chapter does not carry, get the head of the chapter exactly as before — nothing is
+invented in place of a missing field, and a window centred on the wrong words is worse than an
+honest beginning. What the window leaves out is said in band at both ends, because a passage from
+the middle of a chapter read as its opening is a new way to be wrong.
+
+**Why B is not also the answer for search, and why A had to come first.** Reading around the
+matching span at retrieval time needs the offsets of what matched, and neither retriever returns
+them — LanceDB's vector search returns a distance and BM25 a score, not a span — so the span would
+have to be recomputed in Python over every hit, with a heuristic, against a ranking that used
+different text. Re-chunking costs a rebuild once and removes the problem instead of papering over
+it. And A had to wait for #27: without a chunker stamped in the index, a re-chunk would have left
+a mixed index nothing could detect (ADR-020, ADR-024).
+
+**The constraint B is written under, which is the whole of its risk.** The window IS the
+provenance haystack. ADR-004 guarantees that a quote is a contiguous run of the passage it is
+pinned to, and that guarantee rests on `act` and `observe` cutting one string the same way
+(`per_hit_limit`). So the window is computed ONCE, in `act`, and the text it produces is what goes
+into `hits_log`, the scratchpad and the observe prompt; nothing downstream recomputes it. A window
+recomputed in `observe` — or later in `validate`, over a chapter that has since been re-ingested —
+would turn quotes honestly copied out of one window into quotes broken against another, which is
+the exact failure the provenance check exists to report and would then be manufacturing.
+
+**Alternatives.** *(A′) Leave the chunker and widen the window to 4,000* — measured for ADR-012:
++32% cost per question and no behaviour bought, and it leaves the audio chunks (10,778) outside a
+window at any size anyone would pay for. *(B′) Return offsets from the retrievers* — not available
+in the API, and a hand-rolled span over BM25's tokenizer would be a second, undocumented notion of
+"where the match is". *(B″) Fall back to the question when the model names no query* — rejected:
+the question is not what this chapter is being opened for, and a wrong centre is a silent
+regression where a head cut is a known one. *(C) A cursor: read the next 12,000 characters on a
+repeat request* — the repeat guard exists (`stop_chapter_again`) and this would need it to become
+state; worth revisiting if reads start naming what they are looking for and still missing it.
+
+**Consequences.** Every existing index is one release behind the chunker: it answers, warns on
+every read and refuses the next write until `ayl-add <folder> --rebuild --backup <dir>`
+([upgrading](../upgrading.md)). Chunk ids are renumbered by the re-chunk, which is deliberate and
+recorded — `tests/fixtures/book_identity.json` was regenerated with the chunker that produced it
+frozen beside it, and book keys and row keys are byte-for-byte unchanged. The row count grows by
+about 55%, which moves a real library toward the ANN trigger #33 names. `reflect`'s prompt gains
+one optional field. **Not yet measured:** the behaviour of the pair on a corpus, because that
+needs the re-ingest (~30 minutes) and a paired core run; until it exists, this record states the
+chunk-size distribution and nothing about answers.
+
+**The acceptance.** Chunks over the window 90.3% -> 0 (met, on the prepared texts). A free local
+core re-run with c03 intact, c06 reported as it comes out, and behaviour not below the #66 gate
+baseline — **pending**, and the eval reports say so.
 
 [reports]: ../eval-results/
 [backlog]: ../backlog.md

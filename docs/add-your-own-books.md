@@ -87,7 +87,15 @@ What an upgrade may NOT do is silently invalidate an index that took half an hou
 table is stamped with the chunker and the row schema that wrote it, and a disagreement **warns on
 read and refuses on write**: the index goes on answering, and the next `ayl-add` into it stops
 before embedding or deleting anything, naming both versions and the way out. A rebuild is the way
-out, and it discards what it replaces — so take a copy first:
+out, and it discards what it replaces — so take a copy first.
+
+**This release is the first time that happens.** The chunker changed in #28 (`sentence-pack-1` ->
+`sentence-pack-2`: chunks packed to 2,400 characters instead of 4,000, so a hit is no longer
+longer than the window the model reads it through), so an index built before 2026-09-17 warns on
+every read and refuses the next write until you run the three commands below — over **each** of
+the folders your library came from. Expect a full re-embed and about 55% more rows. Cards are cut
+by a different rule and are not affected. See [upgrading](upgrading.md) for what the warning and
+the refusal actually say.
 
 ```bash
 uv run ayl-add --backup ~/ayl-backups --db ~/ayl-index    # index + chat.db + a verified manifest

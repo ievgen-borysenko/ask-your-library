@@ -27,6 +27,53 @@ and a write is not: one `ayl-add` into such a table leaves two chunkers' rows in
 to tell them apart, and the only repair after that is rebuilding all of it. That is the whole
 policy, in one line each: **warn on read, refuse on write** ([ADR-020](adr/README.md)).
 
+## This release: the chunker changed (#28), and every earlier index is one behind it
+
+This is the first chunker bump this project has shipped, so it is also the first time the policy
+above does anything. **If you built an index before 2026-09-17, it was cut by `sentence-pack-1`
+and this code chunks as `sentence-pack-2`.** What changed: transcript chunks are packed to 2,400
+characters instead of 4,000, and a "sentence" with no punctuation in it — an hour of speech
+transcribed as one run — is broken on whitespace instead of being carried whole. The reason is
+that `observe` reads 2,500 characters of a retrieved passage, and 90% of the old chunks were
+longer than that, so the retriever ranked text the model never saw
+([ADR-025](adr/README.md), [known limits](known-limits.md)). Book cards are cut by a different
+rule and are **not** affected: a cards table built by an earlier release stays valid and is not
+re-chunked.
+
+**What your index does until you rebuild it.** It answers. Every read logs one warning line and
+the CLI and the web UI show a startup notice; retrieval and the quote check work exactly as
+before, on the chunks the index already holds. The next `ayl-add` write refuses, because one
+append would leave two chunkers' rows in one table.
+
+**Your own library, in order:**
+
+```bash
+uv run ayl-add --backup ~/ayl-backups --db ~/ayl-index          # 1. the copy that survives step 2
+uv run ayl-add --doctor --db ~/ayl-index                        # 2. read the stamps; exits non-zero on the mismatch
+uv run ayl-add ~/books --rebuild --backup ~/ayl-backups --db ~/ayl-index   # 3. re-chunk and re-embed
+```
+
+Step 3 takes its own backup first and then replaces every row, so step 1 is only belt-and-braces
+if you are running the two back to back — but take it anyway if the index is the only copy of a
+library you spent hours building. It re-embeds everything: budget roughly what the first build
+took (about half an hour for the demo corpus on an M3 Pro, longer for a large library), and expect
+**around 55% more rows** out of the same text. Feed `--rebuild` **every** folder your library came
+from, one run each: a rebuild drops the table, so books from folders this run does not name lose
+their rows and are reported by name at the end as `requested`.
+
+**The demo corpus** has its own rebuild and does not go through `ayl-add`:
+
+```bash
+uv run scripts/ingest_demo_corpus.py --stage ingest
+```
+
+The cards table is untouched by the bump, so `--stage cards` is not part of this upgrade.
+
+**If you do not want to rebuild yet**, nothing forces you: keep reading the index and postpone
+adding books to it. What you must not do is silence the warning by re-stamping the table
+(`--stage stamp-meta --chunker …`) — the stamp would then claim something the rows do not have,
+which is worse than no stamp at all.
+
 ### What the warning looks like
 
 Once per table per process, in the log, and as a startup notice in the CLI and the web UI:
@@ -80,7 +127,7 @@ uv run ayl-add --doctor --db ~/ayl-index
 ```
 index /Users/…/ayl-index
 ledger: 33 book(s); index (transcripts_ollama, cards_ollama): 33 book key(s)
-  stamp: transcripts_ollama: bge-m3 / 1024d, chunker sentence-pack-1, row schema 2, stamped 2026-09-17T05:12:44
+  stamp: transcripts_ollama: bge-m3 / 1024d, chunker sentence-pack-2, row schema 2, stamped 2026-09-17T05:12:44
   stamp: cards_ollama: bge-m3 / 1024d, chunker card-sections-1, row schema 1, stamped 2026-09-17T05:19:02
   no drift: every indexed book has its rows, and every row its book
 ```
