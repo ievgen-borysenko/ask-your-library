@@ -85,12 +85,15 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   `LLM_BACKEND=ollama uv run eval/run_agent_eval.py`.
 - **A local model's context window is Ollama's business, and a large default is a trap.** This
   project cannot set `num_ctx`: the local backend uses Ollama's OpenAI-compatible `/v1` endpoint,
-  where an `options` block is accepted and ignored. A model pulled with a 128k default window is
-  loaded at that size — `mistral-small3.2:24b` on an M3 Pro / 36 GB took about 36 GB with roughly
-  28 % offloaded to the CPU — and the failure it produces is not an out-of-memory error but a
-  question deadline expiring inside a single model call (603 input tokens, 1,201 s, `plan 192.2,
-  observe 1005.4`). A derived model at `num_ctx 20480` ran the same eleven questions in 73–399 s
-  each. Set the window explicitly for any non-`qwen` default before measuring it
+  where an `options` block is accepted and ignored, and Ollama 0.34 picks the window adaptively from
+  the memory available unless a tag or a Modelfile pins it. Most tags pin nothing:
+  `mistral-small3.2:24b` carries no `num_ctx`, and on one M3 Pro / 36 GB it loaded at 131072 — about
+  36 GB, roughly 28 % offloaded to the CPU — where the failure is not an out-of-memory error but a
+  question deadline expiring inside a single model call (603 input tokens, 1,201 s; `plan 192.2,
+  observe 1005.4`, so the plan call did return and the deadline landed inside `observe`). A derived
+  model at `num_ctx 20480` ran the same eleven questions in 73–399 s each. That 131072 is what one
+  run observed, not a property of the tag: read `ollama ps` for the context actually loaded and pin
+  it in a Modelfile when the number has to be reproducible
   ([Configuration](configuration.md)); measured 2026-09-16
   ([`eval-results/2026-09-16-local-models-repeat3.md`](eval-results/2026-09-16-local-models-repeat3.md)).
 - **A repeated local run measures latency, not behaviour.** At `temperature=0` the three local

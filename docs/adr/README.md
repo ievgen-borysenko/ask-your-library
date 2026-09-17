@@ -209,14 +209,23 @@ counts.
 the hits of the run minus the books the *evidence* names, so evidence the gate thinned makes a book
 look uncovered and the one probe of a run fires where it would not have before. That is arguably
 right — a book whose only quotes were dropped genuinely is not covered — and it costs a step from
-the same budget the paragraph above already stretches. No code changed for it; it is a **measured
-effect**, and the gate's run is to report the coverage-probe firing count beside the baseline's
-([`../evaluation.md`](../evaluation.md)).
+the same budget the paragraph above already stretches. No code changed for it. It was to be reported
+as the coverage-probe firing count beside the baseline's, and **that turned out not to be
+measurable**: the probe has no counter in the sidecar and leaves no marker in `steps_log`, so neither
+the baseline nor either gate run says how often it fired. Recording it is in `../backlog.md`.
 
-**Not measured yet:** the acceptance is a confirmed ratio of 1.0 by construction on evidence, a
-published drop rate (with its breakdown by reason and the re-pin count), the coverage-probe firing
-count, and behaviour at `--repeat` not below the baseline being produced on the three local models.
-Nothing here was re-run against it.
+**Measured 2026-09-17, per model** (`../eval-results/2026-09-16-local-models-repeat3.md`; each model
+run under the gate on `c79018a` against its own pre-gate run on `169b511`, both golden sets at
+`--repeat 3`). Conditions 1 and 2 — a confirmed ratio of 1.0 by construction on evidence, and a
+published drop rate with its breakdown by reason and the re-pin count — are met on both models.
+Condition 3, behaviour at `--repeat` not below the baseline, is **met on `qwen2.5:14b`** (9/11 and
+10/10, item for item, with the same steps and calls) and **not met on
+`mistral-small3.2:24b-ctx20k`**, which goes 11/11 → 10/11 on two attempts of three: `c03` with
+`titles 0/1`, its surviving evidence carrying no citation once a second quote is refused. The
+options are listed in `../backlog.md` and none is adopted here.
+
+**Still unmeasured:** the coverage-probe firing count (no counter to read), `qwen2.5:32b` under the
+gate, and every hosted model under it.
 
 ## ADR-005: `observe` sees a fixed budget of each hit; the rest of the loop sees only evidence
 

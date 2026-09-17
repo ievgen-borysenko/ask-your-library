@@ -75,11 +75,14 @@ open ones often refer to them.
   at the `observe` gate, so `synthesize` consumes verified evidence only — a broken quote is dropped
   before the answer, an unattributed one is re-pinned to the passage that holds it, and the
   post-synthesis check stays as the report (ADR-004, second amendment of 16.09). **The behavioural
-  effect is unmeasured until the next local run:** the paired baseline on three local models is
-  being produced, the gate's own run follows it, and the acceptance is a confirmed ratio of 1.0 by
-  construction, a published drop rate, and behaviour at repeat not below the baseline. Still open
-  from #29: citation by evidence id, checked against the answer's own sentences, and a broken quote
-  failing the evaluation instead of only being counted.
+  effect was measured 17.09 on two local models**
+  (`docs/eval-results/2026-09-16-local-models-repeat3.md`): a confirmed ratio of 1.0 by construction
+  and a published drop rate on both, and behaviour at repeat not below the baseline on
+  `qwen2.5:14b` but **not** on `mistral-small3.2:24b-ctx20k`, which loses `c03` on two attempts of
+  three — the open decision is the bullet below. Still unmeasured: the coverage-probe firing count
+  (no counter exists), `qwen2.5:32b` under the gate, and hosted models. Still open from #29:
+  citation by evidence id, checked against the answer's own sentences, and a broken quote failing
+  the evaluation instead of only being counted.
 - Behavioural scoring is heuristic (substring titles, refusal phrase markers); refusal markers are
   loose ("do not have", "доказів") and should be anchored to the library; an LLM judge for answer
   correctness remains future work.
@@ -327,10 +330,14 @@ open ones often refer to them.
   (`c03`, `titles 0/1`) plus 6 LLM calls and 502 s a set. Three options are on the table and none is
   adopted: accept the trade as the price of zero broken quotes; let a step whose quotes were all
   dropped count toward the empty streak after the Nth rather than being held (returns `c04` and `c10`
-  toward their baseline step counts, does not touch `c03`); or tell `reflect` in-loop that
-  unverifiable quotes are being discarded, which is the only option that could move `c03` and is a
-  prompt change, so it invalidates every recording and needs its own baseline. `qwen2.5:32b` under
-  the gate is unmeasured and would inform the choice.
+  toward their baseline step counts, does not touch `c03`); or strengthen the quoting instruction
+  where quoting happens — `OBSERVE_RULES` and the `observe` payload, which already demand a
+  character-exact copy but never say that a failing quote is now discarded, nor show the model which
+  of its quotes were dropped. That third one is the only option that could move `c03`. It needs a new
+  behavioural run on both models, but it does **not** invalidate the planner recordings: a recording
+  goes stale on `PLAN_RULES` and `RETRY_RULE` only, the two hashes its header carries
+  (`eval/plan_recording.py`), and `OBSERVE_RULES` is in neither. `qwen2.5:32b` under the gate is
+  unmeasured and would inform the choice.
 - **A recording batch self-dirties its own code stamp from the second run onward.**
   `eval/recordings/` is committed by design and the run fingerprint hashes `git diff HEAD` together
   with the un-ignored untracked files. A *single* run is fine — the clean check runs before the

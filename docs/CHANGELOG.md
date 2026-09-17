@@ -61,8 +61,11 @@
   both of those items still pass. The catalogue set is unaffected (10/10, 2 dropped, 20/20).
   **So acceptance condition 3, behaviour at repeat not below baseline, is met on the default and NOT
   met on this model**, on one item, on two attempts of three. The report states the trade in full and
-  names three options — accept it, count-as-dry after N dropped steps, or a "quote verbatim" nudge in
-  the `reflect` context — without recommending one. `qwen2.5:32b` under the gate is not measured.
+  names three options — accept it, count-as-dry after N dropped steps, or a stronger quoting
+  instruction in `OBSERVE_RULES` / the `observe` payload (the only one that could move `c03`; it
+  needs a new behavioural run but leaves the planner recordings valid, since staleness hashes
+  `PLAN_RULES` and `RETRY_RULE` only) — without recommending one. `qwen2.5:32b` under the gate is not
+  measured.
 
   One correction to the earlier finding, and the gate run is its control: **the dirty code stamp is
   not caused by `--record-plans`.** This run recorded nothing and is still stamped

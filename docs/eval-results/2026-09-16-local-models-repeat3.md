@@ -387,8 +387,13 @@ recording. Read the PASS column, not the exit code.
 
 ### 5. The 131k-context trap
 
-`mistral-small3.2:24b` could not be measured as pulled. Ollama loaded it with `num_ctx 131072`,
-which on this machine means roughly 36 GB of weights-plus-KV and about 28 % of the model offloaded
+`mistral-small3.2:24b` could not be measured as pulled. **On this machine, on this run**, Ollama
+loaded it at `num_ctx 131072` — which is what the run observed, not a property of the tag. The stock
+manifest pins no `num_ctx` at all (`ollama show mistral-small3.2:24b` lists one parameter,
+`temperature 0.15`); the 131072 it also reports is the *architecture's* context length, the model's
+trained maximum, and Ollama 0.34's server chooses the context it actually loads adaptively from the
+memory available, so another machine may well see another number. At that size it means
+roughly 36 GB of weights-plus-KV and about 28 % of the model offloaded
 to CPU (`_data/step0/step0.log`, 20:41). The first attempt of the first item spent the whole question
 budget without finishing a search: `c01-ivanhoe-disguised-knight (identify, 1 steps, 1201s, 1 calls,
 603 in / 55 out tokens, attempt 1/3) — FAIL: titles 0/1, stop: question deadline (1200 s) ran out
@@ -400,17 +405,21 @@ in and the `.partial` recording removed; the one report it wrote is kept at
 `_data/step0/results/mistral-small3.2_24b-ctx131k-aborted/`.
 
 A derived model fixed it completely — `mistral-small3.2:24b` with `PARAMETER num_ctx 20480`, which
-is the `-ctx20k` in every fingerprint above. The same 11 items then ran 73–399 s each.
+is the `-ctx20k` in every fingerprint above. The same 11 items then ran 73–399 s each. The two are
+distinguishable after the fact: `ollama show` on the derived model lists `num_ctx 20480` under
+Parameters while its architecture context length stays 131072, and `ollama ps` reports the context
+of whatever is loaded right now in its `CONTEXT` column. **Read `ollama ps` rather than assuming**,
+and pin the window in a Modelfile if the number has to be reproducible.
 
 **The application cannot fix this for the reader.** The local backend speaks to Ollama through its
 OpenAI-compatible `/v1` endpoint, where an `options` block is accepted and ignored
 (`src/ask_your_library/llm.py`), so there is no `num_ctx` this project can send. The context length
-is a property of the model as Ollama holds it, set by a `Modelfile` or by the server's own
-`OLLAMA_CONTEXT_LENGTH`. The recommendation is therefore documentation, not code: **any non-`qwen`
-model whose default context window is large needs `num_ctx` set explicitly before it is worth
-measuring**, and a reader who swaps `OLLAMA_LLM_MODEL` for a model with a 128k default on a 36 GB
-machine will meet a deadline timeout rather than a memory error, which is a much harder failure to
-read. A line to that effect is added to `docs/configuration.md` and `docs/known-limits.md` with
+is decided by Ollama — adaptively, unless a `Modelfile` pins it or the server's own
+`OLLAMA_CONTEXT_LENGTH` sets it. The recommendation is therefore documentation, not code: **for any
+model with a large trained context, check what Ollama actually loaded (`ollama ps`) and pin
+`num_ctx` before the numbers are worth publishing**, and know that a reader who swaps
+`OLLAMA_LLM_MODEL` for such a model on a 36 GB machine may meet a deadline timeout rather than a
+memory error, which is a much harder failure to read. A line to that effect is added to `docs/configuration.md` and `docs/known-limits.md` with
 this report.
 
 ### 6. Bigger-same-family does not add passes; it moves them, at 2.6× the clock
@@ -683,10 +692,17 @@ no citation in it — and no change to the hold decision would address it.
    and let the second (or Nth) count toward the empty streak, which would return `c04` and `c10`
    toward their baseline step counts and give back most of the 6 calls and 502 s. It does not touch
    `c03`.
-3. **Re-plan with a "quote verbatim" nudge in the `reflect` context.** Tell the model, in the loop,
-   that quotes not present in the passage are being discarded, so the next step's quoting is aimed at
-   the text rather than at the summary. This is the only one of the three that could move `c03`, and
-   it is also a prompt change — so it invalidates every recording and needs its own baseline.
+3. **Strengthen the quoting instruction where quoting happens: `OBSERVE_RULES` and the `observe`
+   payload.** `observe` is the node that produces the quotations, and its rules already demand "a
+   character-exact, contiguous copy-paste from ONE result"; what they do not say is that a quote
+   failing that test is now discarded rather than reported, nor do they show the model which of its
+   quotes were dropped. Saying so — in the rules, or by feeding the previous step's drop count and
+   reasons into the next `observe` payload — aims the next step's quoting at the retrieved text
+   rather than at the card summary. This is the only one of the three that could move `c03`. Its cost
+   is a new behavioural run on both models, because it changes what the model is asked; it does
+   **not** invalidate the planner recordings — a recording goes stale on `PLAN_RULES` and
+   `RETRY_RULE` only (`plan_rules_sha256_12` and `retry_rule_sha256_12` are the two hashes in its
+   header), and `OBSERVE_RULES` is in neither.
 
 Not measured either way: `qwen2.5:32b` under the gate, and any hosted model under it.
 
