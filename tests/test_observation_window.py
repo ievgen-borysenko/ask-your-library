@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 from ask_your_library import config, library, llm, nodes, provenance
-from ask_your_library.bookkey import chapter_marker, split_read_query
+from ask_your_library.bookkey import chapter_marker, split_read_query, unescape_marker
 from ask_your_library.ingest import pack_sentences, split_sentences
 from ask_your_library.ingest.chunking import (MAX_SENTENCE_CHARS, TRANSCRIPT_MAX_CHARS,
                                               TRANSCRIPT_TARGET_CHARS, cap_sentence)
@@ -417,14 +417,18 @@ SECTION_PROBES = ["Weird|q=evil query", "A|q=", "Chapter 3 | part two", "q=", "|
 @pytest.mark.parametrize("section", SECTION_PROBES)
 @pytest.mark.parametrize("query", ["", "the drowned lamp"])
 def test_a_section_that_spells_the_grammar_round_trips_byte_for_byte(section, query):
+    """On the wire the separator is encoded, so the parse cannot be fooled by a
+    heading that spells the grammar; off the wire the section is the heading
+    again, character for character."""
     action, read_query = split_read_query(chapter_marker("A Book — An Author", section, query))
 
     assert read_query == query
     assert action.startswith("__chapter__|")
     marker_parts = action.split("|", 2)          # exactly what `act` does
     assert len(marker_parts) == 3
-    assert marker_parts[1] == "A Book — An Author"
-    assert marker_parts[2] == section             # byte for byte, pipes and all
+    assert "|" not in marker_parts[2]            # nothing left for the split to take
+    assert unescape_marker(marker_parts[1]) == "A Book — An Author"
+    assert unescape_marker(marker_parts[2]) == section
 
 
 BOOK_PROBES = ["A Book — An Author", "Either|Or — S. Kierkegaard", "100%|Pure — A. Nother",
