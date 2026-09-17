@@ -975,8 +975,11 @@ def run_restore(db_path: Path, source: Path, chat_db: Path | None, force: bool) 
 
 # --- entry point ------------------------------------------------------------
 
-def main(argv: list[str] | None = None) -> int:
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
+def build_parser() -> argparse.ArgumentParser:
+    """The command line `ayl-add` accepts, built apart from `main` so that it
+    can be asked what it accepts without running a command: the docs-as-code
+    check of #72 compares the flags docs/add-your-own-books.md, docs/upgrading.md
+    and the README tell a reader to type against this parser's own options."""
     parser = argparse.ArgumentParser(
         prog="ayl-add",
         description="Index a folder of .txt / .md books into the Ask Your Library LanceDB.")
@@ -1024,7 +1027,12 @@ def main(argv: list[str] | None = None) -> int:
                              "(default: AYL_CHAINLIT_DIR or .chainlit/chat.db)")
     parser.add_argument("--cards", action="store_true",
                         help="not implemented (see the message it prints)")
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    args = build_parser().parse_args(argv)
 
     if args.cards:
         say("--cards is not implemented: book cards are LLM-distilled summaries, which "
