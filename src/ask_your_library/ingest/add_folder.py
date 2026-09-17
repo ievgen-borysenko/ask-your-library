@@ -38,7 +38,7 @@ from ..bookkey import (MAX_TITLE_LINE, UNKNOWN_AUTHOR, author_of, book_key, slug
                        split_title_author, title_of)
 from ..config import DB_PATH, EMBED_BACKEND
 from ..embeddings import get_embedder
-from ..index_meta import check_index, read_index_meta, write_index_meta
+from ..index_meta import META_TABLE, check_index, read_index_meta, write_index_meta
 from ..sanitize import LINE_BREAK_RE, strip_control_chars
 from .chapters import MergedHeading, split_book_sections
 from .chunking import Chunk, embedding_text, pack_sentences, parse_frontmatter, rows_for, \
@@ -510,6 +510,10 @@ def add_books(books: list[Book], backend: str, db_path: Path, folder: Path | Non
     db = lancedb.connect(db_path)
     table_name = f"transcripts_{backend}"
     recover_staging(db, table_name)
+    # The fingerprint table has its own staged rebuild (a widening), and
+    # recovering it is a write — so it happens here, on the write path, and
+    # never in the readers that check a stamp before every search.
+    recover_staging(db, META_TABLE)
     refuse_model_mismatch(db, table_name, embedder)
     ledger = open_book_ledger(db, backend, embedder)
 
@@ -609,7 +613,8 @@ def add_books(books: list[Book], backend: str, db_path: Path, folder: Path | Non
     if folder is not None:
         counts["vanished"] = [row for row in folder_vanished(ledger, folder, books)]
         if prune and counts["vanished"]:
-            counts["pruned"] = prune_books(db, table_name, ledger, counts["vanished"])
+            counts["pruned"] = prune_books(db, table_name, ledger, counts["vanished"],
+                                           cards_table=f"cards_{backend}")
             fts_seconds = build_fts_index(db, table_name)
 
     counts["table"] = table_name
@@ -652,18 +657,32 @@ def folder_vanished(ledger: Ledger, folder: Path, books: list[Book]) -> list[dic
     return folder_ledger_diff(ledger, folder, books).vanished
 
 
-def prune_books(db, table_name: str, ledger: Ledger, rows: list[dict]) -> int:
+def prune_books(db, table_name: str, ledger: Ledger, rows: list[dict],
+                cards_table: str = "") -> int:
     """Delete the rows of books whose file is gone, and their ledger rows.
 
     Only ever under `--prune`. A folder that failed to mount, a file being
     edited in place, a partial sync — all of them look exactly like a deletion,
     and the difference between reporting and deleting is the difference between
-    a warning and a lost book."""
+    a warning and a lost book.
+
+    The full-text rows go; a book CARD of the same key stays, and the line says
+    so. `ayl-add` does not write the cards table — a card is an LLM-distilled
+    summary that costs a model call per book and usually came from the demo
+    corpus, so deleting one because a text file vanished from a folder would
+    reach well past what this flag promises. What it costs is stated instead:
+    the catalogue goes on listing that key as a book with no text, and
+    `--doctor` names it as a card without a book."""
     table = db.open_table(table_name)
+    cards = db.open_table(cards_table) if cards_table in table_names(db) else None
     for row in rows:
-        replace_book_rows(table, row["book_id"], slug(row.get("key") or ""), [])
+        key = row.get("key") or ""
+        replace_book_rows(table, row["book_id"], slug(key), [])
         ledger.delete(row["book_id"])
-        say(f"  pruned {row.get('key')}: its file is no longer in the folder")
+        say(f"  pruned {key}: its file is no longer in the folder")
+        if cards is not None and cards.count_rows(f"book = '{key.replace(chr(39), chr(39) * 2)}'"):
+            say(f"      its book card in {cards_table} is kept (ayl-add does not write that "
+                f"table): the catalogue still lists {key} as a book with no text")
     return len(rows)
 
 

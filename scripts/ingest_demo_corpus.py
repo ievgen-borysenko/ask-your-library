@@ -48,7 +48,8 @@ import yaml
 from ask_your_library.bookkey import author_of, book_key, title_of
 from ask_your_library.config import DB_PATH, EMBED_BACKEND
 from ask_your_library.embeddings import get_embedder
-from ask_your_library.index_meta import check_index, read_index_meta, write_index_meta
+from ask_your_library.index_meta import (META_TABLE, check_index, read_index_meta,
+                                         write_index_meta)
 from ask_your_library.ingest import (Chunk, build_fts_index, chunk_card, embedding_text,
                                      pack_sentences, rows_for, split_sentences)
 # Chapter splitting lives in the package so every ingest path (this script and
@@ -471,6 +472,7 @@ def ingest_transcripts_table(backend: str, book_filter: str | None, entry_ids: l
     db = lancedb.connect(DB_PATH)
     name = f"transcripts_{backend}"
     recover_staging(db, name)
+    recover_staging(db, META_TABLE)     # a widening left half-done; a write may finish it
     started = time.time()
     progress = {"total": 0}
 
@@ -540,6 +542,7 @@ def ingest_cards_table(backend: str) -> None:
     db = lancedb.connect(DB_PATH)
     name = f"cards_{backend}"
     recover_staging(db, name)
+    recover_staging(db, META_TABLE)
 
     chunks: list[Chunk] = []
     for path in cards:

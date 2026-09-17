@@ -34,8 +34,11 @@ class LedgerReport:
     books_in_index: int = 0
     # A ledger row says `indexed`, and the index holds no row for that id.
     indexed_but_absent: list[str] = field(default_factory=list)
-    # A book is in the index and the ledger has no row for its key.
+    # A book is in the FULL-TEXT table and the ledger has no row for its key.
     in_index_but_not_in_ledger: list[str] = field(default_factory=list)
+    # A key that only the cards table holds, with no ledger row: a card whose
+    # book was pruned, or one whose heading does not match its book's key.
+    cards_without_a_book: list[str] = field(default_factory=list)
     # Rows whose `book_id` is empty or names no ledger row.
     orphan_row_counts: dict[str, int] = field(default_factory=dict)
     # Requested or failed: asked for, never confirmed indexed.
@@ -50,7 +53,8 @@ class LedgerReport:
     def ok(self) -> bool:
         return not (self.indexed_but_absent or self.in_index_but_not_in_ledger
                     or self.orphan_row_counts or self.never_indexed
-                    or self.duplicate_keys or self.row_count_drift)
+                    or self.duplicate_keys or self.row_count_drift
+                    or self.cards_without_a_book)
 
     def lines(self) -> list[str]:
         out = [f"ledger: {self.books_in_ledger} book(s); index "
@@ -67,6 +71,12 @@ class LedgerReport:
         for key in self.in_index_but_not_in_ledger:
             out.append(f"  NOT IN THE LEDGER   {key} — searchable, but nothing records where "
                        f"it came from; the next ayl-add over its folder adopts it")
+        for key in self.cards_without_a_book:
+            out.append(f"  CARD WITHOUT A BOOK {key} — only the cards table holds this key, and "
+                       f"no ledger row does. Either --prune removed the book and left its card "
+                       f"(ayl-add never writes the cards table), or the card's heading differs "
+                       f"from its book's key. The catalogue lists it as a book with no text; "
+                       f"delete the card, or fix its heading to match the book")
         for name, count in sorted(self.orphan_row_counts.items()):
             out.append(f"  ORPHAN ROWS         {count} row(s) in {name} carry a book_id no "
                        f"ledger row claims")
@@ -165,8 +175,16 @@ def check_ledger(db, table_names: list[str], ledger_table: str = TABLE) -> Ledge
                 f"{key}: the ledger says {row['rows']} rows, the index holds {present_rows}")
 
     for key in sorted(keys_in_index):
-        if key not in seen_keys:
+        if key in seen_keys:
+            continue
+        # Which table holds it decides what the reader should do about it, and
+        # the two hints are opposite: a full-text book with no ledger row is
+        # adopted by the next run over its folder, while a card is something no
+        # `ayl-add` will ever touch.
+        if key in text_keys:
             report.in_index_but_not_in_ledger.append(key)
+        else:
+            report.cards_without_a_book.append(key)
 
     for book_id, count in rows_by_id.items():
         if book_id not in by_id:

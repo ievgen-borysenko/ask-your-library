@@ -9,8 +9,9 @@ import logging
 import time
 
 # The staged publish this module needs is the ingest's, and `ingest.publish`
-# imports nothing from the package, so this direction costs no cycle.
-from .ingest.publish import rebuild_table, recover_staging
+# imports nothing from the package, so this direction costs no cycle. Only
+# `write_index_meta` uses the recovery half: see the note in `read_index_meta`.
+from .ingest.publish import STAGING_SUFFIX, rebuild_table, recover_staging
 
 log = logging.getLogger(__name__)
 
@@ -86,12 +87,34 @@ def _with_new_fields(row: dict) -> dict:
 
 
 def read_index_meta(db, table: str) -> dict | None:
-    # A widening that was interrupted leaves the staged copy behind; finishing
-    # it here means a reader never sees a stamped index as unstamped.
-    recover_staging(db, META_TABLE)
-    if META_TABLE not in _table_names(db):
+    """The fingerprint row for `table`, or None.
+
+    A reader NEVER recovers. It tolerates an interrupted widening instead: the
+    live table if it is there, the staged copy read-only if it is not. Recovery
+    is a write — it drops or promotes a table — and every search goes through
+    here (`library.open_table`), as does the preflight of every interface. A
+    reader that recovered would race the `ayl-add` that is mid-widening, could
+    drop the staging table the writer is still filling, and would leave the
+    index unstamped: exactly the state `ayl-add` then refuses to write to. It
+    would also break the rule `doctor` is held to — a check does not rewrite
+    what it checks.
+
+    So recovery belongs to the write path, and is done there: at the start of
+    every ingest run and inside `write_index_meta`."""
+    names = _table_names(db)
+    if META_TABLE in names:
+        source = META_TABLE
+    elif META_TABLE + STAGING_SUFFIX in names:
+        # Mid-widening, or a crash during one. The staged copy is complete by
+        # construction (it is built before the live table is dropped), so it is
+        # the honest answer — and reading it is better than reporting an index
+        # with no fingerprint, which is what the caller would act on.
+        source = META_TABLE + STAGING_SUFFIX
+        log.info("%s is being rebuilt; reading %s instead (the next ingest finishes it)",
+                 META_TABLE, source)
+    else:
         return None
-    rows = db.open_table(META_TABLE).search().where(f"`table` = '{table}'").limit(1).to_list()
+    rows = db.open_table(source).search().where(f"`table` = '{table}'").limit(1).to_list()
     return rows[0] if rows else None
 
 

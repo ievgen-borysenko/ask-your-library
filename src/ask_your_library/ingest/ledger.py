@@ -192,8 +192,9 @@ class Ledger:
         if source_ref:
             for row in rows:
                 if row.get("source_ref") == source_ref and row["book_id"] not in claimed:
-                    log.info("%s: the file %s already holds %r — the same book, its metadata "
-                             "corrected; keeping book_id %s",
+                    log.info("%s: the file %s already holds %r — either the same book with "
+                             "its metadata corrected, or the file at this path now holds a "
+                             "different book; either way it keeps the slot's id %s",
                              key, source_ref, row.get("key"), row["book_id"])
                     return row["book_id"]
         if sha256:

@@ -35,8 +35,12 @@
   design review supposed — the honest claim for the per-book path is identity and recoverability,
   not speed.
 
+  `--prune` removes full-text rows and keeps a book card of the same key, saying so: `ayl-add`
+  never writes the cards table, and `--doctor` names what is left as a card without a book.
+
   Also: `_index_meta` gains `chunker` and `schema_version`, written by both ingest paths, with no
-  refusal on either yet (#27 brings the policy); the catalogue deliberately still reads the index
+  refusal on either yet (#27 brings the policy) — and its own rebuild is recovered on the write
+  path alone, never by the readers that check a stamp before every search; the catalogue deliberately still reads the index
   tables and not the ledger, so ADR-016's exhaustiveness is untouched; and book identity moved
   into one module, `bookkey.py`, from the four that held halves of it. That move is gated by a
   frozen fixture of the exact keys, row keys and chunk ids both ingest paths produce, checked

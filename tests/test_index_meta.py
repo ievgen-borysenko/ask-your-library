@@ -124,29 +124,55 @@ def test_readers_tolerate_a_stamp_without_the_new_fields(tmp_path):
     assert "chunker" not in index_meta.read_index_meta(db, "transcripts_ollama")
 
 
-def test_an_interrupted_widening_still_leaves_a_readable_fingerprint(tmp_path):
-    """The widening goes through the staging table, because this is the table
-    every reader checks before opening an index: an index that looks unstamped
-    is one `ayl-add` refuses to write to. A crash after the old table was
-    dropped is finished on the next read, not left behind."""
+def _mid_widening(tmp_path):
+    """An index whose fingerprint table is mid-rebuild: the staged copy is
+    complete, the live table is already gone."""
     import lancedb
 
-    from ask_your_library.ingest.publish import table_names
-
     db = lancedb.connect(tmp_path / "db")
-    widened = [
+    db.create_table(index_meta.META_TABLE + "__staging", [
         {"table": "cards_ollama", "backend": "ollama", "model": "bge-m3", "dims": 1024,
          "created": "2026-01-01T00:00:00", "chunker": "", "schema_version": 1},
         {"table": "transcripts_ollama", "backend": "ollama", "model": "bge-m3", "dims": 1024,
-         "created": "2026-01-02T00:00:00", "chunker": "sentence-pack-1", "schema_version": 2}]
-    # the crash: staging complete, the live table already gone
-    db.create_table(index_meta.META_TABLE + "__staging", widened)
-    assert index_meta.META_TABLE not in table_names(db)
+         "created": "2026-01-02T00:00:00", "chunker": "sentence-pack-1", "schema_version": 2}])
+    return db
 
+
+def test_a_reader_reads_an_interrupted_widening_without_touching_it(tmp_path):
+    """A reader never recovers. Recovery drops or promotes a table, every search
+    goes through `read_index_meta`, and a reader that recovered would race the
+    `ayl-add` that is mid-widening — dropping the staging table it is filling,
+    and leaving the index unstamped, which is the state `ayl-add` then refuses
+    to write to."""
+    from ask_your_library.ingest.publish import table_names
+
+    db = _mid_widening(tmp_path)
     row = index_meta.read_index_meta(db, "transcripts_ollama")
     assert row is not None and row["chunker"] == "sentence-pack-1"
     assert index_meta.read_index_meta(db, "cards_ollama")["model"] == "bge-m3"
+    # neither dropped nor promoted: the staging table is exactly as it was
+    assert index_meta.META_TABLE + "__staging" in table_names(db)
+    assert index_meta.META_TABLE not in table_names(db)
+
+
+def test_the_live_table_wins_over_a_staging_table_left_behind(tmp_path):
+    db = _mid_widening(tmp_path)
+    db.create_table(index_meta.META_TABLE, [
+        {"table": "transcripts_ollama", "backend": "ollama", "model": "current-model",
+         "dims": 1024, "created": "2026-02-02T00:00:00", "chunker": "sentence-pack-1",
+         "schema_version": 2}])
+    assert index_meta.read_index_meta(db, "transcripts_ollama")["model"] == "current-model"
+
+
+def test_the_write_path_is_what_finishes_an_interrupted_widening(tmp_path):
+    from ask_your_library.ingest.publish import table_names
+
+    db = _mid_widening(tmp_path)
+    index_meta.write_index_meta(db, "transcripts_ollama", "ollama", "bge-m3", 1024,
+                                chunker="sentence-pack-1")
     assert index_meta.META_TABLE + "__staging" not in table_names(db)
+    assert index_meta.read_index_meta(db, "cards_ollama")["created"] == "2026-01-01T00:00:00"
+    assert index_meta.read_index_meta(db, "transcripts_ollama")["schema_version"] == 2
 
 
 def test_the_widening_keeps_every_other_row_when_it_rewrites_the_table(tmp_path):
@@ -165,3 +191,17 @@ def test_the_widening_keeps_every_other_row_when_it_rewrites_the_table(tmp_path)
     assert index_meta.read_index_meta(db, "cards_ollama")["created"] == "2026-01-01T00:00:00"
     assert index_meta.read_index_meta(db, "transcripts_openrouter")["dims"] == 1536
     assert index_meta.read_index_meta(db, "transcripts_ollama")["schema_version"] == 2
+
+
+def test_the_check_before_a_search_does_not_recover_either(tmp_path):
+    """`check_index` is what `library.open_table` runs before the first search
+    of a process, and what `preflight` runs before an interface starts. Both are
+    readers."""
+    import lancedb
+
+    from ask_your_library.ingest.publish import table_names
+
+    db = _mid_widening(tmp_path)
+    db.create_table("transcripts_ollama", [{"vector": [0.0] * 1024, "text": "t"}])
+    assert index_meta.check_index(db, "transcripts_ollama", "bge-m3", 1024) is None
+    assert index_meta.META_TABLE + "__staging" in table_names(db)

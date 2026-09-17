@@ -240,7 +240,9 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   replacing another. What is still derived is the `Title — Author` key itself, which is what the
   agent cites, what the chapter filter matches and what the catalogue lists; a book card whose
   heading differs from its transcript's key by one character still lists as two books, because the
-  two tables are joined by that string and no card row carries a `book_id`. And a book backfilled
+  two tables are joined by that string and no card row carries a `book_id` — which is also why
+  `--prune` removes a book's full-text rows and keeps its card, saying so, rather than deleting
+  from a table `ayl-add` never writes. And a book backfilled
   from an index built before the ledger records neither a digest nor a file, so the *first*
   correction after that upgrade still creates a second book (the next one does not).
 - **The catalogue is what the index holds, not what your folder holds.** It counts the distinct

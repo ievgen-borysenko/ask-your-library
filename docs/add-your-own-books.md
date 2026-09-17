@@ -63,7 +63,10 @@ being edited in place and a half-finished sync all look exactly like a deletion.
 such books as `VANISHED`, a normal run names them at the end, and only `--prune` removes their
 rows and their ledger entry. Only books of the folder you named are ever considered: one index can
 hold several folders, and the books of the others are not missing merely because this folder does
-not have them.
+not have them. `--prune` deletes full-text rows only: a **book card** of the same key is kept and
+the run says so, because `ayl-add` never writes the cards table and a card is a model call per book
+that usually came from the demo corpus. The catalogue then lists that key as a book with no text
+until you delete the card yourself, and `--doctor` names it as a card without a book.
 
 **Upgrading an existing index** needs nothing from you. The first run over an index built before
 the ledger backfills one row per book already in it (`chunker: legacy`, because nothing recorded

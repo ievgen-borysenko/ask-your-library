@@ -803,7 +803,12 @@ visible, and that "which of my files did not index" has an answer. The cost argu
 at a library an order of magnitude larger, and it has not been measured there.
 
 **Consequences.** Easier: re-ingest, correction, upgrade, and the folder diff (`--dry-run`), with
-a vanished file reported and deleted only under `--prune`. Harder: two writes per book that must
+a vanished file reported and deleted only under `--prune`. One rule the whole change is held to:
+**recovery is a write.** The fingerprint table gained a staged rebuild of its own here, and
+recovering it happens at the start of an ingest and nowhere else — a reader that recovered would
+race the ingest that is mid-widening, and `read_index_meta` runs before every search. Readers
+tolerate the staged copy instead and read it where the live table is missing. It is the same rule
+`doctor` is held to, from the other side. Harder: two writes per book that must
 agree, so a **stale ledger is a new class of failure** — reconciled by `ayl-add --doctor`, which
 reports six shapes of drift and repairs none of them, because a check that rewrites what it checks
 is not evidence. The crash window moved rather than closed: between the delete and the append one
@@ -824,7 +829,8 @@ mismatch). A book backfilled from a pre-ledger index records neither a digest no
 first correction after that upgrade still mints a second id — `--doctor` reports the pair. The
 cards table is joined to the transcripts table by the book key string alone; no card row carries a
 `book_id`, and the ledger does not reconcile the two corpora — `--doctor` says so in its report
-rather than leaving it to be discovered. And the per-book write is visible to a concurrent reader:
+rather than leaving it to be discovered, and `--prune` keeps a card whose book it removes rather
+than deleting from a table `ayl-add` never writes. And the per-book write is visible to a concurrent reader:
 see `known-limits.md`.
 
 [reports]: ../eval-results/

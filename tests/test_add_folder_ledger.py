@@ -392,3 +392,31 @@ def test_an_index_built_before_the_ledger_is_backfilled_and_then_updated_in_plac
     for row in rows(tmp_path):
         assert row["book_id"] == entries[row["book"]]["book_id"]
     assert "A postscript." in " ".join(r["text"] for r in rows(tmp_path))
+
+
+def test_prune_keeps_a_book_card_and_says_so(tmp_path, fake_embedder, capsys):
+    """`ayl-add` never writes the cards table, so `--prune` does not delete from
+    it either: a card is a model call per book and usually came from the demo
+    corpus. What it costs is said out loud instead, and `--doctor` names the
+    card afterwards."""
+    folder = make_folder(tmp_path)
+    add(tmp_path, folder)
+    db = lancedb.connect(tmp_path / "db")
+    db.create_table("cards_ollama", [
+        {"chunk_id": "sea/1", "note": "sea", "book": "Sea Notes — B. Mate",
+         "source": "card", "section": "Plot", "text": "a summary", "vector": [1.0] * 4}])
+    (folder / "Sea Notes - B. Mate.txt").unlink()
+    capsys.readouterr()
+
+    counts = add(tmp_path, folder, prune=True)
+    printed = capsys.readouterr().out
+    assert counts["pruned"] == 1
+    assert "its book card in cards_ollama is kept" in printed
+    assert {r["book"] for r in rows(tmp_path)} == {"The Green Ledger — A. Keeper"}
+    assert rows(tmp_path, "cards_ollama")          # the card is still there
+
+    report = check_ledger(lancedb.connect(tmp_path / "db"),
+                          ["transcripts_ollama", "cards_ollama"])
+    assert report.cards_without_a_book == ["Sea Notes — B. Mate"]
+    assert report.in_index_but_not_in_ledger == []      # not "the next ayl-add adopts it"
+    assert any("CARD WITHOUT A BOOK" in line for line in report.lines())
