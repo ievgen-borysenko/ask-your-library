@@ -23,9 +23,23 @@ Stages (all cached in corpus-tech/raw/, safe to re-run):
   uv run scripts/fetch_tech_shelf.py --stage verify     # re-hash them against the pins
   uv run scripts/fetch_tech_shelf.py --work sre         # substring filter on the title
 
-The stages are deliberately separate from `scripts/ingest_demo_corpus.py`: that
-script owns the classics index and embeds; this one writes files and nothing
-else, so it needs no model, no database and no embedding backend.
+`--stage cards` is the one stage that calls a model, so it is asked for by name
+and never runs as part of `--stage all`:
+
+  uv run scripts/fetch_tech_shelf.py --stage cards                 # the ten works that may have one
+  uv run scripts/fetch_tech_shelf.py --stage cards --work twelve   # one of them
+  uv run scripts/fetch_tech_shelf.py --stage cards --force         # rebuild cards already written
+
+It writes corpus-tech/cards/<id>.md through the repository's own client
+(`ask_your_library.llm.llm_invoke`), so LLM_BACKEND=ollama|openrouter picks the
+backend and the egress and observer rules of ADR-017 apply unchanged, and it
+records in each card which backend and model wrote it. The cards are indexed
+into the shelf's own index with
+`scripts/ingest_demo_corpus.py --stage cards --cards-dir corpus-tech/cards`.
+
+Every other stage is deliberately separate from `scripts/ingest_demo_corpus.py`:
+that script owns the classics index and embeds; these ones write files and
+nothing else, so they need no model, no database and no embedding backend.
 
 Fetch kinds, one per shape of source (`fetch:` in the manifest):
   html-chapters  one HTML page per chapter, listed by the site's own table of
@@ -58,6 +72,7 @@ import shutil
 import subprocess
 import sys
 import time
+from datetime import date
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
@@ -818,6 +833,209 @@ def write_toc(entries: list[dict]) -> None:
         print(f"  {work['id']}: {len(titles)} chapters")
 
 
+# --- book cards --------------------------------------------------------------
+
+# Cards ARE committed, unlike the text they are written from: a card is this
+# project's own file, it holds no passage of the work, and it is what the
+# catalogue and the identify questions read. Only the works `card_targets`
+# returns may have one.
+CARDS_DIR = SHELF / "cards"
+
+# How much of a work the model is shown. Never the whole book: the shelf is 5 MB
+# of prepared text and the largest single work is over a megabyte, which no
+# context this project runs on holds and no card needs. What a card is written
+# from is the work's own skeleton — the full chapter list, so every chapter can
+# be named — plus the opening of each chapter, which in an engineering text is
+# where the chapter says what it is about before it argues it. 1,500 characters
+# is about two paragraphs, enough for that thesis; the 60,000-character cap is
+# what keeps a 48-chapter book inside a local 14b model's window together with
+# the prompt, and it is spent on the earliest chapters, so a work that hits it
+# is summarised from its first half and still lists all of its chapters (#58).
+CARD_CHAPTER_CHARS = 1_500
+CARD_TOTAL_CHARS = 60_000
+
+# The sections the model writes. `## Structure` is not among them: it is the
+# work's chapter list, which this script already holds exactly, and asking a
+# model to copy forty titles is asking it to get one of them wrong. The card's
+# promise that it can answer "which chapter covers X" rests on those titles
+# being the prepared text's own, so they are written here and not generated.
+CARD_MODEL_SECTIONS = ("Summary", "Key ideas", "Terms", "Themes")
+
+CARD_SYSTEM = """You write a reference card for one technical work: the page a reader consults to decide whether this work answers their question, and which of its chapters to open.
+
+Write ONLY from the text you are given. Add nothing you know about this work from anywhere else. Do not invent chapters, numbers, figures or quotations, and claim nothing the given text does not support. Where you name a chapter, spell it EXACTLY as it stands in the chapter list you are given.
+
+Reply with exactly these sections, in this order, and with nothing else — no preamble, no closing remark, no code fence, no title line above them:
+
+## Summary
+One paragraph of 120-200 words: what the work is, who wrote it and for whom, what it argues, and how it is organised.
+
+## Key ideas
+Six to twelve bullets — never more than twelve — one idea per line and one line per idea, each in the form
+- **<the idea>** — <one sentence saying what the work claims about it> (<chapter name>)
+The chapter name is the chapter that idea lives in, copied from the chapter list character for character, INCLUDING the number, numeral or code it begins with: "III. Config", not "Config"; "LLM01:2025 Prompt Injection", not "Prompt Injection".
+
+## Terms
+Five to twelve bullets, the vocabulary this work uses in its own way — words it coins or gives a meaning of its own, not general English — each in the form
+- **<term>** — <what it means in this work, one sentence>
+
+## Themes
+Four to eight bullets, the concerns that run across chapters rather than sitting in one, each in the form
+- **<theme>** — <one sentence>"""
+
+
+def prepared_chapters(work: dict) -> list[tuple[str, str]]:
+    """The chapters of corpus-tech/prepared/<id>.md as (title, body).
+
+    Read back from the prepared file rather than re-derived from raw/, so a card
+    is written from exactly the text that was indexed — the same file `ayl-add`
+    read, cut on the same `##` headings."""
+    path = PREPARED_DIR / f"{work['id']}.md"
+    if not path.exists():
+        raise FileNotFoundError(f"{path} is missing — run --stage prepare first")
+    pieces = re.split(r"(?m)^## ", path.read_text(encoding="utf-8"))[1:]
+    chapters = []
+    for piece in pieces:
+        title, _, body = piece.partition("\n")
+        chapters.append((title.strip(), body.strip()))
+    return chapters
+
+
+def card_excerpts(chapters: list[tuple[str, str]]) -> tuple[str, int]:
+    """The openings of the chapters, within the budget; also how many were read.
+
+    A chapter whose opening does not fit the total budget is left out of the
+    excerpts and stays in the chapter list, which is why the two are built
+    separately."""
+    parts, spent, read = [], 0, 0
+    for title, body in chapters:
+        opening = body[:CARD_CHAPTER_CHARS].strip()
+        if not opening or spent + len(opening) > CARD_TOTAL_CHARS:
+            continue
+        parts.append(f"### {title}\n{opening}")
+        spent += len(opening)
+        read += 1
+    return "\n\n".join(parts), read
+
+
+def card_user(work: dict, chapters: list[tuple[str, str]]) -> str:
+    """The user message: the work's front matter, its chapter list, the chapter
+    openings — all of it as DATA.
+
+    Every character of this comes from a publisher's web page, so it is wrapped
+    untrusted (`data_block`, the DATA_RULE that `llm_invoke` appends): text
+    fetched from the internet that reaches a model is content and never an
+    instruction, whatever it says about itself (ADR-017)."""
+    from ask_your_library.llm import data_block
+
+    listing = "\n".join(f"{index}. {title}" for index, (title, _) in enumerate(chapters, 1))
+    excerpts, read = card_excerpts(chapters)
+    return "\n".join([
+        data_block("work", "\n".join([f"title: {work['title']}",
+                                      f"author: {work['author']}",
+                                      f"year: {work['year']}",
+                                      f"kind: {work['kind']}"])),
+        data_block("chapter_list", listing, chapters=str(len(chapters))),
+        data_block("chapter_openings", excerpts,
+                   chapters_read=str(read), characters_each=str(CARD_CHAPTER_CHARS)),
+    ])
+
+
+def card_sections(reply: str) -> dict[str, str]:
+    """The `## section` bodies of a model's reply, by heading."""
+    body = re.sub(r"^\s*```[a-z]*\n|\n```\s*$", "", reply.strip())
+    sections = {}
+    for piece in re.split(r"(?m)^## ", body)[1:]:
+        header, _, text = piece.partition("\n")
+        sections[header.strip()] = text.strip()
+    return sections
+
+
+def structure_section(chapters: list[tuple[str, str]]) -> str:
+    """The chapter list as the card's `## Structure`, in the work's own order and
+    the work's own spelling."""
+    return "\n".join(f"- {index}. {title}" for index, (title, _) in enumerate(chapters, 1))
+
+
+def card_text(work: dict, sections: dict[str, str], chapters: list[tuple[str, str]],
+              model: str, built: str) -> str:
+    """The card file: the front matter and H1 shape corpus/cards/*.md already has.
+
+    `source` is "Author — Title" and the H1 is "Title — Author" because that is
+    how the classics' cards are written, and `ingest.chunking.chunk_card` reads
+    the book key off the H1 — so a tech card ingests through the same code path
+    and lands in the catalogue under the same key `ayl-add` minted for the text.
+
+    `card_model` and `card_built` are the two fields the classics' cards do not
+    have: this shelf's cards are generated rather than written, and a card built
+    on the local 14b model and one built on the hosted model are otherwise
+    indistinguishable on disk (#58)."""
+    lines = ["---",
+             f"date: {built}",
+             "tags: [book, tech-shelf]",
+             "type: book-card",
+             f"source: \"{work['author']} — {work['title']}\"",
+             f"card_model: {model}",
+             f"card_built: {built}",
+             "---",
+             f"# {work['title']} — {work['author']}",
+             ""]
+    for name in ("Summary", "Key ideas"):
+        lines += [f"## {name}", "", sections[name], ""]
+    lines += ["## Structure", "", structure_section(chapters), ""]
+    for name in ("Terms", "Themes"):
+        lines += [f"## {name}", "", sections[name], ""]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def build_cards(entries: list[dict], manifest: dict, force: bool = False) -> None:
+    """Write corpus-tech/cards/<id>.md for the works that may have one.
+
+    The NoDerivatives rule is enforced here and not only documented: the list
+    this loop runs over is `card_targets`, intersected with whatever `--work`
+    selected, and a work that is not in it is reported and skipped. A card for a
+    CC BY-NC-ND work is a derivative this project has no right to distribute, so
+    the check is an assertion in the code and a test, not a convention
+    (`tests/test_tech_shelf.py`)."""
+    # Imported here rather than at the top of the file so that `fetch`,
+    # `prepare`, `toc`, `checksums` and `verify` keep needing no model, no key
+    # and no database — which is what lets the weekly CI job run this script at
+    # all, and what lets the tests exec the module offline.
+    from ask_your_library import config
+    from ask_your_library.llm import llm_invoke
+
+    allowed = {work["id"] for work in card_targets(manifest)}
+    model = f"{config.LLM_BACKEND}/{config.ORCHESTRATOR_MODEL}"
+    built = date.today().isoformat()
+    CARDS_DIR.mkdir(parents=True, exist_ok=True)
+    problems = []
+    for work in entries:
+        if work["id"] not in allowed:
+            print(f"  {work['id']}: no card ({work['licence']}), skipped")
+            continue
+        path = CARDS_DIR / f"{work['id']}.md"
+        if path.exists() and not force:
+            print(f"  {work['id']}: card already written, kept (--force to rebuild)")
+            continue
+        chapters = prepared_chapters(work)
+        started = time.monotonic()
+        reply = llm_invoke(CARD_SYSTEM, card_user(work, chapters), role="card").content
+        sections = card_sections(reply)
+        missing = [name for name in CARD_MODEL_SECTIONS if not sections.get(name)]
+        if missing:
+            # Half a card is worse than none: it would be indexed, retrieved and
+            # quoted as if it were whole. The reply is not written, and the run
+            # says which work to re-run once the prompt or the model is changed.
+            problems.append(f"  {work['id']}: the reply has no {', '.join(missing)}")
+            continue
+        path.write_text(card_text(work, sections, chapters, model, built), encoding="utf-8")
+        print(f"  {work['id']}: {len(chapters)} chapters -> {path.name}, "
+              f"{len(reply):,} characters from {model} in "
+              f"{(time.monotonic() - started) / 60:.1f} min")
+    if problems:
+        sys.exit("cards not written:\n" + "\n".join(problems))
+
+
 # --- pins --------------------------------------------------------------------
 
 def fetched_files(work: dict) -> list[Path]:
@@ -894,7 +1112,11 @@ def verify(entries: list[dict]) -> None:
 
 # --- main --------------------------------------------------------------------
 
-STAGES = ("fetch", "prepare", "toc", "checksums", "verify")
+# `cards` is asked for by name and is not part of `--stage all`, like
+# `checksums`: it is the only stage that calls a model, and a plain run of this
+# script — which is what a machine does to check its pins — must not quietly
+# spend ten model calls.
+STAGES = ("fetch", "prepare", "toc", "cards", "checksums", "verify")
 
 
 def main() -> None:
@@ -903,7 +1125,12 @@ def main() -> None:
     ap.add_argument("--work", help="substring filter: of the work's title or id")
     ap.add_argument("--refetch", action="store_true",
                     help="download again even when the file is cached")
+    ap.add_argument("--force", action="store_true",
+                    help="--stage cards only: rebuild a card that is already written")
     args = ap.parse_args()
+    if args.force and args.stage != "cards":
+        ap.error("--force belongs to --stage cards; no other stage overwrites anything "
+                 "it would need forcing past")
 
     manifest = load_manifest()
     entries = works(manifest)
@@ -924,6 +1151,9 @@ def main() -> None:
     if args.stage in ("all", "toc"):
         print("== table of contents ==")
         write_toc(entries)
+    if args.stage == "cards":
+        print("== book cards ==")
+        build_cards(entries, manifest, force=args.force)
     if args.stage == "checksums":
         print("== pin the fetched sources into the manifest ==")
         write_checksums(entries)

@@ -16,10 +16,15 @@ of the claim corpus-tech/README.md makes on the repository's behalf.
 import importlib.util
 import json
 import re
+import types
+from datetime import date
 from pathlib import Path
 
 import pytest
 import yaml
+
+from ask_your_library import config, llm
+from ask_your_library.ingest import chunking
 
 REPO = Path(__file__).resolve().parents[1]
 MANIFEST = REPO / "corpus-tech" / "manifest.yaml"
@@ -150,12 +155,20 @@ def test_the_cards_flag_and_the_licence_agree():
     assert not wrong, f"NoDerivatives works marked as card-bearing: {wrong}"
 
 
-def test_the_shelf_holds_no_cards_directory():
-    """Phase 1 generates no cards at all (#58). A directory here would be the
-    first place an ND summary could sit unnoticed."""
-    assert not (REPO / "corpus-tech" / "cards").exists(), \
-        "corpus-tech/cards/ exists — no card may be committed for this shelf without " \
-        "checking each work's licence first"
+def test_every_committed_card_is_for_a_work_that_may_have_one():
+    """The rule as it applies to what is actually in the repository. A card is
+    the one file of this shelf that IS committed, so a summary of a NoDerivatives
+    work would be distributed by this repository the moment it was added — this
+    test is what stands between that and a green suite."""
+    cards_dir = REPO / "corpus-tech" / "cards"
+    if not cards_dir.exists():
+        return
+    allowed = {work["id"] for work in shelf.card_targets(manifest())}
+    written = {path.stem for path in cards_dir.glob("*.md")}
+    assert not (written & NO_CARD), \
+        f"a card is committed for a NoDerivatives work: {sorted(written & NO_CARD)}"
+    assert written <= allowed, \
+        f"cards for works the manifest does not allow one for: {sorted(written - allowed)}"
 
 
 # --- 3. the chapter lists ----------------------------------------------------
@@ -379,6 +392,7 @@ def test_a_table_in_the_middle_of_a_paper_does_not_capture_the_run():
 # --- 6. the shape of a prepared file -----------------------------------------
 
 WORK = {"id": "demo-work", "title": "A Demo Work", "author": "A. Nonymous",
+        "year": 2019, "kind": "guide",
         "fetch": "git-markdown", "licence": "MIT", "cards": True}
 
 
@@ -428,3 +442,183 @@ def test_a_markdown_work_keeps_its_own_subheadings(prepared):
     only the chapter heading itself is lifted out."""
     text = (prepared / "prepared" / "demo-work.md").read_text(encoding="utf-8")
     assert "### Store config in the environment" in text
+
+
+# --- 7. the card generator ---------------------------------------------------
+# No network and no model: `llm_invoke` is replaced, so what is exercised is
+# what this repository decides — which works are offered a card at all, what the
+# model is shown of a work, and the shape of the file that comes back.
+
+ND_WORK = {"id": "nd-work", "title": "A Work Nobody May Summarise", "author": "N. D. Author",
+           "year": 2020, "kind": "book", "fetch": "html-chapters",
+           "licence": "CC-BY-NC-ND-4.0", "cards": False}
+
+CARD_REPLY = """## Summary
+A demo work about configuration, in two chapters.
+
+## Key ideas
+- **Config is not code** — everything that varies between deploys lives outside the codebase (III. Config)
+
+## Terms
+- **config** — everything that varies between deploys
+
+## Themes
+- **Separation** — the codebase says nothing about where it runs
+"""
+
+
+@pytest.fixture
+def card_shelf(prepared, monkeypatch):
+    """The prepared demo work, a temporary cards directory, and a fake model
+    whose last prompt the test can read."""
+    monkeypatch.setattr(shelf, "CARDS_DIR", prepared / "cards")
+    calls = []
+
+    def fake_invoke(system, user, role):
+        calls.append({"system": system, "user": user, "role": role})
+        return types.SimpleNamespace(content=CARD_REPLY)
+
+    monkeypatch.setattr(llm, "llm_invoke", fake_invoke)
+    return types.SimpleNamespace(root=prepared, cards=prepared / "cards", calls=calls)
+
+
+def build(card_shelf, entries=(WORK,), works_in_manifest=None, force=False):
+    shelf.build_cards(list(entries), {"works": list(works_in_manifest or (WORK, ND_WORK))},
+                      force=force)
+    return card_shelf.cards
+
+
+def test_a_card_is_never_generated_for_a_no_derivatives_work(card_shelf):
+    """The rule of #58 enforced in the code that would break it: the stage runs
+    over whatever `--work` selected, and a work outside `card_targets` is skipped
+    before its text is read and before any model is called at all."""
+    cards = build(card_shelf, entries=(WORK, ND_WORK))
+    assert sorted(path.name for path in cards.glob("*.md")) == ["demo-work.md"]
+    assert len(card_shelf.calls) == 1, "the NoDerivatives work reached the model"
+
+
+def test_a_card_for_a_work_that_may_have_one_is_written(card_shelf):
+    assert (build(card_shelf) / "demo-work.md").exists()
+
+
+def test_the_card_has_the_front_matter_and_h1_the_classics_cards_have(card_shelf):
+    """Same shape as corpus/cards/*.md, because the same `chunk_card` reads both:
+    `source` is "Author — Title" and the H1 is "Title — Author", which is the
+    book key the agent cites."""
+    text = (build(card_shelf) / "demo-work.md").read_text(encoding="utf-8")
+    meta, body = chunking.parse_frontmatter(text)
+    assert meta["tags"] == "[book, tech-shelf]"
+    assert meta["type"] == "book-card"
+    assert meta["source"] == "A. Nonymous — A Demo Work"
+    assert re.findall(r"^# .*$", body, re.M) == ["# A Demo Work — A. Nonymous"]
+
+
+def test_the_card_records_which_backend_and_model_wrote_it(card_shelf):
+    """A card built on the local model and one built on the hosted model are
+    otherwise the same file. `card_model` is what tells the reader which they
+    are looking at, and what says a card is due to be rebuilt (#58)."""
+    text = (build(card_shelf) / "demo-work.md").read_text(encoding="utf-8")
+    meta, _ = chunking.parse_frontmatter(text)
+    assert meta["card_model"] == f"{config.LLM_BACKEND}/{config.ORCHESTRATOR_MODEL}"
+    assert meta["card_built"] == date.today().isoformat()
+
+
+def test_the_card_has_the_five_sections_a_non_fiction_card_needs_in_order(card_shelf):
+    """Summary and Themes are the classics' cards'; Key ideas, Structure and
+    Terms take the place of Plot and Characters, which a technical work has
+    none of."""
+    text = (build(card_shelf) / "demo-work.md").read_text(encoding="utf-8")
+    assert re.findall(r"^## (.*)$", text, re.M) == [
+        "Summary", "Key ideas", "Structure", "Terms", "Themes"]
+
+
+def test_the_structure_section_is_the_prepared_texts_own_chapter_list(card_shelf):
+    """The section that lets the card answer "which chapter covers X". It is not
+    the model's: it is copied from the prepared file, in its order and its
+    spelling, so a chapter can never be renamed or invented here."""
+    text = (build(card_shelf) / "demo-work.md").read_text(encoding="utf-8")
+    structure = shelf.card_sections(text)["Structure"]
+    assert structure == "- 1. Introduction\n- 2. III. Config"
+
+
+def test_the_card_is_cut_into_chunks_by_the_same_code_as_a_classics_card(card_shelf):
+    """The point of matching the shape: `ingest_demo_corpus.py --stage cards
+    --cards-dir corpus-tech/cards` indexes this file through `chunk_card`, so
+    the shelf's cards land in `cards_<backend>` under the same book key the
+    folder ingest minted for the work's text."""
+    chunks = chunking.chunk_card(build(card_shelf) / "demo-work.md")
+    assert {chunk.section for chunk in chunks} == {
+        "Summary", "Key ideas", "Structure", "Terms", "Themes"}
+    assert {chunk.book for chunk in chunks} == {"A Demo Work — A. Nonymous"}
+    assert {chunk.note for chunk in chunks} == {"demo-work"}
+
+
+def test_the_model_is_shown_the_chapter_list_whole_and_the_openings_only(card_shelf):
+    """The budget of #58: never the whole book. Every chapter is named, so the
+    card can list them all; of the text, only the opening of each chapter is
+    sent."""
+    monkeypatched = card_shelf
+    build(monkeypatched)
+    user = monkeypatched.calls[0]["user"]
+    assert "1. Introduction" in user and "2. III. Config" in user
+    assert "An app's config is everything that varies." in user
+
+
+def test_a_long_chapter_is_cut_to_the_budget(card_shelf, monkeypatch):
+    long_chapter = [("Introduction", "x" * 10_000)]
+    excerpts, read = shelf.card_excerpts(long_chapter)
+    assert read == 1
+    assert len(excerpts) < shelf.CARD_CHAPTER_CHARS + 100
+    monkeypatch.setattr(shelf, "CARD_TOTAL_CHARS", 1_000)
+    _, read = shelf.card_excerpts(long_chapter * 3)
+    assert read == 0, "a chapter opening that does not fit the total budget is left out"
+
+
+def test_the_work_is_given_to_the_model_as_data_and_not_as_instructions(card_shelf):
+    """Every character of a work on this shelf came off a publisher's web page,
+    so it is wrapped as untrusted data (ADR-017): text that reaches a model from
+    the internet is content, never an instruction."""
+    build(card_shelf)
+    user = card_shelf.calls[0]["user"]
+    assert user.startswith("<work>")
+    assert "<chapter_list" in user and "<chapter_openings" in user
+
+
+def test_an_existing_card_is_kept_unless_force_is_given(card_shelf):
+    cards = build(card_shelf)
+    (cards / "demo-work.md").write_text("edited by hand\n", encoding="utf-8")
+    build(card_shelf)
+    assert (cards / "demo-work.md").read_text(encoding="utf-8") == "edited by hand\n"
+    assert len(card_shelf.calls) == 1, "the model was called for a card already written"
+    build(card_shelf, force=True)
+    assert "## Summary" in (cards / "demo-work.md").read_text(encoding="utf-8")
+    assert len(card_shelf.calls) == 2
+
+
+def test_a_reply_missing_a_section_is_not_written_at_all(card_shelf, monkeypatch):
+    """Half a card is worse than no card: it would be embedded, retrieved and
+    quoted as if it were whole."""
+    monkeypatch.setattr(llm, "llm_invoke", lambda system, user, role:
+                        types.SimpleNamespace(content="## Summary\nOnly this.\n"))
+    with pytest.raises(SystemExit) as raised:
+        build(card_shelf)
+    assert "Key ideas" in str(raised.value)
+    assert not list(card_shelf.cards.glob("*.md"))
+
+
+def test_a_reply_wrapped_in_a_code_fence_is_still_read(card_shelf, monkeypatch):
+    """A small local model fences its Markdown often enough that refusing one
+    would mean re-running the card rather than reading it."""
+    monkeypatch.setattr(llm, "llm_invoke", lambda system, user, role:
+                        types.SimpleNamespace(content=f"```markdown\n{CARD_REPLY}\n```"))
+    text = (build(card_shelf) / "demo-work.md").read_text(encoding="utf-8")
+    assert "```" not in text
+    assert "A demo work about configuration" in text
+
+
+def test_a_work_that_was_never_prepared_is_named_rather_than_summarised_empty(card_shelf):
+    """The text is gitignored, so "prepare first" is the ordinary state of a
+    fresh checkout, not an exotic failure."""
+    absent = dict(WORK, id="never-prepared")
+    with pytest.raises(FileNotFoundError, match="never-prepared"):
+        build(card_shelf, entries=(absent,), works_in_manifest=(absent,))
