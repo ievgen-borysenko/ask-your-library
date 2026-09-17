@@ -106,20 +106,29 @@ open ones often refer to them.
 
 ## Retrieval, ingest, eval harness, code quality
 
-- **Book identity is a derived string, and no ingest ledger records what went in.** A book is its
-  `Title — Author` key, derived from the file (front matter, a standalone title line, or the file
-  name), and every downstream reference — the citation, the chapter filter, the catalogue
-  listing — is that string. Correcting `author:` in a file and running `ayl-add` again therefore
-  adds a second book instead of renaming the first: the corrected key is indexed and the rows
-  under the old one stay until someone removes them by hand; a file removed from the folder keeps
-  its rows; a card whose heading differs from its transcript's key by one character lists as two
-  books. And since `ayl-add` rebuilds the table (carrying over the rows it did not replace)
-  without recording requested / indexed / failed per file, "which of my files did not index"
-  cannot be answered either (`list_books` shows what
-  is there, never what is missing). The catalogue is exhaustive for what the index holds, which
-  is the history of what was ingested, not the current state of the folder
-  (`docs/known-limits.md`). Fix: a `books` table with a stable id that a re-ingest updates in place, and an ingest
-  ledger beside it.
+- **Book identity, and the ingest ledger: done for `ayl-add`, open in three places (17.09,
+  ADR-024).** A `books` ledger now carries a minted `book_id` per book with its source, digest,
+  chunker, embedding model and status, `ayl-add` updates one book at a time by that id, and
+  `ayl-add --doctor` reconciles the ledger against the index tables. What remains: (a) the
+  enforcement half of #27 — `_index_meta` records `chunker` and `schema_version`, nothing warns
+  or refuses on them; (b) a book backfilled from a pre-ledger index records neither a digest nor a
+  file, so the *first* correction after that upgrade still mints a second id (reported by
+  `--doctor`, not prevented); (c) the cards table is joined to the transcripts table by the book
+  key string alone, so a card whose heading differs by one character is still two books in the
+  catalogue — no card row carries a `book_id`, and the ledger does not reconcile the two corpora
+  (`--doctor` reports the count of card keys with no full-text book of the same key); (d) when the
+  key comes from the FILE NAME, renaming the file to correct the author changes the key and the
+  path together and is indexed as a new book, the old one reported as vanished — deliberate, since
+  the alternative is a silent takeover, but front matter is the way to avoid it; (e) a concurrent
+  reader can see the moment between the delete and the append, and answers without that one book. `(card only)` / `(text only)` in the
+  listing is still backed by `has_cards` / `has_text` over the index rows, which is the right
+  source for it.
+- **The FTS rebuild is measured, and stays whole.** 0.8 s for the demo corpus's 7,285 transcript
+  rows (0.01 s for 165 card rows), about 0.1 ms a row, and the seconds of each run are written
+  into the ledger rows it wrote. The staged full rebuild it replaced was 0.2 s at the same scale,
+  against 0.01 s for a per-book delete-and-append — so the cost argument for the per-book path
+  was weak at demo scale and the correctness argument carried it. LanceDB's incremental FTS merge
+  (#33) waits for a library where those numbers are not noise; nobody has measured one.
 - **A local latency budget still misses what is not a model call.** Since 16.09 `by_role` carries
   `seconds` beside calls and tokens (the wall clock of each model call, retries and timeouts
   included), and the eval report and sidecar carry them per question — the precondition #32 was

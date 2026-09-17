@@ -16,8 +16,9 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 
+from .bookkey import TITLE_SEPARATOR
 from .i18n import t
-from .library import TITLE_SEPARATOR, BookEntry, list_books
+from .library import BookEntry, list_books
 
 CATALOG_OPS = ("count", "list", "has", "by_author")
 CLOSE_MATCH_CUTOFF = 0.8      # a typo still resolves ("Ivanho" -> Ivanhoe)
@@ -187,7 +188,13 @@ def _resolve(name: str, entries: list[BookEntry], field_of, last_word_too: bool 
 def _split_author(name: str) -> tuple[str, str] | None:
     """("Title", "Author") when the name carries an explicit author — the index
     key's separator or " by " — split on the LAST one, since a title may itself
-    contain a dash or a "by"; None otherwise."""
+    contain a dash or a "by"; None otherwise.
+
+    Deliberately narrower than `bookkey.split_title_author`, which also accepts
+    the separators a FILE NAME may use (" - ", " -- ", a bare em dash): here the
+    name comes from a reader's question, where "Crime - and Punishment" is a
+    title with a dash in it and not an author called "and Punishment". Only the
+    index key's own separator counts."""
     if TITLE_SEPARATOR in name:
         title, _, author = name.rpartition(TITLE_SEPARATOR)
         if title.strip() and author.strip():

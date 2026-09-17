@@ -42,7 +42,8 @@ def embedding_text(chunk: Chunk) -> str:
     return f"{header}\n{chunk.text}"
 
 
-def rows_for(chunks: list[Chunk], vectors: list[list[float]]) -> list[dict]:
+def rows_for(chunks: list[Chunk], vectors: list[list[float]],
+             book_id: str | None = None, book_rev: str | None = None) -> list[dict]:
     """Chunks plus their vectors as index rows — the one place every ingest
     path (cards, transcripts, `ayl-add`) writes through.
 
@@ -51,16 +52,31 @@ def rows_for(chunks: list[Chunk], vectors: list[list[float]]) -> list[dict]:
     other: it is a heading the file itself supplied, and nothing above strips
     it (front matter is cleaned by `parse_frontmatter`, the key by `book_key`,
     but a `# Chapter One` carrying an escape sequence reaches the row intact).
-    So the strip happens on the row, for every path at once."""
+    So the strip happens on the row, for every path at once.
+
+    `book_id` is the ledger's minted identity and `book_rev` the version of the
+    book these rows were built from — a short prefix of the ledger row's
+    `sha256`, so that rows being present under a book also says WHICH version of
+    it they are. They are carried BESIDE `note` rather than instead of it: `note` is inside every `chunk_id` already written, and
+    the id is what an update deletes by, so a corrected author still finds the
+    rows it has to replace. It is last in the row, which is where a migrated
+    table has it too (`publish.add_book_id_column`). Omitted — the demo
+    corpus's cards table, and any caller predating the ledger — the column is
+    simply absent, and the readers never look at it."""
     # strict: an embedder returning fewer vectors must fail here, not silently
     # drop the tail chunks
     if len(chunks) != len(vectors):
         raise ValueError(f"{len(chunks)} chunks but {len(vectors)} vectors")
-    return [{
+    rows = [{
         "chunk_id": c.chunk_id, "note": c.note, "book": strip_control_chars(c.book),
         "source": c.source, "section": strip_control_chars(c.section), "text": c.text,
         "vector": v,
     } for c, v in zip(chunks, vectors)]
+    if book_id is not None:
+        for row in rows:
+            row["book_id"] = book_id
+            row["book_rev"] = book_rev or ""
+    return rows
 
 
 # --- cards -------------------------------------------------------------------

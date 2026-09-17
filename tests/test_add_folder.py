@@ -8,6 +8,7 @@ import pytest
 
 from ask_your_library.index_meta import read_index_meta, vector_dims, write_index_meta
 from ask_your_library.ingest import add_folder
+from ask_your_library.ingest.ledger import open_ledger
 from ask_your_library.ingest.chapters import (FRONT_MATTER_SECTION, FULL_TEXT_SECTION,
                                               split_book_chapters, split_book_sections,
                                               split_chapters, unique_titles)
@@ -661,14 +662,19 @@ def test_slugs_that_collide_on_ascii_keep_both_books(tmp_path, fake_embedder):
     assert len(ids) == len(set(ids))
 
 
-def test_a_failed_embedding_batch_leaves_the_index_untouched(tmp_path, monkeypatch):
+def test_a_failed_book_leaves_the_books_that_worked_and_says_which_failed(tmp_path,
+                                                                           monkeypatch):
+    """The trade-off ADR-024 accepted. Under the old staged rebuild a run was
+    all or nothing; per book, the books already written stay written, and the
+    ledger is what says the run did not finish."""
     folder = make_folder(tmp_path)
     good = FakeEmbedder()
     monkeypatch.setattr(add_folder, "get_embedder", lambda backend: good)
-    add_folder.add_books(add_folder.read_folder(folder), "ollama", tmp_path / "db")
+    add_folder.add_books(add_folder.read_folder(folder), "ollama", tmp_path / "db", folder)
 
     db = lancedb.connect(tmp_path / "db")
-    before_rows = db.open_table("transcripts_ollama").search().limit(1000).to_list()
+    before = {r["chunk_id"]: r["text"]
+              for r in db.open_table("transcripts_ollama").search().limit(1000).to_list()}
 
     class DiesOnSecondBook(FakeEmbedder):
         def __init__(self):
@@ -681,55 +687,66 @@ def test_a_failed_embedding_batch_leaves_the_index_untouched(tmp_path, monkeypat
                 raise RuntimeError("embedding backend died mid-run")
             return super().embed_docs(texts)
 
-    # the books really changed, so a partial write would be visible
+    # both books really changed, so a partial write is visible either way
     (folder / "Sea Notes - B. Mate.txt").write_text(PARA * 20, encoding="utf-8")
+    (folder / "The Green Ledger - A. Keeper.md").write_text(
+        "# The Green Ledger\n\n## One\n\n" + PARA * 20, encoding="utf-8")
     monkeypatch.setattr(add_folder, "get_embedder", lambda backend: DiesOnSecondBook())
     with pytest.raises(RuntimeError, match="died mid-run"):
-        add_folder.add_books(add_folder.read_folder(folder), "ollama", tmp_path / "db")
+        add_folder.add_books(add_folder.read_folder(folder), "ollama", tmp_path / "db", folder)
 
     db = lancedb.connect(tmp_path / "db")
     assert "transcripts_ollama__staging" not in db.table_names()
     table = db.open_table("transcripts_ollama")
-    after_rows = table.search().limit(1000).to_list()
-    assert sorted(r["chunk_id"] for r in after_rows) == sorted(r["chunk_id"] for r in before_rows)
-    assert sorted(r["text"] for r in after_rows) == sorted(r["text"] for r in before_rows)
-    # the fingerprint and the FTS index survived too
+    after = {r["chunk_id"]: r["text"] for r in table.search().limit(1000).to_list()}
+    # the book that was embedded before the failure was written; the other one
+    # kept the rows it had, and no book lost its rows
+    assert set(after) >= set(before)
+    assert any(after[i] != before[i] for i in set(before))
+
+    ledger = open_ledger(db)
+    failed = [r for r in ledger.all_rows() if r["status"] == "failed"]
+    assert len(failed) == 1 and "died mid-run" in failed[0]["error"]
+    # and the fingerprint and the FTS index of the earlier run survived
     assert read_index_meta(db, "transcripts_ollama")["model"] == "fake-embed"
     assert table.search("lighthouse", query_type="fts").limit(1).to_list()
 
 
-def test_the_existing_index_is_read_in_batches_not_all_at_once(tmp_path, fake_embedder,
-                                                               monkeypatch):
-    # The kept rows must never be materialized as one Arrow table: the memory
-    # cost of adding one book would then grow with the whole library.
+def test_adding_a_book_does_not_copy_the_books_it_is_not_touching(tmp_path, fake_embedder,
+                                                                  monkeypatch):
+    """The point of the per-book path: the cost of adding one book must not be
+    a function of how many books the index already holds. Under the staged
+    rebuild every existing row was read and written twice per run."""
     folder = make_folder(tmp_path)
-    add_folder.add_books(add_folder.read_folder(folder), "ollama", tmp_path / "db")
+    add_folder.add_books(add_folder.read_folder(folder), "ollama", tmp_path / "db", folder)
+    untouched = {r["chunk_id"]: r["text"] for r in lancedb.connect(tmp_path / "db").open_table(
+        "transcripts_ollama").search().limit(1000).to_list()}
 
     def no_to_arrow(self, *args, **kwargs):
         raise AssertionError("the live table was materialized with to_arrow()")
 
     monkeypatch.setattr(lancedb.table.LanceTable, "to_arrow", no_to_arrow)
+    rebuilds = []
+    real_rebuild = add_folder.rebuild_table
+    monkeypatch.setattr(add_folder, "rebuild_table",
+                        lambda db, name, batches: rebuilds.append(name) or real_rebuild(
+                            db, name, batches))
 
-    batch_sizes = []
-    real_batches = add_folder.table_batches
+    write(folder, "Third Book - C. Writer.txt", PARA * 4)
+    add_folder.add_books(add_folder.read_folder(folder), "ollama", tmp_path / "db", folder)
 
-    def tiny_batches(table, batch_rows):
-        for batch in real_batches(table, 2):          # two rows at a time
-            batch_sizes.append(batch.num_rows)
-            yield batch
-
-    monkeypatch.setattr(add_folder, "table_batches", tiny_batches)
-
-    (folder / "Sea Notes - B. Mate.txt").write_text(PARA * 4, encoding="utf-8")
-    add_folder.add_books(add_folder.read_folder(folder), "ollama", tmp_path / "db")
-
-    assert len(batch_sizes) > 1 and max(batch_sizes) <= 2   # really streamed
+    # nothing was staged: no rebuild of the transcripts table at all
+    assert rebuilds == []
     table = lancedb.connect(tmp_path / "db").open_table("transcripts_ollama")
-    assert vector_dims(table) == 4                   # schema survived the batch round trip
+    assert vector_dims(table) == 4
     rows = table.search().limit(1000).to_list()
-    assert {r["book"] for r in rows} == {"The Green Ledger — A. Keeper", "Sea Notes — B. Mate"}
+    assert {r["book"] for r in rows} == {"The Green Ledger — A. Keeper", "Sea Notes — B. Mate",
+                                         "Third Book — C. Writer"}
     ids = [r["chunk_id"] for r in rows]
     assert len(ids) == len(set(ids))
+    # and the books it did not touch still hold exactly the rows they held
+    kept = {r["chunk_id"]: r["text"] for r in rows if r["chunk_id"] in untouched}
+    assert kept == untouched
 
 
 def test_a_run_that_produces_no_chunks_is_one_line_not_a_traceback(tmp_path, fake_embedder,

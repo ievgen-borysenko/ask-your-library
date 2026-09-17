@@ -183,9 +183,29 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
 - **Chapter reads are capped at 12,000 characters** and the cut is marked in-band within that
   budget; an empty read (chapter not in the index) yields no hit at all and is logged in the
   scratchpad, so nothing synthetic can be quoted as evidence.
-- **Corpus changes mean a full re-ingest**, except single-book re-ingest via `--book`, which
-  upserts that book's rows in place. `ayl-add` rewrites the whole table instead — a staged
-  rebuild that carries the untouched books over and re-embeds only the run's books.
+- **Corpus changes are per book, and a re-chunk is still a full rebuild.** `ayl-add` updates one
+  book at a time — resolve to a `book_id` in the `books` ledger, delete that book's rows, append
+  the new ones, write the ledger row before and after — so the books a run does not name are
+  neither read nor rewritten. The demo corpus keeps its staged whole-table rebuild (and its
+  `--book` upsert): it builds a pinned corpus from scratch and has no run that adds one book. What
+  still costs a full rebuild: a change of embedding model, and a change of chunker (#28) — both
+  invalidate every vector or every chunk id in the table. The BM25 index is rebuilt whole after
+  every run, measured at 0.8 s for the demo corpus's 7,285 rows.
+- **The delete and the append are not one transaction.** A crash between them leaves one book out
+  of the index; its ledger row still says `requested`, and the recovery pass at the start of the
+  next `ayl-add` finds it, re-indexes it when the run covers it and reports it by name when it
+  does not. The same pass also catches the subtler shape: a crash while a book was being embedded
+  leaves the index holding the PREVIOUS version of it, with nothing about the rows to say so.
+  Every row therefore carries the revision of the book it was built from, and recovery compares
+  it with what the ledger asked for — matching, the rows are confirmed; not matching, the book is
+  re-indexed or reported as `STALE` and never marked indexed, because calling an older text
+  current is the one thing a ledger must not do. The window is narrower than the one it replaced (a staged rebuild was all-or-nothing
+  but rewrote the whole table), and it is visible instead of silent — which is why the ledger
+  came before the incremental path, not after it. **A reader sees that window too:** for the
+  fraction of a second between the delete and the append, a question asked in the web UI or the
+  CLI searches an index in which that one book does not exist, and it answers without it rather
+  than waiting or failing — the staged rebuild it replaced kept the old table queryable to the
+  moment of the swap instead. Re-ask the question, or index when nobody is asking.
 - **English corpus assumption.** The planner prompt hardcodes English search queries. Questions
   in other languages work (bge-m3 is multilingual), the queries do not.
 - **"Your own library" covers plain text only, and without cards.** `ayl-add` takes `.txt` and
@@ -212,13 +232,37 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
 - **Heuristic behavioural scoring**, no LLM judge: refusals detected by phrase markers,
   titles by substring match. `get_chapter` caps at 1000 chunks / 12k chars and reconciles
   section naming (`Chapter 59` vs `59`) heuristically.
-- **A book is its `Title — Author` key, and the catalogue is a history of ingests, not a listing
-  of your folder.** The key is derived from the file — front matter, a standalone title line, or
-  the file name — and everything downstream is keyed on it: the citation, the chapter filter, the
-  catalogue. Correct `author:` in a file's front matter and run `ayl-add` again, and the catalogue
-  holds a second book: the corrected key is indexed, and the rows under the old one stay until
-  someone removes them by hand. A file removed from the folder keeps its rows too, and a book card
-  whose heading differs from its transcript's key by one character lists as two books. The count
-  is the length of what the index holds, which is the history of what was ingested, not the
-  current state of the folder. A `books` table with a stable id, and an ingest ledger beside it,
-  are the planned fix (`backlog.md`).
+- **A book's identity is minted; its NAME is still a derived string.** Every book has a `book_id`
+  in the `books` ledger, assigned once and never recomputed, and `ayl-add` updates by that id. A
+  book is recognised by its key, or — when the key is what changed — by being the same file in the
+  same folder: so correcting `author:` in the front matter or on the title line renames the book
+  rather than indexing a second one, and a file that moved inside the folder keeps its key and so
+  its id. **Renaming the file itself to correct the key is the case this cannot carry**: the key
+  and the path change together and nothing distinguishes a correction from a second copy, so the
+  new name is indexed as a new book and the old one is reported as vanished (`--prune` clears it).
+  Identical content alone never adopts an id — a byte-identical copy under another title is a
+  second book, with a warning naming the first, because the alternative is one book silently
+  replacing another. What is still derived is the `Title — Author` key itself, which is what the
+  agent cites, what the chapter filter matches and what the catalogue lists; a book card whose
+  heading differs from its transcript's key by one character still lists as two books, because the
+  two tables are joined by that string and no card row carries a `book_id` — which is also why
+  `--prune` removes a book's full-text rows and keeps its card, saying so, rather than deleting
+  from a table `ayl-add` never writes. And a book backfilled
+  from an index built before the ledger records neither a digest nor a file, so the *first*
+  correction after that upgrade still creates a second book (the next one does not).
+- **The catalogue is what the index holds, not what your folder holds.** It counts the distinct
+  book keys of the index tables and never reads the ledger (ADR-016, ADR-024), so "N of N books"
+  stays exactly as exhaustive as it was — but a book whose file you deleted is still listed until
+  you re-run `ayl-add --prune`, and a file that failed to index is not listed at all. The two
+  questions the catalogue cannot answer — what was requested, and what failed — are what
+  `ayl-add --doctor` answers, by reconciling the ledger against the index tables and reporting
+  the drift. A stale ledger is itself a failure mode now; that check is how it becomes visible.
+- **The chunker and the schema version are recorded but not enforced.** `_index_meta` now carries
+  `chunker` and `schema_version` beside the embedding fingerprint, written by both ingest paths.
+  The version is read from the table's own columns rather than assumed, so a table an ingest has
+  not yet migrated, and the cards table — which never gains the ledger columns — are stamped for
+  what they actually are.
+  Nothing refuses on them yet: a table stamped with another chunker is read without a word. The
+  policy decided for that — warn on read, refuse on write, unlike the embedder's fatal-on-read
+  rule — is #27, and until it lands a mixed-chunker index is detectable by reading the stamp and
+  by nothing else.

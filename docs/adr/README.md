@@ -5,7 +5,7 @@ what it was measured to buy. They were written from the code rather than ahead o
 describe the system as built; where a variant was tried and dropped, the rejected variant is part
 of the record, because it is usually the more useful half.
 
-Twenty-three decisions, in the order they were taken. ADR-016 is written out as a file of its own
+Twenty-four decisions, in the order they were taken. ADR-016 is written out as a file of its own
 because it changed the planner's contract and added a node to the graph; the rest are summarised
 here. ADR-017 to ADR-023 were recorded on 2026-09-16, after the fact: a review of this tree found
 seven decisions the code had made and no record named. The four that constrain what may be built
@@ -530,8 +530,16 @@ its quotes confirmed. The review rounds are the more useful part of the record �
 followed, a table with no fingerprint is refused rather than stamped after the fact, a row key
 carries a digest of the book key so two titles that reduce to the same ASCII slug stay two books,
 an update is a staged rebuild with a single publish, and a missing cards table became a supported
-shape with a visible notice instead of a silent degradation. A later audit closed two more defects
-in the splitter: duplicate section names, and short real chapters and the text before the first
+shape with a visible notice instead of a silent degradation.
+
+Two of those are **partly superseded by ADR-024** (2026-09-17). An update is no longer a staged
+rebuild with a single publish: it is a per-book delete-and-append keyed by a minted `book_id`, and
+the staged publish survives only for the first build of a table and for the demo corpus. And the
+row key's digest is no longer what a re-ingest matches on. The digest still does the job it was
+added for — two titles that reduce to the same ASCII slug stay two row keys — but a key derived
+from title and author is exactly what a correction changes, so identity moved to the ledger.
+
+A later audit closed two more defects in the splitter: duplicate section names, and short real chapters and the text before the first
 heading disappearing without a word. One limitation is documented rather than fixed — a `CHAPTER I`
 that repeats across volumes in one file is read as a contents line and merged into the section
 above it, reported, never lost.
@@ -651,6 +659,11 @@ half an hour to build, while a write that mixes two chunkers cannot be undone at
 deliberately **not** the embedder's rule above, which is fatal on read and stays so. `created` is
 there for a human reading the table; no code routes on it.
 
+**Half of that is now done** (ADR-024, 2026-09-17): the row carries `chunker` and
+`schema_version`, written by both ingest paths. The *policy* is not — nothing warns and nothing
+refuses — so a table stamped with another chunker is still read without a word, and #27 is now
+exactly the enforcement and nothing else.
+
 ## ADR-021: The action channel is a reserved string marker in `current_query`
 
 Status: accepted; recorded 2026-09-16, after the fact. The typed channel is deferred (#25).
@@ -726,6 +739,106 @@ The model client is built with `max_retries=0` and one client per attempt, so a 
 recomputed rather than sampled once and reused by every retry; what is retryable, how long the wait
 is, and which regime a call runs under are decided once per call in `llm.py`, and `synthesize` is
 never capped — dense reasoning that today is recorded only in docstrings.
+
+## ADR-024: A book ledger with a minted id; `ayl-add` updates one book at a time
+
+Status: accepted (2026-09-17). Partly supersedes ADR-015; completes half of what ADR-020 left to
+#27.
+
+A book was a derived string and its row key a digest of that string (`bookkey.slug`), so a
+corrected `author:` indexed a second book and deleted nothing — ADR-015's own recorded
+consequence. `ayl-add` published by staged full rebuild because LanceDB OSS has no rename; the FTS
+index was rebuilt whole every time; `_index_meta` carried no chunker or schema version, so a
+re-chunk (#28) would leave a mixed index nothing could detect; and nothing recorded which files
+had been *requested*, so "which of my books did not make it in" had no answer at all.
+
+**Decision.** A `books` ledger table beside the index tables: `book_id` minted once and never
+derived, `key`, `title`, `author`, `source_ref`, `sha256`, `chunker`, `embedding_model`, `status`
+(requested / indexed / failed), `error`, `requested_at`, `indexed_at`, `rows`, `fts_seconds`. Its
+API is `resolve` / `begin` / `commit` / `fail` / `missing` / `diff`.
+
+**Which book is this?** `resolve` adopts an existing id on two signals and refuses to on a third,
+and the order is the part that had to be got right. (1) **The key.** `Title — Author` is what the
+reader sees and what the agent cites, so a book that still answers to its key is that book,
+whatever happened to its text. (2) **The source.** Failing the key, the file at the same path in
+the same folder is the same book whose metadata was corrected — which is the case the derived row
+key could never express, and the whole point of the issue. `source_ref` is
+`local:<folder digest>:<path inside it>`: the folder is in the reference because one index can be
+fed from several folders, and without it a `notes.md` in a second library would be the first
+library's book — and, worse, `--prune` run on either folder would delete the other's. (3) **The
+digest adopts nothing.** A sha256 match alone is reported and not acted on: a byte-identical copy
+of a book under another title would otherwise take over the first book's id, and its next write
+would delete the first book's rows — a loss the staged rebuild this replaces could not produce. The
+digest is of the book's TEXT, taken after the front matter and any title line are off it, because
+correcting `author:` rewrites the file and changes nothing about the book.
+
+One edge is left deliberately unresolved and is tested as such: when the key comes from the FILE
+NAME, renaming the file changes the key and the path at once, and nothing remains to tell "I
+corrected the author" from "I added another copy". That is indexed as a second book and the first
+is reported as vanished, which `--prune` clears — a visible extra book being much the better
+failure than a silent takeover. `ayl-add` becomes a per-book
+delete-then-append keyed by `book_id`, with the ledger row written before and after and a recovery
+pass at the start of every run. Rows carry `book_id` **beside** `note` for one release, so every
+chunk id stays byte-compatible. `_index_meta` gains `chunker` and `schema_version`; readers
+tolerate their absence and nothing refuses on them here. The version is derived from the stamped
+table's own columns rather than asserted, because a version is a claim about the rows and a stamp
+that claims what the rows do not have is worse than no stamp — it is what a later refusal (#27)
+would act on.
+
+**The alternatives.** *(A) The staged rebuild as it was* — crash-safe and simple, but it has no
+identity at all, which is the actual defect; the cost argument for replacing it turned out to be
+weak (see the measurements below), the correctness argument did not. *(B) Per-book upsert keyed by
+the derived slug* — cheap, but a corrected author still orphans rows, and the delete-then-add is
+not transactional either, so it buys the new failure mode without buying the identity. *(C)
+Ledger + per-book upsert with recovery* — chosen: the ledger is what makes an interrupted upsert
+recoverable, which is the argument for identity **before** incrementality. *(D) A separate SQLite
+metadata store* — rejected: two stores to keep consistent, and everything else already reads
+LanceDB.
+
+**What it was measured to buy, and what it was not.** Two numbers were taken on the built demo
+corpus (7,285 transcript rows, M3 Pro) because the backlog asked for them before anything was
+replaced. The **FTS rebuild is 0.8 s** — about 0.1 ms a row — so it stays whole, and an
+incremental merge (#33) is not worth its complexity at that price. The **staged full rebuild is
+0.2 s**, against 0.01 s for a per-book delete-and-append of one 59-row book. So at demo scale the
+publish was *never* the cost the review supposed it was, and the honest claim for the per-book
+path is not speed: it is that a correction renames instead of duplicating, that an interruption is
+visible, and that "which of my files did not index" has an answer. The cost argument returns only
+at a library an order of magnitude larger, and it has not been measured there.
+
+**Consequences.** Easier: re-ingest, correction, upgrade, and the folder diff (`--dry-run`), with
+a vanished file reported and deleted only under `--prune`. One rule the whole change is held to:
+**recovery is a write.** The fingerprint table gained a staged rebuild of its own here, and
+recovering it happens at the start of an ingest and nowhere else — a reader that recovered would
+race the ingest that is mid-widening, and `read_index_meta` runs before every search. Readers
+tolerate the staged copy instead and read it where the live table is missing. It is the same rule
+`doctor` is held to, from the other side. Harder: two writes per book that must
+agree, so a **stale ledger is a new class of failure** — reconciled by `ayl-add --doctor`, which
+reports six shapes of drift and repairs none of them, because a check that rewrites what it checks
+is not evidence. The crash window moved rather than closed: between the delete and the append one
+book is absent, which the recovery pass finds on the next run. What that pass may NOT do is infer completion from rows
+being present: `begin` marks a book `requested` before its text is embedded, so a crash there
+leaves a full set of perfectly good, perfectly stale rows. Each row therefore carries `book_rev`,
+the revision of the book it was built from, and recovery compares it with the revision the ledger
+recorded — equal, the append landed and only the ledger write was lost (one book is one
+`table.add()`, committed as a unit); unequal, absent or mixed, the book is re-indexed or reported
+`STALE`, never marked indexed.
+The catalogue keeps reading the index tables and not the ledger, or ADR-016's "the count is the
+length of that list" weakens into a history of ingests.
+
+**The gate.** Book identity moved into one module (`bookkey.py`) in the same change, and the risk
+of that move is silent: a `slug` that differs by one character makes a delete match nothing. So
+the exact keys, row keys and chunk ids of both ingest paths were frozen from the code as it stood
+before (`tests/fixtures/book_identity.json`, generated at `b2157cb`) and checked against the built
+index: all 35 book keys and all 1,228 chapter-level chunk-id prefixes reproduce exactly.
+
+**Still open.** The enforcement half of #27 (warn on read, refuse on write for a chunker or schema
+mismatch). A book backfilled from a pre-ledger index records neither a digest nor a file, so the
+first correction after that upgrade still mints a second id — `--doctor` reports the pair. The
+cards table is joined to the transcripts table by the book key string alone; no card row carries a
+`book_id`, and the ledger does not reconcile the two corpora — `--doctor` says so in its report
+rather than leaving it to be discovered, and `--prune` keeps a card whose book it removes rather
+than deleting from a table `ayl-add` never writes. And the per-book write is visible to a concurrent reader:
+see `known-limits.md`.
 
 [reports]: ../eval-results/
 [backlog]: ../backlog.md

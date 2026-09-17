@@ -45,16 +45,20 @@ import lancedb
 import requests
 import yaml
 
+from ask_your_library.bookkey import author_of, book_key, chunk_id, title_of
 from ask_your_library.config import DB_PATH, EMBED_BACKEND
 from ask_your_library.embeddings import get_embedder
-from ask_your_library.index_meta import check_index, read_index_meta, write_index_meta
+from ask_your_library.index_meta import (META_TABLE, check_index, read_index_meta,
+                                         write_index_meta)
 from ask_your_library.ingest import (Chunk, build_fts_index, chunk_card, embedding_text,
                                      pack_sentences, rows_for, split_sentences)
 # Chapter splitting lives in the package so every ingest path (this script and
 # the generic `ayl-add`) cuts books into sections identically.
 from ask_your_library.ingest.chapters import (DEFAULT_CHAPTER_RE, MIN_CHAPTER_CHARS,  # noqa: F401
                                               split_chapters, with_parts)
-from ask_your_library.ingest.publish import (rebuild_table, recover_staging, table_names,
+from ask_your_library.ingest.ledger import CHUNKER_VERSION, open_ledger
+from ask_your_library.ingest.publish import (add_ledger_columns, rebuild_table,
+                                             recover_staging, revision_of, table_names,
                                              upsert_book_rows)
 from ask_your_library.sanitize import strip_control_chars
 
@@ -222,8 +226,11 @@ def save_prepared(entry: dict, chapters: list[tuple[str, str]], provenance: str)
     prepared_path(entry).write_text(json.dumps({
         "note": entry["id"],
         # "Title — Author", matching the cards' H1 form — so the book field is
-        # consistent across both tables and stays unambiguous as the corpus grows
-        "book": f"{entry['title']} — {entry['author']}",
+        # consistent across both tables and stays unambiguous as the corpus
+        # grows. Through `bookkey.book_key`, the same function `ayl-add` mints
+        # with: for a manifest entry it is the identity it always was (the
+        # fields are already clean), and one rule means one place to change.
+        "book": book_key(entry["title"], entry["author"]),
         "source": provenance,
         "chapters": [{"title": t, "text": b} for t, b in chapters],
     }, ensure_ascii=False), encoding="utf-8")
@@ -401,7 +408,7 @@ def chunk_prepared(doc: dict) -> list[Chunk]:
         for j, text in enumerate(packed, 1):
             title = chapter["title"]
             chunks.append(Chunk(
-                chunk_id=f"{doc['note']}#{title or 'full'}/{j}",
+                chunk_id=chunk_id(doc["note"], title, j),
                 note=doc["note"],
                 book=doc["book"],
                 source=doc["source"],
@@ -466,23 +473,52 @@ def ingest_transcripts_table(backend: str, book_filter: str | None, entry_ids: l
     db = lancedb.connect(DB_PATH)
     name = f"transcripts_{backend}"
     recover_staging(db, name)
+    recover_staging(db, META_TABLE)     # a widening left half-done; a write may finish it
     started = time.time()
     progress = {"total": 0}
 
+    # The ledger this corpus writes is the same one `ayl-add` keeps: a book
+    # built from the manifest gets a minted id like any other, its `source_ref`
+    # naming the manifest entry rather than a file. The publish itself is still
+    # a staged whole-table rebuild here (or the `--book` upsert) — the per-book
+    # path belongs to `ayl-add`, where a library grows one book at a time; this
+    # script rebuilds a pinned corpus from scratch and has no such run.
+    ledger = open_ledger(db)
+    ids: dict[str, str] = {}
+    written: dict[str, int] = {}
+    for doc in docs:
+        # No sha256: what the manifest pins is the SOURCE file, and what is
+        # ingested is the prepared JSON built from it. The manifest id is the
+        # stable reference here, and the key matches on every re-run.
+        ids[doc["note"]] = ledger.resolve(title_of(doc["book"]), author_of(doc["book"]),
+                                          source_ref=f"manifest:{doc['note']}",
+                                          claimed=set(ids.values()))
+
     def batches():
         for i, doc in enumerate(docs, 1):
+            book_id = ids[doc["note"]]
+            ledger.begin(book_id, key=doc["book"], source_ref=f"manifest:{doc['note']}",
+                         embedding_model=embedder.model)
             chunks = chunk_prepared(doc)
             vectors = embedder.embed_docs([embedding_text(c) for c in chunks])
             progress["total"] += len(chunks)
+            written[book_id] = len(chunks)
             print(f"  [{i}/{len(docs)}] {doc['book']}: {len(chunks)} chunks "
                   f"(total {progress['total']})", flush=True)
-            yield doc["note"], rows_for(chunks, vectors)
+            yield doc["note"], rows_for(chunks, vectors, book_id,
+                                        revision_of(ledger.get(book_id).get("sha256") or ""))
 
     if book_filter and name in table_names(db):
         # Re-ingest selected books in place: replace their rows, never append.
         # One table, one embedding model: an upsert with a different embedder
         # would leave a table of mixed vectors and re-stamp it as if it were not.
         refuse_unsafe_partial_reingest(db, name, embedder)
+        # An index built before the ledger has no `book_id` column, and rows
+        # that carry one cannot be appended to it. Filling it re-embeds
+        # nothing — it is a staged copy of the rows that are already there.
+        by_note = {row["source_ref"].split(":", 1)[1]: row["book_id"]
+                   for row in ledger.all_rows() if row.get("source_ref", "").startswith("manifest:")}
+        add_ledger_columns(db, name, by_note.get)
         table = db.open_table(name)
         for note, rows in batches():
             upsert_book_rows(table, note, rows)
@@ -491,9 +527,13 @@ def ingest_transcripts_table(backend: str, book_filter: str | None, entry_ids: l
         # until the new one is complete.
         rebuild_table(db, name, (rows for _note, rows in batches()))
     total = progress["total"]
-    build_fts_index(db, name)
-    write_index_meta(db, name, backend, embedder.model, embedder.dims)
-    print(f"transcripts done: {total} chunks in {(time.time() - started) / 60:.1f} min")
+    fts_seconds = build_fts_index(db, name)
+    write_index_meta(db, name, backend, embedder.model, embedder.dims,
+                     chunker=CHUNKER_VERSION)
+    for book_id, rows in written.items():
+        ledger.commit(book_id, rows=rows, fts_seconds=fts_seconds)
+    print(f"transcripts done: {total} chunks in {(time.time() - started) / 60:.1f} min "
+          f"(FTS rebuild {fts_seconds:.1f}s)")
 
 
 def ingest_cards_table(backend: str) -> None:
@@ -504,6 +544,7 @@ def ingest_cards_table(backend: str) -> None:
     db = lancedb.connect(DB_PATH)
     name = f"cards_{backend}"
     recover_staging(db, name)
+    recover_staging(db, META_TABLE)
 
     chunks: list[Chunk] = []
     for path in cards:
@@ -511,13 +552,24 @@ def ingest_cards_table(backend: str) -> None:
     vectors = embedder.embed_docs([embedding_text(c) for c in chunks])
     table = rebuild_table(db, name, [rows_for(chunks, vectors)])
     build_fts_index(db, name)
-    write_index_meta(db, name, backend, embedder.model, embedder.dims)
+    # No `book_id` on the cards table and no ledger row for a card: a card is a
+    # distillate of a book that the transcripts table already holds, and the
+    # ledger's unit is the book. Its schema_version stays at the default, which
+    # says only "written by an ingest that knows about the field".
+    write_index_meta(db, name, backend, embedder.model, embedder.dims,
+                     chunker=CHUNKER_VERSION)
     print(f"cards done: {len(cards)} cards -> {table.count_rows()} chunks")
 
 
 def stamp_existing_tables(backend: str) -> None:
     """Fingerprint tables built before stamps existed. Assumes they were built
-    with the embedder configured right now — only run this when that is true."""
+    with the embedder configured right now — only run this when that is true.
+
+    Neither `chunker` nor `schema_version` is named here, and that is the point:
+    nothing recorded which chunker built such a table, so the chunker stays
+    empty rather than claiming the current one, and the version is read from the
+    table's own columns. The embedder is the one thing this command asserts, and
+    the one thing the operator is being asked to vouch for."""
     embedder = get_embedder(backend)
     db = lancedb.connect(DB_PATH)
     for name in (f"cards_{backend}", f"transcripts_{backend}"):

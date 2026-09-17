@@ -152,7 +152,14 @@ in [`adr/README.md`](adr/README.md), each with the measurement that settled it.
   never on raw hits.
 - **Embedding index fingerprint.** Ingest stamps every table with the embedding model and
   dimensionality; readers refuse an index built by another model, which otherwise degrades
-  retrieval silently when the dims happen to match.
+  retrieval silently when the dims happen to match. The stamp also carries the chunker and a
+  schema version (17.09), which nothing refuses on yet.
+- **A book has a minted identity, kept in a ledger beside the index (17.09, ADR-024).** The
+  `books` table records what was requested, what is indexed and what failed, under a `book_id`
+  assigned once and never derived from title, author or path — so a corrected author renames a
+  book instead of indexing a second one, and `ayl-add` updates one book at a time by that id. The
+  catalogue does not read it: what the library holds is answered from the rows that can be
+  searched (ADR-016), and `ayl-add --doctor` is what reconciles the two.
 
 ## Quote provenance (not faithfulness, and not correctness)
 
@@ -220,9 +227,11 @@ The numbers under [Evaluation](evaluation.md) come from this validator (runs on 
 ```
 src/ask_your_library/  agent package: graph, nodes, model client (llm.py), prompts, clarify
                        resolver, coverage gate, provenance engine, hybrid search, embeddings,
-                       index fingerprint, sanitizer, preflight, runner, CLI, i18n
-  ingest/              chapter splitting, chunking, LanceDB rows, FTS index, staged
-                       publishing, and add_folder.py - the `ayl-add` folder ingest
+                       index fingerprint, bookkey.py (one home for book identity),
+                       sanitizer, preflight, runner, CLI, i18n
+  ingest/              chapter splitting, chunking, LanceDB rows, FTS index, staged and
+                       per-book publishing, ledger.py (the books ledger), doctor.py
+                       (ledger vs index), and add_folder.py - the `ayl-add` folder ingest
 scripts/               ingest_demo_corpus.py - staged, cached corpus build
 corpus/                manifest.yaml (checksums), book cards, canaries, audio transcripts,
                        toc/ (committed chapter titles; the card-grounding test uses them)

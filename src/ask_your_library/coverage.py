@@ -6,7 +6,7 @@ no effect (04.09).
 import re
 
 from .config import MAX_STEPS
-from .library import TITLE_SEPARATOR, title_of
+from .bookkey import TITLE_SEPARATOR, title_of
 from .state import AgentState, is_loop_marker
 
 def _uncovered_books(state: AgentState) -> list[tuple[str, int]]:

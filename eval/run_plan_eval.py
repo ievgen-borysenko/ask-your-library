@@ -56,7 +56,8 @@ from pathlib import Path
 import yaml
 
 from ask_your_library import nodes
-from ask_your_library.library import BookEntry, TITLE_SEPARATOR, title_of
+from ask_your_library.bookkey import TITLE_SEPARATOR, title_of
+from ask_your_library.library import BookEntry
 # the conditional edge graph.py wires after plan, called here over the state the
 # node produced: a routing change is measured by this harness too
 from ask_your_library.nodes import route_after_plan

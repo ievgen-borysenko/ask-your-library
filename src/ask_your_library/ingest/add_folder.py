@@ -27,26 +27,28 @@ searches full text alone when the cards table is absent.
 import argparse
 import hashlib
 import logging
-import re
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import lancedb
-import pyarrow as pa
 
+from ..bookkey import (MAX_TITLE_LINE, UNKNOWN_AUTHOR, author_of, book_key, chunk_id, slug,
+                       split_title_author, title_of)
 from ..config import DB_PATH, EMBED_BACKEND
 from ..embeddings import get_embedder
-from ..index_meta import check_index, read_index_meta, write_index_meta
-from ..library import TITLE_SEPARATOR
+from ..index_meta import META_TABLE, check_index, read_index_meta, write_index_meta
 from ..sanitize import LINE_BREAK_RE, strip_control_chars
 from .chapters import MergedHeading, split_book_sections
 from .chunking import Chunk, embedding_text, pack_sentences, parse_frontmatter, rows_for, \
     split_sentences
+from .doctor import check_ledger
 from .fts import build_fts_index
-from .publish import COPY_BATCH_ROWS, NoRowsError, rebuild_table, recover_staging, \
-    table_batches, table_names
+from .ledger import (CHUNKER_VERSION, REQUESTED, Ledger, backfill_from_index,
+                     open_ledger)
+from .publish import NoRowsError, add_ledger_columns, book_revisions, rebuild_table, \
+    recover_staging, replace_book_rows, revision_of, rows_of_book, table_names
 
 log = logging.getLogger(__name__)
 
@@ -99,14 +101,6 @@ class IngestError(Exception):
 
 BOOK_SUFFIXES = (".txt", ".md", ".markdown")
 MARKDOWN_SUFFIXES = (".md", ".markdown")
-UNKNOWN_AUTHOR = "Unknown"
-
-# Separators accepted between a title and an author, longest first so " -- "
-# is not consumed by " - ". The canonical key always uses TITLE_SEPARATOR.
-AUTHOR_SEPARATORS = (" — ", " – ", " -- ", " - ", "—", "–")
-# A first line is only read as a title line when it is this short: a narrative
-# sentence containing " by " must not be mistaken for "Title by Author".
-MAX_TITLE_LINE = 120
 
 
 @dataclass
@@ -117,34 +111,20 @@ class Book:
     source: str                        # provenance, file name only (no local paths)
     path: Path
     sections: list[tuple[str, str]]
+    # sha256 of the book's TEXT — the body after the front matter and any title
+    # line have been taken off it, which is exactly the part that gets chunked
+    # and embedded. Deliberately not a digest of the file: correcting `author:`
+    # in the front matter rewrites the file and changes nothing about the book,
+    # and the ledger has to be able to see that.
+    text_sha256: str = ""
     # contents lines merged into the section above them, reported by the CLI
     merged_headings: list[MergedHeading] = field(default_factory=list)
 
 
 # --- book key ---------------------------------------------------------------
-
-def book_key(title: str, author: str) -> str:
-    """The key the agent cites and filters on, so it is also the string that
-    ends up in a terminal, in a prompt and in a chunk id: control and invisible
-    formatting characters are dropped before anything downstream sees them."""
-    title = re.sub(r"\s+", " ", strip_control_chars(title)).strip()
-    author = re.sub(r"\s+", " ", strip_control_chars(author)).strip() or UNKNOWN_AUTHOR
-    return f"{title}{TITLE_SEPARATOR}{author}"
-
-
-def split_title_author(raw: str) -> tuple[str, str] | None:
-    """"Title — Author" / "Title by Author" -> (title, author); None otherwise.
-    Split on the LAST separator: a title may itself contain a dash."""
-    text = raw.strip()
-    for separator in AUTHOR_SEPARATORS:
-        if separator in text:
-            title, _, author = text.rpartition(separator)
-            if title.strip() and author.strip():
-                return title.strip(), author.strip()
-    match = re.search(r"^(.+)\s+by\s+(\S.*)$", text, re.I)   # greedy: the LAST " by "
-    if match and match.group(1).strip():
-        return match.group(1).strip(), match.group(2).strip()
-    return None
+# `book_key`, `split_title_author` and `slug` live in `ask_your_library.bookkey`
+# with the rest of book identity; what stays here is where a key is FOUND in a
+# file — front matter, a first title line, the file name.
 
 
 def key_from_frontmatter(meta: dict) -> str | None:
@@ -183,23 +163,6 @@ def key_from_filename(path: Path) -> str:
     if parts:
         return book_key(*parts)
     return book_key(path.stem, UNKNOWN_AUTHOR)
-
-
-SLUG_DIGEST_CHARS = 8
-
-
-def slug(text: str) -> str:
-    """Row key derived from the book key: stable across file renames, so
-    re-adding the same book replaces its rows instead of duplicating them.
-
-    The readable part is ASCII-only and cut to 80 characters, which alone would
-    collapse distinct keys onto one row key (two Cyrillic titles both become
-    "book", and the second add would delete the first book's rows). A short
-    digest of the FULL key is appended, so the row key is unique per key while
-    still being readable in a chunk id."""
-    readable = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:80] or "book"
-    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:SLUG_DIGEST_CHARS]
-    return f"{readable}-{digest}"
 
 
 # --- reading a folder -------------------------------------------------------
@@ -287,7 +250,7 @@ def read_book(path: Path, folder: Path) -> Book | None:
                     path.relative_to(folder), heading.title, heading.body_chars,
                     heading.target)
     return Book(note=slug(key), book=key, source=f"local:{path.name}", path=path,
-                sections=sections, merged_headings=merged)
+                sections=sections, text_sha256=text_digest(body), merged_headings=merged)
 
 
 def read_folder(folder: Path) -> list[Book]:
@@ -329,7 +292,7 @@ def chunks_for(book: Book) -> list[Chunk]:
     for section, (title, text) in enumerate(book.sections, 1):
         for i, packed in enumerate(pack_sentences(split_sentences(text)), 1):
             chunks.append(Chunk(
-                chunk_id=f"{book.note}#{section}.{title or 'full'}/{i}",
+                chunk_id=chunk_id(book.note, title, i, ordinal=section),
                 note=book.note,
                 book=book.book,
                 source=book.source,
@@ -378,81 +341,372 @@ def refuse_model_mismatch(db, table: str, embedder) -> None:
             f"embedder {embedder.model!r} produces {embedder.dims} — rebuild the index.")
 
 
-def kept_rows(db, table_name: str, replaced: set[str], batch_rows: int = COPY_BATCH_ROWS):
-    """The existing rows this run does NOT replace, as Arrow record batches.
+def text_digest(body: str) -> str:
+    """sha256 of a book's text.
 
-    Streamed rather than materialized: reading the live table with `to_arrow()`
-    would hold the entire index in memory for the length of the run, so adding
-    one small book to a large library would cost as much memory as rebuilding
-    it. One batch at a time is held instead, and the rows are handed straight
-    to the staging table.
-
-    Arrow rather than row dicts so the staging table is created with the live
-    table's own schema — the vector column is a fixed-size list, and inferring
-    that again from Python floats is not guaranteed to reproduce it."""
-    for batch in table_batches(db.open_table(table_name), batch_rows):
-        if not replaced:
-            yield batch
-            continue
-        keep = pa.array([note not in replaced for note in batch.column("note").to_pylist()])
-        kept = batch.filter(keep)
-        if kept.num_rows:               # a batch of nothing but replaced books
-            yield kept
+    Of the TEXT, not of the file: the ledger uses this to recognise a book
+    whose metadata changed, and the metadata lives in the same file. Correct
+    `author:` in the front matter, or fix the author on the title line, and the
+    file's bytes change while the book does not — so a file digest would call
+    the corrected book a different book, which is the defect this whole issue
+    is about. The body handed here is the one that gets chunked and embedded,
+    after `parse_frontmatter` and after a title line has been lifted off it."""
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 
-def add_books(books: list[Book], backend: str, db_path: Path) -> dict:
+def folder_digest(folder: Path | None) -> str:
+    """A short, stable tag for the folder a book was indexed from.
+
+    One index can be fed from several folders (`LIBRARY_DB_PATH` is one
+    database, `ayl-add <folder>` names one folder per run), and two libraries
+    may well both hold `notes.md`. Without the folder in the reference, a file
+    at the same relative path in a second folder would look like the FIRST
+    folder's book — and adopt its id, and replace its rows. A digest rather
+    than the path itself: the ledger is read out loud in `--doctor` output and
+    in the run summary, and nothing there should name a directory on this
+    machine."""
+    if folder is None:
+        return "nofolder"
+    try:
+        resolved = str(Path(folder).resolve())
+    except OSError:
+        resolved = str(folder)
+    return hashlib.sha256(resolved.encode("utf-8")).hexdigest()[:8]
+
+
+def source_ref_for(book: "Book", folder: Path | None) -> str:
+    """`local:<folder digest>:<path inside the folder>` — what the ledger
+    records as a book's source, and what `resolve` matches a corrected book on."""
+    return f"local:{folder_digest(folder)}:{relative_name(book, folder)}"
+
+
+def parse_source_ref(ref: str) -> tuple[str, str] | None:
+    """(folder digest, relative path) of a `local:` reference, or None for a
+    reference written by another ingest path (`manifest:`, `note:`)."""
+    if not ref.startswith("local:"):
+        return None
+    parts = ref.split(":", 2)
+    if len(parts) != 3:
+        return None
+    return parts[1], parts[2]
+
+
+def display_source(ref: str) -> str:
+    """A source reference as a person should read it: the file, and the folder
+    named by its tag rather than by its path."""
+    parsed = parse_source_ref(ref)
+    if not parsed:
+        return ref
+    digest, relative = parsed
+    return f"{relative} (folder {digest})"
+
+
+def open_book_ledger(db, backend: str, embedder) -> Ledger:
+    """The ledger of this index, backfilled on first sight of an older one.
+
+    An index built before the ledger existed knows its books only as rows, and
+    a per-book update keyed by a minted id cannot touch rows that have no id.
+    So the first run over such an index mints one per distinct book key and
+    records it as `indexed` with `chunker=legacy` — what is true of it, and no
+    more."""
+    ledger = open_ledger(db)
+    if ledger.exists():
+        return ledger
+    names = table_names(db)
+    present = [name for name in (f"transcripts_{backend}", f"cards_{backend}") if name in names]
+    if present:
+        backfill_from_index(db, present, embedding_model=embedder.model)
+    return ledger
+
+
+def recover_interrupted(db, table_name: str, ledger: Ledger, about_to_write: set[str]) -> list[str]:
+    """The recovery pass at the start of a run: every ledger row that says a
+    book was requested and never confirmed indexed.
+
+    What decides the outcome is the REVISION the rows carry, never the fact that
+    rows exist. `begin` marks a book `requested` before its text is embedded, so
+    at that moment the index still holds the PREVIOUS version of it — and a
+    crash there (a power cut, not an exception, which is recorded as `failed`)
+    leaves `requested` with a full set of perfectly good, perfectly stale rows.
+    Reading presence alone, this pass used to call that a completed append and
+    mark the old text current. Nothing else in the system could then tell.
+
+    So each book's rows are asked which version of it they are (`book_rev`, a
+    short prefix of the digest the ledger recorded when the write began) and
+    compared with what the ledger expected:
+
+    *The revision matches* — the append landed and only the ledger's second
+    write was lost. One book is one `table.add()`, which LanceDB commits as a
+    unit, so those rows are the whole book at that revision; the ledger is
+    corrected to say so.
+
+    *The revision does not match, or the rows cannot say* (empty, mixed, or
+    written before the column existed) — the index holds something other than
+    what was asked for. Re-indexed when this run covers the book, reported as
+    stale when it does not. Never committed: calling an older text current is
+    the one thing a ledger must not do.
+
+    *No rows at all* — the crash fell between the delete and the append. Same
+    two outcomes, and the report says which case it was.
+
+    Returns the lines to report."""
+    report: list[str] = []
+    if table_name not in table_names(db):
+        return report
+    table = db.open_table(table_name)
+    for row in ledger.missing():
+        key, book_id = row.get("key") or "(no key)", row["book_id"]
+        present = rows_of_book(table, book_id)
+        expected = revision_of(row.get("sha256") or "")
+        revisions = book_revisions(table, book_id) if present else set()
+        current = bool(expected) and revisions == {expected}
+
+        if present and current and row.get("status") == REQUESTED:
+            ledger.commit(book_id, rows=present)
+            report.append(f"recovered {key}: its {present} rows are the text that was "
+                          f"requested, and the ledger now says so")
+        elif present and row.get("status") != REQUESTED:
+            # `failed`, with rows: the index holds an EARLIER version of this
+            # book. Never silently promoted to `indexed`.
+            report.append(f"failed {key}: {row.get('error') or 'no reason recorded'} — the "
+                          f"rows in the index are from an earlier run")
+        elif present and key in about_to_write:
+            report.append(f"re-indexing {key}: an earlier run left the index holding an "
+                          f"older version of it")
+        elif present:
+            report.append(f"STALE {key}: requested, but the {present} rows in the index are "
+                          f"an older version of it — run ayl-add over its folder again "
+                          f"(the index is still answering from the older text)")
+        elif key in about_to_write:
+            report.append(f"re-indexing {key}: an earlier run did not finish it")
+        else:
+            source = display_source(row.get("source_ref") or "") or "an unrecorded source"
+            report.append(f"MISSING {key}: requested from {source}, never indexed — "
+                          f"run ayl-add over that folder again to finish it")
+    return report
+
+
+def folder_diff(db_path: Path, backend: str, books: list[Book], folder: Path):
+    """The ledger's view of this folder: which books are new, which it already
+    has, and which of its rows name a file that is no longer there.
+
+    Returns None when there is no index yet — `lancedb.connect` CREATES the
+    directory it is given, and `--dry-run` must not leave one behind."""
+    if not Path(db_path).exists():
+        return None
+    db = lancedb.connect(db_path)
+    ledger = open_ledger(db)
+    if not ledger.exists():
+        return None
+    return folder_ledger_diff(ledger, folder, books)
+
+
+def folder_ledger_diff(ledger: Ledger, folder: Path, books: list[Book]):
+    """The ledger's diff for these books, scoped to this folder — the one place
+    the injected rules are assembled, so the dry run, the run summary and
+    `--prune` cannot answer differently."""
+    by_path = {book.path: book.book for book in books}
+    refs = {book.path: source_ref_for(book, folder) for book in books}
+    return ledger.diff(folder, files=list(by_path), key_of=by_path.get,
+                       scope=folder_digest(folder), path_of=refs.get)
+
+
+def add_books(books: list[Book], backend: str, db_path: Path, folder: Path | None = None,
+              prune: bool = False) -> dict:
+    """Index these books, one book at a time, keyed by the ledger's `book_id`.
+
+    Not a whole-table rebuild any more (ADR-015's "an update is a staged
+    rebuild with a single publish" is partly superseded by ADR-024). A run that
+    adds one book to a library of three hundred now deletes and appends that
+    book's rows, instead of copying every row of the index through a staging
+    table twice. What is still whole is the BM25 index, which LanceDB drops with
+    the table it belongs to and which has no incremental merge here: its
+    seconds are measured and written into the ledger rows of the run, because
+    the backlog asked for a measurement before anyone makes it incremental
+    (#33).
+
+    The crash window moved rather than closed: between the delete and the
+    append one book is absent from the index, with a ledger row that says
+    `requested`. That is what `recover_interrupted` looks for on the next run —
+    and it is why the ledger comes before incrementality, not after it."""
     embedder = get_embedder(backend)
     db = lancedb.connect(db_path)
     table_name = f"transcripts_{backend}"
     recover_staging(db, table_name)
+    # The fingerprint table has its own staged rebuild (a widening), and
+    # recovering it is a write — so it happens here, on the write path, and
+    # never in the readers that check a stamp before every search.
+    recover_staging(db, META_TABLE)
     refuse_model_mismatch(db, table_name, embedder)
+    ledger = open_book_ledger(db, backend, embedder)
 
-    counts = {"books": 0, "sections": 0, "chunks": 0, "merged_headings": 0}
+    counts = {"books": 0, "sections": 0, "chunks": 0, "merged_headings": 0,
+              "recovered": [], "vanished": [], "pruned": 0}
+    counts["recovered"] = recover_interrupted(db, table_name, ledger,
+                                              {book.book for book in books})
+    for line in counts["recovered"]:
+        say(f"  {line}")
+
     existing = table_name in table_names(db)
-    replaced = {book.note for book in books}
+    # Resolved for the whole run before anything is written, and each id is
+    # taken out of circulation as it is handed out: two files with identical
+    # bytes are two books, not one of them renamed.
+    ids: dict[str, str] = {}
+    for book in books:
+        # title and author SEPARATELY: `book_key` is what `resolve` compares on,
+        # and handing it the composite key as a title produced
+        # "Title — Author — Unknown", which matches no row ever written. Every
+        # re-ingest of an edited book then minted a fresh id.
+        ids[book.note] = ledger.resolve(
+            title_of(book.book), author_of(book.book), sha256=book.text_sha256,
+            source_ref=source_ref_for(book, folder), claimed=set(ids.values()))
 
-    def batches():
-        # Update = merged rebuild, not delete-then-add on the live table: the
-        # books that stay, then the books of this run. The old table is only
-        # dropped once the staging table holds every row, so an embedder that
-        # dies on book 7 leaves the index exactly as it was (FTS index and
-        # fingerprint included) instead of a half-updated table.
-        if existing:
-            yield from kept_rows(db, table_name, replaced)
-        for i, book in enumerate(books, 1):
-            chunks = chunks_for(book)
-            if not chunks:
-                # Defensive: split_book_chapters currently guarantees at least
-                # one non-empty section, so a book always chunks to something.
-                # If a future chunker stops guaranteeing it, skip the book —
-                # never embed an empty batch, never blank the table.
-                log.warning("%s: produced no text chunks, skipped", book.path.name)
-                continue
+    def prepare(book: Book) -> tuple[str, list[dict]] | None:
+        """One book, embedded, as rows ready to write. None when it chunked to
+        nothing — never an empty batch, never a blanked book."""
+        book_id = ids[book.note]
+        chunks = chunks_for(book)
+        if not chunks:
+            # Defensive: split_book_sections currently guarantees at least one
+            # non-empty section, so a book always chunks to something. If a
+            # future chunker stops guaranteeing it, skip the book.
+            log.warning("%s: produced no text chunks, skipped", book.path.name)
+            ledger.fail(book_id, "produced no text chunks")
+            return None
+        ledger.begin(book_id, key=book.book, source_ref=source_ref_for(book, folder),
+                     sha256=book.text_sha256, embedding_model=embedder.model)
+        try:
             vectors = embedder.embed_docs([embedding_text(c) for c in chunks])
-            counts["books"] += 1
-            counts["sections"] += len(book.sections)
-            counts["chunks"] += len(chunks)
-            counts["merged_headings"] += len(book.merged_headings)
-            say(f"  [{i}/{len(books)}] {book.book}: {len(book.sections)} sections, "
-                f"{len(chunks)} chunks")
-            yield rows_for(chunks, vectors)
+        except Exception as error:
+            # The ledger says `failed`, with the reason, and the book keeps
+            # whatever rows it already had: the next run reports the pair
+            # instead of promoting stale rows to current.
+            ledger.fail(book_id, f"{type(error).__name__}: {error}")
+            raise
+        counts["books"] += 1
+        counts["sections"] += len(book.sections)
+        counts["chunks"] += len(chunks)
+        counts["merged_headings"] += len(book.merged_headings)
+        return book_id, rows_for(chunks, vectors, book_id, revision_of(book.text_sha256))
 
-    try:
-        rebuild_table(db, table_name, batches())
-    except NoRowsError as error:
-        # Every file in the folder chunked to nothing. rebuild_table left the
-        # live table alone; report it as the one-line user error the CLI
-        # promises instead of letting a bare ValueError reach the terminal.
-        raise IngestError(
-            f"nothing to index: none of the {len(books)} files produced any text chunks "
-            f"— the index was left unchanged") from error
-    build_fts_index(db, table_name)
-    write_index_meta(db, table_name, backend, embedder.model, embedder.dims)
+    written: list[tuple[str, int]] = []
+    if existing:
+        # The per-book path. The column has to be there before a delete can be
+        # keyed on it; filling it is a staged rebuild that re-embeds nothing.
+        add_ledger_columns(db, table_name, _book_id_by_note(ledger))
+        table = db.open_table(table_name)
+        for i, book in enumerate(books, 1):
+            prepared = prepare(book)
+            if prepared is None:
+                continue
+            book_id, rows = prepared
+            say(f"  [{i}/{len(books)}] {book.book}: {len(book.sections)} sections, "
+                f"{len(rows)} chunks")
+            replace_book_rows(table, book_id, book.note, rows)
+            written.append((book_id, len(rows)))
+    else:
+        # No table yet: one staged publish for the whole folder is both cheaper
+        # and safer than creating a table and appending to it book by book.
+        def batches():
+            for i, book in enumerate(books, 1):
+                prepared = prepare(book)
+                if prepared is None:
+                    continue
+                book_id, rows = prepared
+                say(f"  [{i}/{len(books)}] {book.book}: {len(book.sections)} sections, "
+                    f"{len(rows)} chunks")
+                written.append((book_id, len(rows)))
+                yield rows
+
+        try:
+            rebuild_table(db, table_name, batches())
+        except NoRowsError as error:
+            raise IngestError(
+                f"nothing to index: none of the {len(books)} files produced any text chunks "
+                f"— the index was left unchanged") from error
+
+    fts_seconds = build_fts_index(db, table_name)
+    write_index_meta(db, table_name, backend, embedder.model, embedder.dims,
+                     chunker=CHUNKER_VERSION)
+    # After the FTS rebuild, so a crash during it leaves the books `requested`
+    # and the next run's recovery pass sees rows and confirms them.
+    for book_id, rows in written:
+        ledger.commit(book_id, rows=rows, fts_seconds=fts_seconds)
+
+    if folder is not None:
+        counts["vanished"] = [row for row in folder_vanished(ledger, folder, books)]
+        if prune and counts["vanished"]:
+            counts["pruned"] = prune_books(db, table_name, ledger, counts["vanished"],
+                                           cards_table=f"cards_{backend}")
+            fts_seconds = build_fts_index(db, table_name)
+
     counts["table"] = table_name
     counts["model"] = embedder.model
     counts["dims"] = embedder.dims
+    counts["fts_seconds"] = fts_seconds
     counts["cards_table"] = f"cards_{backend}" in table_names(db)
     return counts
+
+
+def relative_name(book: Book, folder: Path | None) -> str:
+    """What the ledger records as the book's file: the path inside the folder,
+    never an absolute one — the same rule the `source` column already follows,
+    so a ledger read out loud names nothing about this machine."""
+    if folder is None:
+        return book.path.name
+    try:
+        return str(book.path.relative_to(folder))
+    except ValueError:
+        return book.path.name
+
+
+def _book_id_by_note(ledger: Ledger):
+    """`note` -> `book_id` for the column migration. A backfilled row carries
+    the row key its chunks were written under (`note:<slug>`); a row written by
+    a later run carries its file instead, and is found by re-deriving the slug
+    from its key."""
+    by_note: dict[str, str] = {}
+    for row in ledger.all_rows():
+        ref = row.get("source_ref") or ""
+        if ref.startswith("note:"):
+            by_note.setdefault(ref[len("note:"):], row["book_id"])
+        key = row.get("key")
+        if key:
+            by_note.setdefault(slug(key), row["book_id"])
+    return by_note.get
+
+
+def folder_vanished(ledger: Ledger, folder: Path, books: list[Book]) -> list[dict]:
+    return folder_ledger_diff(ledger, folder, books).vanished
+
+
+def prune_books(db, table_name: str, ledger: Ledger, rows: list[dict],
+                cards_table: str = "") -> int:
+    """Delete the rows of books whose file is gone, and their ledger rows.
+
+    Only ever under `--prune`. A folder that failed to mount, a file being
+    edited in place, a partial sync — all of them look exactly like a deletion,
+    and the difference between reporting and deleting is the difference between
+    a warning and a lost book.
+
+    The full-text rows go; a book CARD of the same key stays, and the line says
+    so. `ayl-add` does not write the cards table — a card is an LLM-distilled
+    summary that costs a model call per book and usually came from the demo
+    corpus, so deleting one because a text file vanished from a folder would
+    reach well past what this flag promises. What it costs is stated instead:
+    the catalogue goes on listing that key as a book with no text, and
+    `--doctor` names it as a card without a book."""
+    table = db.open_table(table_name)
+    cards = db.open_table(cards_table) if cards_table in table_names(db) else None
+    for row in rows:
+        key = row.get("key") or ""
+        replace_book_rows(table, row["book_id"], slug(key), [])
+        ledger.delete(row["book_id"])
+        say(f"  pruned {key}: its file is no longer in the folder")
+        if cards is not None and cards.count_rows(f"book = '{key.replace(chr(39), chr(39) * 2)}'"):
+            say(f"      its book card in {cards_table} is kept (ayl-add does not write that "
+                f"table): the catalogue still lists {key} as a book with no text")
+    return len(rows)
 
 
 def merged_headings_line(count: int) -> str:
@@ -464,7 +718,7 @@ def merged_headings_line(count: int) -> str:
             f"later in the file)")
 
 
-def dry_run(books: list[Book], backend: str, db_path: Path) -> int:
+def dry_run(books: list[Book], backend: str, db_path: Path, folder: Path | None = None) -> int:
     sections = chunks = merged = 0
     for book in books:
         book_chunks = chunks_for(book)
@@ -479,7 +733,43 @@ def dry_run(books: list[Book], backend: str, db_path: Path) -> int:
         f"into transcripts_{backend} at {db_path} (nothing written, nothing embedded)")
     if merged:
         say(merged_headings_line(merged))
+    if folder is not None:
+        print_diff(folder_diff(db_path, backend, books, folder), db_path)
     return 0
+
+
+def print_diff(diff, db_path: Path) -> None:
+    """What the run would change, against the ledger: the half of `--dry-run`
+    that needs an index to answer. Without one every book is new, and saying so
+    is more use than printing three empty lists."""
+    if diff is None:
+        say(f"\nno book ledger at {db_path} yet — every book above is new")
+        return
+    say(f"\nagainst the ledger at {db_path}:")
+    say(f"  {len(diff.new)} new, {len(diff.known)} already indexed "
+        f"(their rows would be replaced)")
+    for path in diff.new:
+        say(f"      new       {path.name}")
+    for path, _ in diff.known:
+        say(f"      replaces  {path.name}")
+    for row in diff.vanished:
+        say(f"      VANISHED  {row.get('key')} ({display_source(row.get('source_ref') or '')}) "
+            f"— still in the index; --prune removes it")
+
+
+def run_doctor(backend: str, db_path: Path) -> int:
+    """`ayl-add <anything> --doctor`: what the ledger and the index disagree
+    about. Exit 0 when they agree, 1 when they do not — so it can gate a
+    script, and so "no drift" is a statement and not the absence of output."""
+    if not Path(db_path).exists():
+        say(f"no index at {db_path}", error=True)
+        return 1
+    db = lancedb.connect(db_path)
+    report = check_ledger(db, [f"transcripts_{backend}", f"cards_{backend}"])
+    say(f"index {db_path}")
+    for line in report.lines():
+        say(line)
+    return 0 if report.ok else 1
 
 
 # --- entry point ------------------------------------------------------------
@@ -489,13 +779,23 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="ayl-add",
         description="Index a folder of .txt / .md books into the Ask Your Library LanceDB.")
-    parser.add_argument("folder", type=Path, help="folder of .txt / .md files (searched recursively)")
+    # Optional only because --doctor reads the index and needs no folder; a
+    # run without either is the argparse error it always was.
+    parser.add_argument("folder", type=Path, nargs="?",
+                        help="folder of .txt / .md files (searched recursively)")
     parser.add_argument("--backend", default=EMBED_BACKEND, choices=("ollama", "openrouter"),
                         help="embedding backend; also selects the table suffix")
     parser.add_argument("--db", type=Path, default=None,
                         help=f"LanceDB directory (default: LIBRARY_DB_PATH, now {DB_PATH})")
     parser.add_argument("--dry-run", action="store_true",
-                        help="print the books, sections and chunk counts; embed and write nothing")
+                        help="print the books, sections and chunk counts and the diff against "
+                             "the book ledger; embed and write nothing")
+    parser.add_argument("--prune", action="store_true",
+                        help="also DELETE the rows of books whose file is no longer in the "
+                             "folder (without it they are reported and kept)")
+    parser.add_argument("--doctor", action="store_true",
+                        help="reconcile the book ledger against the index tables and report "
+                             "any drift; read nothing else, write nothing")
     parser.add_argument("--cards", action="store_true",
                         help="not implemented (see the message it prints)")
     args = parser.parse_args(argv)
@@ -509,6 +809,12 @@ def main(argv: list[str] | None = None) -> int:
             error=True)
         return 2
 
+    if args.doctor:
+        return run_doctor(args.backend, (args.db.expanduser() if args.db else DB_PATH))
+    if args.folder is None:
+        say("no folder given: `ayl-add <folder>`, or `ayl-add --doctor` to check an "
+            "existing index", error=True)
+        return 2
     folder = args.folder.expanduser()
     if not folder.is_dir():
         say(f"not a folder: {folder}", error=True)
@@ -518,9 +824,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         books = read_folder(folder)
         if args.dry_run:
-            return dry_run(books, args.backend, db_path)
+            return dry_run(books, args.backend, db_path, folder)
         say(f"embedding {len(books)} books with {args.backend} into {db_path} ...")
-        counts = add_books(books, args.backend, db_path)
+        counts = add_books(books, args.backend, db_path, folder, prune=args.prune)
     except IngestError as error:              # one readable line, not a traceback
         say(str(error), error=True)
         return 1
@@ -530,7 +836,14 @@ def main(argv: list[str] | None = None) -> int:
     if counts["merged_headings"]:
         say(merged_headings_line(counts["merged_headings"]))
     say(f"table {counts['table']} in {db_path}; embedding model {counts['model']} "
-        f"({counts['dims']} dims), FTS index rebuilt")
+        f"({counts['dims']} dims), FTS index rebuilt in {counts['fts_seconds']:.1f}s "
+        f"(whole, every run)")
+    for row in counts["vanished"]:
+        say(f"still in the index, but no longer in the folder: {row.get('key')} "
+            f"({display_source(row.get('source_ref') or '')}) — re-run with --prune to "
+            f"delete its rows")
+    if counts["pruned"]:
+        say(f"pruned {counts['pruned']} book(s) whose file is gone")
     if not counts["cards_table"]:
         say(f"no cards_{args.backend} table here: the agent will search full text only "
             f"(book cards need an LLM and are not generated by ayl-add)")
