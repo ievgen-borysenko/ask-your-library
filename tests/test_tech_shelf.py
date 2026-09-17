@@ -61,7 +61,7 @@ def test_every_work_carries_the_fields_a_build_and_a_reader_need():
     for work in works():
         where = work.get("id", work.get("title", "<unnamed>"))
         for field in ("id", "title", "author", "year", "kind", "source", "fetch",
-                      "cards", "note"):
+                      "pin", "cards", "note"):
             if work.get(field) in (None, "", []):
                 problems.append(f"  {where}: no {field}")
         if work.get("kind") not in KINDS:
@@ -69,6 +69,10 @@ def test_every_work_carries_the_fields_a_build_and_a_reader_need():
         if work.get("fetch") not in FETCH_KINDS:
             problems.append(f"  {where}: fetch {work.get('fetch')!r} is not a kind the "
                             f"script knows ({sorted(FETCH_KINDS)})")
+        if work.get("pin") not in shelf.PIN_KINDS:
+            problems.append(f"  {where}: pin {work.get('pin')!r} is not one of "
+                            f"{list(shelf.PIN_KINDS)} — it decides what the sha256 is "
+                            f"taken of")
         if not isinstance(work.get("cards"), bool):
             problems.append(f"  {where}: cards must be true or false, not "
                             f"{work.get('cards')!r} — it decides whether a derivative "
@@ -169,6 +173,111 @@ def test_every_committed_card_is_for_a_work_that_may_have_one():
         f"a card is committed for a NoDerivatives work: {sorted(written & NO_CARD)}"
     assert written <= allowed, \
         f"cards for works the manifest does not allow one for: {sorted(written - allowed)}"
+
+
+# --- 2b. what a pin is taken of ----------------------------------------------
+
+# The pages these publishers serve are not byte-stable, so a byte pin on them is
+# red on every run and can never report the edit it exists to catch. Both cases
+# below are the real ones, reduced to the smallest page that shows them.
+NONCE_PAGE = ('<html><head><script nonce="{nonce}">var a=1;</script></head>'
+              '<body><h2>Rule #4</h2><p>Keep the first model simple.</p>'
+              '<script type="application/json" analytics>{analytics}</script>'
+              '</body></html>')
+CLOUDFLARE_PAGE = ('<html><body><h2>Preface</h2><p>Email '
+                   '<a class="email" href="/cdn-cgi/l/email-protection#{key}">'
+                   '<span class="__cf_email__" data-cfemail="{key}">'
+                   '[email&#160;protected]</span></a> to comment.</p></body></html>')
+
+TEXT_WORK = {"id": "pinned-by-text", "fetch": "html-chapters", "pin": "text"}
+
+
+def digest_of_html(html: str, tmp_path: Path, name: str = "page.html") -> str:
+    path = tmp_path / name
+    path.write_text(html, encoding="utf-8")
+    return shelf.digest_of(TEXT_WORK, path)
+
+
+def test_a_per_response_nonce_does_not_change_a_text_pin(tmp_path):
+    """developers.google.com stamps every response with a CSP nonce and an
+    analytics blob whose JSON keys come out in a different order each time. Two
+    fetches three seconds apart gave two different digests (#58); neither
+    fragment is text of the book, and under the text pin the two hash the
+    same."""
+    first = digest_of_html(NONCE_PAGE.format(
+        nonce="OUM2UctphZr7khAsNUmKlfJAa0bYkN",
+        analytics='[{"dimension6": "en", "dimension1": "Signed out"}]'), tmp_path)
+    second = digest_of_html(NONCE_PAGE.format(
+        nonce="xK4pQ2vLmNrT8wZaYbCdEfGhIjKlMn",
+        analytics='[{"dimension1": "Signed out", "dimension6": "en"}]'), tmp_path)
+    assert first == second
+
+
+def test_cloudflares_email_obfuscation_does_not_change_a_text_pin(tmp_path):
+    """abseil.io is behind Cloudflare, which rewrites the book's "Email ... to
+    comment" link with a fresh key on every response — three digests were
+    observed for one unchanged page. The link's visible text does not move."""
+    first = digest_of_html(CLOUDFLARE_PAGE.format(key="bddfd2d2d6ccc8d8cec9d4d2d3ce"), tmp_path)
+    second = digest_of_html(CLOUDFLARE_PAGE.format(key="0b696464607a7e6e787f62646578"), tmp_path)
+    assert first == second
+
+
+def test_a_changed_paragraph_does_change_a_text_pin(tmp_path):
+    """The other half, and the one that matters: a text pin still catches an
+    edit to the book. Without this the rule above would be indistinguishable
+    from not hashing anything."""
+    same = NONCE_PAGE.format(nonce="n", analytics="[]")
+    edited = same.replace("Keep the first model simple.",
+                          "Keep the first model simple, and get the infrastructure right.")
+    assert digest_of_html(same, tmp_path) != digest_of_html(edited, tmp_path)
+
+
+def test_a_heading_that_disappears_changes_a_text_pin(tmp_path):
+    """A chapter heading is text too: a page that loses one is a different
+    page, however little of its prose moved."""
+    same = NONCE_PAGE.format(nonce="n", analytics="[]")
+    assert digest_of_html(same, tmp_path) != digest_of_html(
+        same.replace("<h2>Rule #4</h2>", ""), tmp_path)
+
+
+def test_a_bytes_pinned_work_is_hashed_as_the_file(tmp_path):
+    """The other rule, unchanged: a PDF and a file served out of a git
+    repository are byte-stable, and hashing them whole says more than hashing
+    what a reader made of them."""
+    path = tmp_path / "chapter.html"
+    path.write_text(NONCE_PAGE.format(nonce="n", analytics="[]"), encoding="utf-8")
+    work = dict(TEXT_WORK, pin="bytes")
+    assert shelf.digest_of(work, path) == shelf.sha256_of(path)
+    assert shelf.digest_of(TEXT_WORK, path) != shelf.sha256_of(path)
+
+
+def test_the_pages_index_is_hashed_as_bytes_even_under_a_text_pin(tmp_path):
+    """It is this script's record of which pages the publisher's table of
+    contents listed and in which order, not a page to read: a chapter that
+    appears, vanishes or moves has to be a failure."""
+    path = tmp_path / shelf.PAGES_INDEX
+    path.write_text(json.dumps([{"url": "https://example.invalid/a", "file": "a.html",
+                                 "title": "A"}]), encoding="utf-8")
+    assert shelf.digest_of(TEXT_WORK, path) == shelf.sha256_of(path)
+
+
+def test_a_work_with_no_pin_rule_is_a_failure_not_a_guess(tmp_path):
+    """The two rules answer different questions, so a work added without saying
+    which one it wants must not be pinned by whichever is the fallback."""
+    path = tmp_path / "page.html"
+    path.write_text("<p>x</p>", encoding="utf-8")
+    with pytest.raises(SystemExit, match="pin:"):
+        shelf.digest_of({"id": "no-rule", "fetch": "html-chapters"}, path)
+
+
+def test_the_pin_rule_and_the_fetch_kind_agree():
+    """The rule as the shelf applies it: the two shapes fetched from a web page
+    are pinned by text, and the ones fetched from a git repository or published
+    as a PDF are pinned by bytes."""
+    by_text = {"html-chapters", "arxiv-html"}
+    wrong = [f"{work['id']}: fetch {work['fetch']}, pin {work['pin']}" for work in works()
+             if (work["pin"] == "text") != (work["fetch"] in by_text)]
+    assert not wrong, "pin rules that do not follow the fetch kind:\n" + "\n".join(wrong)
 
 
 # --- 3. the chapter lists ----------------------------------------------------

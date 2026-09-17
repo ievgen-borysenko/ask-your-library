@@ -10,7 +10,10 @@ generic folder ingest:
 
 corpus-tech/manifest.yaml is the single source of truth for what the shelf
 holds, where each work comes from, under which licence, and the sha256 of every
-file that was fetched to build it. Three of the works are CC BY-NC-ND: they are
+file that was fetched to build it — taken per the work's `pin:`, which is
+`bytes` for a PDF or a file out of a git repository and `text` for a page read
+off the web, because two of these publishers do not serve the same bytes twice
+(see `digest_of`). Three of the works are CC BY-NC-ND: they are
 fetched as text and never get a generated book card, because a card is a
 derivative work and ND forbids distributing one (`cards: false` in the manifest,
 and `card_targets` below is the only list a card-generating stage may read).
@@ -1091,6 +1094,59 @@ def build_cards(entries: list[dict], manifest: dict, force: bool = False) -> Non
 
 # --- pins --------------------------------------------------------------------
 
+PIN_KINDS = ("text", "bytes")
+
+
+def pin_kind(work: dict) -> str:
+    """Whether this work's files are pinned by their bytes or by the text the
+    reader extracts from them (`pin:` in the manifest).
+
+    There is no default. A work added without deciding this would be pinned by
+    whichever rule happened to be the fallback, and the two rules answer
+    different questions — so the person adding a work says which one, and a work
+    that does not is a failure rather than a guess."""
+    kind = work.get("pin")
+    if kind not in PIN_KINDS:
+        sys.exit(f"{work['id']}: pin: is {kind!r}, not one of {PIN_KINDS} — say in "
+                 f"corpus-tech/manifest.yaml whether this work's files are pinned by "
+                 f"their bytes or by the text read out of them")
+    return kind
+
+
+def page_text(work: dict, path: Path) -> str:
+    """The reader's output for one fetched page: the chapter body the prepare
+    stage builds out of that file, and nothing else the page carries."""
+    html = path.read_text(encoding="utf-8", errors="replace")
+    return render(read_html(html, work.get("container")), demote=1)
+
+
+def digest_of(work: dict, path: Path) -> str:
+    """The digest this work's pins are made of.
+
+    `pin: bytes` hashes the file. `pin: text` hashes what the reader extracts
+    from it, because two of these publishers do not serve the same bytes twice:
+    developers.google.com stamps every response with a CSP `nonce` and an
+    analytics JSON blob whose keys come out in a different order each time, and
+    abseil.io is behind Cloudflare's email obfuscation, which rewrites the
+    book's "Email ... to comment" link with a fresh key per response. Three
+    fetches of an unchanged page gave three digests, so the weekly job was red
+    by construction on those two files — and a job that is always red cannot
+    report the edit it exists to catch in the other 174 (#58).
+
+    None of that noise is text of the book: `<script>` is dropped by the reader
+    and an attribute never reaches it, while the link's visible text is stable.
+    Hashing the reader's output pins exactly what the shelf is built from, and a
+    changed paragraph still changes the digest.
+
+    The pages index is always hashed as bytes, whatever the work's rule: it is
+    this script's own record of which pages the publisher's table of contents
+    listed and in which order, not a page to read, and a chapter that appears,
+    vanishes or moves has to be a failure."""
+    if path.name == PAGES_INDEX or pin_kind(work) == "bytes":
+        return sha256_of(path)
+    return hashlib.sha256(page_text(work, path).encode("utf-8")).hexdigest()
+
+
 def fetched_files(work: dict) -> list[Path]:
     directory = raw_dir(work)
     if not directory.exists():
@@ -1126,8 +1182,8 @@ def write_checksums(entries: list[dict]) -> None:
             continue
         body = re.sub(r"\n?    sources:\n(?:      [^\n]*\n)*", "\n", piece).rstrip("\n")
         pieces[index] = body + "\n    sources:\n" + "".join(
-            f"      {path.name}: {sha256_of(path)}\n" for path in files) + "\n"
-        print(f"  {work['id']}: {len(files)} files pinned")
+            f"      {path.name}: {digest_of(work, path)}\n" for path in files) + "\n"
+        print(f"  {work['id']}: {len(files)} files pinned by {pin_kind(work)}")
     MANIFEST.write_text("".join(pieces).rstrip("\n") + "\n", encoding="utf-8")
 
 
@@ -1147,14 +1203,15 @@ def verify(entries: list[dict]) -> None:
             if name not in present:
                 problems.append(f"  {work['id']}/{name}: pinned but not fetched")
                 continue
-            actual = sha256_of(present[name])
+            actual = digest_of(work, present[name])
             checked += 1
             if actual != digest:
                 problems.append(f"  {work['id']}/{name}: manifest {digest[:12]}..., "
-                                f"got {actual[:12]}... — the source changed upstream")
+                                f"got {actual[:12]}... ({pin_kind(work)} pin) — "
+                                f"the source changed upstream")
         for name in sorted(set(present) - set(pins)):
             problems.append(f"  {work['id']}/{name}: fetched but not pinned")
-        print(f"  {work['id']}: {len(pins)} pins")
+        print(f"  {work['id']}: {len(pins)} pins ({pin_kind(work)})")
     if problems:
         sys.exit("checksum verification failed:\n" + "\n".join(problems)
                  + "\n\nre-pin with --stage checksums once the change is understood; "

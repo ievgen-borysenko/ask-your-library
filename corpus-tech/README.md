@@ -119,6 +119,37 @@ per work, because these books are dozens of separately published pages and a fai
 Monday, so a publisher's edit turns up as a red job here rather than as a surprise in somebody's
 first build.
 
+**What the digest is taken of is `pin:` in the manifest, per work, and there is no default.**
+
+| `pin` | Works | What is hashed |
+|---|---|---|
+| `text` | `html-chapters`, `arxiv-html` | the text the HTML reader extracts from the page |
+| `bytes` | `pdf`, `git-markdown`, `git-html` | the file exactly as it was fetched |
+
+The reason is that two of these publishers do not serve the same bytes twice, and neither
+difference is text of the book:
+
+- **developers.google.com** (Rules of Machine Learning) stamps every response with a CSP
+  `<script nonce="…">` and an analytics JSON blob whose keys are serialised in a different order
+  each time. Two fetches three seconds apart gave two different digests.
+- **abseil.io** (Software Engineering at Google) is behind Cloudflare's email obfuscation, which
+  rewrites the book's "Email … to comment" link with a fresh key on every response. Three digests
+  were observed for one unchanged page: the pin, a local fetch and CI's.
+
+A byte pin on those two files was therefore red on every single run — and a job that is red by
+construction cannot report the edit it exists to catch in the other 174 files. The reader drops
+`<script>` entirely and never sees an attribute, while the obfuscated link's visible text does not
+move, so hashing the reader's output pins exactly what the shelf is built from. A changed
+paragraph, or a heading that disappears, still changes the digest
+(`tests/test_tech_shelf.py`). A PDF and a file served out of a git repository are byte-stable and
+keep the stronger rule.
+
+The pages index the fetch writes beside them (_pages.json) is hashed as bytes whatever a work's
+`pin` says: it is this script's record of which pages the publisher's table of contents listed and
+in which order, not a page to read, so a chapter that appears, vanishes or moves has to be a
+failure. And because `--stage verify` runs the reader
+rather than `pdftotext`, the weekly job still needs no poppler.
+
 When it goes red on a work, the pin is not the thing to fix first:
 
 ```sh
@@ -137,7 +168,8 @@ uv run scripts/fetch_tech_shelf.py --stage checksums --work "Site Reliability"
 ```
 
 Step 3 is the one that matters. A re-pin makes the checksums green by construction; the chapter
-list is what still says whether the book changed. A drift that moves or renames chapters is a
+list is what still says whether the book changed. Under a `text` pin the job is already past the
+noise — a digest that moved is a sentence of the book that moved. A drift that moves or renames chapters is a
 different edition, and the golden questions in `eval/golden/en-tech.yaml` have to be re-read
 against it.
 

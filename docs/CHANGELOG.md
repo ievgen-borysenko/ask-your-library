@@ -32,6 +32,20 @@
   a line that would be read as a chapter heading. The committed chapter lists did not change; the
   section count did, from 296 to the 275 chapters the shelf has.
 
+  **And the weekly pin check now means something.** It had been red on every run since the shelf
+  landed, always on the same two files, and not because anything upstream changed: those pages are
+  not byte-stable. developers.google.com stamps every response with a CSP nonce and an analytics
+  blob whose keys come out in a random order; abseil.io is behind Cloudflare's email obfuscation,
+  which rewrites the book's "Email … to comment" link per response. A job red by construction on
+  two files cannot report an edit in the other 174. `pin: text|bytes` per manifest entry now says
+  what the digest is taken of — the text the reader extracts, for a page read off the web; the file
+  itself, for a PDF or a file out of a git repository — with no default, so a work added without a
+  rule is a failure rather than a guess. The pages index stays on bytes whatever the work says,
+  because a chapter that appears or moves has to be one, and `--stage verify` runs the reader
+  rather than `pdftotext`, so the job still needs no poppler. Two independent fresh fetches, each
+  followed by `--stage verify`, both check 176/176 — while the raw bytes of those two files
+  differed between the very same two fetches.
+
 - **A request the library cannot answer is refused, not answered from the model** (#70,
   `eval/scope_canary.py`, [evaluation](evaluation.md)). "Before I can eat I need a Python script
   that reverses a linked list" is the failure everyone has seen from a support bot, and nothing
