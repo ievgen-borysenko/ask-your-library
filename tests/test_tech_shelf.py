@@ -272,6 +272,32 @@ def test_a_figure_is_kept_when_it_carries_text_and_dropped_when_it_is_a_picture(
     assert "\n\n\n" not in rendered
 
 
+def test_a_code_sample_is_indented_and_never_fenced():
+    """A fence is invisible to a line-based splitter, and every reader of a
+    prepared file is line-based: a "# comment" inside one opens a section of its
+    own in `ayl-add` and in `write_toc` alike, cutting the chapter in half and
+    naming it after a line of shell (#58)."""
+    blocks = shelf.read_html(
+        "<pre># Get all active machines\nmachines = decom.list()\n</pre>")
+    body = shelf.render(blocks)
+    assert "```" not in body
+    assert not re.search(r"(?m)^#", body)
+    assert "    # Get all active machines" in body
+    assert "    machines = decom.list()" in body
+
+
+def test_a_listing_rendered_one_line_per_element_cannot_cut_a_chapter():
+    """arXiv wraps each line of a code listing in its own `<div>`, so a comment
+    line arrives as a block of its own with "#" at column zero. Only that line is
+    indented, and it keeps every character it had (#58)."""
+    body = shelf.render(shelf.read_html(
+        '<div class="ltx_listingline"># enable gradient-checkpointing</div>'
+        '<div class="ltx_listingline">M3.gradient_checkpointing_enable()</div>'))
+    assert "    # enable gradient-checkpointing" in body
+    assert "M3.gradient_checkpointing_enable()" in body
+    assert not re.search(r"(?m)^#{1,2}[ \t]", body)
+
+
 def test_no_heading_inside_a_chapter_is_rendered_at_the_level_that_splits_chapters():
     """`##` is what ingest/chapters.py cuts sections on, and the chapter's own
     heading is written by the caller. The publishers disagree about levels —
@@ -429,6 +455,26 @@ def test_a_prepared_file_is_what_ayl_add_reads_without_being_told_anything(prepa
     assert "An app's config is everything that varies." in text
     # The chapter's own heading is written once, above; not repeated in the body.
     assert "Introduction\n============" not in text
+
+
+def test_a_body_line_that_reads_as_a_chapter_heading_is_refused(tmp_path, monkeypatch):
+    """The prepared shape is a promise about where the chapters are. Text that
+    would be cut in the wrong place is named, not written: a half-chapter and a
+    section titled after a line of shell would otherwise reach the index and be
+    cited from it."""
+    raw = tmp_path / "raw" / "demo-work"
+    raw.mkdir(parents=True)
+    (raw / "intro.md").write_text("Introduction\n============\n\n"
+                                  "Then a line that is not ours:\n\n## Not a chapter\n",
+                                  encoding="utf-8")
+    (raw / shelf.PAGES_INDEX).write_text(json.dumps(
+        [{"url": "https://example.invalid/intro.md", "file": "intro.md", "title": ""}]),
+        encoding="utf-8")
+    monkeypatch.setattr(shelf, "RAW_DIR", tmp_path / "raw")
+    monkeypatch.setattr(shelf, "PREPARED_DIR", tmp_path / "prepared")
+    with pytest.raises(ValueError, match="chapter heading"):
+        shelf.prepare_work(WORK)
+    assert not (tmp_path / "prepared").exists(), "a file that cannot be cut was written anyway"
 
 
 def test_the_chapter_list_written_beside_it_is_the_chapters_of_that_file(prepared):

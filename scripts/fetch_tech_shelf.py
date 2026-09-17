@@ -204,6 +204,14 @@ BLOCK_TAGS = {"p", "div", "section", "article", "ul", "ol", "dl", "table",
               "tr", "figure", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6",
               "li", "dt", "dd", "pre", "td", "th", "figcaption", "main"}
 HEADINGS = {f"h{level}": level for level in range(1, 7)}
+CODE_INDENT = "    "
+
+# What a prepared file's body may never contain: a line that a chapter splitter
+# reads as a heading. `#` and `##` at column zero are the file's own structure —
+# the work's title and its chapters — and a body line that looks like one is a
+# chapter cut in the wrong place, in this repository's `write_toc` and in
+# `ayl-add` alike.
+BODY_HEADING = re.compile(r"(?m)^#{1,2}[ \t]")
 
 
 def _matches(tag: str, attrs: dict, spec: str) -> bool:
@@ -262,7 +270,21 @@ class MarkdownReader(HTMLParser):
         elif self._pending and self._pending[0] == "term":
             self.blocks.append(("text", f"**{' '.join(text.split())}**"))
         elif self._pending and self._pending[0] == "pre":
-            self.blocks.append(("text", f"```\n{text}\n```"))
+            # An INDENTED code block, never a fenced one. A fence is invisible
+            # to a line-based reader, and every reader of a prepared file is
+            # line-based: `ayl-add` cuts a Markdown book on `#`/`##` at column
+            # zero with one regex over the whole file, and so does `write_toc`
+            # below. Inside a fence that regex still matches, so a shell or
+            # Python comment in a code sample — "# Get all active machines in
+            # satellite" — opens a section of its own, cuts the chapter it sits
+            # in half, and puts a comment line into the index as the section
+            # title the agent then cites. Eighteen of those across this shelf.
+            # Four leading spaces are what Markdown means by preformatted text,
+            # they keep every character of the line, and nothing can read them
+            # as a heading (#58).
+            self.blocks.append(("text", "\n".join(
+                CODE_INDENT + line if line.strip() else line
+                for line in text.split("\n"))))
         else:
             self.blocks.append(("text", text))
         self._pending = None
@@ -357,6 +379,23 @@ def same_heading(one: str, other: str) -> bool:
     return bare(one) == bare(other)
 
 
+def as_body_line(text: str) -> str:
+    """A text block none of whose lines can be read as a chapter heading.
+
+    A `<pre>` is indented whole, above, and that covers most code. What it does
+    not cover is a publisher who renders a code listing as one element per LINE:
+    arXiv wraps each line of a Python listing in its own `<div>`, so a comment
+    line arrives here as a block of its own with `#` at column zero — four of
+    them in the bge-m3 appendix, each of which would cut that appendix into
+    pieces named after a comment. Only the offending line is indented, and only
+    by the four spaces Markdown reads as preformatted text: the line keeps every
+    character it had, and it keeps its place in the chapter (#58)."""
+    if not BODY_HEADING.search(text):
+        return text
+    return "\n".join(CODE_INDENT + line if BODY_HEADING.match(line) else line
+                     for line in text.split("\n"))
+
+
 def render(blocks: list[tuple], demote: int = 0, skip_title: str | None = None) -> str:
     """Blocks -> Markdown, inside one chapter.
 
@@ -374,8 +413,11 @@ def render(blocks: list[tuple], demote: int = 0, skip_title: str | None = None) 
             level = min(6, max(block[1] + demote, demote + 2))
             pieces.append("#" * level + " " + block[2])
         else:
-            pieces.append(block[1])
-    return "\n\n".join(pieces).strip()
+            pieces.append(as_body_line(block[1]))
+    # Newlines only: a chapter that opens with a code sample opens with four
+    # spaces of indentation, and that indentation is what keeps the sample from
+    # being read as a heading.
+    return "\n\n".join(pieces).strip("\n")
 
 
 def first_heading(blocks: list[tuple], level: int = 1) -> str | None:
@@ -781,6 +823,16 @@ def prepare_work(work: dict) -> tuple[int, int]:
     title as the single `#`, and one `##` per chapter — the headings
     `ingest/chapters.py` splits sections on."""
     chapters = [(title, body) for title, body in chapters_of(work) if body.strip()]
+    # The shape is a promise about where the chapters are, so it is checked here
+    # rather than discovered later as a section named after a line of somebody's
+    # shell script. A body line that reads as `#` or `##` means this work cannot
+    # be cut correctly by anything, and the work is named instead of written.
+    strays = [(title, line) for title, body in chapters
+              for line in body.split("\n") if BODY_HEADING.match(line)]
+    if strays:
+        raise ValueError(
+            f"{len(strays)} body line(s) would be read as a chapter heading, e.g. "
+            + "; ".join(f"{title!r}: {line[:60]!r}" for title, line in strays[:3]))
     lines = ["---", f"title: \"{work['title']}\"", f"author: \"{work['author']}\"", "---", "",
              f"# {work['title']}", ""]
     for title, body in chapters:
@@ -799,10 +851,11 @@ def prepare(entries: list[dict]) -> None:
     for work in entries:
         try:
             chapters, size = prepare_work(work)
-        except FileNotFoundError as error:
-            # A missing pdftotext is the one failure that is about the machine
-            # and not about the shelf: the other works still prepare, and this
-            # one is named rather than left as a file nobody notices is absent.
+        except (FileNotFoundError, ValueError) as error:
+            # Two failures that leave the other works preparable: a missing
+            # pdftotext, which is about the machine and not about the shelf, and
+            # text that cannot be cut into chapters unambiguously. Both name the
+            # work rather than leave a file nobody notices is absent or wrong.
             unprepared.append(f"  {work['id']}: {error}")
             continue
         card = "card allowed" if work.get("cards") else f"no card ({work['licence']})"
