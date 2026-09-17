@@ -16,6 +16,17 @@ indexes have to be rebuilt:
     AYL_FREEZE_BOOK_IDENTITY=1 uv run --group dev pytest -q \\
         tests/test_book_identity_fixtures.py
 
+**What the freeze is a claim about, since #28.** Book keys and row keys are
+byte-compatible with every index ever built by this code and are meant to stay
+that way — a `slug` that drifts by one character orphans rows silently. The
+CHUNK IDS are not, and cannot be: their last component is the chunk's position
+inside its section, so re-chunking renumbers them. #28 re-chunked (4,000 ->
+2,400 characters, `sentence-pack-1` -> `sentence-pack-2`) and every `ayl-add`
+case here went from 2 chunk ids to 3. That is what a chunker bump MEANS, and it
+is why the fixture records the chunker that produced it: an id change without a
+bump is the mixed index #27's policy exists to refuse. The demo half is pinned
+to `note#<chapter title>` and did not move at all.
+
 Two ingest paths are covered, because they mint keys differently:
 
 * the demo corpus (`scripts/ingest_demo_corpus.py`), whose `note` is the
@@ -38,6 +49,7 @@ import yaml
 
 from ask_your_library.bookkey import book_key
 from ask_your_library.ingest import add_folder
+from ask_your_library.ingest.chunking import CHUNKER_VERSION
 
 REPO = Path(__file__).resolve().parents[1]
 # The demo ingest is a script, not a module of the package; both halves of this
@@ -148,7 +160,13 @@ def add_folder_identity(tmp_path: Path) -> list[dict]:
 
 
 def current(tmp_path: Path) -> dict:
-    return {"demo_manifest": demo_identity(), "add_folder": add_folder_identity(tmp_path)}
+    # The chunker is part of the fixture because half of what it freezes is the
+    # chunker's: a chunk id ends in the chunk's position inside its section, so
+    # a packer that packs differently renumbers ids that are already in
+    # somebody's index. Frozen beside them, it turns "the ids moved" into
+    # "the ids moved and nobody said which rule moved them".
+    return {"chunker": CHUNKER_VERSION,
+            "demo_manifest": demo_identity(), "add_folder": add_folder_identity(tmp_path)}
 
 
 def test_book_keys_row_keys_and_chunk_ids_are_byte_for_byte_what_the_index_holds(tmp_path):
@@ -159,6 +177,15 @@ def test_book_keys_row_keys_and_chunk_ids_are_byte_for_byte_what_the_index_holds
                            encoding="utf-8")
         pytest.skip(f"froze {FIXTURE.relative_to(REPO)} — unset AYL_FREEZE_BOOK_IDENTITY to check it")
     frozen = json.loads(FIXTURE.read_text(encoding="utf-8"))
+
+    # A regenerated fixture is only legitimate under a chunker that says it
+    # changed: re-freezing the ids under the name of the chunker that produced
+    # the OLD ones would leave every existing index undetectably mixed, which
+    # is the one thing #27's policy exists to prevent.
+    assert frozen.get("chunker") == CHUNKER_VERSION, (
+        f"the frozen chunk ids were produced by chunker {frozen.get('chunker')!r} and this code "
+        f"is {CHUNKER_VERSION!r}: bump the version in ingest/chunking.py if the chunks changed, "
+        f"or find out why the fixture was frozen under another one")
 
     # Compared entry by entry so a failure names the book or the rule, not a
     # diff of the whole file.

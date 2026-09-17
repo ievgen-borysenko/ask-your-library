@@ -7,11 +7,11 @@ from .chapters import (DEFAULT_CHAPTER_RE, FRONT_MATTER_SECTION, FULL_TEXT_SECTI
                        MIN_CHAPTER_CHARS, MergedHeading, merge_contents_headings,
                        split_book_chapters, split_book_sections, split_chapters,
                        split_markdown_chapters, unique_titles, with_parts)
-from .chunking import (Chunk, chunk_card, embedding_text, pack_sentences, rows_for,
-                       split_sentences)
+from .chunking import (Chunk, cap_sentence, chunk_card, embedding_text, pack_sentences,
+                       rows_for, split_sentences)
 from .fts import build_fts_index
 
-__all__ = ["Chunk", "chunk_card", "embedding_text", "pack_sentences", "rows_for",
+__all__ = ["Chunk", "cap_sentence", "chunk_card", "embedding_text", "pack_sentences", "rows_for",
            "split_sentences", "build_fts_index",
            "DEFAULT_CHAPTER_RE", "FRONT_MATTER_SECTION", "FULL_TEXT_SECTION",
            "MIN_CHAPTER_CHARS", "MergedHeading", "merge_contents_headings",

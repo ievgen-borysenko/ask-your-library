@@ -15,19 +15,26 @@ from ..sanitize import strip_control_chars
 
 # What a chunk IS, as one name that can be written down and compared.
 #
-# `sentence-pack-1` is this module's rule: whole sentences packed to
-# TRANSCRIPT_TARGET_CHARS with a sentence-level overlap, chapter boundaries
-# supplied by the caller. Bump it whenever a change here would make the chunks
-# of a re-ingest different text from the chunks already in an index (#28 moves
-# the target and caps a punctuation-free sentence, so it bumps this) — not for
-# a refactor that produces the same chunks.
+# `sentence-pack-2` is this module's rule: whole sentences packed to
+# TRANSCRIPT_TARGET_CHARS with a sentence-level overlap, a hard cap on a
+# "sentence" that carries no punctuation, and chapter boundaries supplied by
+# the caller. Bump it whenever a change here would make the chunks of a
+# re-ingest different text from the chunks already in an index — not for a
+# refactor that produces the same chunks.
+#
+# `sentence-pack-1` was the same packer at a 4,000-character target with no
+# sentence cap, which is what every index built before #28 holds: 90% of its
+# transcript chunks were longer than the window `observe` reads (2,500), so
+# ranking scored text the model never saw. The bump is what makes such an index
+# detectable — warn on read, refuse on write until `--rebuild` (ADR-020 as #27
+# amended it).
 #
 # It lives HERE, in the module that decides what a chunk is, and is imported by
 # everything that records it: `_index_meta.chunker` on both ingest paths, the
 # `chunker` column of every ledger row, and the mismatch policy that reads them
 # back (`index_meta.version_mismatch`). One constant, because a version written
 # from two places is two versions.
-CHUNKER_VERSION = "sentence-pack-1"
+CHUNKER_VERSION = "sentence-pack-2"
 
 # And the OTHER chunker in this module, which is a different rule over a
 # different corpus: a book card is cut on its "## section" headings
@@ -42,9 +49,35 @@ CARD_CHUNKER_VERSION = "card-sections-1"
 MAX_CHUNK_CHARS = 2000
 TARGET_CHUNK_CHARS = 1400
 
-# Transcript chunks: ~1000 tokens, overlap ~15% carried as whole trailing sentences.
-TRANSCRIPT_TARGET_CHARS = 4000
-TRANSCRIPT_OVERLAP_CHARS = 400
+# Transcript chunks: the chunk and the observation window are ONE decision
+# (ADR-025, superseding ADR-012). A chunk is what the retriever ranks, and
+# `observe` reads at most SEARCH_HIT_CHARS (2,500 by default) of the hit it
+# returns, so a chunk longer than that window is text the ranking counted and
+# the model never saw. The target is set BELOW the window rather than at it, so
+# that the overlap a chunk carries from its predecessor still fits inside it.
+#
+# These numbers are not read from `config`: a chunker whose output depends on
+# an environment variable would write chunks no version string could describe.
+# The relation between the two is asserted instead, once, in
+# `tests/test_observation_window.py`.
+TRANSCRIPT_TARGET_CHARS = 2400
+TRANSCRIPT_OVERLAP_CHARS = 240        # ~10%, carried as whole trailing sentences
+
+# A "sentence" the splitter could not end, because the text carries no
+# punctuation to end it on: raw Whisper output is the case that matters, and
+# the demo corpus holds one of 10,140 characters (`time-machine`, Chapter 3).
+# The packer cannot break such a run into whole sentences, so it breaks it on
+# whitespace instead — the only boundary left that is not mid-word. Below the
+# target, so a capped piece can never be the thing that pushes a chunk over it.
+MAX_SENTENCE_CHARS = 2000
+
+# The hard ceiling every transcript chunk is under, derived from the three
+# numbers above rather than asserted beside them: a chunk is flushed at the
+# target, and the one shape that can exceed it is the first sentence after a
+# flush landing on top of the overlap. Nothing in this module may return a
+# longer string, and the window test checks it against SEARCH_HIT_CHARS.
+TRANSCRIPT_MAX_CHARS = max(TRANSCRIPT_TARGET_CHARS,
+                           TRANSCRIPT_OVERLAP_CHARS + 1 + MAX_SENTENCE_CHARS)
 
 # Sentence end: . ! ? … optionally followed by a closing quote/bracket, then whitespace.
 _SENTENCE_END = re.compile(r'(?<=[.!?…])["\')\]]*[ \n]+')
@@ -190,27 +223,88 @@ def split_sentences(text: str) -> list[str]:
     return sentences
 
 
+def cap_sentence(sentence: str) -> list[str]:
+    """One "sentence" as pieces of at most MAX_SENTENCE_CHARS.
+
+    A sentence shorter than the cap is returned untouched, which is every
+    sentence of every book that has punctuation. What this exists for is the
+    other kind: an hour of speech transcribed as one run with no full stop in
+    it. The packer's promise is that it never cuts mid-sentence, and it keeps
+    it — but a "sentence" the splitter could not end is not a sentence, it is
+    the absence of one, and packing it whole is what put a 10,778-character
+    chunk into the index (#28).
+
+    The break is on whitespace, the only boundary below a sentence that is not
+    mid-word; a single "word" longer than the cap (a run of digits, a URL) is
+    cut where the cap falls, because nothing else is left. Runs of whitespace
+    inside a capped piece collapse to one space — the pieces are re-joined by
+    the packer anyway, and normalization collapses them on both sides of every
+    comparison (`provenance._normalize`)."""
+    if len(sentence) <= MAX_SENTENCE_CHARS:
+        return [sentence]
+    pieces: list[str] = []
+    buffer = ""
+    for word in sentence.split():
+        while len(word) > MAX_SENTENCE_CHARS:
+            if buffer:
+                pieces.append(buffer)
+                buffer = ""
+            pieces.append(word[:MAX_SENTENCE_CHARS])
+            word = word[MAX_SENTENCE_CHARS:]
+        if not word:
+            continue
+        if buffer and len(buffer) + 1 + len(word) > MAX_SENTENCE_CHARS:
+            pieces.append(buffer)
+            buffer = word
+        else:
+            buffer = f"{buffer} {word}" if buffer else word
+    if buffer:
+        pieces.append(buffer)
+    return pieces
+
+
+def _overlap_tail(buffer: list[str]) -> tuple[list[str], int]:
+    """The trailing sentences of a finished chunk that open the next one, and
+    the length of the string they join into.
+
+    A sentence is taken only while the whole tail still fits in
+    TRANSCRIPT_OVERLAP_CHARS, never one past it. The old rule stopped AFTER
+    crossing the budget, so the overlap could be a whole sentence longer than
+    the number said — which is one of the two ways a chunk used to exceed its
+    target, and the reason the ceiling here is arithmetic rather than a hope."""
+    tail: list[str] = []
+    tail_len = 0
+    for sentence in reversed(buffer):
+        cost = len(sentence) + (1 if tail else 0)
+        if tail_len + cost > TRANSCRIPT_OVERLAP_CHARS:
+            break
+        tail.insert(0, sentence)
+        tail_len += cost
+    return tail, tail_len
+
+
 def pack_sentences(sentences: list[str]) -> list[str]:
-    """Greedy packing: fill a chunk with sentences up to TRANSCRIPT_TARGET_CHARS,
-    then start the next chunk from the tail sentences of the previous one until
-    TRANSCRIPT_OVERLAP_CHARS of overlap is collected."""
+    """Greedy packing: fill a chunk with whole sentences up to
+    TRANSCRIPT_TARGET_CHARS, then start the next chunk from the tail sentences
+    of the previous one until TRANSCRIPT_OVERLAP_CHARS of overlap is collected.
+
+    Every returned chunk is at most TRANSCRIPT_MAX_CHARS characters long, and
+    that is the point of the two changes #28 made here: the length counted is
+    the length of the string this returns — the joining spaces included, which
+    the old count left out, so 600 four-character sentences packed to 2,400
+    "characters" and came back 3,000 long — and a sentence that cannot fit is
+    capped before it is packed (`cap_sentence`) rather than carried whole."""
     chunks = []
     buffer: list[str] = []
-    buffer_len = 0
-    for sentence in sentences:
-        if buffer and buffer_len + len(sentence) > TRANSCRIPT_TARGET_CHARS:
+    buffer_len = 0      # length of " ".join(buffer), not the sum of its parts
+    for sentence in (piece for s in sentences for piece in cap_sentence(s)):
+        cost = len(sentence) + (1 if buffer else 0)
+        if buffer and buffer_len + cost > TRANSCRIPT_TARGET_CHARS:
             chunks.append(" ".join(buffer))
-            overlap: list[str] = []
-            overlap_len = 0
-            for prev_sentence in reversed(buffer):
-                if overlap_len >= TRANSCRIPT_OVERLAP_CHARS:
-                    break
-                overlap.insert(0, prev_sentence)
-                overlap_len += len(prev_sentence)
-            buffer = overlap
-            buffer_len = overlap_len
+            buffer, buffer_len = _overlap_tail(buffer)
+            cost = len(sentence) + (1 if buffer else 0)
         buffer.append(sentence)
-        buffer_len += len(sentence)
+        buffer_len += cost
     if buffer:
         chunks.append(" ".join(buffer))
     return chunks

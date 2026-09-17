@@ -3,6 +3,14 @@ import pyarrow as pa
 import pytest
 
 from ask_your_library import index_meta
+from ask_your_library.ingest.chunking import CHUNKER_VERSION
+
+# The chunker this code chunks as, and the one that built every index before
+# #28. The pair is not a fiction: `sentence-pack-1` packed to 4,000 characters
+# and `sentence-pack-2` packs to 2,400, so "an index another chunker built" is
+# the upgrade a reader is actually going to meet, and the strings in the
+# examples under `docs/upgrading.md` are these two.
+PREVIOUS_CHUNKER = "sentence-pack-1"
 
 
 class FakeTable:
@@ -328,7 +336,7 @@ def test_a_failure_while_staging_the_widening_leaves_the_live_table_intact(tmp_p
 # behave differently from "it disagrees" or the first upgrade after this warns
 # every reader of every index built before it.
 
-def _stamped(tmp_path, chunker="sentence-pack-1", schema_version=None, dims=1024):
+def _stamped(tmp_path, chunker=CHUNKER_VERSION, schema_version=None, dims=1024):
     """An index with one transcripts table and a fingerprint that says what the
     test needs it to say."""
     import lancedb
@@ -344,23 +352,23 @@ def test_a_foreign_chunker_warns_on_read_and_the_index_still_opens(tmp_path, cap
     """The asymmetry this whole policy is: a chunker mismatch is a degradation,
     not a broken index, and refusing to READ it would throw away a build that
     takes about half an hour — which is the thing an upgrade must never do."""
-    db = _stamped(tmp_path, chunker="sentence-pack-2")
+    db = _stamped(tmp_path, chunker=PREVIOUS_CHUNKER)
     with caplog.at_level("WARNING"):
         line = index_meta.warn_version_mismatch(db, "transcripts_ollama")
-    assert line and "sentence-pack-2" in line and "sentence-pack-1" in line
+    assert line and PREVIOUS_CHUNKER in line and CHUNKER_VERSION in line
     # the remedy names the flag that actually gets out of this: a plain
     # `ayl-add <folder>` would hit the same refusal again
     assert "--rebuild" in line and "--backup" in line
-    assert any("sentence-pack-2" in record.message for record in caplog.records)
+    assert any(PREVIOUS_CHUNKER in record.message for record in caplog.records)
     # and the embedder check, which IS fatal on read, still says nothing
     assert index_meta.check_index(db, "transcripts_ollama", "bge-m3", 1024) is None
 
 
 def test_a_foreign_chunker_refuses_a_write(tmp_path):
-    db = _stamped(tmp_path, chunker="sentence-pack-2")
+    db = _stamped(tmp_path, chunker=PREVIOUS_CHUNKER)
     refusal = index_meta.refuse_version_mismatch(db, "transcripts_ollama")
     assert refusal and refusal.startswith("refusing to write transcripts_ollama")
-    assert "sentence-pack-2" in refusal and "sentence-pack-1" in refusal
+    assert PREVIOUS_CHUNKER in refusal and CHUNKER_VERSION in refusal
     # the reason a write is treated differently from a read, in the text itself
     assert "two chunkers" in refusal and "--rebuild" in refusal and "--backup" in refusal
 
