@@ -745,6 +745,19 @@ stating exactly: a *planner query* that looks like a marker is dropped before it
 own question (`:213`), so no marker string can be injected into the channel by planner output or by
 raw user text.
 
+Amended 2026-09-17 (#28, ADR-025). The channel gained the one thing this record says a lexical
+convention is bad at: a FOURTH action, `__chapter_q__|what to look for|book|section`, the same
+chapter read carrying what the model is looking for. Two rules came out of building it, and they
+are the cost this record predicted, paid. **A new field cannot be recognised after the section**,
+because a section name is the book's own words and any trailing sentinel can be spelled by a
+heading — a chapter called `Weird|q=evil query` would otherwise have handed `act` a read query
+nobody wrote and a section the index does not hold. So the presence of a query is carried by the
+marker NAME, which nothing but `bookkey.chapter_marker` writes. And **every component is escaped**
+(`%` and `|` percent-encoded, decoded once in `act`), because a book key may contain the separator
+too and a split would have moved half the book into the section, looking the chapter up in a book
+the catalogue does not have. The parse moved into `bookkey` beside the construction, which is
+where the typed channel will replace both.
+
 A typed channel — a second state field holding `{"kind": ..., "book": ..., "section": ...}`, or an
 enum beside the query — was the alternative, and the reason it was not taken is that the marker was
 the cheapest way to add an action to a loop whose one conditional edge already routed on this field
@@ -973,6 +986,10 @@ the question is not what this chapter is being opened for, and a wrong centre is
 regression where a head cut is a known one. *(C) A cursor: read the next 12,000 characters on a
 repeat request* — the repeat guard exists (`stop_chapter_again`) and this would need it to become
 state; worth revisiting if reads start naming what they are looking for and still missing it.
+
+**How the read query reaches `act`.** On a marker of its own,
+`__chapter_q__|what to look for|book|section`, with every component percent-escaped and decoded
+once in `act` — the rules and the two ways of getting this wrong are in ADR-021's amendment.
 
 **What else the re-chunk moved.** Two numbers were sized for chunks that no longer exist.
 `CHAPTER_ROW_CAP` is a length of text expressed in rows — 1,000 rows reached about 3.6M characters

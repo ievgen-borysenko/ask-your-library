@@ -87,8 +87,29 @@ def test_a_sentence_with_no_punctuation_in_it_is_capped_not_carried_whole():
     assert len(pieces) > 1
     assert all(len(p) <= MAX_SENTENCE_CHARS for p in pieces)
     assert " ".join(pieces) == run                       # nothing lost, nothing invented
+    assert all(p in run for p in pieces)                 # and every piece is a slice of it
     chunks = pack_sentences([run])
     assert all(len(c) <= TRANSCRIPT_MAX_CHARS for c in chunks)
+
+
+def test_a_capped_piece_is_the_book_s_own_characters():
+    """Pieces are SLICES of the sentence: the tab, the double space and the
+    Unicode spaces a book prints survive inside a piece. The quote check
+    normalizes both sides and would not have noticed the difference — which is
+    why this is asserted here, on the text the index stores and the reader is
+    shown, and not left to the comparison that cannot see it."""
+    run = ("a\u00a0word\tafter  another\u2009one and then some more of them " * 120)
+    assert len(run) > MAX_SENTENCE_CHARS
+    pieces = cap_sentence(run)
+
+    assert len(pieces) > 1
+    assert all(len(piece) <= MAX_SENTENCE_CHARS for piece in pieces)
+    assert all(piece in run for piece in pieces)                  # every piece is a slice
+    assert any("\t" in piece for piece in pieces)
+    assert any("\u00a0" in piece for piece in pieces)
+    assert any("  " in piece for piece in pieces)
+    # nothing but the whitespace at the breaks is lost
+    assert "".join("".join(piece.split()) for piece in pieces) == "".join(run.split())
 
 
 def test_a_word_longer_than_the_cap_is_cut_because_nothing_else_is_left():
@@ -138,9 +159,11 @@ FILLER = ("The lighthouse keeper counted the ships that passed the headland. "
           "He wrote each name in a ledger bound in green cloth. ")
 
 
-def long_chapter(needle_at: float = 0.8) -> str:
-    """A chapter far longer than one read, with one distinctive sentence in it."""
-    body = FILLER * 900                       # ~110,000 characters
+def long_chapter(needle_at: float = 0.8, length: int = 900) -> str:
+    """A chapter far longer than one read, with one distinctive sentence in it.
+    `length` is in repetitions of FILLER — 900 is ~110,000 characters, inside
+    the scan budget; 1300 is over it."""
+    body = FILLER * length
     cut = int(len(body) * needle_at)
     return f"{body[:cut]}{NEEDLE} {body[cut:]}"
 
@@ -203,6 +226,44 @@ def test_a_query_the_chapter_does_not_carry_falls_back_to_the_head(monkeypatch, 
     assert library.HEAD_MARKER_PREFIX not in passage
     assert passage == library.join_chapter([{"chunk_id": "b/c/1", "text": text}],
                                            config.CHAPTER_HIT_CHARS)
+
+
+def test_a_chapter_longer_than_the_scan_budget_still_falls_back_to_the_exact_head(monkeypatch,
+                                                                                  tmp_path):
+    """The scan cut writes a marker INSIDE its budget, so stripping it removes
+    both what it says was hidden and the characters it was written over. Count
+    only the first and the head cut this falls back to is short by one marker —
+    a read that is nearly, but not quite, the read an unaimed request gets."""
+    text = long_chapter(length=1300)          # ~155,000 characters, over the scan budget
+    assert len(text) > config.CHAPTER_SCAN_CHARS
+    marker = chapter_marker("Some Book", "Chapter 3", "zeppelins over montevideo")
+
+    result, _ = act_on_chapter(monkeypatch, tmp_path, marker, text)
+
+    passage = result["hits"][0]["text"]
+    assert passage == library.join_chapter([{"chunk_id": "b/c/1", "text": text}],
+                                           config.CHAPTER_HIT_CHARS)
+    hidden = int(passage.rsplit("continues: ", 1)[1].split(" ")[0])
+    assert hidden == len(text) - config.CHAPTER_HIT_CHARS
+
+
+def test_a_window_inside_a_chapter_longer_than_the_scan_budget_counts_the_whole_tail(monkeypatch,
+                                                                                     tmp_path):
+    text = long_chapter(needle_at=0.5, length=1300)
+    marker = chapter_marker("Some Book", "Chapter 3", "drowned lamp seventh stair")
+
+    result, _ = act_on_chapter(monkeypatch, tmp_path, marker, text)
+
+    passage = result["hits"][0]["text"]
+    assert NEEDLE in passage and len(passage) <= config.CHAPTER_HIT_CHARS
+    hidden_before = int(passage.split("earlier: ", 1)[1].split(" ")[0])
+    hidden_after = int(passage.rsplit("continues: ", 1)[1].split(" ")[0])
+    shown = passage.split("characters not shown]\n", 1)[1]
+    shown = shown[:shown.rindex("\n[chapter continues:")]
+    # Every character of the chapter is either shown or reported as not shown —
+    # the scan cut's own marker included, which is the arithmetic that was
+    # wrong: its length was neither in the window nor in either count.
+    assert hidden_before + len(shown) + hidden_after == len(text)
 
 
 def test_a_window_that_opens_at_the_first_character_is_the_head_cut():
@@ -364,6 +425,61 @@ def test_a_section_that_spells_the_grammar_round_trips_byte_for_byte(section, qu
     assert len(marker_parts) == 3
     assert marker_parts[1] == "A Book — An Author"
     assert marker_parts[2] == section             # byte for byte, pipes and all
+
+
+BOOK_PROBES = ["A Book — An Author", "Either|Or — S. Kierkegaard", "100%|Pure — A. Nother",
+               "Already%7CEncoded — A. Nother"]
+
+
+@pytest.mark.parametrize("book", BOOK_PROBES)
+@pytest.mark.parametrize("section", SECTION_PROBES)
+@pytest.mark.parametrize("query", ["", "the drowned lamp"])
+def test_every_component_of_a_marker_comes_back_out_as_it_went_in(book, section, query,
+                                                                 monkeypatch, tmp_path):
+    """Not only the section: a book key may contain "|" too — nothing in the
+    front matter, the title line or a file name forbids one — and under a plain
+    split it would hand part of the book to the section, so the chapter would be
+    looked up in a book the catalogue does not have. The components are
+    percent-encoded in the marker and decoded once, in `act`, which is where
+    the key has to be the catalogue's own key again."""
+    asked = []
+    monkeypatch.setattr(nodes, "read_chapter",
+                        lambda b, sec, max_chars: (asked.append((b, sec)) or "the chapter text",
+                                                   b, "found"))
+    llm.reset_usage()
+    scratchpad = tmp_path / "scratch.md"
+    scratchpad.write_text("")
+    result = nodes.act({"current_query": chapter_marker(book, section, query), "steps_taken": 1,
+                        "read_chapters": [], "scratchpad_path": str(scratchpad)})
+
+    assert asked == [(book, section)]                     # byte for byte, to the resolver
+    assert result["hits"][0]["book"] == book
+    assert result["read_chapters"] == [f"{book}|{section}|complete"]
+
+
+def test_the_coverage_probe_carries_a_piped_book_key_too(monkeypatch, tmp_path):
+    """The other marker built from a book key (ADR-013). Same separator, same
+    hole, and `act` decodes it in the same place."""
+    from ask_your_library import coverage
+
+    book = "Either|Or — S. Kierkegaard"
+    probe = coverage.coverage_probe(
+        {"mode": "answer", "coverage_probed": False, "steps_taken": 1, "evidence": [],
+         "question": f"what does {book} say about the aesthetic life",
+         "hits_log": [{"book": book, "hit_id": "s1h1"}], "queries": [],
+         "clarify_asked": False, "clarify_chosen": ""}, "enough")
+    assert probe.startswith("__book__|")
+
+    searched = []
+    monkeypatch.setattr(nodes, "search_both",
+                        lambda query, k, book=None: searched.append(book) or [])
+    llm.reset_usage()
+    scratchpad = tmp_path / "scratch.md"
+    scratchpad.write_text("")
+    nodes.act({"current_query": probe, "steps_taken": 1, "read_chapters": [],
+               "scratchpad_path": str(scratchpad)})
+
+    assert searched == [book]
 
 
 def test_a_pipe_in_the_read_query_cannot_eat_the_book_or_the_section():

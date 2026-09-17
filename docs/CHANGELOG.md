@@ -37,9 +37,20 @@
   to act on: **every index built before this release warns on every read and refuses the next
   `ayl-add` write until `ayl-add <folder> --rebuild --backup <dir>`** — the exact sequence, and
   what it costs, is in [upgrading](upgrading.md). Book cards are cut by their own rule and are not
-  affected. The frozen identity fixture was regenerated deliberately: re-chunking renumbers chunk
+  affected. **`--rebuild` goes once per index, not once per folder**: it drops the whole
+  transcripts table, so running it again for a second folder would throw away what the first one
+  produced — it now refuses before dropping anything when the ledger holds indexed books this run
+  cannot re-index, names them, and names the plain `ayl-add <folder>` that adds them back
+  (`--force` goes ahead and reports every book it orphans). The frozen identity fixture was regenerated deliberately: re-chunking renumbers chunk
   ids, book keys and row keys are byte-for-byte unchanged, and the fixture now records the chunker
   that produced it so ids cannot move again without a version bump.
+
+  The read query reaches `act` on an action marker of its own
+  (`__chapter_q__|what to look for|book|section`, [ADR-021](adr/README.md) amended), with every
+  component percent-escaped and decoded in one place: a section name is a heading the book
+  supplied and a book key may contain the separator, so neither may be parsed by position alone —
+  a chapter called `Weird|q=evil query` would otherwise have produced a read query nobody wrote,
+  and a book called `Either|Or` would have had its chapters looked up under `Either`.
 
   Two numbers sized for the old chunks moved with them. The chapter row cap (`CHAPTER_ROW_CAP`) is
   a length of text expressed in rows, so it is raised 1,000 -> 1,700 to keep the same reach into a

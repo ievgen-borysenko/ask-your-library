@@ -70,7 +70,8 @@ from ask_your_library.graph import build_graph
 from ask_your_library.bookkey import title_of
 from ask_your_library.i18n import t
 from ask_your_library import library
-from ask_your_library.config import (CHAPTER_HIT_CHARS, MAX_CLARIFY_CANDIDATES, MAX_EMPTY_STREAK, MAX_STEPS,
+from ask_your_library.config import (CHAPTER_HIT_CHARS, CHAPTER_SCAN_CHARS, MAX_CLARIFY_CANDIDATES,
+                                     MAX_EMPTY_STREAK, MAX_STEPS,
                                      PRICE_IN_PER_MTOK, PRICE_OUT_PER_MTOK, QUESTION_DEADLINE_S, SEARCH_HIT_CHARS)
 from ask_your_library.llm import usage_snapshot
 # The one home of the rule (it used to live here and in the runner, with the
@@ -192,6 +193,10 @@ def run_facts(repeat: int = 1) -> dict:
         "clarify_pick": CLARIFY_PICK,
         "search_hit_chars": SEARCH_HIT_CHARS,
         "chapter_hit_chars": CHAPTER_HIT_CHARS,
+        # How much of a chapter a window may be chosen from (#28). It changes
+        # which part of a long chapter the model is shown, so a report that did
+        # not name it would describe two different systems with one line.
+        "chapter_scan_chars": CHAPTER_SCAN_CHARS,
         "max_steps": MAX_STEPS,
         "max_empty_streak": MAX_EMPTY_STREAK,
         "max_clarify_candidates": MAX_CLARIFY_CANDIDATES,
@@ -221,7 +226,8 @@ def render_fingerprint(f: dict) -> str:
             f"{' | '.join(f['index'])} | "
             f"strict_hit_id={'on' if f['strict_hit_id'] else 'off'} | "
             f"clarify_pick={f['clarify_pick'] or 'default'} | "
-            f"hit_chars={f['search_hit_chars']}/{f['chapter_hit_chars']} | "
+            f"hit_chars={f['search_hit_chars']}/{f['chapter_hit_chars']}"
+            f"(scan {f['chapter_scan_chars']}) | "
             f"steps={f['max_steps']}/{f['max_empty_streak']} | "
             f"candidates={f['max_clarify_candidates']} | "
             f"deadline={f['question_deadline_s']}s | "

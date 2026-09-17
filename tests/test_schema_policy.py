@@ -216,6 +216,30 @@ def test_rebuild_keeps_the_minted_ids(index, tmp_path):
     assert after == before
 
 
+def test_rebuild_refuses_to_drop_another_folders_books_and_says_what_to_run(
+        index, tmp_path, capsys, fake_embedder):  # noqa: F811
+    """A rebuild drops the whole table, so it is a rebuild of the INDEX. Running
+    it once per folder — the obvious reading of "rebuild your library" — leaves
+    only the folder that ran last, and nothing said so until the books were
+    already gone."""
+    other = tmp_path / "more-books"
+    write(other, "Harbour Lights - C. Watch.txt", BODY)
+    add_folder.add_books(add_folder.read_folder(other), "ollama", tmp_path / "db", other)
+    restamp(tmp_path / "db")
+    capsys.readouterr()
+
+    code = add_folder.main([str(index), "--db", str(tmp_path / "db"), "--rebuild",
+                            "--backup", str(tmp_path / "backups")])
+
+    assert code == 1
+    error = capsys.readouterr().err
+    assert "Harbour Lights — C. Watch" in error
+    # the way out, named: one rebuild, then ordinary runs for the other folders
+    assert "Rebuild ONCE" in error and "ayl-add <folder>" in error and "--force" in error
+    # and nothing was dropped on the way to saying no
+    assert "transcripts_ollama" in lancedb.connect(tmp_path / "db").table_names()
+
+
 def test_rebuild_names_the_books_it_does_not_cover(index, tmp_path, capsys, fake_embedder):  # noqa: F811
     """A second folder's books were in the table too. Their rows went with it,
     so the ledger's `indexed` is no longer true of them — and saying nothing
@@ -242,6 +266,8 @@ def test_rebuild_without_a_backup_or_force_is_refused(index, tmp_path, capsys):
 
 
 def test_rebuild_with_backup_takes_the_copy_first(index, tmp_path, capsys):
+    """Also the other half of the refusal above: one folder, nothing else in the
+    ledger, so there is nothing this run cannot re-index and it goes through."""
     restamp(tmp_path / "db")
 
     code = add_folder.main([str(index), "--db", str(tmp_path / "db"), "--rebuild",
