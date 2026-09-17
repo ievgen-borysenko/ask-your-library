@@ -32,7 +32,8 @@ from .catalog import resolve_title
 from .config import SEARCH_HIT_CHARS
 from .i18n import t
 from .bookkey import author_of, title_of
-from .library import BookEntry, cut_marker, head_marker
+from .library import (CUT_MARKER_RE, HEAD_MARKER_RE, BookEntry, cut_marker,
+                      head_marker)
 from . import llm
 from .sanitize import LINE_BREAK_RE, strip_control_chars
 from .state import AgentState
@@ -269,10 +270,9 @@ def _contains_tokens(haystack_norm: str, needle_norm: str) -> bool:
 
 
 CHUNK_JOINER = "\n[...]\n"     # written by library.join_chapter between chunks
-CUT_MARKER_RE = re.compile(r"\n?\[chapter continues: \d+ characters not shown\]\s*$")
-# The other end of the same sentence, written by library.head_marker when a
-# read query opens a window inside a chapter instead of reading its head.
-HEAD_MARKER_RE = re.compile(r"^\s*\[chapter begins earlier: \d+ characters not shown\]\n?")
+# CUT_MARKER_RE / HEAD_MARKER_RE are imported from `library`, beside the
+# functions that write those markers: the strip here and the writing there have
+# to agree, and two copies of one pattern agree only until somebody edits one.
 
 
 def _without_markers(hit_text: str, keep_offsets: bool = False) -> str:
@@ -642,8 +642,10 @@ def window_around(text: str, query: str, budget: int) -> str:
 
     A query whose words the chapter does not carry gets the head of the
     chapter, exactly as before — a window centred on nothing is worse than an
-    honest beginning. So does a request that names no query at all: `act` does
-    not call this then."""
+    honest beginning — and "exactly" is meant character for character
+    (`_head_cut`), so a query that misses cannot be told from a read that never
+    named one. A request that names no query does not reach this function at
+    all: `act` reads the head directly."""
     if len(text) <= budget and not CUT_MARKER_RE.search(text):
         return text                      # the whole chapter fits; nothing to choose
     already_hidden = _hidden_after(text)
@@ -667,9 +669,32 @@ def window_around(text: str, query: str, budget: int) -> str:
     start, end = _snap_forward(body, start), _snap_back(body, end)
     if end <= start:                     # one word longer than the whole budget
         start, end = max(0, min(start, len(body))), min(len(body), start + width)
+    if start == 0:
+        # The window opens where the chapter does, so it IS the head cut — and
+        # it must be the head cut character for character, not a head cut minus
+        # the room reserved for a marker that is not going to be written. That
+        # is the difference between "this query found nothing, so you get the
+        # opening as always" and a second, slightly shorter kind of head read
+        # that only ever happens when a query was named and missed.
+        return _head_cut(body, budget, already_hidden)
     hidden_after = (len(body) - end) + already_hidden
-    return (f"{head_marker(start) if start else ''}{body[start:end]}"
-            f"{cut_marker(hidden_after) if hidden_after else ''}")
+    return f"{head_marker(start)}{body[start:end]}" \
+           f"{cut_marker(hidden_after) if hidden_after else ''}"
+
+
+def _head_cut(body: str, budget: int, already_hidden: int = 0) -> str:
+    """The head of a chapter at `budget` characters — `library.join_chapter`'s
+    own arithmetic, reproduced here so that a windowed read that lands on the
+    head is byte-identical to a read that never asked for a window.
+
+    `already_hidden` is what an earlier cut (the scan budget) had already left
+    out, so the marker counts the whole remainder of the chapter rather than
+    only this function's share of it."""
+    hidden = len(body) + already_hidden - budget
+    if hidden <= 0:
+        return body[:budget]
+    marker = cut_marker(hidden)
+    return body[:max(0, budget - len(marker))] + marker
 
 
 def gate_counts(state: AgentState) -> dict:

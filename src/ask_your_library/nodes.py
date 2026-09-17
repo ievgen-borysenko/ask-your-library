@@ -32,7 +32,8 @@ from .config import (CHAPTER_HIT_CHARS, CHAPTER_SCAN_CHARS, LLM_TIMEOUT_S,
                      MAX_CLARIFY_CANDIDATES, MAX_EMPTY_STREAK, MAX_STEPS, SEARCH_HIT_CHARS)
 from .coverage import coverage_probe
 from .i18n import t
-from .library import BookEntry, chapter_is_cut, list_books, read_chapter, search_both
+from .library import (HEAD_MARKER_PREFIX, BookEntry, chapter_is_cut, list_books,
+                      read_chapter, search_both)
 from .llm import data_block
 from .prompts import OBSERVE_RULES, PLAN_RULES, REFLECT_RULES, SYNTHESIZE_RULES
 from .provenance import _valid_evidence, validate, window_around  # noqa: F401  (validate is wired by graph.py)
@@ -319,6 +320,18 @@ def act(state: AgentState) -> dict:
             max_chars=CHAPTER_SCAN_CHARS if read_query else CHAPTER_HIT_CHARS)
         if read_query and chapter_text:
             chapter_text = window_around(chapter_text, read_query, CHAPTER_HIT_CHARS)
+        # Three counts, so a report can say whether this path did anything
+        # (#28): reads, reads that named what they were looking for, and reads
+        # whose window actually moved off the head of the chapter. "Moved" is
+        # read off the head marker rather than kept as a separate flag: a match
+        # inside the first window IS the head of the chapter, and counting it as
+        # an opened window would inflate the number with reads that changed
+        # nothing. The optional field may simply never be filled by the model,
+        # and that is exactly what the middle count exists to make visible.
+        usage = llm._usage()
+        usage.chapter_reads += 1
+        usage.chapter_reads_aimed += 1 if read_query else 0
+        usage.chapter_windows_opened += 1 if chapter_text.startswith(HEAD_MARKER_PREFIX) else 0
         # The hit carries the index key of the book actually read, not the
         # string reflect asked with: a bare title ("Don Quixote") would otherwise
         # produce evidence that the exact-key filter after a clarify ("Don
