@@ -222,9 +222,19 @@ thinned). All three are additive, and the claim that goes with that word is narr
 the USER message of an `observe` step that lost nothing is byte for byte what it was, and so is its
 update, but the SYSTEM message changed for every run — `OBSERVE_RULES` and `SYNTHESIZE_RULES` are
 where the new sentences live. No run of this release is prompt-identical to one made before it.
-`PLAN_RULES` did not change, so the plan recordings still replay. **Measured: not yet** — the
-behavioural run that decides whether `c03` comes back is pending, and nothing above is claimed on
-numbers until it is appended here.
+`PLAN_RULES` did not change, so the plan recordings still replay. **Measured 2026-09-18**
+([report][rechunk-feedback], part B): on the re-chunked index, `mistral-small3.2:24b-ctx20k` is
+10/11 with 0 broken of 32 checked and `c03` back — PASS at `titles 1/1`, on six evidence items where
+the attempts it failed on had nine, so the naming rule did its work on evidence thinner than the
+evidence that defeated it. `qwen2.5:14b`, paired against the same index without this change, goes
+9/11 → 10/11 and is below its baseline on no item. Two things the run says that the reasoning above
+did not anticipate. **The failure moved**: `c05-quixote-windmills` passed three baseline attempts
+and now fails, with five quotes refused and no evidence at all surviving — and `synthesize` returns
+the fixed refusal by code when `evidence` is empty, so `SYNTHESIZE_RULES` is never sent and the
+naming rule cannot reach the answer that needs a name most. **The cap is not visible in the data**:
+`MAX_DROPPED_STREAK` is configured in both runs, `c05` stops in a way consistent with it firing, and
+no artifact records `dropped_streak` or the per-step refusal counts, so whether it fired is
+undecidable from a report. A counter in the item header would close that.
 
 **What the hold decision really costs, said as a number.** A model that quotes badly is no longer
 stopped after two steps. Where the CRAG gate used to end such a run at step 2, it now runs to
@@ -1037,13 +1047,22 @@ every read and refuses the next write until `ayl-add <folder> --rebuild --backup
 recorded — `tests/fixtures/book_identity.json` was regenerated with the chunker that produced it
 frozen beside it, and book keys and row keys are byte-for-byte unchanged. The row count grows by
 about 55%, which moves a real library toward the ANN trigger #33 names. `reflect`'s prompt gains
-one optional field. **Not yet measured:** the behaviour of the pair on a corpus, because that
-needs the re-ingest (~30 minutes) and a paired core run; until it exists, this record states the
-chunk-size distribution and nothing about answers.
+one optional field. **Measured 2026-09-18** ([report][rechunk-feedback], part A): the corpus was
+re-ingested at `sentence-pack-2` (11,282 rows, `--doctor` clean) and both golden sets re-run on
+`qwen2.5:14b` at `--repeat 3` against the `#65` gate baseline. Behaviour is unchanged item for item
+— 9/11 and 10/10, the same two failures, the same clarify, 10/12 titles and 10/24 facts on both
+sides — so the defect is closed without the answers moving. The optional field is filled on every
+read (`chapter_reads_aimed` 7/7, five windows off the head), which was the first question this
+record said the measurement had to answer.
 
-**The acceptance.** Chunks over the window 90.3% -> 0 (met, on the prepared texts). A free local
-core re-run with c03 intact, c06 reported as it comes out, and behaviour not below the #66 gate
-baseline — **pending**, and the eval reports say so.
+**The acceptance.** Chunks over the window 90.3% -> 0 (met, on the prepared texts; the index the
+re-run read holds exactly the 11,282 rows that measurement predicted, which ties the two together
+without re-measuring the distribution). A free local core re-run with c03 intact, c06 reported as it
+comes out, and behaviour not below the #66 gate baseline — **met**: c03 PASSES on both sides, c06
+passes with `facts 0/3` on both sides and now reports a chapter read that aimed and kept the head,
+and no item is below the baseline. What the re-run does not buy, and the report says it plainly:
+evidence items rise 43 -> 50 while book-text matches fall 34 -> 33, so the growth is card matches
+and not more of the books.
 
 [reports]: ../eval-results/
 [backlog]: ../backlog.md
@@ -1055,3 +1074,4 @@ baseline — **pending**, and the eval reports say so.
 [rc1-retrieval]: ../eval-results/2026-09-07-v0.2.0-rc1-retrieval-canary.md
 [catalogue-set]: ../eval-results/2026-09-09-catalogue-set.md
 [catalogue-core]: ../eval-results/2026-09-09-catalogue-branch-core.md
+[rechunk-feedback]: ../eval-results/2026-09-18-rechunk-and-observe-feedback.md

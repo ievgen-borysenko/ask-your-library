@@ -193,8 +193,12 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   decision a model makes that ignores the new optional field. A chapter longer than the scan
   budget is still cut at 120,000 characters before the window is chosen. There is no cursor: a
   second request for the same chapter cannot show the next window, it stops the loop
-  (`stop_chapter_again`). And **no behavioural measurement of this exists yet** — see the entry
-  below. An empty read (chapter not in the index) still yields no hit at all and is logged in the
+  (`stop_chapter_again`). The first behavioural measurement of it is
+  [`eval-results/2026-09-18-rechunk-and-observe-feedback.md`](eval-results/2026-09-18-rechunk-and-observe-feedback.md):
+  on `qwen2.5:14b` over the research set, 7 chapter reads per attempt, **7 of 7 named what they were
+  looking for** and 5 of 7 moved the window off the head, with 0 row-cap hits; the two that kept the
+  head are the case described above, where the query's own words are not found further in. It says
+  nothing about whether the moved window answered the question better. An empty read (chapter not in the index) still yields no hit at all and is logged in the
   scratchpad, so nothing synthetic can be quoted as evidence.
 - **The chunk is now the observation window, and what that bought is not measured yet.** Until
   2026-09-17 the chunker packed transcript chunks to 4,000 characters while `observe` read 2,500
@@ -203,11 +207,18 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   10,140 characters), so the retriever ranked and fused text that was cut off before the model
   read it. The chunker now packs to 2,400 with a hard cap on such a run: on the 35 prepared demo
   texts, **11,282 chunks, median 2,304, the longest 2,400, 0% over the window**, at 55% more rows.
-  That is a measurement of the chunks and of nothing else. **Whether answers get better is
-  unmeasured**: it needs a full re-ingest of the corpus and a paired eval run, and until those
-  numbers are published here, treat this as a defect removed rather than a result. Every published
-  eval report was produced against the old chunker and is not comparable, chunk for chunk, with a
-  run made after it — nothing was re-run to change a published number. Raising `SEARCH_HIT_CHARS`
+  That is a measurement of the chunks and of nothing else. **Whether answers get better is still
+  unmeasured, and what is now measured is that they do not get worse**: on 2026-09-18 the corpus was
+  re-ingested (11,282 rows) and both golden sets re-run on `qwen2.5:14b` against the pre-re-chunk
+  gate baseline
+  ([`eval-results/2026-09-18-rechunk-and-observe-feedback.md`](eval-results/2026-09-18-rechunk-and-observe-feedback.md)),
+  and behaviour is identical item for item — 9/11 and 10/10, the same two failures, 10/12 titles and
+  10/24 facts on both sides — at +2 LLM calls on the research set and −2 on the catalogue set. In the
+  same pair, evidence items rise 43 -> 50 while book-text matches fall 34 -> **33**, so the extra
+  evidence is card matches rather than more of the books: treat the re-chunk as a defect removed at
+  no behavioural cost, not as better answers. Every published eval report other than that one was
+  produced against the old chunker and is not comparable, chunk for chunk, with a run made after it
+  — nothing was re-run to change a published number. Raising `SEARCH_HIT_CHARS`
   now buys nothing (there is no chunk tail behind it) and lowering it cuts a chunk the retriever
   ranked whole.
 - **Corpus changes are per book, and a re-chunk is still a full rebuild.** `ayl-add` updates one

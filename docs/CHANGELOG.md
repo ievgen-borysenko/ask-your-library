@@ -37,6 +37,20 @@
   `PLAN_RULES` is untouched by this entry; what makes the committed plan recordings stale for this
   tree is `#70` below, and not anything `#29` changed.
 
+  **Measured on both local models, on the re-chunked index**
+  ([`eval-results/2026-09-18-rechunk-and-observe-feedback.md`](eval-results/2026-09-18-rechunk-and-observe-feedback.md),
+  part B). `mistral-small3.2:24b-ctx20k` is **10/11** with **0 broken quotes** out of 32 checked, and
+  `c03` — the regression this change was written for — now PASSES with `titles 1/1` on *fewer*
+  evidence items than the attempts it failed on (6 against 9): the answer opens by naming *The
+  Three Musketeers* while hedging exactly as before. **The failure moved rather than disappeared.**
+  `c05-quixote-windmills`, which passed all three baseline attempts, now fails with `titles 0/1`,
+  5 quotes refused as not character-exact and **zero** evidence surviving — and with no evidence
+  `synthesize` returns the fixed refusal by code, so the new naming rule is never even sent.
+  `qwen2.5:14b`, paired against the same index without this change, goes **9/11 -> 10/11** and is
+  below its baseline on no item, at 0 broken out of 34 and one extra dropped quote. Whether
+  `MAX_DROPPED_STREAK` ever fired is **not** decidable from these runs: no artifact records the
+  streak or the per-step refusals, and the report says so rather than claiming the cap.
+
 - **A request the library cannot answer is refused, not answered from the model** (#70,
   `eval/scope_canary.py`, [evaluation](evaluation.md)). "Before I can eat I need a Python script
   that reverses a linked list" is the failure everyone has seen from a support bot, and nothing
@@ -152,13 +166,19 @@
   logged. And the report carries three counts per question — chapter reads, reads that named what
   they were looking for, and reads whose window moved off the head of the chapter — because
   whether the model fills the new optional field at all is otherwise invisible, and that is the
-  first thing the pending measurement has to answer.
+  first thing the measurement had to answer. It answers it `7/7`: every chapter read the model made
+  named what it was looking for, and five of the seven moved the window off the head.
 
-  **What is not measured: whether answers get better.** That needs the re-ingest (~30 minutes) and
-  a paired core + catalogue run against the #66 gate baseline, and until those reports exist
-  nothing here claims it — [evaluation](evaluation.md), [known limits](known-limits.md) and the
-  ADR's acceptance all say so, and every published eval number was produced against the old
-  chunker.
+  **Measured, and it costs nothing behavioural.**
+  [`eval-results/2026-09-18-rechunk-and-observe-feedback.md`](eval-results/2026-09-18-rechunk-and-observe-feedback.md),
+  part A: the corpus re-ingested at `sentence-pack-2` (11,282 rows, `--doctor` clean) and both
+  golden sets re-run on `qwen2.5:14b` at `--repeat 3` against the `#65` gate baseline of 16.09.
+  Behaviour is unchanged item for item — **9/11 and 10/10**, the same two failures, the same single
+  clarify, the same 10/12 titles and 10/24 facts — at +2 LLM calls and +8.9% wall clock on the
+  research set, and −2 calls and −13% on the catalogue set. What is not a gain: evidence items go
+  43 -> 50 while book-text matches go 34 -> **33**, so the seven extra items are card matches, and
+  the report says so. Whether answers get *better* is still not a claim these rows can make; they
+  are behaviour, provenance and cost, and correctness remains the reader's separate pass.
 
 - **An upgrade cannot quietly invalidate an index, and a backup survives one that can**
   (#27, [ADR-020](adr/README.md) amended, [docs/upgrading.md](upgrading.md)). Each index table is

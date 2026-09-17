@@ -14,8 +14,11 @@ local reports there say so in their own provenance headers:
 CLI run; and
 [`2026-09-16-local-models-repeat3.md`](eval-results/2026-09-16-local-models-repeat3.md), three local
 models against both golden sets at `--repeat 3` — the first runs here to carry a spread, to publish
-the facts row and the card-only split on real numbers, and to commit their planner recordings. None
-of the three feeds the table below. The rule that separates the two kinds at a glance is the
+the facts row and the card-only split on real numbers, and to commit their planner recordings; and
+[`2026-09-18-rechunk-and-observe-feedback.md`](eval-results/2026-09-18-rechunk-and-observe-feedback.md),
+which continues that page on the **re-chunked** index — the paired `#28` measurement on
+`qwen2.5:14b` and the `#29` branch runs on both local models. None of the four feeds the table
+below. The rule that separates the two kinds at a glance is the
 cost line: a hosted run carries the configured rates `$3.0/M in, $15.0/M out`, a local one `$0.0/M
 in, $0.0/M out`. From this release the harness fingerprint also names the backend outright — `model
 <name> via <backend>` — but every report committed before it prints `model <name>` alone, so for
@@ -290,10 +293,14 @@ Nothing in the tables below has been re-measured, and the numbers in them are wh
 hit is no longer longer than the window `observe` reads it through — 90.3% of them were. That
 changes what is retrieved and what is ranked, on every question. No run in
 [`eval-results/`](eval-results/) has been re-made against a re-chunked index, and none was re-run
-to change a published number; the first one that is will say so in its own fingerprint, which
-names the index build it ran on. Until then the tables below describe the system as it was on the
-index they were measured on, and the comparison that matters — the same sets on the same code
-before and after the re-chunk — **is pending**.
+to change a published number; the tables below describe the system as it was on the index they were
+measured on. **The comparison that matters has since been made, on the local default and not on
+this page's configuration**:
+[`2026-09-18-rechunk-and-observe-feedback.md`](eval-results/2026-09-18-rechunk-and-observe-feedback.md)
+runs both golden sets on `qwen2.5:14b` before and after the re-chunk and finds behaviour unchanged
+item for item (9/11 and 10/10 on both sides), at +2 LLM calls on the research set and −2 on the
+catalogue set. That is one model on the local backend; nothing hosted has been re-run, and no number
+in the tables below has moved.
 
 Two measured trees, both single runs, clean tree (`--require-clean`), strict hit-id mode, the same
 bge-m3 index: **v0.1.0**, 2026-09-05 on code `88881ee` (the last code commit before tag `v0.1.0`;
