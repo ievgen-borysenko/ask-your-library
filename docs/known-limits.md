@@ -221,7 +221,9 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   ([upgrading](upgrading.md)). Neither happens silently: the index is
   stamped with both, a reader warns and a write refuses (see the entry below and
   [upgrading](upgrading.md)), and `ayl-add --backup` is what survives the rebuild. The BM25 index
-  is rebuilt whole after every run, measured at 0.8 s for the demo corpus's 7,285 rows.
+  is rebuilt whole after every run, measured at 0.8 s for the demo corpus's 7,285 rows at
+  `sentence-pack-1`; at `sentence-pack-2` the same text is about 11,282 rows and the 0.8 s
+  has not been retaken.
 - **The delete and the append are not one transaction.** A crash between them leaves one book out
   of the index; its ledger row still says `requested`, and the recovery pass at the start of the
   next `ayl-add` finds it, re-indexes it when the run covers it and reports it by name when it
@@ -261,7 +263,9 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   does not stop a blank line from ending the message's HTML block and handing what follows back
   to the markdown renderer.
 - **Heuristic behavioural scoring**, no LLM judge: refusals detected by phrase markers,
-  titles by substring match. `get_chapter` caps at 1000 chunks and reconciles section naming
+  titles by substring match. `get_chapter` caps at 1,700 chunks — raised from 1,000 with the
+  re-chunk, so the cap still reaches about the same 3.6M characters of one section, and every read
+  that comes back at it is logged and counted into the eval report — and reconciles section naming
   (`Chapter 59` vs `59`) heuristically; the 12k it returns is a window inside up to 120k of the
   chapter, not its first 12k, when the request names what it is looking for.
 - **A book's identity is minted; its NAME is still a derived string.** Every book has a `book_id`

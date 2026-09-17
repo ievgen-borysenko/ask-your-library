@@ -974,6 +974,15 @@ regression where a head cut is a known one. *(C) A cursor: read the next 12,000 
 repeat request* — the repeat guard exists (`stop_chapter_again`) and this would need it to become
 state; worth revisiting if reads start naming what they are looking for and still missing it.
 
+**What else the re-chunk moved.** Two numbers were sized for chunks that no longer exist.
+`CHAPTER_ROW_CAP` is a length of text expressed in rows — 1,000 rows reached about 3.6M characters
+of one section when a chunk advanced the text by 3,600; at 2,160 the same reach is 1,667, so the
+cap is raised to 1,700 rather than left to tighten silently, and a query that comes back at it is
+counted into the eval report instead of only logged. And the report itself now carries three counts
+per question — chapter reads, reads that named what they were looking for, and reads whose window
+moved off the head — because whether the model fills the optional field at all is otherwise
+invisible, and a read path that never aims cannot be told from one that aims and misses.
+
 **Consequences.** Every existing index is one release behind the chunker: it answers, warns on
 every read and refuses the next write until `ayl-add <folder> --rebuild --backup <dir>`
 ([upgrading](../upgrading.md)). Chunk ids are renumbered by the re-chunk, which is deliberate and

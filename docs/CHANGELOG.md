@@ -41,6 +41,14 @@
   ids, book keys and row keys are byte-for-byte unchanged, and the fixture now records the chunker
   that produced it so ids cannot move again without a version bump.
 
+  Two numbers sized for the old chunks moved with them. The chapter row cap (`CHAPTER_ROW_CAP`) is
+  a length of text expressed in rows, so it is raised 1,000 -> 1,700 to keep the same reach into a
+  single section, and a query that comes back at it is now counted into the eval report as well as
+  logged. And the report carries three counts per question — chapter reads, reads that named what
+  they were looking for, and reads whose window moved off the head of the chapter — because
+  whether the model fills the new optional field at all is otherwise invisible, and that is the
+  first thing the pending measurement has to answer.
+
   **What is not measured: whether answers get better.** That needs the re-ingest (~30 minutes) and
   a paired core + catalogue run against the #66 gate baseline, and until those reports exist
   nothing here claims it — [evaluation](evaluation.md), [known limits](known-limits.md) and the

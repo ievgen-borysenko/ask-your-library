@@ -51,7 +51,9 @@ quietly absent.
 
 The BM25 (full-text) index is still rebuilt **whole** after every run, because LanceDB drops it
 with the table it belongs to. That cost is now measured rather than assumed: **0.8 s for the
-7,285 rows of the demo corpus**, about 0.1 ms a row, and the seconds of each run are written into
+7,285 rows the demo corpus had at `sentence-pack-1`**, about 0.1 ms a row — the same books are
+about 11,282 rows after the re-chunk (#28) and that second number has not been timed, so the rate
+is the claim here, not the total. The seconds of each run are written into
 the ledger rows it wrote. An incremental merge is not worth its complexity at that price.
 
 The index is checked, not trusted:

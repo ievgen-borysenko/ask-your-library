@@ -136,7 +136,9 @@ open ones often refer to them.
   listing is still backed by `has_cards` / `has_text` over the index rows, which is the right
   source for it.
 - **The FTS rebuild is measured, and stays whole.** 0.8 s for the demo corpus's 7,285 transcript
-  rows (0.01 s for 165 card rows), about 0.1 ms a row, and the seconds of each run are written
+  rows at `sentence-pack-1` (0.01 s for 165 card rows), about 0.1 ms a row — the same text is
+  about 11,282 rows at `sentence-pack-2` and the seconds have not been retaken there, so read
+  0.8 s as the rate and not as the number. The seconds of each run are written
   into the ledger rows it wrote. The staged full rebuild it replaced was 0.2 s at the same scale,
   against 0.01 s for a per-book delete-and-append — so the cost argument for the per-book path
   was weak at demo scale and the correctness argument carried it. LanceDB's incremental FTS merge
