@@ -8,6 +8,7 @@ rank of a chunk in each list matters, never the raw distance / BM25 score, so
 the two scales need no calibration against each other.
 """
 import logging
+import re
 from dataclasses import dataclass
 
 import lancedb
@@ -204,11 +205,20 @@ def _sql_quote(value: str) -> str:
 # first N rows of every book that happens to have a section with this name.
 # It can still truncate a single section: "chapter" holds for chaptered books,
 # but an unstructured book indexed as one "Full text" section is thousands of
-# chunks (a 1.4M-character book at ~1,400 characters per chunk), and the scan
-# order under a filter is not guaranteed, so a hit at the cap is logged: the
-# read still reports "found" and `join_chapter`'s "characters not shown"
-# undercounts what was left in the database.
-CHAPTER_ROW_CAP = 1000
+# chunks, and the scan order under a filter is not guaranteed, so a hit at the
+# cap is logged and counted (`llm.RunUsage.chapter_row_cap_hits`, which the eval
+# report surfaces): the read still reports "found" and `join_chapter`'s
+# "characters not shown" undercounts what was left in the database.
+#
+# The number is a length of TEXT expressed in rows, so it moves when a chunk
+# changes size (#28). A chunk advances the text by its target minus its
+# overlap: 4,000 - 400 = 3,600 characters under `sentence-pack-1`, where 1,000
+# rows reached about 3.6M characters of one section; 2,400 - 240 = 2,160 under
+# `sentence-pack-2`, so the same reach is 3.6M / 2,160 ≈ 1,667 rows. Raised to
+# 1,700 rather than left at 1,000, which would have cut the same section at 2.2M
+# characters — a cap that tightens because chunks got smaller is a silent
+# regression, and this one is the drill-down's whole ceiling.
+CHAPTER_ROW_CAP = 1700
 
 
 # --- the catalogue: what the index holds, as data --------------------------------
@@ -310,17 +320,54 @@ def join_chapter(rows: list[dict], max_chars: int) -> str:
         return text
     # The marker lives INSIDE the max_chars budget, so every later cut at the
     # same limit (scratchpad, observe) still shows it.
-    marker = f"\n[chapter continues: {len(text) - max_chars} characters not shown]"
+    marker = cut_marker(len(text) - max_chars)
     body = text[:max(0, max_chars - len(marker))]
     return body + marker
 
 
 CUT_MARKER_SUFFIX = "characters not shown]"
+HEAD_MARKER_PREFIX = "[chapter begins earlier:"
+# The two markers as the readers match them. They live here, beside the two
+# functions that WRITE them, because a pattern kept next to the writer cannot
+# drift from it; `provenance` imports these rather than spelling them a second
+# time. Both are anchored to the end (the cut) or the start (the head) and both
+# require the digits, so a sentence of a book that happens to talk about
+# chapters continuing is not service text.
+CUT_MARKER_RE = re.compile(r"\n?\[chapter continues: \d+ characters not shown\]\s*$")
+HEAD_MARKER_RE = re.compile(r"^\s*\[chapter begins earlier: \d+ characters not shown\]\n?")
+
+
+def cut_marker(hidden: int) -> str:
+    """The in-band note that the text stops before the chapter does, so "not in
+    the text I read" is not mistaken for "not in the chapter"."""
+    return f"\n[chapter continues: {hidden} characters not shown]"
+
+
+def head_marker(hidden: int) -> str:
+    """The same note for the other end: the text STARTS after the chapter does.
+
+    A head-of-chapter read needs no such marker — the text begins where the
+    chapter begins. A window around a match does (ADR-025): without it the
+    model reads a passage from the middle of a chapter as its opening, and
+    "the first thing that happens in this chapter" becomes a sentence from its
+    middle. Same wording and the same suffix as `cut_marker`, so one rule reads
+    both (`chapter_is_cut`) and the provenance gate strips both."""
+    return f"{HEAD_MARKER_PREFIX} {hidden} characters not shown]\n"
 
 
 def chapter_is_cut(text: str) -> bool:
-    """True when join_chapter had to cut the chapter (read status "partial")."""
-    return text.rstrip().endswith(CUT_MARKER_SUFFIX)
+    """True when the chapter did not fit the budget it was read with (read
+    status "partial"): cut at the end by `join_chapter`, or at the front too by
+    the window a read query opens (`provenance.window_around`).
+
+    The head is matched by the WHOLE marker, digits included, and not by its
+    opening words. A book's own text can begin with anything, this marker
+    included, and the strict reading is the one that cannot turn a paragraph
+    about a chapter beginning earlier into a report that the reader was shown
+    less than the chapter. (The tail keeps its older, looser test — it is the
+    test every existing read status was decided by, and tightening it would
+    silently restate them.)"""
+    return bool(text.strip().endswith(CUT_MARKER_SUFFIX) or HEAD_MARKER_RE.match(text))
 
 
 def read_chapter(book: str, section: str, max_chars: int = 12000) -> tuple[str, str, str]:
@@ -418,6 +465,16 @@ def _capped(table, condition, book: str, section: str, fallback: bool) -> tuple[
     cut out, which the caller turns into an "ambiguous" refusal."""
     rows = table.search().where(condition).limit(CHAPTER_ROW_CAP).to_list()
     cut = len(rows) >= CHAPTER_ROW_CAP
+    if cut:
+        # Counted as well as logged, because a warning in a server log is not a
+        # number in a report: the eval run that decides whether the re-chunk
+        # cost anything has to be able to say "and no chapter query hit the cap"
+        # (#28). Imported inside the branch rather than at module scope: `llm`
+        # pulls in the whole model-client stack, and retrieval — which this
+        # module is — is usable without it (the free retrieval eval imports
+        # `search_both` and nothing else).
+        from . import llm
+        llm._usage().chapter_row_cap_hits += 1
     if cut and fallback:
         log.warning("bare-title chapter query hit the %d-row cap (title %r, section %r): other books "
                     "sharing this title may have been cut out of the candidates; refused as ambiguous",

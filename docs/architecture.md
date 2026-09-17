@@ -150,6 +150,12 @@ in [`adr/README.md`](adr/README.md), each with the measurement that settled it.
   sanitized passages, cut to the same budget, to a per-run scratchpad (a human-readable log) and
   keeps each passage, as observe saw it, in state under a stable hit id; plan, reflect and synthesize work on the distilled evidence,
   never on raw hits.
+- **The chunk and that budget are one decision (17.09, ADR-025).** A chunk was 4,000 characters
+  and the budget 2,500, so 90% of chunks were ranked on more text than was ever read; transcript
+  chunks are packed to 2,400 now, under the budget, and a search hit arrives whole. A chapter read
+  keeps a budget of its own and, when the request says what it is looking for, spends it as a
+  window around the best lexical match instead of on the chapter's head — computed once, in `act`,
+  and stored with the hit, because the window is the text every quote is later checked against.
 - **Embedding index fingerprint, and the upgrade policy.** Ingest stamps every table with the
   embedding model and dimensionality; readers refuse an index built by another model, which
   otherwise degrades retrieval silently when the dims happen to match. The stamp also carries the

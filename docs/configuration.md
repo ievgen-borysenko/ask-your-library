@@ -25,8 +25,9 @@ the hosted lines ship commented out with what they cost written beside them.
 | `OPENROUTER_ENV_FILE` | (unset) | Opt-in file scanned for the key; never read unless set |
 | `ORCHESTRATOR_MODEL` | `anthropic/claude-sonnet-4.6` | Model for all agent nodes **when `LLM_BACKEND=openrouter`**; not applied in the default local mode, where `OLLAMA_LLM_MODEL` decides |
 | `MAX_OUTPUT_TOKENS` | `2048` | Hard output cap per call; without it the provider pre-authorizes the model maximum |
-| `SEARCH_HIT_CHARS` | `2500` | Characters of each search hit that `observe` sees (and the quote check compares against); 1,200 until 0.1.0 |
-| `CHAPTER_HIT_CHARS` | `12000` | Characters of a chapter read that `observe` sees; the cut is marked in-band |
+| `SEARCH_HIT_CHARS` | `2500` | Characters of each search hit that `observe` sees (and the quote check compares against); 1,200 until 0.1.0. Since #28 the chunker packs transcript chunks to 2,400, under this number, so a hit arrives whole: raising it reveals nothing (there is no chunk tail behind it) and lowering it cuts a chunk the retriever ranked whole — the two are one decision ([ADR-025](adr/README.md)) |
+| `CHAPTER_HIT_CHARS` | `12000` | Characters of a chapter read that `observe` sees; every cut is marked in-band. When the read names what it is looking for, this budget is spent as a window around the best lexical match instead of on the head of the chapter, and both ends say what they left out |
+| `CHAPTER_SCAN_CHARS` | `120000` | How much of a chapter that window may be chosen from. A scan budget, not an observation budget: the model still sees `CHAPTER_HIT_CHARS`. Must be at least `CHAPTER_HIT_CHARS`, or startup refuses. 120,000 covers 1,224 of the demo corpus's 1,228 chapters whole |
 | `MAX_STEPS` | `4` | Search or chapter-read steps per question; the eval fingerprint names it |
 | `MAX_EMPTY_STREAK` | `2` | CRAG gate: the loop stops after this many dry steps in a row |
 | `MAX_CLARIFY_CANDIDATES` | `5` | Longest list of books a clarify question offers; at most 5, the ordinals the reply resolver understands |

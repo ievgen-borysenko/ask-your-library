@@ -30,7 +30,8 @@ Event contract (node_name -> keys present in update):
              (no_hit / cross_book / short / not_found, summing to it) and repinned — run
              totals, each present ONLY on a step that spent it, so a run where every quote
              checks out emits exactly the event it always did
-  reflect    current_query ("" = synthesize; "__clarify__" + clarify_candidates; "__chapter__|book|section";
+  reflect    current_query ("" = synthesize; "__clarify__" + clarify_candidates; "__chapter__|book|section"
+             or "__chapter_q__|looking for|book|section";
              "__book__|book|query" = coverage probe, one search inside one candidate) + coverage_probed
   clarify    clarification (the user's reply)
   synthesize answer

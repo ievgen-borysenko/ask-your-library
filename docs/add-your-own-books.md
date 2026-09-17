@@ -51,7 +51,9 @@ quietly absent.
 
 The BM25 (full-text) index is still rebuilt **whole** after every run, because LanceDB drops it
 with the table it belongs to. That cost is now measured rather than assumed: **0.8 s for the
-7,285 rows of the demo corpus**, about 0.1 ms a row, and the seconds of each run are written into
+7,285 rows the demo corpus had at `sentence-pack-1`**, about 0.1 ms a row — the same books are
+about 11,282 rows after the re-chunk (#28) and that second number has not been timed, so the rate
+is the claim here, not the total. The seconds of each run are written into
 the ledger rows it wrote. An incremental merge is not worth its complexity at that price.
 
 The index is checked, not trusted:
@@ -87,7 +89,18 @@ What an upgrade may NOT do is silently invalidate an index that took half an hou
 table is stamped with the chunker and the row schema that wrote it, and a disagreement **warns on
 read and refuses on write**: the index goes on answering, and the next `ayl-add` into it stops
 before embedding or deleting anything, naming both versions and the way out. A rebuild is the way
-out, and it discards what it replaces — so take a copy first:
+out, and it discards what it replaces — so take a copy first.
+
+**This release is the first time that happens.** The chunker changed in #28 (`sentence-pack-1` ->
+`sentence-pack-2`: chunks packed to 2,400 characters instead of 4,000, so a hit is no longer
+longer than the window the model reads it through), so an index built before 2026-09-17 warns on
+every read and refuses the next write until you run the three commands below. Expect a full
+re-embed and about 55% more rows. If your index was fed from more than one folder, `--rebuild`
+goes **once** — it drops the whole table, so a second one would throw away what the first
+produced — and every other folder follows with a plain `uv run ayl-add <folder>`, which appends.
+A rebuild that would drop another folder's books refuses and says so before dropping anything. Cards are cut
+by a different rule and are not affected. See [upgrading](upgrading.md) for what the warning and
+the refusal actually say.
 
 ```bash
 uv run ayl-add --backup ~/ayl-backups --db ~/ayl-index    # index + chat.db + a verified manifest

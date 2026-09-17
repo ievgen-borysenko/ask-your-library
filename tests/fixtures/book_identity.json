@@ -1,4 +1,5 @@
 {
+  "chunker": "sentence-pack-2",
   "demo_manifest": [
     {
       "id": "robinson-crusoe",
@@ -1552,7 +1553,8 @@
       "note": "the-green-ledger-a-keeper-ba231cab",
       "chunk_ids": [
         "the-green-ledger-a-keeper-ba231cab#1.Full text/1",
-        "the-green-ledger-a-keeper-ba231cab#1.Full text/2"
+        "the-green-ledger-a-keeper-ba231cab#1.Full text/2",
+        "the-green-ledger-a-keeper-ba231cab#1.Full text/3"
       ]
     },
     {
@@ -1562,7 +1564,8 @@
       "note": "the-green-ledger-unknown-6faec51f",
       "chunk_ids": [
         "the-green-ledger-unknown-6faec51f#1.Full text/1",
-        "the-green-ledger-unknown-6faec51f#1.Full text/2"
+        "the-green-ledger-unknown-6faec51f#1.Full text/2",
+        "the-green-ledger-unknown-6faec51f#1.Full text/3"
       ]
     },
     {
@@ -1572,7 +1575,8 @@
       "note": "the-green-ledger-a-keeper-ba231cab",
       "chunk_ids": [
         "the-green-ledger-a-keeper-ba231cab#1.Full text/1",
-        "the-green-ledger-a-keeper-ba231cab#1.Full text/2"
+        "the-green-ledger-a-keeper-ba231cab#1.Full text/2",
+        "the-green-ledger-a-keeper-ba231cab#1.Full text/3"
       ]
     },
     {
@@ -1582,7 +1586,8 @@
       "note": "the-green-ledger-a-keeper-ba231cab",
       "chunk_ids": [
         "the-green-ledger-a-keeper-ba231cab#1.Full text/1",
-        "the-green-ledger-a-keeper-ba231cab#1.Full text/2"
+        "the-green-ledger-a-keeper-ba231cab#1.Full text/2",
+        "the-green-ledger-a-keeper-ba231cab#1.Full text/3"
       ]
     },
     {
@@ -1592,7 +1597,8 @@
       "note": "the-green-ledger-a-keeper-ba231cab",
       "chunk_ids": [
         "the-green-ledger-a-keeper-ba231cab#1.Full text/1",
-        "the-green-ledger-a-keeper-ba231cab#1.Full text/2"
+        "the-green-ledger-a-keeper-ba231cab#1.Full text/2",
+        "the-green-ledger-a-keeper-ba231cab#1.Full text/3"
       ]
     },
     {
@@ -1602,7 +1608,8 @@
       "note": "the-green-ledger-unknown-6faec51f",
       "chunk_ids": [
         "the-green-ledger-unknown-6faec51f#1.Full text/1",
-        "the-green-ledger-unknown-6faec51f#1.Full text/2"
+        "the-green-ledger-unknown-6faec51f#1.Full text/2",
+        "the-green-ledger-unknown-6faec51f#1.Full text/3"
       ]
     },
     {
@@ -1612,7 +1619,8 @@
       "note": "the-green-ledger-a-keeper-ba231cab",
       "chunk_ids": [
         "the-green-ledger-a-keeper-ba231cab#1.Full text/1",
-        "the-green-ledger-a-keeper-ba231cab#1.Full text/2"
+        "the-green-ledger-a-keeper-ba231cab#1.Full text/2",
+        "the-green-ledger-a-keeper-ba231cab#1.Full text/3"
       ]
     },
     {
@@ -1622,7 +1630,8 @@
       "note": "the-ledger-green-a-keeper-4bbe6be8",
       "chunk_ids": [
         "the-ledger-green-a-keeper-4bbe6be8#1.Full text/1",
-        "the-ledger-green-a-keeper-4bbe6be8#1.Full text/2"
+        "the-ledger-green-a-keeper-4bbe6be8#1.Full text/2",
+        "the-ledger-green-a-keeper-4bbe6be8#1.Full text/3"
       ]
     },
     {
@@ -1632,7 +1641,8 @@
       "note": "unknown-f96b1700",
       "chunk_ids": [
         "unknown-f96b1700#1.Full text/1",
-        "unknown-f96b1700#1.Full text/2"
+        "unknown-f96b1700#1.Full text/2",
+        "unknown-f96b1700#1.Full text/3"
       ]
     },
     {
@@ -1642,7 +1652,8 @@
       "note": "unknown-74e887c5",
       "chunk_ids": [
         "unknown-74e887c5#1.Full text/1",
-        "unknown-74e887c5#1.Full text/2"
+        "unknown-74e887c5#1.Full text/2",
+        "unknown-74e887c5#1.Full text/3"
       ]
     },
     {
@@ -1653,8 +1664,10 @@
       "chunk_ids": [
         "sectioned-a-keeper-61f31323#1.One/1",
         "sectioned-a-keeper-61f31323#1.One/2",
+        "sectioned-a-keeper-61f31323#1.One/3",
         "sectioned-a-keeper-61f31323#2.Two/1",
-        "sectioned-a-keeper-61f31323#2.Two/2"
+        "sectioned-a-keeper-61f31323#2.Two/2",
+        "sectioned-a-keeper-61f31323#2.Two/3"
       ]
     },
     {
@@ -1665,8 +1678,10 @@
       "chunk_ids": [
         "preamble-a-keeper-20bfa03a#1.Front matter/1",
         "preamble-a-keeper-20bfa03a#1.Front matter/2",
+        "preamble-a-keeper-20bfa03a#1.Front matter/3",
         "preamble-a-keeper-20bfa03a#2.full/1",
-        "preamble-a-keeper-20bfa03a#2.full/2"
+        "preamble-a-keeper-20bfa03a#2.full/2",
+        "preamble-a-keeper-20bfa03a#2.full/3"
       ]
     }
   ]

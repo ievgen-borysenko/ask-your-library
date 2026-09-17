@@ -32,7 +32,8 @@ from .catalog import resolve_title
 from .config import SEARCH_HIT_CHARS
 from .i18n import t
 from .bookkey import author_of, title_of
-from .library import BookEntry
+from .library import (CUT_MARKER_RE, HEAD_MARKER_RE, BookEntry, cut_marker,
+                      head_marker)
 from . import llm
 from .sanitize import LINE_BREAK_RE, strip_control_chars
 from .state import AgentState
@@ -269,16 +270,33 @@ def _contains_tokens(haystack_norm: str, needle_norm: str) -> bool:
 
 
 CHUNK_JOINER = "\n[...]\n"     # written by library.join_chapter between chunks
-CUT_MARKER_RE = re.compile(r"\n?\[chapter continues: \d+ characters not shown\]\s*$")
+# CUT_MARKER_RE / HEAD_MARKER_RE are imported from `library`, beside the
+# functions that write those markers: the strip here and the writing there have
+# to agree, and two copies of one pattern agree only until somebody edits one.
+
+
+def _without_markers(hit_text: str, keep_offsets: bool = False) -> str:
+    """The hit's text with the chapter markers off it. They are service text
+    this code wrote, never the book's, so no quote may be confirmed against
+    them and no window may be centred on them.
+
+    `keep_offsets` blanks the head marker instead of deleting it: `match_span`
+    reports offsets INTO the string it was given, and deleting a prefix would
+    move every one of them. Blanking leaves whitespace, which tokenizes to
+    nothing — the same result, at the same coordinates."""
+    body = CUT_MARKER_RE.sub("", hit_text)
+    head = HEAD_MARKER_RE.match(body)
+    if not head:
+        return body
+    return " " * head.end() + body[head.end():] if keep_offsets else body[head.end():]
 
 
 def _segments(hit_text: str) -> list[str]:
     """Normalized text of one hit, split where the text is NOT contiguous in
-    the source: at the chunk joiner of a chapter read. The chapter-cut marker
-    is service text, never evidence, and is removed before normalizing. A
+    the source: at the chunk joiner of a chapter read. The chapter markers are
+    service text, never evidence, and are removed before normalizing. A
     quote must fit inside ONE segment; "before [...] after" is two."""
-    body = CUT_MARKER_RE.sub("", hit_text)
-    return [_normalize(part) for part in body.split(CHUNK_JOINER)]
+    return [_normalize(part) for part in _without_markers(hit_text).split(CHUNK_JOINER)]
 
 
 # The four outcomes of the quote check, named once. They are the statuses
@@ -477,30 +495,221 @@ def match_span(passage: str, quote: str) -> tuple[int, int] | None:
     needle = _normalize(quote).split()
     if not needle:
         return None
-    body = CUT_MARKER_RE.sub("", passage)
-    chunks: list[tuple[int, int] | None] = []
-    tokens: list[str | None] = []
-    where: list[int] = []
-    offset = 0
-    for index, part in enumerate(body.split(CHUNK_JOINER)):
-        if index:
-            # a barrier chunk: it holds a token no quote can carry, so no match
-            # is allowed to run across the [...] that separates two chunks
-            chunks.append(None)
-            tokens.append(None)
-            where.append(len(chunks) - 1)
-        for word in re.finditer(r"\S+", part):
-            chunks.append((offset + word.start(), offset + word.end()))
-            for token in _normalize(word.group()).split():
-                tokens.append(token)
-                where.append(len(chunks) - 1)
-        offset += len(part) + len(CHUNK_JOINER)
+    tokens, chunks, where = _tokens_with_offsets(_without_markers(passage, keep_offsets=True))
     for start in range(len(tokens) - len(needle) + 1):
         if tokens[start:start + len(needle)] == needle:
             first, last = chunks[where[start]], chunks[where[start + len(needle) - 1]]
             if first is not None and last is not None:
                 return first[0], last[1]
     return None
+
+
+def _tokens_with_offsets(body: str) -> tuple[list[str | None], list[tuple[int, int] | None],
+                                             list[int]]:
+    """The passage as normalized tokens, each pointing back at the raw text it
+    came from: (tokens, spans, token -> span index).
+
+    One raw whitespace-separated chunk can normalize into several tokens
+    ("snake_case" is two), so the mapping is a list and not a zip. A chunk
+    joiner becomes a None barrier in all three: nothing may match — or be
+    measured as near — across text that is not contiguous in the book.
+
+    Two readers: `match_span`, which wants where a known quote sits, and
+    `window_around`, which wants where a query's words sit thickest."""
+    spans: list[tuple[int, int] | None] = []
+    tokens: list[str | None] = []
+    where: list[int] = []
+    offset = 0
+    for index, part in enumerate(body.split(CHUNK_JOINER)):
+        if index:
+            spans.append(None)
+            tokens.append(None)
+            where.append(len(spans) - 1)
+        for word in re.finditer(r"\S+", part):
+            spans.append((offset + word.start(), offset + word.end()))
+            for token in _normalize(word.group()).split():
+                tokens.append(token)
+                where.append(len(spans) - 1)
+        offset += len(part) + len(CHUNK_JOINER)
+    return tokens, spans, where
+
+
+def best_match_span(passage: str, query: str, width: int) -> tuple[int, int] | None:
+    """Where `query`'s words sit thickest in `passage`: the (start, end) of the
+    tightest run of them that fits in `width` characters, or None when the
+    passage holds none of them.
+
+    "Thickest" is how many DIFFERENT words of the query the run covers, then —
+    between runs that cover the same words — the shorter one, then the earlier
+    one. Counting distinct words rather than occurrences is what keeps a page
+    that repeats "the" from outranking the one page that carries the query's
+    rare words together; the tie-breaks are there so the result is one span and
+    not a set of equally good ones, because a retrieval this deterministic is
+    the only kind that can be tested and re-run.
+
+    There is no stop-word list: the corpus is not one language (the demo
+    library holds Ukrainian), a list per language is a thing to maintain and
+    get wrong, and "distinct words covered" already prices a common word at
+    what it is worth — one word out of several.
+
+    This is a LEXICAL match over the raw text, not the retrieval the index
+    does: no vectors, no BM25 statistics, nothing but the query's own words.
+    That is the whole of what is available here — neither retriever returns the
+    offsets of what it matched (ADR-025) — and it is honest about what it
+    cannot do: a window chosen for a query whose words the passage never spells
+    is no window at all, and the caller falls back to the head."""
+    terms = set(_normalize(query).split())
+    if not terms:
+        return None
+    tokens, spans, where = _tokens_with_offsets(passage)
+    hits = [(spans[where[i]], token) for i, token in enumerate(tokens)
+            if token in terms and spans[where[i]] is not None]
+    if not hits:
+        return None
+    best: tuple[int, int] | None = None
+    best_key: tuple[int, int] | None = None
+    counts: dict[str, int] = {}
+    distinct = 0
+    right = 0
+    for left in range(len(hits)):
+        if right < left:            # the previous window closed on nothing
+            right, counts, distinct = left, {}, 0
+        while right < len(hits) and hits[right][0][1] - hits[left][0][0] <= width:
+            term = hits[right][1]
+            counts[term] = counts.get(term, 0) + 1
+            distinct += 1 if counts[term] == 1 else 0
+            right += 1
+        if right == left:           # this single hit is wider than the budget
+            continue
+        start, end = hits[left][0][0], hits[right - 1][0][1]
+        key = (distinct, -(end - start))
+        if best_key is None or key > best_key:
+            best_key, best = key, (start, end)
+        term = hits[left][1]
+        counts[term] -= 1
+        distinct -= 1 if counts[term] == 0 else 0
+    return best
+
+
+def _snap_forward(text: str, at: int) -> int:
+    """`at`, moved to the start of the next whole word when it fell inside one.
+    Only ever moves right, so a window that snaps never grows past its budget."""
+    if at <= 0 or at >= len(text) or text[at - 1].isspace():
+        return at
+    while at < len(text) and not text[at].isspace():
+        at += 1
+    while at < len(text) and text[at].isspace():
+        at += 1
+    return at
+
+
+def _snap_back(text: str, at: int) -> int:
+    """`at`, moved to the end of the previous whole word when it fell inside
+    one. Only ever moves left, for the same reason."""
+    if at >= len(text) or at <= 0 or text[at].isspace():
+        return at
+    while at > 0 and not text[at - 1].isspace():
+        at -= 1
+    while at > 0 and text[at - 1].isspace():
+        at -= 1
+    return at
+
+
+def _body_and_tail(text: str) -> tuple[str, int]:
+    """A chapter read split into (its text, the characters of the chapter that
+    are NOT in it).
+
+    The second number is the marker's own count PLUS the marker's own length.
+    A cut marker does not sit beside the text it replaces, it sits INSIDE the
+    budget (`library.join_chapter`), so stripping it removes both what it says
+    was hidden and the characters it was written over. Counting only the first
+    loses the marker's length on every arithmetic done afterwards — which is
+    how a chapter longer than the scan budget came back with a head cut whose
+    "characters not shown" was short by exactly one marker, and therefore not
+    the head cut an unaimed read of the same chapter produces."""
+    marker = CUT_MARKER_RE.search(text)
+    if not marker:
+        return text, 0
+    hidden = int(re.search(r"\d+", marker.group()).group())
+    return text[:marker.start()], hidden + len(marker.group())
+
+
+def window_around(text: str, query: str, budget: int) -> str:
+    """`budget` characters of a chapter read around the best lexical match for
+    `query`, with an in-band marker for what is left out at each end.
+
+    This is the second half of ADR-025. The first half made a search chunk and
+    the observation window one decision; a chapter read is the same decision at
+    ten times the scale — 12,000 characters off the FRONT of a chapter, chosen
+    by nothing, because the head is where a cut is cheapest to write. A
+    question about the last page of a long chapter reads the first page of it.
+
+    The window is computed ONCE, in `act`, and what this returns is stored in
+    `hits_log` as the passage — which is what makes it safe. The window IS the
+    provenance haystack (ADR-004): a quote is checked against the text the
+    model was shown, so a window recomputed in `observe`, or later in
+    `validate`, would turn honest quotes from a passage that moved into broken
+    ones. Nothing downstream re-runs this; they all read the stored text.
+
+    A query whose words the chapter does not carry gets the head of the
+    chapter, exactly as before — a window centred on nothing is worse than an
+    honest beginning — and "exactly" is meant character for character
+    (`_head_cut`), so a query that misses cannot be told from a read that never
+    named one. A request that names no query does not reach this function at
+    all: `act` reads the head directly."""
+    if len(text) <= budget and not CUT_MARKER_RE.search(text):
+        return text                      # the whole chapter fits; nothing to choose
+    # `hidden_beyond` is everything of the chapter that is not in `body`: what
+    # an earlier cut said it left out, and the characters that cut wrote its own
+    # marker over. len(body) + hidden_beyond is the chapter as it was.
+    body, hidden_beyond = _body_and_tail(text)
+    # Both markers live INSIDE the budget, like `join_chapter`'s does, so every
+    # later cut at the same limit (the scratchpad, the observe prompt) still
+    # shows them. Their length depends on numbers the window has not been
+    # chosen yet, so the room reserved is an upper bound on both: the digits of
+    # a count that cannot be larger than the chapter itself.
+    reserve = len(head_marker(len(body))) + len(cut_marker(len(body) + hidden_beyond))
+    width = max(1, budget - reserve)
+    span = best_match_span(body, query, width)
+    if span is None:
+        start = 0
+    elif span[1] - span[0] >= width:
+        start = span[0]                  # the match itself fills the window
+    else:
+        start = max(0, span[0] - (width - (span[1] - span[0])) // 2)
+    end = min(len(body), start + width)
+    start = max(0, end - width)          # a window at the end of the chapter is still full
+    start, end = _snap_forward(body, start), _snap_back(body, end)
+    if end <= start:                     # one word longer than the whole budget
+        start, end = max(0, min(start, len(body))), min(len(body), start + width)
+    if start == 0:
+        # The window opens where the chapter does, so it IS the head cut — and
+        # it must be the head cut character for character, not a head cut minus
+        # the room reserved for a marker that is not going to be written. That
+        # is the difference between "this query found nothing, so you get the
+        # opening as always" and a second, slightly shorter kind of head read
+        # that only ever happens when a query was named and missed.
+        return _head_cut(body, budget, hidden_beyond)
+    hidden_after = (len(body) - end) + hidden_beyond
+    return f"{head_marker(start)}{body[start:end]}" \
+           f"{cut_marker(hidden_after) if hidden_after else ''}"
+
+
+def _head_cut(body: str, budget: int, hidden_beyond: int = 0) -> str:
+    """The head of a chapter at `budget` characters — `library.join_chapter`'s
+    own arithmetic, reproduced here so that a windowed read that lands on the
+    head is byte-identical to a read that never asked for a window.
+
+    `hidden_beyond` is the rest of the chapter: what an earlier cut (the scan
+    budget) left out and the characters it wrote its marker over. `len(body) +
+    hidden_beyond` is therefore the chapter's own length, which is what
+    `join_chapter` counts from — so the count in the marker is the same number
+    down to the digit whether the chapter fitted the scan budget or not."""
+    hidden = len(body) + hidden_beyond - budget
+    if hidden <= 0:
+        return body[:budget]
+    marker = cut_marker(hidden)
+    return body[:max(0, budget - len(marker))] + marker
 
 
 def gate_counts(state: AgentState) -> dict:

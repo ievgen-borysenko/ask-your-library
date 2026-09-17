@@ -2,6 +2,70 @@
 
 ## Unreleased
 
+- **The chunk IS the observation window, and a chapter read reads around the match** (#28,
+  [ADR-025](adr/README.md), superseding ADR-012; [upgrading](upgrading.md)). Two numbers decided
+  how much of a retrieved passage the model ever saw and nothing related them: the chunker packed
+  transcript chunks to 4,000 characters, `observe` read 2,500 of a hit. Measured on the demo
+  corpus: 7,285 chunks, median 3,922, **the longest 10,778, and 90.3% of them longer than the
+  window** — the retriever ranked and fused text that was then cut off before the model read it.
+
+  The chunker now packs to **2,400**, under the window with room for the overlap a chunk carries
+  from its predecessor; a "sentence" the splitter cannot end — an hour of raw Whisper output, the
+  longest in the corpus running to 10,140 characters — is broken on whitespace at 2,000 instead of
+  packed whole; and the length the packer counts is the length of the string it returns, joining
+  spaces included, so a chapter of one-word lines can no longer pack to a "target" of 2,400 and
+  come back a quarter longer. On the 35 prepared demo texts: **11,282 chunks, median 2,304, the
+  longest 2,400, 0% over the window**, at 55% more rows. `SEARCH_HIT_CHARS` stops being a knob
+  worth turning — nothing is left behind it to reveal.
+
+  **A chapter read is the same defect one scale up**: it took the first 12,000 characters of the
+  chapter, and 61% of the corpus's 1,228 chapters are longer than that (median 14,783, the longest
+  585,482), so a question about the end of a long chapter was answered from its beginning.
+  `reflect` may now say what it is opening the chapter for, and `act` reads up to
+  `CHAPTER_SCAN_CHARS` (120,000, a new setting) and cuts the window around the best lexical match
+  inside it — the query's own words, scored by how many distinct ones a run covers, because
+  neither retriever returns offsets. A read that names nothing, and a query the chapter does not
+  spell, get the head exactly as before: nothing is invented in place of a missing field. Both
+  ends of a window say in band what they left out, and a read cut at either end is `partial`.
+
+  **The window is computed once, in `act`, and stored in `hits_log`.** That is the constraint the
+  whole change is written under, not an optimization: the window is the provenance haystack
+  (ADR-004), and one recomputed in `observe` would turn quotes honestly copied out of one window
+  into quotes broken against another.
+
+  `CHUNKER_VERSION` becomes `sentence-pack-2`, which is the first thing #27's policy has ever had
+  to act on: **every index built before this release warns on every read and refuses the next
+  `ayl-add` write until `ayl-add <folder> --rebuild --backup <dir>`** — the exact sequence, and
+  what it costs, is in [upgrading](upgrading.md). Book cards are cut by their own rule and are not
+  affected. **`--rebuild` goes once per index, not once per folder**: it drops the whole
+  transcripts table, so running it again for a second folder would throw away what the first one
+  produced — it now refuses before dropping anything when the ledger holds indexed books this run
+  cannot re-index, names them, and names the plain `ayl-add <folder>` that adds them back
+  (`--force` goes ahead and reports every book it orphans). The frozen identity fixture was regenerated deliberately: re-chunking renumbers chunk
+  ids, book keys and row keys are byte-for-byte unchanged, and the fixture now records the chunker
+  that produced it so ids cannot move again without a version bump.
+
+  The read query reaches `act` on an action marker of its own
+  (`__chapter_q__|what to look for|book|section`, [ADR-021](adr/README.md) amended), with every
+  component percent-escaped and decoded in one place: a section name is a heading the book
+  supplied and a book key may contain the separator, so neither may be parsed by position alone —
+  a chapter called `Weird|q=evil query` would otherwise have produced a read query nobody wrote,
+  and a book called `Either|Or` would have had its chapters looked up under `Either`.
+
+  Two numbers sized for the old chunks moved with them. The chapter row cap (`CHAPTER_ROW_CAP`) is
+  a length of text expressed in rows, so it is raised 1,000 -> 1,700 to keep the same reach into a
+  single section, and a query that comes back at it is now counted into the eval report as well as
+  logged. And the report carries three counts per question — chapter reads, reads that named what
+  they were looking for, and reads whose window moved off the head of the chapter — because
+  whether the model fills the new optional field at all is otherwise invisible, and that is the
+  first thing the pending measurement has to answer.
+
+  **What is not measured: whether answers get better.** That needs the re-ingest (~30 minutes) and
+  a paired core + catalogue run against the #66 gate baseline, and until those reports exist
+  nothing here claims it — [evaluation](evaluation.md), [known limits](known-limits.md) and the
+  ADR's acceptance all say so, and every published eval number was produced against the old
+  chunker.
+
 - **An upgrade cannot quietly invalidate an index, and a backup survives one that can**
   (#27, [ADR-020](adr/README.md) amended, [docs/upgrading.md](upgrading.md)). Each index table is
   stamped with the chunker that cut its rows and the shape those rows have; from this release

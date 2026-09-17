@@ -155,6 +155,89 @@ def read_status(entry: str) -> str:
     return last if last in READ_STATUSES else "complete"
 
 
+CHAPTER_MARKER = "__chapter__|"
+# The SAME action, carrying one field more: what the model is looking for in
+# that chapter (ADR-025). It is a second marker NAME rather than a fourth field
+# on the first one, and the reason is the section.
+#
+# A section name is the book's own words. It is looked up literally in the
+# index and must come back out of the marker byte for byte — pipes included,
+# which is why every component is escaped below — so it is the field that
+# absorbs the rest of the string, and no new
+# field may be recognised after it. Any rule that peels a trailing field off
+# the right can be spelled by a heading: a chapter called `Weird|q=evil query`
+# would hand out a read query the model never wrote and a section the index
+# does not have. A trailing SENTINEL only moves the problem — the sentinel is a
+# string, and a heading can contain it.
+#
+# The marker name cannot be spelled by corpus text, because nothing but this
+# function writes it. So "is there a read query" is answered by which name was
+# used, and the query — the model's own words, which this code may neutralise —
+# goes FIRST, where a "|" of its own would break the parse and is therefore
+# removed. Book and section then sit exactly where they always sat.
+CHAPTER_QUERY_MARKER = "__chapter_q__|"
+
+
+# The separator is "|", so a component that contains one has to say so rather
+# than spell one. Percent-encoding, and only of the two characters that make it
+# ambiguous: "%" first (or decoding a real "%7C" in a title would produce a
+# separator), then "|". It is LOSSLESS, which matters more here than it looks —
+# the book key is matched against the catalogue and the section is looked up
+# literally in the index, so a component that came back "cleaned" would find
+# nothing, and a book called "Either|Or" would simply have no chapters.
+MARKER_ESCAPES = (("%", "%25"), ("|", "%7C"))
+_MARKER_UNESCAPE = re.compile("%(25|7C)")
+
+
+def escape_marker(part: str) -> str:
+    """One component of an action marker, with the separator encoded."""
+    for raw, encoded in MARKER_ESCAPES:
+        part = part.replace(raw, encoded)
+    return part
+
+
+def unescape_marker(part: str) -> str:
+    """The inverse, in ONE left-to-right pass — two `str.replace` calls would
+    decode the output of the first ("%257C" -> "%7C" -> "|"), which is how an
+    escape scheme silently loses the difference between a book called "Either%7COr"
+    and one called "Either|Or"."""
+    return _MARKER_UNESCAPE.sub(lambda m: "%" if m.group(1) == "25" else "|", part)
+
+
+def chapter_marker(book: str, section: str, query: str = "") -> str:
+    """The action marker for a chapter read: "__chapter__|book|section", or
+    "__chapter_q__|query|book|section" when the model said what it is looking
+    for (ADR-025).
+
+    The book and the section are encoded and come back out of `act` exactly as
+    they went in, "|" included — a book key may contain one (nothing in the
+    front matter or the file name forbids it) and a section name is a heading
+    the book itself supplied. The query is the model's own words and is not a
+    lookup key, so it is simply cleaned of separators and surrounding space."""
+    query = " ".join(query.replace("|", " ").split())
+    book, section = escape_marker(book), escape_marker(section)
+    if not query:
+        return f"{CHAPTER_MARKER}{book}|{section}"
+    return f"{CHAPTER_QUERY_MARKER}{query}|{book}|{section}"
+
+
+def split_read_query(marker: str) -> tuple[str, str]:
+    """A chapter marker split into (the three-part marker every reader of this
+    channel already understands, the read query or "").
+
+    Nothing is peeled off a plain `__chapter__|` marker — whatever its section
+    contains — and nothing at all off any other string: a search query is free
+    text, and a rule about markers must never trim it."""
+    if not marker.startswith(CHAPTER_QUERY_MARKER):
+        return marker, ""
+    parts = marker.split("|", 2)
+    if len(parts) != 3:
+        # A malformed action marker: handed back whole, so `act`'s guard for
+        # exactly that sees it instead of a read of some invented chapter.
+        return marker, ""
+    return f"{CHAPTER_MARKER}{parts[2]}", parts[1]
+
+
 def same_chapter(wanted: str, entry: str) -> bool:
     """Does a read_chapter request name a chapter already in read_chapters?
     "Some Book|Chapter 59" and "Some Book|59" are the same chapter; so are

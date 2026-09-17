@@ -159,10 +159,13 @@ def test_the_section_variants_are_still_tried(transcripts):
 
 
 def test_the_row_cap_is_no_longer_the_correctness_boundary(transcripts):
-    """1,200 other books have a "Chapter 1" too. Filtering on the section alone
-    and cutting at limit(1000) dropped the wanted book before Python ever saw
-    it; with the book in the where clause the cap is only a safety net."""
-    rows = [chunk(f"Filler {i} — A", text="filler") for i in range(1200)]
+    """More books than the cap holds have a "Chapter 1" too. Filtering on the
+    section alone and cutting at the cap dropped the wanted book before Python
+    ever saw it; with the book in the where clause the cap is only a safety net.
+    The filler is sized off the constant, so a cap that moves with the chunk
+    size (#28) does not quietly turn this test into a test of nothing."""
+    rows = [chunk(f"Filler {i} — A", text="filler")
+            for i in range(library.CHAPTER_ROW_CAP + 200)]
     rows.append(chunk("Target — Author", text="the real chapter"))
     table = transcripts(rows)
 

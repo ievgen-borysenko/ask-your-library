@@ -65,7 +65,10 @@ Decide ONE of:
   knowledge; the library may not contain them>"}}
 - A specific chapter from the evidence deserves a FULL read (deep question about details,
   character's own reflections, exact reasoning) -> {{"decision": "read_chapter",
-  "book": "<exact book name from evidence>", "section": "<exact section from evidence>"}}
+  "book": "<exact book name from evidence>", "section": "<exact section from evidence>",
+  "looking_for": "<the words you expect to find there: the sentence, name or phrase the
+  chapter is being opened for. A long chapter is read around them; leave it out and the
+  chapter is read from its beginning>"}}
 - Need more searching -> {{"decision": "search", "next_query": "<the single best next
   ENGLISH search query, either from the queue or a better new one>"}}
 

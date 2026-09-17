@@ -14,6 +14,13 @@ from ask_your_library.ingest import add_folder
 from ask_your_library.ingest.doctor import check_ledger
 from test_add_folder import PARA, fake_embedder, write  # noqa: F401
 
+# The chunker this code chunks as, and the one that built every index before
+# #28. The pair is not a fiction: `sentence-pack-1` packed to 4,000 characters
+# and `sentence-pack-2` packs to 2,400, so "an index another chunker built" is
+# the upgrade a reader is actually going to meet, and the strings in the
+# examples under `docs/upgrading.md` are these two.
+PREVIOUS_CHUNKER = "sentence-pack-1"
+
 TABLES = ["transcripts_ollama", "cards_ollama"]
 BODY = PARA * 4
 
@@ -28,7 +35,7 @@ def index(tmp_path, fake_embedder):  # noqa: F811
     return folder
 
 
-def restamp(db_path, chunker="sentence-pack-2", schema_version=None):
+def restamp(db_path, chunker=PREVIOUS_CHUNKER, schema_version=None):
     """Re-write the fingerprint as some other version of the code would have.
 
     The stamp is rewritten rather than the rows: what the policy acts on is the
@@ -63,7 +70,7 @@ def test_ayl_add_refuses_to_write_an_index_another_chunker_built(index, tmp_path
     assert code == 1
     error = capsys.readouterr().err
     assert "refusing to write transcripts_ollama" in error
-    assert "sentence-pack-2" in error and add_folder.CHUNKER_VERSION in error
+    assert PREVIOUS_CHUNKER in error and add_folder.CHUNKER_VERSION in error
     assert "--rebuild" in error and "--backup" in error
 
 
@@ -89,7 +96,7 @@ def test_a_refused_write_leaves_the_index_exactly_as_it_was(index, tmp_path):
 
     db = lancedb.connect(tmp_path / "db")
     assert db.open_table("transcripts_ollama").count_rows() == before
-    assert index_meta.read_index_meta(db, "transcripts_ollama")["chunker"] == "sentence-pack-2"
+    assert index_meta.read_index_meta(db, "transcripts_ollama")["chunker"] == PREVIOUS_CHUNKER
 
 
 def test_a_reader_warns_and_goes_on(index, tmp_path, monkeypatch, caplog, fake_embedder):  # noqa: F811
@@ -105,7 +112,7 @@ def test_a_reader_warns_and_goes_on(index, tmp_path, monkeypatch, caplog, fake_e
         table = library.open_table(db, "transcripts_ollama")
 
     assert table.count_rows() > 0                 # opened, not refused
-    assert any("sentence-pack-2" in record.message for record in caplog.records)
+    assert any(PREVIOUS_CHUNKER in record.message for record in caplog.records)
 
 
 def test_the_reader_warns_once_per_process(index, tmp_path, monkeypatch, caplog, fake_embedder):  # noqa: F811
@@ -120,7 +127,7 @@ def test_the_reader_warns_once_per_process(index, tmp_path, monkeypatch, caplog,
         for _ in range(3):
             library.open_table(db, "transcripts_ollama")
 
-    assert sum("sentence-pack-2" in record.message for record in caplog.records) == 1
+    assert sum(PREVIOUS_CHUNKER in record.message for record in caplog.records) == 1
 
 
 def test_preflight_reports_a_mismatch_as_a_notice_not_a_problem(monkeypatch, tmp_path):
@@ -160,7 +167,7 @@ def test_doctor_names_a_mismatch_and_exits_non_zero(index, tmp_path, capsys):
 
     assert code == 1
     out = capsys.readouterr().out
-    assert "VERSION MISMATCH" in out and "sentence-pack-2" in out
+    assert "VERSION MISMATCH" in out and PREVIOUS_CHUNKER in out
     assert "ayl-add --backup" in out
 
 
@@ -209,6 +216,30 @@ def test_rebuild_keeps_the_minted_ids(index, tmp_path):
     assert after == before
 
 
+def test_rebuild_refuses_to_drop_another_folders_books_and_says_what_to_run(
+        index, tmp_path, capsys, fake_embedder):  # noqa: F811
+    """A rebuild drops the whole table, so it is a rebuild of the INDEX. Running
+    it once per folder — the obvious reading of "rebuild your library" — leaves
+    only the folder that ran last, and nothing said so until the books were
+    already gone."""
+    other = tmp_path / "more-books"
+    write(other, "Harbour Lights - C. Watch.txt", BODY)
+    add_folder.add_books(add_folder.read_folder(other), "ollama", tmp_path / "db", other)
+    restamp(tmp_path / "db")
+    capsys.readouterr()
+
+    code = add_folder.main([str(index), "--db", str(tmp_path / "db"), "--rebuild",
+                            "--backup", str(tmp_path / "backups")])
+
+    assert code == 1
+    error = capsys.readouterr().err
+    assert "Harbour Lights — C. Watch" in error
+    # the way out, named: one rebuild, then ordinary runs for the other folders
+    assert "Rebuild ONCE" in error and "ayl-add <folder>" in error and "--force" in error
+    # and nothing was dropped on the way to saying no
+    assert "transcripts_ollama" in lancedb.connect(tmp_path / "db").table_names()
+
+
 def test_rebuild_names_the_books_it_does_not_cover(index, tmp_path, capsys, fake_embedder):  # noqa: F811
     """A second folder's books were in the table too. Their rows went with it,
     so the ledger's `indexed` is no longer true of them — and saying nothing
@@ -235,6 +266,8 @@ def test_rebuild_without_a_backup_or_force_is_refused(index, tmp_path, capsys):
 
 
 def test_rebuild_with_backup_takes_the_copy_first(index, tmp_path, capsys):
+    """Also the other half of the refusal above: one folder, nothing else in the
+    ledger, so there is nothing this run cannot re-index and it goes through."""
     restamp(tmp_path / "db")
 
     code = add_folder.main([str(index), "--db", str(tmp_path / "db"), "--rebuild",
@@ -247,7 +280,7 @@ def test_rebuild_with_backup_takes_the_copy_first(index, tmp_path, capsys):
     import json
     manifest = json.loads((taken[0] / "MANIFEST.json").read_text())
     stamp = next(r for r in manifest["index_meta"] if r["table"] == "transcripts_ollama")
-    assert stamp["chunker"] == "sentence-pack-2"
+    assert stamp["chunker"] == PREVIOUS_CHUNKER
 
 
 def test_a_failed_backup_stops_the_rebuild(index, tmp_path, capsys):
@@ -310,7 +343,7 @@ def test_the_warning_is_logged_once_per_process_across_call_sites(index, tmp_pat
         second = index_meta.warn_version_mismatch(db, "transcripts_ollama")
 
     assert first == second and first is not None      # every caller still gets the line
-    assert sum("sentence-pack-2" in r.message for r in caplog.records) == 1
+    assert sum(PREVIOUS_CHUNKER in r.message for r in caplog.records) == 1
 
 
 # --- a refusal writes nothing, not even a recovery ---------------------------

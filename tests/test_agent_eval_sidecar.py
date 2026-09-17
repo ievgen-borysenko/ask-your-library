@@ -623,7 +623,8 @@ def test_the_fingerprint_says_single_run_at_one_attempt_and_names_n_above_it():
     facts = {"code": "abc1234", "golden_name": "en-demo.yaml", "golden_sha256_12": "aaaa",
              "manifest_sha256_12": "bbbb", "toc_sha256_12": "cccc", "model": "m", "backend": "b",
              "index": ["cards=x"], "strict_hit_id": True, "clarify_pick": None,
-             "search_hit_chars": 2500, "chapter_hit_chars": 6000, "max_steps": 8,
+             "search_hit_chars": 2500, "chapter_hit_chars": 6000, "chapter_scan_chars": 60000,
+             "max_steps": 8,
              "max_empty_streak": 2, "max_clarify_candidates": 4, "question_deadline_s": 120,
              "repeat": 1}
     assert harness.render_fingerprint(facts).endswith("| single run")

@@ -148,6 +148,15 @@ quote provenance: OK: all 2 quotes found verbatim in the passages they cite
   problem, the answering passage is never in the window"). The fix has to change *what is
   retrieved* — a second query or a chapter drill-down when a detail question's evidence is
   cards-only — not how much of each hit is read.
+
+  **#28 (2026-09-17) does not change that reading, and is not expected to fix c06.** Re-chunking
+  to 2,400 characters means every ranked chunk is now read whole, which removes a confound this
+  trace had to argue around — the mid-word cuts above are gone — but Chapter XXXVII was never in
+  the eight hits, and a chunk that is not retrieved is not read at any size. What *could* reach it
+  is the other half of ADR-025: if `reflect` drills into Chapter XXXVII naming what it is looking
+  for, the read now opens around that phrase instead of at the chapter's head. That is a
+  possibility, not a claim. **This trace is from the 2026-09-05 index and has not been re-run
+  against the re-chunked one**; when it is, the result belongs here whichever way it goes.
 - **One step was enough, and that is the mechanism.** The same "enough after one step" reflex that
   makes h06 cheap and right stops the loop here with two card bullets in hand. `reflect` had the
   information it needed to doubt itself: both evidence items came from cards, neither from the book

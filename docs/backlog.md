@@ -53,11 +53,19 @@ open ones often refer to them.
 - **"How exactly / what happens" questions answered from card summaries.** h13 (Moby Dick ending)
   passes on facts but skips the chapter drill-down the golden expects; reflect should prefer
   read_chapter when evidence for a detail question comes only from cards.
-- **Observe sees the first 2,500 characters of a hit (1,200 until 0.1.0), ranking saw ~4,000.**
-  c06 in the 05.09 core run: the Chapter XXXVII window ended one line before the sentence that
-  answers the question, and the model inverted the day of the week. Read a window around the
-  matching span instead of the chunk head (also: reading a window around the matching span
-  instead of the chapter head in `read_chapter`).
+- **What the chunk-is-the-window change bought is not measured yet** (#28 shipped 17.09,
+  [ADR-025](adr/README.md)). The defect is closed and counted — 90.3% of chunks over the window
+  became 0%, on the prepared texts — but behaviour is not: it needs a full re-ingest at the new
+  chunker (~30 min) and a paired core + catalogue run at `--repeat 3` against the #66 gate
+  baseline, with c03 intact and c06 reported whichever way it comes out. Until that is in
+  `docs/eval-results/`, no claim about answers belongs anywhere in these pages. The same run is
+  the first chance to see whether the local model ever fills `looking_for` on a `read_chapter`
+  decision; if it does not, the chapter window never opens and the field needs the prompt work,
+  not the code.
+- **A chapter read has no cursor.** The window is chosen once per request, and a second request for
+  the same chapter stops the loop (`stop_chapter_again`) rather than showing the next window —
+  right while there was nothing to show, thinner now that a read can be aimed. If aimed reads turn
+  out to miss, the repeat becomes state: "the next 12,000 characters after the window I gave you".
 - **Behaviour gaps need code-level gates, not prompts** (audit 04.09). Prompt-only tuning
   (per-work queries, surfaced candidates in reflect, cards-only drill-down rule) was measured on
   golden v3: 37/42 vs 36/42 baseline, with all five target failures at the time (q06/h05 clarify,
@@ -128,7 +136,9 @@ open ones often refer to them.
   listing is still backed by `has_cards` / `has_text` over the index rows, which is the right
   source for it.
 - **The FTS rebuild is measured, and stays whole.** 0.8 s for the demo corpus's 7,285 transcript
-  rows (0.01 s for 165 card rows), about 0.1 ms a row, and the seconds of each run are written
+  rows at `sentence-pack-1` (0.01 s for 165 card rows), about 0.1 ms a row — the same text is
+  about 11,282 rows at `sentence-pack-2` and the seconds have not been retaken there, so read
+  0.8 s as the rate and not as the number. The seconds of each run are written
   into the ledger rows it wrote. The staged full rebuild it replaced was 0.2 s at the same scale,
   against 0.01 s for a per-book delete-and-append — so the cost argument for the per-book path
   was weak at demo scale and the correctness argument carried it. LanceDB's incremental FTS merge
@@ -393,7 +403,16 @@ open ones often refer to them.
   behavioural sample however many attempts produced it.
 - ADR-012: `SEARCH_HIT_CHARS` is a config knob, default raised 1,200 -> 2,500 after measuring
   1,200 / 2,500 / 4,000 on the core set (c03 complete at 2,500 and 4,000; c06 is not a window
-  problem, the answering passage is never in the window).
+  problem, the answering passage is never in the window). **Superseded by ADR-025** (17.09): the
+  knob was over a chunk it could not reach — 90.3% of transcript chunks were longer than it — so
+  the chunker packs to 2,400 and the two are one decision.
+- ADR-025: the chunk IS the observation window (`TRANSCRIPT_TARGET_CHARS` 4,000 -> 2,400, a
+  punctuation-free "sentence" capped at 2,000, `CHUNKER_VERSION` -> `sentence-pack-2`: 11,282
+  chunks, median 2,304, longest 2,400, 0% over the window, +55% rows on the prepared texts), and a
+  `read_chapter` that names what it is looking for is read around the best lexical match inside up
+  to `CHAPTER_SCAN_CHARS` instead of from the chapter's head. The window is computed once in `act`
+  and stored in `hits_log`, because it is the provenance haystack. Behaviour: not measured, see the
+  open item above.
 - ADR-013: `library.search(book=...)` filters both lists; after a resolved clarify retrieval is
   limited to the chosen book; a deterministic coverage gate in `reflect` spends one extra search
   before "enough"/"clarify" when the evidence names at most one book. The first variant (probe the
