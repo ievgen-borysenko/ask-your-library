@@ -117,10 +117,15 @@ def _read_stamps(db, report: LedgerReport) -> None:
         if meta is None:
             report.stamps.append(f"{name}: no fingerprint (built before stamps existed)")
             continue
+        # A fingerprint row written before ADR-024 has neither field at all, so
+        # both read as an absence rather than as `None` — which in a report
+        # reads like a value somebody wrote.
+        schema = meta.get("schema_version")
         report.stamps.append(
             f"{name}: {meta.get('model')} / {meta.get('dims')}d, chunker "
             f"{meta.get('chunker') or '(none recorded)'}, row schema "
-            f"{meta.get('schema_version')}, stamped {meta.get('created')}")
+            f"{schema if schema is not None else '(none recorded)'}, "
+            f"stamped {meta.get('created') or '(no date recorded)'}")
         detail = version_mismatch(db, name)
         if detail:
             report.version_mismatches.append(detail)

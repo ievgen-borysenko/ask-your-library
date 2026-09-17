@@ -27,7 +27,7 @@ import time
 # The staged publish this module needs is the ingest's, and `ingest.publish`
 # imports nothing from the package, so this direction costs no cycle. Only
 # `write_index_meta` uses the recovery half: see the note in `read_index_meta`.
-from .ingest.chunking import CHUNKER_VERSION
+from .ingest.chunking import CARD_CHUNKER_VERSION, CHUNKER_VERSION
 from .ingest.ledger import LEGACY_CHUNKER
 from .ingest.publish import (LEDGER_COLUMNS, STAGING_SUFFIX, rebuild_table,
                              recover_staging)
@@ -205,15 +205,40 @@ def check_index(db, table_name: str, model: str, dims: int) -> str | None:
 # --- the chunker and the row schema: warn on read, refuse on write -----------
 
 # The one remedy sentence, so the warning and the refusal cannot drift into
-# recommending two different things. `--backup` comes first in it deliberately:
-# a rebuild is the only way out of a chunker mismatch, it discards every row it
-# replaces, and this is the sentence a reader acts on.
-REBUILD_HINT = ("Back the index up first (`uv run ayl-add --backup <dir>`), then rebuild it: "
-                "`uv run ayl-add <folder>` for your own books, or "
-                "`uv run scripts/ingest_demo_corpus.py --stage ingest` for the demo corpus.")
+# recommending two different things.
+#
+# It names `--rebuild`, and it has to: a plain `ayl-add <folder>` over a
+# mismatched index hits this very refusal again, which left the only way out as
+# deleting the index directory by hand — a remedy no message mentioned and
+# nobody should have to guess. `--rebuild` drops the table and re-indexes,
+# which is the one write that is not a mix; `--backup` is in the same command
+# because a rebuild discards every row it replaces.
+REBUILD_HINT = ("The way out is a rebuild, which replaces every row: "
+                "`uv run ayl-add <folder> --rebuild --backup <dir>` takes a copy first, drops the "
+                "table and re-indexes (`--rebuild --force` skips the copy). For the demo corpus, "
+                "`uv run scripts/ingest_demo_corpus.py --stage ingest` is already a full rebuild.")
+
+# One table kind, one chunking rule. Cards are cut on their "## section"
+# headings and transcripts by the sentence packer, so the packer's version says
+# nothing about a cards table — stamping it there would make #28's bump refuse
+# every card write for a reason that is not true of cards. The name prefix is
+# what decides, exactly as `doctor` and the ingest paths already read it.
+CARDS_PREFIX = "cards"
 
 
-def version_mismatch(db, table: str, chunker: str = CHUNKER_VERSION,
+def expected_chunker(table: str) -> str:
+    """The chunker version THIS code would stamp on `table`."""
+    return CARD_CHUNKER_VERSION if table.startswith(CARDS_PREFIX) else CHUNKER_VERSION
+
+
+# Tables already warned about in this process, keyed by index and by the exact
+# disagreement. The dedupe lives here rather than in each caller, so the reader,
+# the preflight and anything added later cannot each warn once about the same
+# thing — three lines for one fact is how a real warning stops being read.
+_warned: set[tuple[str, str, str]] = set()
+
+
+def version_mismatch(db, table: str, chunker: str | None = None,
                      schema_version: int = SCHEMA_VERSION) -> str | None:
     """What the stamp on `table` claims against what this code does, as one
     sentence naming BOTH values — or None when they agree, or when there is
@@ -240,7 +265,13 @@ def version_mismatch(db, table: str, chunker: str = CHUNKER_VERSION,
     either: nothing recorded which chunker built those rows, and inventing a
     disagreement out of an absence is exactly what the ledger's `legacy` marker
     exists to avoid. `legacy` itself is that absence written down, and is
-    treated the same way."""
+    treated the same way.
+
+    `chunker` defaults to the version that belongs to THIS table's kind
+    (`expected_chunker`): a cards table is compared with the card chunker and a
+    transcripts table with the sentence packer, because they are two rules and
+    a bump to one is not a claim about the other."""
+    chunker = chunker or expected_chunker(table)
     meta = read_index_meta(db, table)
     if meta is None:
         return None
@@ -255,23 +286,29 @@ def version_mismatch(db, table: str, chunker: str = CHUNKER_VERSION,
     return None
 
 
-def warn_version_mismatch(db, table: str, chunker: str = CHUNKER_VERSION,
+def warn_version_mismatch(db, table: str, chunker: str | None = None,
                           schema_version: int = SCHEMA_VERSION) -> str | None:
     """The read-side half of the policy: one warning line, or None.
 
-    Logged here so every reader warns identically, and returned so a caller
-    with a user in front of it (preflight's notices) can show the same words
-    instead of leaving them in a server log. Never raises, never refuses: the
-    index answers, and its answers come from the chunks it holds."""
+    Logged here so every reader warns identically, and ONCE per process per
+    index per disagreement — the dedupe is this module's, not each caller's, so
+    `library.open_table` and the preflight cannot both log the same sentence.
+    The line is still RETURNED every time: a caller with a user in front of it
+    (preflight's notices) must show it at every start, and only the log is
+    deduplicated. Never raises, never refuses: the index answers, and its
+    answers come from the chunks it holds."""
     detail = version_mismatch(db, table, chunker, schema_version)
     if detail is None:
         return None
     line = f"{detail}. The index still answers, from the chunks it already holds. {REBUILD_HINT}"
-    log.warning("%s", line)
+    key = (str(getattr(db, "uri", "") or ""), table, detail)
+    if key not in _warned:
+        _warned.add(key)
+        log.warning("%s", line)
     return line
 
 
-def refuse_version_mismatch(db, table: str, chunker: str = CHUNKER_VERSION,
+def refuse_version_mismatch(db, table: str, chunker: str | None = None,
                             schema_version: int = SCHEMA_VERSION) -> str | None:
     """The write-side half: the refusal text, or None when the write may go on.
 

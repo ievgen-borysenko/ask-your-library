@@ -29,6 +29,15 @@ from ..sanitize import strip_control_chars
 # from two places is two versions.
 CHUNKER_VERSION = "sentence-pack-1"
 
+# And the OTHER chunker in this module, which is a different rule over a
+# different corpus: a book card is cut on its "## section" headings
+# (`chunk_card`), never by the sentence packer, so a change to the packer says
+# nothing about a cards table. One constant per rule is what keeps #28's bump
+# from refusing every card write for a reason that is not true of cards. The
+# policy picks the one that belongs to the table it is checking
+# (`index_meta.expected_chunker`).
+CARD_CHUNKER_VERSION = "card-sections-1"
+
 # Card sections longer than MAX are split on bullet boundaries, packing up to TARGET.
 MAX_CHUNK_CHARS = 2000
 TARGET_CHUNK_CHARS = 1400

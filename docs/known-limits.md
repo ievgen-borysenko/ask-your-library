@@ -273,7 +273,19 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   which chunker wrote those rows; an absent chunker stamp is treated as the absence it is, read
   and written without a word. And only the stamp is compared — nothing measures the rows, so an
   index whose stamp was asserted by hand (`--stage stamp-meta --chunker …`) is trusted exactly as
-  far as the person who asserted it.
+  far as the person who asserted it. The way out is `ayl-add <folder> --rebuild`, which drops the
+  table and re-indexes — it keeps the ledger's minted ids, but the books the ledger holds that
+  this folder does not lose their rows with the table and are reported as `requested`, to be
+  re-indexed from their own folders.
+- **The web UI's chat database is checked, not migrated.** `ui.py` creates its tables with
+  `CREATE TABLE IF NOT EXISTS`, so a `chat.db` written by an older release keeps its old columns
+  for ever. At startup the columns the schema declares are compared with the ones that are there
+  and the difference is **warned** about, naming the missing columns; the file carries a
+  chat-schema version of its own. Nothing alters the table: there is no `ALTER TABLE` migration
+  and none is planned, because the failure is rare, the schema is Chainlit's rather than this
+  project's, and the remedy (move the file aside, let it be recreated) destroys the conversation
+  history and has to be the reader's decision. Until it is taken, the UI works for everything that
+  does not touch the missing column.
 - **A backup is a file copy with a statement attached, and the statement has limits.**
   `ayl-add --backup <dir>` copies the LanceDB directory and the web UI's `chat.db` with a manifest
   (the stamps, the row counts, a sha256 per file), after taking the ingest lock and finishing any

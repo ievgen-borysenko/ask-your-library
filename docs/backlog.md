@@ -112,8 +112,10 @@ open ones often refer to them.
   `ayl-add --doctor` reconciles the ledger against the index tables. What remains: (a) — **done
   17.09 (#27):** a disagreeing chunker, or a row schema newer than this code's, now warns on read
   (once per table, and as a preflight notice) and refuses on write, `--doctor` reads every stamp
-  out, and `ayl-add --backup` / `--restore` copy and verify the index and `chat.db` around the
-  rebuild such a mismatch asks for; (b) a book backfilled from a pre-ledger index records neither a
+  out, `ayl-add <folder> --rebuild` is the way out a refusal can name, and `ayl-add --backup` /
+  `--restore` copy and verify the index and `chat.db` around it. #27's chat-database half is done
+  too: `chat.db` carries a schema version and the UI checks its columns against the ones it writes
+  at every start, warning by name (it does not migrate — see `known-limits.md`); (b) a book backfilled from a pre-ledger index records neither a
   digest nor a file, so the *first* correction after that upgrade still mints a second id (reported by
   `--doctor`, not prevented); (c) the cards table is joined to the transcripts table by the book
   key string alone, so a card whose heading differs by one character is still two books in the

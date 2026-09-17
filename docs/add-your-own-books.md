@@ -6,6 +6,7 @@ LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books --dry-run  # what it would ch
 LIBRARY_DB_PATH=~/ayl-index uv run ayl-add --doctor           # ledger vs index, no writes
 LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books --prune    # also delete books whose file is gone
 LIBRARY_DB_PATH=~/ayl-index uv run ayl-add --backup ~/backups # copy the index + chat.db, verified
+LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books --rebuild --backup ~/backups  # copy, then rebuild
 LIBRARY_DB_PATH=~/ayl-index uv run ask-library "..."          # ask it
 ```
 
@@ -91,8 +92,15 @@ out, and it discards what it replaces — so take a copy first:
 ```bash
 uv run ayl-add --backup ~/ayl-backups --db ~/ayl-index    # index + chat.db + a verified manifest
 uv run ayl-add --doctor --db ~/ayl-index                  # what this code makes of that index
+uv run ayl-add ~/books --rebuild --backup ~/ayl-backups --db ~/ayl-index   # copy, drop, re-index
 uv run ayl-add --restore ~/ayl-backups/<timestamp> --db ~/ayl-index --force
 ```
+
+`--rebuild` is what a refusal names, because a plain re-run hits the same refusal: it drops the
+transcripts table and indexes the folder from scratch. The `books` ledger is kept, so every book
+keeps its minted id; books the ledger holds that this folder does not lose their rows with the
+table, go back to `requested` and are named at the end of the run. It needs `--backup <dir>` in
+the same command (taken first) or `--force`.
 
 `--backup` refuses while an ingest is running (both write paths hold a lock inside the index
 directory) and finishes any half-swapped staged rebuild before it copies, which is what makes the

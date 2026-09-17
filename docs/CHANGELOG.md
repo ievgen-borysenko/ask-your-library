@@ -20,7 +20,26 @@
   performs in place — so neither warns. `--doctor` now reads every stamp out whether or not it
   agrees, because that is where somebody looks before upgrading, and exits non-zero on a mismatch.
   `CHUNKER_VERSION` moved into the chunking module, which is the only thing that decides what a
-  chunk is; the ledger and both `_index_meta` writers record that one constant.
+  chunk is; the ledger and both `_index_meta` writers record that one constant. Cards keep a
+  constant of their own (`CARD_CHUNKER_VERSION`) and are compared against it, because a card is cut
+  on its `## section` headings and never by the sentence packer — one constant for both would make
+  the packer's next bump refuse every card write over a change that did not touch cards.
+
+  **`ayl-add <folder> --rebuild`** is the way out, and the refusals name it: a plain re-run hits the
+  same refusal, which left deleting the index directory by hand as the only remedy and nothing said
+  so. It drops the transcripts table and indexes the folder from scratch — the one write that is
+  not a mix — keeping the `books` ledger, because re-minting the ids would turn the whole library
+  into new books. Books the ledger holds that the folder does not lose their rows with the table:
+  they go back to `requested` and are named at the end of the run. Since a rebuild discards what it
+  replaces, it requires `--backup <dir>` in the same command (taken first — a failed backup stops
+  the rebuild) or an explicit `--force`.
+
+  **The web UI's chat database got the same pair.** `ui.py` creates its tables with `CREATE TABLE
+  IF NOT EXISTS`, which by design leaves an existing table alone — so a `chat.db` from an older
+  release keeps its old columns, looks healthy, and fails on the first insert naming a column it
+  does not have, in the middle of a question. At every start the columns the schema declares are
+  now compared with the ones that are there and the difference is warned about by name, and the
+  file carries a chat-schema version of its own.
 
   **`ayl-add --backup <dir>`** copies the LanceDB directory and the web UI's `chat.db` into a
   timestamped directory with a `MANIFEST.json` — what was copied, the stamps, the row count per
@@ -33,8 +52,12 @@
   finished first, because a copy taken in that window restores to a missing table.
   **`--restore`** re-verifies every digest before touching anything, refuses to overwrite a live
   index without `--force`, refuses while an ingest is in flight, and **moves the index it replaces
-  aside rather than deleting it**. `--stage stamp-meta --chunker current` lets an operator vouch
-  for the chunker of an old index the way they already vouch for its embedder.
+  aside rather than deleting it** — and it follows a symlinked `LIBRARY_DB_PATH` rather than
+  replacing the link, so the real directory is what moves and what is written. A destination inside
+  the index is refused (a copy of a directory into itself), and a failure part-way through removes
+  the half-written directory rather than leaving something shaped like a backup with no manifest.
+  `--stage stamp-meta --chunker current` lets an operator vouch for the chunker of an old index the
+  way they already vouch for its embedder.
 
 - **A book has an identity a correction survives, and an ingest ledger says what went in**
   (#26, [ADR-024](adr/README.md)). A `books` table beside the index tables carries a `book_id`

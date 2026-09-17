@@ -348,7 +348,9 @@ def test_a_foreign_chunker_warns_on_read_and_the_index_still_opens(tmp_path, cap
     with caplog.at_level("WARNING"):
         line = index_meta.warn_version_mismatch(db, "transcripts_ollama")
     assert line and "sentence-pack-2" in line and "sentence-pack-1" in line
-    assert "ayl-add --backup" in line and "ayl-add <folder>" in line
+    # the remedy names the flag that actually gets out of this: a plain
+    # `ayl-add <folder>` would hit the same refusal again
+    assert "--rebuild" in line and "--backup" in line
     assert any("sentence-pack-2" in record.message for record in caplog.records)
     # and the embedder check, which IS fatal on read, still says nothing
     assert index_meta.check_index(db, "transcripts_ollama", "bge-m3", 1024) is None
@@ -360,7 +362,7 @@ def test_a_foreign_chunker_refuses_a_write(tmp_path):
     assert refusal and refusal.startswith("refusing to write transcripts_ollama")
     assert "sentence-pack-2" in refusal and "sentence-pack-1" in refusal
     # the reason a write is treated differently from a read, in the text itself
-    assert "two chunkers" in refusal and "ayl-add --backup" in refusal
+    assert "two chunkers" in refusal and "--rebuild" in refusal and "--backup" in refusal
 
 
 def test_an_index_written_by_a_newer_release_warns_on_read(tmp_path):

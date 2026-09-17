@@ -64,7 +64,7 @@ def test_ayl_add_refuses_to_write_an_index_another_chunker_built(index, tmp_path
     error = capsys.readouterr().err
     assert "refusing to write transcripts_ollama" in error
     assert "sentence-pack-2" in error and add_folder.CHUNKER_VERSION in error
-    assert "ayl-add --backup" in error
+    assert "--rebuild" in error and "--backup" in error
 
 
 def test_ayl_add_refuses_an_index_written_by_a_newer_release(index, tmp_path, capsys):
@@ -162,3 +162,152 @@ def test_doctor_names_a_mismatch_and_exits_non_zero(index, tmp_path, capsys):
     out = capsys.readouterr().out
     assert "VERSION MISMATCH" in out and "sentence-pack-2" in out
     assert "ayl-add --backup" in out
+
+
+# --- the way out: `ayl-add --rebuild` ----------------------------------------
+
+def test_the_refusal_names_a_command_that_actually_gets_out_of_it(index, tmp_path, capsys):
+    """The refusal used to recommend `ayl-add <folder>`, which hits the same
+    refusal. The only way out was deleting the index directory by hand, and
+    nothing said so."""
+    restamp(tmp_path / "db")
+    add_folder.main([str(index), "--db", str(tmp_path / "db")])
+    error = capsys.readouterr().err
+    assert "--rebuild" in error
+
+
+def test_rebuild_replaces_the_table_and_the_stamp_is_current(index, tmp_path, capsys):
+    restamp(tmp_path / "db")
+    before = lancedb.connect(tmp_path / "db").open_table("transcripts_ollama").count_rows()
+
+    code = add_folder.main([str(index), "--db", str(tmp_path / "db"), "--rebuild", "--force"])
+
+    assert code == 0
+    db = lancedb.connect(tmp_path / "db")
+    assert index_meta.read_index_meta(db, "transcripts_ollama")["chunker"] \
+        == add_folder.CHUNKER_VERSION
+    assert index_meta.version_mismatch(db, "transcripts_ollama") is None
+    assert db.open_table("transcripts_ollama").count_rows() == before
+    # and the index is writable again by an ordinary run
+    assert add_folder.main([str(index), "--db", str(tmp_path / "db")]) == 0
+
+
+def test_rebuild_keeps_the_minted_ids(index, tmp_path):
+    """Dropping the ledger with the table would turn every book in the library
+    into a new book — the defect the ledger exists to prevent, by the back
+    door."""
+    from ask_your_library.ingest.ledger import open_ledger
+
+    before = {row["key"]: row["book_id"]
+              for row in open_ledger(lancedb.connect(tmp_path / "db")).all_rows()}
+    restamp(tmp_path / "db")
+
+    add_folder.main([str(index), "--db", str(tmp_path / "db"), "--rebuild", "--force"])
+
+    after = {row["key"]: row["book_id"]
+             for row in open_ledger(lancedb.connect(tmp_path / "db")).all_rows()}
+    assert after == before
+
+
+def test_rebuild_names_the_books_it_does_not_cover(index, tmp_path, capsys, fake_embedder):  # noqa: F811
+    """A second folder's books were in the table too. Their rows went with it,
+    so the ledger's `indexed` is no longer true of them — and saying nothing
+    would leave `--doctor` as the only place the loss ever surfaced."""
+    other = tmp_path / "more-books"
+    write(other, "Harbour Lights - C. Watch.txt", BODY)
+    add_folder.add_books(add_folder.read_folder(other), "ollama", tmp_path / "db", other)
+    capsys.readouterr()
+
+    add_folder.main([str(index), "--db", str(tmp_path / "db"), "--rebuild", "--force"])
+
+    from ask_your_library.ingest.ledger import open_ledger
+
+    out = capsys.readouterr().out
+    assert "Harbour Lights — C. Watch" in out and "does not cover it" in out
+    rows = open_ledger(lancedb.connect(tmp_path / "db")).all_rows()
+    assert next(r for r in rows if r["key"].startswith("Harbour"))["status"] == "requested"
+
+
+def test_rebuild_without_a_backup_or_force_is_refused(index, tmp_path, capsys):
+    code = add_folder.main([str(index), "--db", str(tmp_path / "db"), "--rebuild"])
+    assert code == 2
+    assert "--backup" in capsys.readouterr().err
+
+
+def test_rebuild_with_backup_takes_the_copy_first(index, tmp_path, capsys):
+    restamp(tmp_path / "db")
+
+    code = add_folder.main([str(index), "--db", str(tmp_path / "db"), "--rebuild",
+                            "--backup", str(tmp_path / "backups")])
+
+    assert code == 0
+    taken = list((tmp_path / "backups").iterdir())
+    assert len(taken) == 1 and (taken[0] / "MANIFEST.json").is_file()
+    # the copy is of the index as it WAS: the stamp it holds is the old one
+    import json
+    manifest = json.loads((taken[0] / "MANIFEST.json").read_text())
+    stamp = next(r for r in manifest["index_meta"] if r["table"] == "transcripts_ollama")
+    assert stamp["chunker"] == "sentence-pack-2"
+
+
+def test_a_failed_backup_stops_the_rebuild(index, tmp_path, capsys):
+    """The one sequence --rebuild exists to make safe, run in reverse, is the
+    one thing it must never do."""
+    code = add_folder.main([str(index), "--db", str(tmp_path / "db"), "--rebuild",
+                            "--backup", str(tmp_path / "db" / "inside")])
+    assert code == 1
+    assert "inside the index itself" in capsys.readouterr().err
+    assert lancedb.connect(tmp_path / "db").open_table("transcripts_ollama").count_rows() > 0
+
+
+def test_force_on_its_own_is_an_error(index, tmp_path, capsys):
+    code = add_folder.main([str(index), "--db", str(tmp_path / "db"), "--force"])
+    assert code == 2
+    assert "--force belongs to" in capsys.readouterr().err
+
+
+# --- one chunker per table kind ----------------------------------------------
+
+def test_cards_are_compared_with_the_card_chunker_not_the_sentence_packer(tmp_path):
+    """A card is cut on its "## section" headings; the packer's version says
+    nothing about it. Stamping the packer's version on cards would make #28's
+    bump refuse every card write for a reason that is not true of cards."""
+    from ask_your_library.ingest.chunking import CARD_CHUNKER_VERSION
+
+    db = lancedb.connect(tmp_path / "db")
+    db.create_table("cards_ollama", [{"chunk_id": "c/1", "note": "c", "book": "A — B",
+                                      "source": "card", "section": "One", "text": "t",
+                                      "vector": [0.0] * 4}])
+    index_meta.write_index_meta(db, "cards_ollama", "ollama", "fake-embed", 4,
+                                chunker=CARD_CHUNKER_VERSION)
+    assert index_meta.expected_chunker("cards_ollama") == CARD_CHUNKER_VERSION
+    assert index_meta.version_mismatch(db, "cards_ollama") is None
+    # the transcripts rule applied to a cards table would be a false mismatch
+    assert index_meta.version_mismatch(
+        db, "cards_ollama", chunker=add_folder.CHUNKER_VERSION) is not None
+
+
+def test_a_cards_table_stamped_with_the_packer_is_a_mismatch(tmp_path):
+    db = lancedb.connect(tmp_path / "db")
+    db.create_table("cards_ollama", [{"chunk_id": "c/1", "note": "c", "book": "A — B",
+                                      "source": "card", "section": "One", "text": "t",
+                                      "vector": [0.0] * 4}])
+    index_meta.write_index_meta(db, "cards_ollama", "ollama", "fake-embed", 4,
+                                chunker=add_folder.CHUNKER_VERSION)
+    detail = index_meta.version_mismatch(db, "cards_ollama")
+    assert detail and add_folder.CHUNKER_VERSION in detail
+
+
+def test_the_warning_is_logged_once_per_process_across_call_sites(index, tmp_path, caplog):
+    """The dedupe is the module's, not each caller's: the reader and the
+    preflight must not each log the same sentence about the same table."""
+    restamp(tmp_path / "db")
+    db = lancedb.connect(tmp_path / "db")
+    index_meta._warned.clear()
+
+    with caplog.at_level("WARNING"):
+        first = index_meta.warn_version_mismatch(db, "transcripts_ollama")
+        second = index_meta.warn_version_mismatch(db, "transcripts_ollama")
+
+    assert first == second and first is not None      # every caller still gets the line
+    assert sum("sentence-pack-2" in r.message for r in caplog.records) == 1

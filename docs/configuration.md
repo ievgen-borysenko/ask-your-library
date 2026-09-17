@@ -59,9 +59,13 @@ vectors another model produced: the index is stamped with the model that made it
 the web UI **refuse to start** against a mismatch rather than answering from a search that means
 nothing. Changing the code's chunker does not refuse a read — it warns, once per table, and shows
 the same line as a startup notice, because differently-cut text still retrieves; the refusal there
-is on the next `ayl-add`. Either way the remedy is a rebuild, and a rebuild discards what it
-replaces: [`docs/upgrading.md`](upgrading.md) is what each case costs, and `ayl-add --backup` is
-what survives it.
+is on the next `ayl-add`. Either way the remedy is a rebuild — `ayl-add <folder> --rebuild
+--backup <dir>`, which takes the copy first — and a rebuild discards what it replaces:
+[`docs/upgrading.md`](upgrading.md) is what each case costs.
+
+The web UI's `chat.db` is checked the same way and never migrated: `CREATE TABLE IF NOT EXISTS`
+leaves an older file's columns alone, so at every start the columns the schema declares are
+compared with the ones that are there and the difference is warned about by name.
 
 ### Exit codes
 

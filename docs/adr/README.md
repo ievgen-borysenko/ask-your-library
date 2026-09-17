@@ -663,8 +663,11 @@ the table; no code routes on it.
 ADR-024 added the two fields; this is what now acts on them.
 
 *What counts as a mismatch* (`index_meta.version_mismatch`): a stamped chunker that differs from
-`chunking.CHUNKER_VERSION`, or a stamped `schema_version` HIGHER than this code's — an index
-written by a newer release. Two things deliberately do not: an **older** stamped schema, which is
+the one belonging to that table's KIND — `chunking.CHUNKER_VERSION` for a transcripts table,
+`CARD_CHUNKER_VERSION` for a cards table, because a card is cut on its `## section` headings and
+never by the sentence packer, and one constant for both would make the packer's next bump refuse
+card writes over a change that did not touch cards — or a stamped `schema_version` HIGHER than
+this code's, an index written by a newer release. Two things deliberately do not: an **older** stamped schema, which is
 the migration this project actually performs (ADR-024 added `book_id`/`book_rev` to existing tables
 in place, and the next `ayl-add` migrates and re-stamps), and would otherwise warn every reader of
 every index built before the last release about something the next ingest fixes; and an **absent**
@@ -680,12 +683,27 @@ therefore the repair rather than a mix. `--doctor` reads every stamp out whether
 disagrees, because it is where somebody looks *before* an upgrade, and exits non-zero on a
 mismatch.
 
-*And the half a refusal cannot supply*: a rebuild discards the rows it replaces, so `ayl-add
---backup <dir>` copies the index directory and the chat database with a manifest (the stamps, the
-row counts, a sha256 per file), taking the ingest lock and finishing any staged rebuild first, and
-`--restore` verifies that manifest before it puts anything back. The refusal names it in its own
-text: the remedy sentence is one constant, so the warning and the refusal cannot drift into
-recommending two different things. See [`docs/upgrading.md`](../upgrading.md).
+*And the half a refusal cannot supply*: a refusal that names no way out is a dead end, and a plain
+`ayl-add <folder>` over a mismatched index hits the same refusal again — which left deleting the
+index directory by hand as the only remedy, mentioned nowhere. So `ayl-add <folder> --rebuild`
+drops the table and re-indexes: the one write that is not a mix, and the only one a refusal can
+honestly recommend. It keeps the `books` ledger, because re-minting the ids would turn every book
+into a new book — the defect ADR-024 exists to prevent, arriving by the back door — and it names
+the books it does not cover, whose rows went with the table, putting them back to `requested`.
+Because a rebuild discards what it replaces, `--rebuild` requires `--backup <dir>` in the same
+command or an explicit `--force`, and a failed backup stops it. `ayl-add --backup` copies the
+index directory and the chat database with a manifest (the stamps, the row counts, a sha256 per
+file), taking the ingest lock and finishing any staged rebuild first; `--restore` verifies that
+manifest before it puts anything back. The remedy sentence is one constant, so the warning and
+the refusal cannot drift into recommending two different things.
+
+*The chat database got the same pair* (#27's second bullet): a `schema_version` row written into
+`chat.db` itself, and a startup check of the columns `ui.py`'s schema declares against the columns
+that are there. `CREATE TABLE IF NOT EXISTS` leaves an older table exactly as it was, so the
+failure it prevents is an insert naming a column that does not exist, mid-question, as an SQLite
+error in a log. A warning, not a refusal, and for a reason the index policy does not have: the
+remedy is to move the file aside, and that throws away every past conversation.
+See [`docs/upgrading.md`](../upgrading.md).
 
 ## ADR-021: The action channel is a reserved string marker in `current_query`
 

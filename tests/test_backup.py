@@ -290,3 +290,77 @@ def test_the_default_chat_db_follows_the_variable_the_ui_reads(tmp_path, monkeyp
     ITS import, and the tests set it per test."""
     monkeypatch.setenv("AYL_CHAINLIT_DIR", str(tmp_path / "elsewhere"))
     assert backup_module.default_chat_db() == tmp_path / "elsewhere" / "chat.db"
+
+
+# --- a destination that would swallow itself ---------------------------------
+
+def test_a_destination_inside_the_index_is_refused_and_writes_nothing(built, tmp_path):
+    """Copying a directory into itself: `copytree` would race its own output,
+    and the best case is a backup containing a partial copy of itself."""
+    inside = tmp_path / "db" / "backups"
+    with pytest.raises(BackupError, match="inside the index itself"):
+        backup(tmp_path / "db", inside)
+    assert not inside.exists()
+
+
+def test_the_check_follows_links_rather_than_names(built, tmp_path):
+    """A `..` or a symlink must not walk into the index under another name."""
+    link = tmp_path / "looks-outside"
+    link.symlink_to(tmp_path / "db" / "sub", target_is_directory=True)
+    (tmp_path / "db" / "sub").mkdir()
+    with pytest.raises(BackupError, match="inside the index itself"):
+        backup(tmp_path / "db", link)
+
+
+def test_a_failed_copy_leaves_no_half_written_backup(built, tmp_path, monkeypatch):
+    """A partial backup is worse than none: a directory named like a backup,
+    with no manifest to say what it is missing, waiting for the day somebody
+    reaches for it."""
+    monkeypatch.setattr(backup_module, "_sha256",
+                        lambda path: (_ for _ in ()).throw(OSError("disk went away")))
+
+    with pytest.raises(OSError, match="disk went away"):
+        backup(tmp_path / "db", tmp_path / "backups")
+
+    assert not any((tmp_path / "backups").iterdir())
+    # and the lock was released, so the index is still usable
+    assert not lock_path(tmp_path / "db").exists()
+
+
+# --- a symlinked index path --------------------------------------------------
+
+def test_a_restore_follows_a_symlinked_index_path(built, tmp_path, fake_embedder):  # noqa: F811
+    """`data/lancedb` is a symlink in this project's own dev checkout. Renaming
+    the LINK would move the link, leave the real directory in place and write
+    the restored index onto the wrong volume."""
+    real = tmp_path / "db"
+    link = tmp_path / "linked-db"
+    link.symlink_to(real, target_is_directory=True)
+    target = backup(link, tmp_path / "backups")
+
+    report = restore(target, link, force=True)
+
+    assert link.is_symlink() and link.resolve() == real
+    assert real.is_dir()
+    assert lancedb.connect(link).open_table("transcripts_ollama").count_rows() > 0
+    # the REAL directory is what was moved aside, not the link
+    assert list(tmp_path.glob("db.replaced-*")) and not list(tmp_path.glob("linked-db.replaced-*"))
+    assert any("still points at the restored index" in line for line in report)
+
+
+# --- the lock is complete from the instant its name exists -------------------
+
+def test_the_lock_file_is_never_observed_empty(tmp_path):
+    """The window this closes: create-then-write lets a competitor read `{}`,
+    call it a lock nobody can be identified from, and take it over."""
+    db_path = tmp_path / "db"
+    db_path.mkdir()
+    acquire(db_path, command="ayl-add ~/books")
+    try:
+        info = read_lock(db_path)
+        assert info["pid"] == os.getpid() and info["command"] == "ayl-add ~/books"
+        assert info["host"] and info["started"]
+        # and nothing left beside it
+        assert [p.name for p in db_path.iterdir()] == [LOCK_NAME]
+    finally:
+        release(db_path)

@@ -122,34 +122,49 @@ def busy_message(db_path: Path | str, info: dict, doing: str) -> str:
 def acquire(db_path: Path | str, command: str = "", doing: str = "write") -> Path:
     """Take the lock, or raise `IngestBusy`.
 
-    `O_CREAT | O_EXCL` is the whole exclusion: the file is created or the call
-    fails, with no window between asking and taking. One retry after clearing a
-    stale lock, and no more — a second failure means a real race with another
-    process that has just taken it, and waiting in a loop for a half-hour ingest
-    is not what a caller wants."""
+    The lock is written to a private temporary file FIRST and then hard-linked
+    into place. `os.link` fails with `FileExistsError` if the name is taken, so
+    it is as exclusive as `O_CREAT | O_EXCL` — and unlike it, the file is
+    COMPLETE from the instant the name exists. Creating an empty file and then
+    writing the payload leaves a window in which a competitor reads `{}`,
+    concludes "a lock nobody can be identified from" and takes it over; the
+    window is short, and two ingests writing one index is exactly the thing
+    this file exists to prevent, so it is closed rather than made unlikely.
+
+    One retry after clearing a stale lock, and no more: a second failure means
+    a real race with a process that has just taken it, and waiting in a loop
+    for a half-hour ingest is not what a caller wants."""
     path = lock_path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps({"pid": os.getpid(), "host": socket.gethostname(),
                           "started": time.strftime("%Y-%m-%dT%H:%M:%S"),
                           "command": command}).encode("utf-8")
-    for attempt in (1, 2):
-        try:
-            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-        except FileExistsError:
-            info = read_lock(db_path)
-            if info is None:
-                continue                      # it vanished between the two calls
-            if attempt == 2 or not _is_stale(info):
-                raise IngestBusy(busy_message(db_path, info, doing)) from None
-            log.warning("%s: clearing a lock left behind by %s (that process is gone)",
-                        path, describe(info))
-            with contextlib.suppress(FileNotFoundError):
-                path.unlink()
-        else:
-            with os.fdopen(fd, "wb") as handle:
-                handle.write(payload)
-            return path
-    raise IngestBusy(busy_message(db_path, read_lock(db_path) or {}, doing))
+    # Same directory, so the link below is within one filesystem; the pid makes
+    # it this process's own even if two race here.
+    staging = path.with_name(f"{LOCK_NAME}.{os.getpid()}.tmp")
+    try:
+        fd = os.open(staging, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(payload)
+        for attempt in (1, 2):
+            try:
+                os.link(staging, path)
+            except FileExistsError:
+                info = read_lock(db_path)
+                if info is None:
+                    continue                  # it vanished between the two calls
+                if attempt == 2 or not _is_stale(info):
+                    raise IngestBusy(busy_message(db_path, info, doing)) from None
+                log.warning("%s: clearing a lock left behind by %s (that process is gone)",
+                            path, describe(info))
+                with contextlib.suppress(FileNotFoundError):
+                    path.unlink()
+            else:
+                return path
+        raise IngestBusy(busy_message(db_path, read_lock(db_path) or {}, doing))
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            staging.unlink()
 
 
 def release(db_path: Path | str) -> None:

@@ -533,8 +533,50 @@ def folder_ledger_diff(ledger: Ledger, folder: Path, books: list[Book]):
                        scope=folder_digest(folder), path_of=refs.get)
 
 
+def drop_for_rebuild(db, table_name: str, ledger: Ledger, keeping: set[str]) -> list[str]:
+    """`--rebuild`: the table goes, the ledger stays.
+
+    A chunker mismatch has exactly one remedy — replace every row — and until
+    this existed the only way to get there was deleting the index directory by
+    hand, which no message mentioned. Dropping the table is the whole of it:
+    LanceDB drops the BM25 index with it, `ayl-add` then takes its
+    no-table-yet path (one staged publish for the whole folder), and a run that
+    replaces everything is not a mixed write, so no refusal applies to it.
+
+    The LEDGER is deliberately kept. It holds the minted ids, and re-minting
+    them would turn every book in the library into a new book — which is the
+    defect the ledger exists to prevent, arriving by the back door. Each book
+    this run covers is re-`begin`/`commit`ted by the ordinary path.
+
+    What is left is books the ledger calls indexed that this folder does not
+    hold — another folder's, or the demo corpus's. Their rows went with the
+    table, so the ledger's `indexed` is no longer true of them; they are put
+    back to `requested`, which is what they are, and returned so the run can
+    name them. Silently leaving them `indexed` would make `--doctor` the only
+    place the loss ever surfaced."""
+    if table_name not in table_names(db):
+        return []
+    db.drop_table(table_name)
+    orphaned = []
+    for row in sorted(ledger.all_rows(), key=lambda r: r.get("key") or ""):
+        key = row.get("key") or ""
+        if key in keeping:
+            continue
+        ledger.begin(row["book_id"], key=key, source_ref=row.get("source_ref") or "",
+                     sha256=row.get("sha256") or "",
+                     # the chunker that BUILT it, not this code's: nothing was
+                     # re-chunked here, and the row is a record of what was
+                     chunker=row.get("chunker") or CHUNKER_VERSION,
+                     embedding_model=row.get("embedding_model") or "")
+        orphaned.append(f"{key or row['book_id']}: its rows were in {table_name} and this "
+                        f"rebuild does not cover it — run ayl-add over its folder "
+                        f"({display_source(row.get('source_ref') or '') or 'source unrecorded'}) "
+                        f"to put it back")
+    return orphaned
+
+
 def add_books(books: list[Book], backend: str, db_path: Path, folder: Path | None = None,
-              prune: bool = False) -> dict:
+              prune: bool = False, rebuild: bool = False) -> dict:
     """Index these books, holding the index's ingest lock for the whole run.
 
     The lock is what makes `--backup` mean anything (#27): a LanceDB index is a
@@ -548,11 +590,11 @@ def add_books(books: list[Book], backend: str, db_path: Path, folder: Path | Non
     Everything else is `_write_books`, unchanged and unindented, so that the
     lock is one line and not a re-reading of the whole ingest."""
     with ingest_lock(db_path, command=f"ayl-add {folder}" if folder else "ayl-add"):
-        return _write_books(books, backend, db_path, folder, prune)
+        return _write_books(books, backend, db_path, folder, prune, rebuild)
 
 
 def _write_books(books: list[Book], backend: str, db_path: Path, folder: Path | None = None,
-                 prune: bool = False) -> dict:
+                 prune: bool = False, rebuild: bool = False) -> dict:
     """Index these books, one book at a time, keyed by the ledger's `book_id`.
 
     Not a whole-table rebuild any more (ADR-015's "an update is a staged
@@ -577,15 +619,28 @@ def _write_books(books: list[Book], backend: str, db_path: Path, folder: Path | 
     # recovering it is a write — so it happens here, on the write path, and
     # never in the readers that check a stamp before every search.
     recover_staging(db, META_TABLE)
-    refuse_model_mismatch(db, table_name, embedder)
-    refuse_chunker_mismatch(db, table_name)
-    ledger = open_book_ledger(db, backend, embedder)
-
     counts = {"books": 0, "sections": 0, "chunks": 0, "merged_headings": 0,
-              "recovered": [], "vanished": [], "pruned": 0}
+              "recovered": [], "vanished": [], "pruned": 0, "orphaned_by_rebuild": []}
+
+    if rebuild:
+        # Before the two refusals, and that is the point: a rebuild is the
+        # remedy they name. Once the table is gone there is nothing to
+        # mismatch, nothing to mix, and the run takes the staged-publish path.
+        ledger = open_book_ledger(db, backend, embedder)
+        counts["orphaned_by_rebuild"] = drop_for_rebuild(
+            db, table_name, ledger, {book.book for book in books})
+        say(f"  --rebuild: dropped {table_name}; every book in {folder or 'this run'} is "
+            f"re-indexed from scratch, and the books ledger keeps its ids")
+    else:
+        refuse_model_mismatch(db, table_name, embedder)
+        refuse_chunker_mismatch(db, table_name)
+        ledger = open_book_ledger(db, backend, embedder)
+
     counts["recovered"] = recover_interrupted(db, table_name, ledger,
                                               {book.book for book in books})
     for line in counts["recovered"]:
+        say(f"  {line}")
+    for line in counts["orphaned_by_rebuild"]:
         say(f"  {line}")
 
     existing = table_name in table_names(db)
@@ -881,9 +936,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--restore", type=Path, metavar="BACKUP_DIR", default=None,
                         help="verify a backup directory against its manifest and put it back; "
                              "refuses to overwrite an existing index unless --force")
+    parser.add_argument("--rebuild", action="store_true",
+                        help="drop the transcripts table and index the folder from scratch — the "
+                             "way out of a chunker or embedder mismatch, and the only write that "
+                             "is not a mix. The books ledger keeps its ids; books it holds that "
+                             "this folder does not are put back to `requested` and named. Needs "
+                             "--backup <dir> (a copy first) or --force")
     parser.add_argument("--force", action="store_true",
-                        help="--restore only: move the index that is there aside (it is kept, "
-                             "not deleted) and restore over it")
+                        help="--restore: move the index that is there aside (it is kept, not "
+                             "deleted) and restore over it, replacing the chat database too. "
+                             "--rebuild: go ahead without taking a backup first")
     parser.add_argument("--chat-db", type=Path, default=None, metavar="PATH",
                         help="--backup / --restore: the web UI's chat database "
                              "(default: AYL_CHAINLIT_DIR or .chainlit/chat.db)")
@@ -908,13 +970,24 @@ def main(argv: list[str] | None = None) -> int:
         say("--backup and --restore are two different runs: take the copy, then put one back",
             error=True)
         return 2
-    if args.backup:
-        return run_backup(db_default, args.backup.expanduser(), chat_db)
     if args.restore:
         return run_restore(db_default, args.restore.expanduser(), chat_db, args.force)
+    # Named rather than ignored: a flag that quietly does nothing is read as a
+    # flag that did something.
+    if args.force and not args.rebuild:
+        say("--force belongs to --restore (overwrite the index that is there) or to --rebuild "
+            "(rebuild without taking a backup first); on its own it does nothing", error=True)
+        return 2
+    if args.backup and args.folder is None:
+        return run_backup(db_default, args.backup.expanduser(), chat_db)
     if args.folder is None:
         say("no folder given: `ayl-add <folder>`, or one of `--doctor`, `--backup <dir>`, "
             "`--restore <backup dir>` over an existing index", error=True)
+        return 2
+    if args.rebuild and not (args.backup or args.force):
+        say("--rebuild replaces every row in the transcripts table, and what it replaces is "
+            "gone. Take the copy in the same command — `ayl-add <folder> --rebuild --backup "
+            "<dir>` — or say --force if you have one already (or do not want one).", error=True)
         return 2
     folder = args.folder.expanduser()
     if not folder.is_dir():
@@ -925,9 +998,20 @@ def main(argv: list[str] | None = None) -> int:
     try:
         books = read_folder(folder)
         if args.dry_run:
+            if args.rebuild:
+                say("--dry-run: nothing is dropped and nothing is written; --rebuild would "
+                    "replace every row of the table below")
             return dry_run(books, args.backend, db_path, folder)
+        # Before a single row is touched, and it is a hard stop: a rebuild that
+        # went ahead after a failed backup would be the one sequence this flag
+        # exists to make safe, run in reverse.
+        if args.backup:
+            code = run_backup(db_path, args.backup.expanduser(), chat_db)
+            if code:
+                return code
         say(f"embedding {len(books)} books with {args.backend} into {db_path} ...")
-        counts = add_books(books, args.backend, db_path, folder, prune=args.prune)
+        counts = add_books(books, args.backend, db_path, folder, prune=args.prune,
+                           rebuild=args.rebuild)
     except (IngestError, IngestBusy) as error:  # one readable line, not a traceback
         say(str(error), error=True)
         return 1
@@ -939,6 +1023,8 @@ def main(argv: list[str] | None = None) -> int:
     say(f"table {counts['table']} in {db_path}; embedding model {counts['model']} "
         f"({counts['dims']} dims), FTS index rebuilt in {counts['fts_seconds']:.1f}s "
         f"(whole, every run)")
+    for line in counts["orphaned_by_rebuild"]:
+        say(f"still in the ledger, no longer in the index: {line}")
     for row in counts["vanished"]:
         say(f"still in the index, but no longer in the folder: {row.get('key')} "
             f"({display_source(row.get('source_ref') or '')}) — re-run with --prune to "

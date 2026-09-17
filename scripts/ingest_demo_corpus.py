@@ -48,15 +48,16 @@ import yaml
 from ask_your_library.bookkey import author_of, book_key, chunk_id, title_of
 from ask_your_library.config import DB_PATH, EMBED_BACKEND
 from ask_your_library.embeddings import get_embedder
-from ask_your_library.index_meta import (META_TABLE, check_index, read_index_meta,
-                                         refuse_version_mismatch, write_index_meta)
+from ask_your_library.index_meta import (META_TABLE, check_index, expected_chunker,
+                                         read_index_meta, refuse_version_mismatch,
+                                         write_index_meta)
 from ask_your_library.ingest import (Chunk, build_fts_index, chunk_card, embedding_text,
                                      pack_sentences, rows_for, split_sentences)
 # Chapter splitting lives in the package so every ingest path (this script and
 # the generic `ayl-add`) cuts books into sections identically.
 from ask_your_library.ingest.chapters import (DEFAULT_CHAPTER_RE, MIN_CHAPTER_CHARS,  # noqa: F401
                                               split_chapters, with_parts)
-from ask_your_library.ingest.chunking import CHUNKER_VERSION
+from ask_your_library.ingest.chunking import CARD_CHUNKER_VERSION, CHUNKER_VERSION
 from ask_your_library.ingest.ledger import open_ledger
 from ask_your_library.ingest.lock import IngestBusy, ingest_lock
 from ask_your_library.ingest.publish import (add_ledger_columns, rebuild_table,
@@ -568,8 +569,13 @@ def ingest_cards_table(backend: str) -> None:
     # distillate of a book that the transcripts table already holds, and the
     # ledger's unit is the book. Its schema_version stays at the default, which
     # says only "written by an ingest that knows about the field".
+    #
+    # And its own chunker version: a card is cut on its "## section" headings,
+    # never by the sentence packer, so stamping the packer's version here would
+    # make the packer's next bump refuse card writes over a change that did not
+    # touch cards.
     write_index_meta(db, name, backend, embedder.model, embedder.dims,
-                     chunker=CHUNKER_VERSION)
+                     chunker=CARD_CHUNKER_VERSION)
     print(f"cards done: {len(cards)} cards -> {table.count_rows()} chunks")
 
 
@@ -591,16 +597,19 @@ def stamp_existing_tables(backend: str, chunker: str | None = None) -> None:
     and is read from the table's own columns (`index_meta.schema_version_of`).
     Nothing an operator can vouch for changes what the columns are."""
     embedder = get_embedder(backend)
-    if chunker == "current":
-        chunker = CHUNKER_VERSION
     db = lancedb.connect(DB_PATH)
     for name in (f"cards_{backend}", f"transcripts_{backend}"):
         if name not in table_names(db):
             print(f"  {name}: not found, skipped")
             continue
-        write_index_meta(db, name, backend, embedder.model, embedder.dims, chunker=chunker)
+        # `current` is per table kind, not one string for both: the cards table
+        # is cut by `chunk_card` and the transcripts table by the sentence
+        # packer, and asserting the packer's version over cards would be an
+        # assertion about a rule that never touched them.
+        claimed = expected_chunker(name) if chunker == "current" else chunker
+        write_index_meta(db, name, backend, embedder.model, embedder.dims, chunker=claimed)
         print(f"  {name}: stamped {embedder.model} / {embedder.dims}d"
-              + (f" / chunker {chunker}" if chunker else " (no chunker claimed)"))
+              + (f" / chunker {claimed}" if claimed else " (no chunker claimed)"))
 
 
 # --- main -------------------------------------------------------------------
@@ -631,6 +640,11 @@ def main() -> None:
     ap.add_argument("--retranscribe", action="store_true",
                     help="ignore shipped audio transcripts and run Whisper (macOS)")
     args = ap.parse_args()
+    if args.chunker and args.stage != "stamp-meta":
+        # Silently ignoring it would let somebody believe they had asserted a
+        # chunker over an index that was never stamped with one.
+        ap.error("--chunker belongs to --stage stamp-meta; every other stage stamps the "
+                 "chunker it actually used")
     global VERIFY_CHECKSUMS
     VERIFY_CHECKSUMS = not args.no_verify
 

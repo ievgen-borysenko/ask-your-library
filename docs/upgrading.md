@@ -15,9 +15,10 @@ uv run ayl-add --backup ~/ayl-backups --db ~/ayl-index
 
 | What changed | What it costs | How you find out |
 |---|---|---|
-| **The chunker** (what a chunk *is*) | a full rebuild: every row is re-chunked and re-embedded | `_index_meta.chunker` differs from this code's — **warned** on every read, **refused** on the next write |
+| **The chunker** (what a chunk *is*) | a full rebuild: every row is re-chunked and re-embedded | `_index_meta.chunker` differs from this code's — **warned** on every read, **refused** on the next write. Compared per table kind: the sentence packer for transcripts, the card chunker for cards, because they are two rules and a bump to one says nothing about the other |
 | **The row schema** (what a row *holds*) | usually nothing: `ayl-add` migrates the table in place, re-embedding no row | nothing to see. A *newer* schema than this code knows is warned and refused, which means you downgraded |
 | **The embedding model or its width** | a full rebuild: a query vector from one model against document vectors from another is not a search | **fatal on read** — the CLI and the web UI refuse to start against it |
+| **The chat database's schema** (the web UI's history) | nothing, usually: SQLite leaves an existing table alone, so an older `chat.db` keeps its columns | the web UI checks the columns it writes against the ones that are there at every start and **warns**, naming the missing ones; the file is stamped with a chat-schema version |
 
 The three are enforced differently on purpose. A wrong embedder makes retrieval meaningless with
 nothing to see, so nothing may read the index. A wrong chunker makes it *worse*, not meaningless —
@@ -32,10 +33,11 @@ Once per table per process, in the log, and as a startup notice in the CLI and t
 
 ```
 transcripts_ollama was built by chunker 'sentence-pack-1', this code chunks as
-'sentence-pack-2'. The index still answers, from the chunks it already holds. Back the
-index up first (`uv run ayl-add --backup <dir>`), then rebuild it: `uv run ayl-add
-<folder>` for your own books, or `uv run scripts/ingest_demo_corpus.py --stage ingest`
-for the demo corpus.
+'sentence-pack-2'. The index still answers, from the chunks it already holds. The way out
+is a rebuild, which replaces every row: `uv run ayl-add <folder> --rebuild --backup <dir>`
+takes a copy first, drops the table and re-indexes (`--rebuild --force` skips the copy).
+For the demo corpus, `uv run scripts/ingest_demo_corpus.py --stage ingest` is already a
+full rebuild.
 ```
 
 ### What the refusal looks like
@@ -48,8 +50,24 @@ refusing to write transcripts_ollama: transcripts_ollama was built by chunker
 'sentence-pack-1', this code chunks as 'sentence-pack-2'. A write would leave one table
 holding rows from two chunkers, and nothing afterwards can tell which rows came from
 which — unlike a read, that cannot be undone except by rebuilding the whole table.
-Back the index up first (`uv run ayl-add --backup <dir>`), then rebuild it: ...
+The way out is a rebuild, which replaces every row: `uv run ayl-add <folder> --rebuild
+--backup <dir>` ...
 ```
+
+A plain `ayl-add <folder>` would hit that same refusal — a rebuild is what gets past it,
+and it is one command:
+
+```bash
+uv run ayl-add ~/books --rebuild --backup ~/ayl-backups --db ~/ayl-index
+```
+
+It takes the backup **first** (a failed backup stops the rebuild), drops the transcripts
+table, and indexes the folder from scratch. The `books` ledger is kept, so every book
+keeps the id it was minted with — re-minting them would turn the whole library into new
+books, which is the defect the ledger exists to prevent. Books the ledger holds that this
+folder does **not** (another folder's, or the demo corpus's) lose their rows with the
+table: they are put back to `requested` and named at the end of the run, so you know to
+re-run `ayl-add` over their folders too. `--rebuild --force` goes ahead without a backup.
 
 ### Checking before you upgrade
 
@@ -111,8 +129,34 @@ the command exists rather than a line in the README:
    finishes or discards any such rebuild before it copies, and the manifest records that it did.
 3. **Nothing rotted since.** `--restore` recomputes every digest before it touches anything.
 
+A destination **inside** the index directory is refused: that is a copy of a directory into
+itself. A failure part-way through removes the half-written directory rather than leaving something
+shaped like a backup with no manifest to say what it is missing.
+
 What is **not** backed up: `.scratch/` (the passages as the model saw them, written per run and
 not cleaned) and `.env` (a backup of secrets is a second place to lose them from).
+
+## The chat database
+
+The web UI's history has the same two things the index has, for the same reason. `ui.py` creates
+its tables with `CREATE TABLE IF NOT EXISTS`, which by design does nothing to a table that is
+already there — so a `chat.db` written by an older release keeps its old columns, looks healthy,
+and fails on the first insert naming a column it does not have, in the middle of somebody's
+question. At every start the UI now compares the columns its schema declares against the columns
+that are actually there and warns, naming them:
+
+```
+…/.chainlit/chat.db: the table 'steps' has no column(s) command, defaultOpen, which this
+version writes. SQLite leaves an existing table alone, so an older chat database keeps its
+old shape and fails on the first insert that names one of them. Move the file aside and let
+the UI create a new one (the conversation history in it is lost — back it up first with
+`uv run ayl-add --backup <dir>`), or add the column(s) by hand.
+```
+
+A warning and not a refusal: the UI works for everything that does not touch the missing column,
+and the remedy throws away every past conversation, so it is the reader's decision. The file also
+carries a `ayl_schema` row with the chat-schema version, so a database written by a **newer**
+release is recognisable as one rather than discovered column by column.
 
 ## Restore
 
@@ -126,13 +170,20 @@ The backup is verified against its manifest first, every time. Three things are 
 
 - a backup that no longer matches its manifest — **nothing is touched**, and no flag makes
   overwriting a working index with a corrupt copy safe;
-- an index already at `--db` — this is what `--force` is for;
+- an index already at `--db` — this is what `--force` is for, and it covers the **chat database**
+  too: without it a `chat.db` already at the target is left alone and the report says so, with it
+  that file is replaced as well;
 - an ingest in flight on the index being replaced.
 
 The index that `--force` replaces is **moved aside, not deleted**: it stays as
 `<index>.replaced-<timestamp>` and the report names it. Delete it yourself once you are satisfied.
 The chat database is restored only when the target is absent or `--force` is given, and it is
 restored owner-readable only, as the web UI keeps it.
+
+If `--db` is a **symlink** — `data/lancedb` is one in this project's own dev checkout — the link is
+followed: the real directory is what is moved aside and what the backup is written into, and the
+link goes on pointing at it. Renaming the link instead would leave the real index where it was and
+put the restored one on whichever volume the link lives on.
 
 Then check what you have:
 
@@ -157,7 +208,8 @@ uv run ayl-add --doctor --db ~/ayl-index
 uv run ayl-add ~/books --db ~/ayl-index
 
 # 4b. a chunker or embedder mismatch: rebuild, which discards every row it replaces
-uv run ayl-add ~/books --db ~/ayl-index      # refuses until the table is gone or rebuilt whole
+uv run ayl-add ~/books --db ~/ayl-index                       # refused, and it names --rebuild
+uv run ayl-add ~/books --rebuild --backup ~/ayl-backups --db ~/ayl-index   # copy, drop, re-index
 # for the demo corpus, a full rebuild is the repair (it replaces every row):
 uv run scripts/ingest_demo_corpus.py --stage ingest
 

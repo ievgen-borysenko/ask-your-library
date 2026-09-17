@@ -42,7 +42,9 @@ from pathlib import Path
 
 import lancedb
 
-from ..index_meta import CHUNKER_VERSION, META_TABLE, SCHEMA_VERSION
+from ..chat_db import SCHEMA_VERSION as CHAT_SCHEMA_VERSION
+from ..index_meta import (CARD_CHUNKER_VERSION, CHUNKER_VERSION, META_TABLE,
+                          SCHEMA_VERSION)
 from ..paths import redact_paths
 from .ledger import open_ledger
 from .lock import LOCK_NAME, ingest_lock, lock_path
@@ -163,11 +165,25 @@ def backup(db_path: Path, dest: Path, chat_db: Path | None = None,
     The order is the point: take the lock, finish any interrupted rebuild, read
     what the index is, copy, digest, write the manifest — and only then release
     the lock. Nothing may write the index between the recovery and the last
-    digest, or the manifest describes something other than what was copied."""
+    digest, or the manifest describes something other than what was copied.
+
+    A failure anywhere in that sequence removes the half-written directory
+    before it propagates. A partial backup is worse than none: it is a
+    directory named like a backup, with no manifest to say what it is missing,
+    sitting where somebody will one day reach for it."""
     db_path = Path(db_path)
     if not db_path.exists():
         raise BackupError(f"no index at {db_path} — nothing to back up")
     dest = Path(dest)
+    # A destination inside the index is a copy of a directory into itself:
+    # `copytree` would race its own output, and at best the backup would
+    # contain a partial copy of itself. Compared on the RESOLVED paths, so a
+    # symlink or a `..` cannot walk into the index by another name.
+    resolved_dest, resolved_db = dest.resolve(), db_path.resolve()
+    if resolved_dest == resolved_db or resolved_dest.is_relative_to(resolved_db):
+        raise BackupError(
+            f"refusing to back up {db_path} into {dest}: that is inside the index itself, so the "
+            f"copy would contain the copy. Name a directory outside it.")
     stamp = now or time.strftime("%Y%m%d-%H%M%S")
     target = dest / stamp
     if target.exists():
@@ -179,42 +195,51 @@ def backup(db_path: Path, dest: Path, chat_db: Path | None = None,
         recovered = _recover_all(db_path)
         state = _index_state(db_path)
         target.mkdir(parents=True)
-        # The lock is ours and is in the directory being copied; a restored
-        # lock would be one held by a pid from another era.
-        _copy_tree(db_path, target / INDEX_DIR, skip={LOCK_NAME})
-        copied_chat = False
-        if chat_db.is_file():
-            # The WAL and shm sidecars too, when they are there: a chat.db
-            # copied without its -wal is a database missing its last writes.
-            for suffix in ("", "-wal", "-shm"):
-                sidecar = Path(str(chat_db) + suffix)
-                if sidecar.is_file():
-                    shutil.copy2(sidecar, target / (CHAT_DB_NAME + suffix))
-            copied_chat = True
+        try:
+            # The lock is ours and is in the directory being copied; a restored
+            # lock would be one held by a pid from another era.
+            _copy_tree(db_path, target / INDEX_DIR, skip={LOCK_NAME})
+            copied_chat = False
+            if chat_db.is_file():
+                # The WAL and shm sidecars too, when they are there: a chat.db
+                # copied without its -wal is a database missing its last writes.
+                for suffix in ("", "-wal", "-shm"):
+                    sidecar = Path(str(chat_db) + suffix)
+                    if sidecar.is_file():
+                        shutil.copy2(sidecar, target / (CHAT_DB_NAME + suffix))
+                copied_chat = True
 
-        entries = [{"path": str(relative), "bytes": (target / relative).stat().st_size,
-                    "sha256": _sha256(target / relative)}
-                   for relative in _files_under(target)]
-        manifest = {
-            "format": MANIFEST_FORMAT,
-            "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "code_version": code_version(),
-            # What the code that took this backup expects of an index. After an
-            # upgrade these two are how a reader knows whether the copy predates
-            # it — which is the whole reason the backup exists.
-            "expects": {"chunker": CHUNKER_VERSION, "schema_version": SCHEMA_VERSION},
-            "source": {"index": redact_paths(str(db_path.resolve())),
-                       "chat_db": redact_paths(str(chat_db)) if copied_chat else None},
-            "recovered_staging": recovered,
-            "index_meta": state["index_meta"],
-            "tables": state["tables"],
-            "ledger_rows": state["ledger_rows"],
-            "files": entries,
-            "digest": _directory_digest(entries),
-        }
-        (target / MANIFEST_NAME).write_text(
-            json.dumps(manifest, indent=2, sort_keys=True, default=str) + "\n",
-            encoding="utf-8")
+            entries = [{"path": str(relative), "bytes": (target / relative).stat().st_size,
+                        "sha256": _sha256(target / relative)}
+                       for relative in _files_under(target)]
+            manifest = {
+                "format": MANIFEST_FORMAT,
+                "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "code_version": code_version(),
+                # What the code that took this backup expects of an index. After
+                # an upgrade these are how a reader knows whether the copy
+                # predates it — which is the whole reason the backup exists.
+                "expects": {"chunker": CHUNKER_VERSION,
+                            "card_chunker": CARD_CHUNKER_VERSION,
+                            "schema_version": SCHEMA_VERSION,
+                            "chat_schema_version": CHAT_SCHEMA_VERSION},
+                "source": {"index": redact_paths(str(resolved_db)),
+                           "chat_db": redact_paths(str(chat_db)) if copied_chat else None},
+                "recovered_staging": recovered,
+                "index_meta": state["index_meta"],
+                "tables": state["tables"],
+                "ledger_rows": state["ledger_rows"],
+                "files": entries,
+                "digest": _directory_digest(entries),
+            }
+            (target / MANIFEST_NAME).write_text(
+                json.dumps(manifest, indent=2, sort_keys=True, default=str) + "\n",
+                encoding="utf-8")
+        except BaseException:
+            # BaseException, not Exception: a KeyboardInterrupt in the middle of
+            # a long copy is the likeliest way this ends half-done.
+            shutil.rmtree(target, ignore_errors=True)
+            raise
     return target
 
 
@@ -270,16 +295,26 @@ def restore(backup_dir: Path, db_path: Path, chat_db: Path | None = None,
             force: bool = False) -> list[str]:
     """Put a verified backup back. Returns the lines to report.
 
-    Refuses on three counts, and none of them is overridden by `--force`
-    except the second: a manifest that does not verify, a live index in the
-    way, and an ingest in flight. `--force` is about the second alone — the
-    first is corruption and the third is a race, and no flag makes either of
-    them safe.
+    Refuses on three counts, and `--force` overrides exactly one of them: a
+    manifest that does not verify, a live index in the way, and an ingest in
+    flight. `--force` is about the second — the first is corruption and the
+    third is a race, and no flag makes either of them safe. It covers the CHAT
+    DATABASE too: without it a chat.db already at the target is left alone and
+    the report says so, with it that file is replaced as well. That is the
+    whole of what `--force` means here.
 
     The index that is replaced is MOVED ASIDE, not deleted: `<index>.replaced-<timestamp>`
     stays where it was, and the report names it. A restore is what somebody
     reaches for when something has already gone wrong, and deleting the only
-    other copy of an index at that moment is the last thing this should do."""
+    other copy of an index at that moment is the last thing this should do.
+
+    A SYMLINKED index path is followed, not overwritten. `data/lancedb` is a
+    symlink in this project's own dev checkout, and renaming the link would
+    move the link, leave the real directory where it was, and write the restored
+    index onto the volume the link lives on rather than the one the index does —
+    which is at best a surprise about disk space and at worst a restore into a
+    directory nothing reads. The real directory is what is moved aside and what
+    is written, and the link goes on pointing at it."""
     backup_dir, db_path = Path(backup_dir), Path(db_path)
     manifest = read_manifest(backup_dir)
     problems = verify(backup_dir)
@@ -296,6 +331,11 @@ def restore(backup_dir: Path, db_path: Path, chat_db: Path | None = None,
         raise BackupError(f"refusing to restore {backup_dir}: it holds no {INDEX_DIR}/ directory")
 
     existing = db_path.exists()
+    # The place the index really lives. `exists()` follows the link, so a live
+    # symlinked path resolves to its target and everything below — the move
+    # aside, the lock, the copy — happens there; an absent path is taken as
+    # given, because there is nothing to follow.
+    target_dir = db_path.resolve() if existing else db_path
     if existing and not force:
         raise BackupError(
             f"refusing to restore over {db_path}: an index is already there "
@@ -310,16 +350,20 @@ def restore(backup_dir: Path, db_path: Path, chat_db: Path | None = None,
         # before it. It travels with the directory (it is a file inside it), so
         # it is dropped from the copy that is kept — an index nobody can write
         # to is not much of a fallback.
-        with ingest_lock(db_path, command="ayl-add --restore", doing="restore over"):
-            aside = db_path.with_name(f"{db_path.name}.replaced-{time.strftime('%Y%m%d-%H%M%S')}")
-            db_path.rename(aside)
+        with ingest_lock(target_dir, command="ayl-add --restore", doing="restore over"):
+            aside = target_dir.with_name(
+                f"{target_dir.name}.replaced-{time.strftime('%Y%m%d-%H%M%S')}")
+            target_dir.rename(aside)
             lock_path(aside).unlink(missing_ok=True)
         report.append(f"the index that was there is kept at {aside} — delete it yourself once "
                       f"you are satisfied with the restore")
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    _copy_tree(source_index, db_path, skip={LOCK_NAME})
+        if target_dir != db_path:
+            report.append(f"{db_path} is a link to {target_dir}: the link is untouched and "
+                          f"still points at the restored index")
+    target_dir.parent.mkdir(parents=True, exist_ok=True)
+    _copy_tree(source_index, target_dir, skip={LOCK_NAME})
     # A lock restored or left over would refuse every later ingest.
-    lock_path(db_path).unlink(missing_ok=True)
+    lock_path(target_dir).unlink(missing_ok=True)
     report.append(f"index restored to {db_path}")
 
     source_chat = backup_dir / CHAT_DB_NAME
