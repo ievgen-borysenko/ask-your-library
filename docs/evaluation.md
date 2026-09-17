@@ -6,12 +6,16 @@ same table without this text around it.
 Every run reported **on this page** was produced on the **hosted** configuration
 (`LLM_BACKEND=openrouter`, `anthropic/claude-sonnet-4.6`), which is not the shipped default: the
 default is local and free, a different answering model and therefore a different system, and no
-number on this page describes it. [`eval-results/`](eval-results/) is not hosted-only, and the two
+number on this page describes it. [`eval-results/`](eval-results/) is not hosted-only, and the three
 local reports there say so in their own provenance headers:
 [`2026-09-10-local-models.md`](eval-results/2026-09-10-local-models.md), two `qwen2.5` sizes on
-`LLM_BACKEND=ollama`, and
+`LLM_BACKEND=ollama`;
 [`2026-09-10-first-question-local.md`](eval-results/2026-09-10-first-question-local.md), one local
-CLI run. Neither feeds the table below. The rule that separates the two kinds at a glance is the
+CLI run; and
+[`2026-09-16-local-models-repeat3.md`](eval-results/2026-09-16-local-models-repeat3.md), three local
+models against both golden sets at `--repeat 3` — the first runs here to carry a spread, to publish
+the facts row and the card-only split on real numbers, and to commit their planner recordings. None
+of the three feeds the table below. The rule that separates the two kinds at a glance is the
 cost line: a hosted run carries the configured rates `$3.0/M in, $15.0/M out`, a local one `$0.0/M
 in, $0.0/M out`. From this release the harness fingerprint also names the backend outright — `model
 <name> via <backend>` — but every report committed before it prints `model <name>` alone, so for
@@ -63,15 +67,42 @@ corrected inside their own book). All are per question and in totals, in the rep
 sidecar, and every clause is written only where there was something to say, so a run that spent none
 of them writes the line the harness has always written.
 
-The gate's own behavioural effect — whether a set answers as well with it as without — is **not
-measured yet**: the paired baseline on three local models is being produced, the gate's run comes
-after it, and the acceptance agreed in advance is 1.0 confirmed by construction, a published drop
-rate, and behaviour at `--repeat` not below that baseline. Two figures to read beside those, because
-both follow from the gate rather than from the models: the **coverage-probe firing count**
-(`coverage._uncovered_books` subtracts the books the *evidence* names, so thinner evidence makes the
-one probe per run fire more often — ADR-013 spending a step out of the same budget), and the **steps
-per question**, since a step whose quotes were all dropped no longer counts toward the CRAG gate and
-a model that quotes badly now runs to `MAX_STEPS` where it used to stop at two.
+The gate's own behavioural effect — whether a set answers as well with it as without — was measured
+on 2026-09-16/17 on **two local models**, each run under the gate on `c79018a` and compared with the
+same model's baseline run on `169b511`, both golden sets, `--repeat 3 --clarify-pick second`
+([`eval-results/2026-09-16-local-models-repeat3.md`](eval-results/2026-09-16-local-models-repeat3.md)).
+**The two do not agree, so the acceptance is stated per model.**
+
+On `qwen2.5:14b`, the shipped default: **behaviour unchanged item for item** (9/11 and 10/10, the
+same two failures and the same single clarify), **broken 2 → 0** with
+`confirmed == checked_book_text` at 34/34, **2 quotes dropped per attempt** (both `not_found`;
+`no_hit`, `cross_book`, `short` and `repinned` all 0), the same 79 LLM calls, and an identical steps
+distribution. All three acceptance conditions met.
+
+On `mistral-small3.2:24b-ctx20k`, the model the gate was argued for: the provenance side is
+everything it was meant to be — **broken 8–9 → 0**, `confirmed == checked_book_text` at **50/50**,
+`repinned` 0, with **10–11 quotes dropped per attempt** (`not_found` 26 and `no_hit` 6 over three
+attempts; `cross_book` and `short` never fired on either model). **Behaviour went 11/11 → 11/11,
+10/11, 10/11**: `c03-musketeers-women` fails attempts 2 and 3 with `titles 0/1`, because with two
+quotes dropped instead of one the surviving evidence carries no citation and the answer hedges
+without ever naming the book. **Condition 3 — behaviour at `--repeat` not below the baseline — is
+therefore NOT met on this model**, on one item, on two attempts of three. The catalogue set is
+unaffected (10/10, 2 dropped, 20/20 confirmed).
+
+The two figures to read beside those, because both follow from the gate rather than from the models,
+behave differently on the two models as well — where they can be read at all. **The coverage-probe
+firing count was not measured**: the probe has no counter in the sidecar and leaves no marker in
+`steps_log`, so neither run says how often it fired, and asking for it in advance was a mistake in
+the acceptance rather than a result (recording it is in `docs/backlog.md`).
+The **steps per question** did not move at all on `qwen2.5:14b` — no step there lost all of its
+quotes — but moved on mistral exactly as predicted: a step whose quotes were all dropped is held
+rather than counted as dry, the empty-streak stop does not fire, and `c04` went 2 → 4 steps and
+`c10` 1 → 2, which is the whole of that run's +6 LLM calls, its ~14,000 extra input tokens per
+attempt and its 502 s. Both of those items still pass; the cost there is time, not verdicts. The
+item that failed took 4 steps in both runs, so the hold decision is not what failed it. The options
+on the table are named in the report and none is adopted here.
+
+Still unmeasured: `qwen2.5:32b` under the gate, and every hosted model under it.
 
 **A book card is not the book, and since 2026-09-16 the triple says so.** `validate` splits its
 verdicts by the corpus the matching passage came from: `confirmed / unattributed / broken` are
@@ -241,8 +272,18 @@ limits and why the reports state the count of runs in their fingerprints. From t
 a choice rather than a missing capability - `uv run eval/run_agent_eval.py --repeat 5` reports
 every row as "how many attempts of 5 passed" with min / median / max cost and seconds, and the
 fingerprint of such a run reads `5 attempts per item` instead of `single run`, so the two kinds
-cannot be confused. No repeated run has been made yet: nothing below has been re-measured, and the
-numbers in the tables are what they always were.
+cannot be confused. The first repeated runs were made on 2026-09-16 and are published with their
+spread: three local models against both golden sets at `--repeat 3 --record-plans --clarify-pick
+second`, on `169b511` — the merge of `#64`, before the evidence gate
+([`eval-results/2026-09-16-local-models-repeat3.md`](eval-results/2026-09-16-local-models-repeat3.md)).
+That report is where `--repeat`, the facts row and the card-only split are shown on real numbers
+rather than described, and it is the paired baseline the gate's own run is to be read against.
+**Its first finding is about the instrument, not the models**: at `temperature=0` the local backend
+returned the same answers three times over — no per-question behaviour verdict moved on any of
+189 item-attempts, `qwen2.5:32b` was byte-identical on every item of both sets, and the only things
+that varied were seconds. So `--repeat` on a local model measures a latency distribution; **the
+behaviour spread it was built for has to be measured on a hosted run**, where the provider samples.
+Nothing in the tables below has been re-measured, and the numbers in them are what they always were.
 
 Two measured trees, both single runs, clean tree (`--require-clean`), strict hit-id mode, the same
 bge-m3 index: **v0.1.0**, 2026-09-05 on code `88881ee` (the last code commit before tag `v0.1.0`;
@@ -410,8 +451,21 @@ nobody ran.
 The mechanism is proved on fixture recordings (`tests/test_plan_recording.py`,
 `tests/test_plan_replay.py`, with the synthetic pair under `tests/fixtures/`), including that a
 replay makes **no network attempt at all** under the process-level egress guard.
-**No recording of a real golden set has been made yet**, so nothing on this page was produced this
-way; the first one will be made by the next paid run of the core set with `--record-plans`.
+The first recordings of real golden sets were made on 2026-09-16 and are committed: six files under
+[`eval/recordings/`](../eval/recordings/), both sets against all three local models of
+[`eval-results/2026-09-16-local-models-repeat3.md`](eval-results/2026-09-16-local-models-repeat3.md)
+(`en-demo.edc151948a58.*` and `en-demo-catalog.72eb2c2b2655.*`, 30 to 39 plan calls each, three
+attempts per item). All six were replayed for the first time on 2026-09-17, and what that measured
+is in the report; until then nothing on this page had been produced this way, and they remain the
+input a replayed number is attributable to.
+
+One thing those runs settled about the recorder itself, stated exactly. The clean check runs before
+the recorder writes anything, so a **single** run can be both `--require-clean` and
+`--record-plans`; the first run of the 16.09 batch was, and stamped `code_clean: true`. A **batch**
+cannot: `eval/recordings/` is committed by design and the fingerprint hashes un-ignored untracked
+files, so from the second run onward each is stamped dirty by its predecessors' recordings (the
+checksums are read in that report's header). Committing the recordings ends it for this tree;
+excluding `eval/recordings/` from the dirty hash would end it generally (`backlog.md`).
 
 ## Where the measured code lives
 

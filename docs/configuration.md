@@ -92,6 +92,37 @@ uv run --extra ui chainlit run ui.py -w --host 127.0.0.1   # the UI's key gate i
 command names a backend, because the local one is the default; `LLM_BACKEND=openrouter` is how
 you leave it.
 
+**Check the loaded context, and pin `num_ctx` for any model with a large trained context.** Ollama
+decides the context length, not this project: the local backend speaks to it through the
+OpenAI-compatible `/v1` endpoint, where an `options` block is accepted and ignored, so there is no
+context size to configure here. Ollama 0.34's server picks the window adaptively from the memory
+available, and most published tags — `mistral-small3.2:24b` among them — pin no `num_ctx` of their
+own, so the same tag can load at very different sizes on two machines. `ollama ps` reports what is
+loaded right now, in its `CONTEXT` column; `ollama show <model>` separates the *architecture's*
+context length (the trained maximum, 131072 for that model) from any `num_ctx` parameter the tag
+actually carries. When the window comes out large, the model can need tens of gigabytes of weights
+plus KV cache, spill onto the CPU, and take minutes per call — and what you see then is a question
+deadline running out inside a model call, not an out-of-memory error. On one M3 Pro / 36 GB that tag
+loaded at `num_ctx 131072` and a single question spent its whole 1,200 s budget. Fix it before measuring anything: derive a model with an explicit window and point
+`OLLAMA_LLM_MODEL` at it. `ollama create` takes a Modelfile **path** (`-f` is not a `-`-reading
+flag), so write the two lines to a file first:
+
+```
+# Modelfile
+FROM mistral-small3.2:24b
+PARAMETER num_ctx 20480
+```
+
+```sh
+ollama create mistral-small3.2:24b-ctx20k -f Modelfile
+```
+
+That is the derived model measured below, on Ollama 0.34. Setting `OLLAMA_CONTEXT_LENGTH` on the
+Ollama server is the other way, and it applies to every model that server loads rather than to
+one. The shipped default `qwen2.5:14b` needs none of this.
+Measured on 2026-09-16
+([`eval-results/2026-09-16-local-models-repeat3.md`](eval-results/2026-09-16-local-models-repeat3.md)).
+
 `OLLAMA_LLM_MODEL` picks the model; preflight fails early if it is not pulled (a model pulled as
 `name:latest` counts as `name`), and so does `OLLAMA_EMBED_MODEL` whenever embeddings are local —
 otherwise a reachable Ollama without `bge-m3` passes every check and fails on the first search.

@@ -2,6 +2,78 @@
 
 ## Unreleased
 
+- **The first measurement with a spread, and the baseline the evidence gate will be read against.**
+  `docs/eval-results/2026-09-16-local-models-repeat3.md`, with the six planner recordings the runs
+  wrote (`eval/recordings/`, committed).
+
+  Three local models — `qwen2.5:14b`, `qwen2.5:32b` and a `mistral-small3.2:24b` derived at
+  `num_ctx 20480` — against both golden sets at `--repeat 3 --record-plans --clarify-pick second`,
+  on `169b511`, which is the merge of `#64` and therefore **before** the evidence gate. Six runs,
+  6 h 21 min on one M3 Pro. `en-demo`: 9/11, 9/11, 11/11. `en-demo-catalog`: 10/10 on all three.
+
+  **The repeat measured latency, not behaviour.** No per-question verdict moved on any of
+  189 item-attempts, and `qwen2.5:32b` returned byte-identical answers on every item of both sets;
+  `qwen2.5:14b` varied on one item of 21, the derived mistral on four, by under 1 % of tokens. Wall
+  clock did vary — 30–196 s per question on the shipped default for answers that never changed —
+  with `observe` 70–76 % of all model seconds and 2–3× slower on a cold first attempt. A spread on
+  the behaviour rows therefore has to come from a hosted run; `docs/backlog.md` carries that as the
+  next measurement.
+
+  Four more results worth the entry. Card-only matches are 20–30 % of checked quotes on the research
+  set and up to two thirds on the catalogue set, countable for the first time since `#64` — every
+  report published before 16.09 counted them inside `confirmed`. The mistral derivative has the best
+  behaviour and the worst quote fidelity (8–9 broken quotes an attempt against 2 and 1), which is
+  the case the evidence gate exists for, and the report states what the gate's own run must show
+  against each of these rows. `qwen2.5:32b` adds no passes over `qwen2.5:14b` — it wins `c09` and
+  loses `c04` — at 2.6× the wall clock. And `mistral-small3.2:24b` as pulled could not be measured
+  at all: Ollama loads it at `num_ctx 131072`, a single plan call hit the 1,200 s question deadline,
+  and only a derived model with an explicit window ran. `docs/configuration.md` and
+  `docs/known-limits.md` now say so, since the local backend's `/v1` endpoint gives this project no
+  way to set the window itself.
+
+  Correctness is ungraded, on purpose: the manual-correctness checkboxes in all six harness reports
+  are unticked.
+
+  **The gate's own runs are in the same report** (section added 17.09), two models on `c79018a`,
+  both sets each, `--repeat 3 --clarify-pick second`, no recording — **and they do not agree.**
+
+  `qwen2.5:14b`: **behaviour unchanged item for
+  item** — 9/11 and 10/10, the same two failures, the same clarify, the same facts and titles rows.
+  **Broken 2 → 0**, `confirmed == checked_book_text` at 34/34 with the same 34 quotes, **2 dropped
+  per attempt** (both `not_found`; `no_hit`, `cross_book`, `short` and `repinned` all 0), from the
+  same two questions that carried the broken quotes before. LLM calls unchanged at 79 and the steps
+  distribution identical per item, so nothing had to compensate for anything: nine of eleven items
+  are byte-identical between the two runs and only `c01` and `c02` moved, by one evidence item each.
+  On the catalogue set every count is unchanged (only the wall clock differs). All three acceptance
+  conditions for `#29` met on
+  this model.
+
+  `mistral-small3.2:24b-ctx20k`, the model the gate was argued for, is where the trade shows.
+  **broken 8–9 → 0**, `confirmed == checked_book_text` at **50/50**, `repinned` 0, **10–11 quotes
+  dropped per attempt** (`not_found` 26 and `no_hit` 6 over three attempts; `cross_book` and `short`
+  never fired on either model), card-only 17 → 18. **Behaviour 11/11 → 11/11, 10/11, 10/11**:
+  `c03-musketeers-women` fails attempts 2 and 3 with `titles 0/1` — with two quotes dropped instead
+  of one the surviving evidence carries no citation, and the answer hedges without ever naming the
+  book the retrieval filter had resolved. That item takes 4 steps in both runs, so the hold decision
+  is not what failed it. The hold decision *is* what costs the rest: a step whose quotes were all
+  dropped is held rather than counted as dry, so `c04` went 2 → 4 steps and `c10` 1 → 2, which is the
+  whole of +6 LLM calls (82 → 88), ~14,000 more input tokens an attempt and 502 s on the set — and
+  both of those items still pass. The catalogue set is unaffected (10/10, 2 dropped, 20/20).
+  **So acceptance condition 3, behaviour at repeat not below baseline, is met on the default and NOT
+  met on this model**, on one item, on two attempts of three. The report states the trade in full and
+  names three options — accept it, count-as-dry after N dropped steps, or a stronger quoting
+  instruction in `OBSERVE_RULES` / the `observe` payload (the only one that could move `c03`; it
+  needs a new behavioural run but leaves the planner recordings valid, since staleness hashes
+  `PLAN_RULES` and `RETRY_RULE` only) — without recommending one. `qwen2.5:32b` under the gate is not
+  measured.
+
+  One correction to the earlier finding, and the gate run is its control: **the dirty code stamp is
+  not caused by `--record-plans`.** This run recorded nothing and is still stamped
+  `c79018a+dirty(2005429d26f5)` — with the *same* checksum on both of its sets, where the recording
+  batch produced five different ones — because the six baseline recordings were sitting untracked in
+  the checkout. An un-ignored untracked file in the tree is the cause; recording is only the usual
+  way one gets there. `docs/backlog.md` carries the fix.
+
 - **Quotes are checked before the answer is written, not after it.** #29, step 2 of the sequencing
   in the system design review of 16.09.
 
@@ -60,12 +132,15 @@
   **What this does not do, and is not measured for.** The quotations the answer itself writes are
   not evidence and nothing checks them; citation by evidence id against the answer's sentences is
   the other half of #29 and is not here. A broken quote still does not fail the behavioural
-  evaluation. And the behavioural effect of the gate is **unmeasured**: the baseline it will be
-  compared against (three local models, `--repeat 3`) is being produced now, the gate's own run
-  comes after it, and the acceptance is a confirmed ratio of 1.0 by construction, a published drop
-  rate, and behaviour at repeat not below that baseline — read beside two figures that follow from
-  the gate rather than from the models, the coverage-probe firing count (thinner evidence makes
-  ADR-013's one probe fire more often) and the steps per question.
+  evaluation. And the behavioural effect of the gate is measured on **two** local models (17.09,
+  `docs/eval-results/2026-09-16-local-models-repeat3.md`), each on `c79018a` against itself on
+  `169b511`, both sets at `--repeat 3` — **and they do not agree, so the acceptance is per model**.
+  `qwen2.5:14b`: behaviour unchanged item for item (9/11 and 10/10), broken 2 → 0 with confirmed
+  34/34 of the book text, 2 dropped per attempt (both `not_found`, `repinned` 0), the same 79 LLM
+  calls and the same steps distribution — all three conditions met.
+  `mistral-small3.2:24b-ctx20k`: broken 8–9 → 0, confirmed 50/50, 10–11 dropped per attempt — and
+  behaviour 11/11 → 10/11 on two attempts of three, so **condition 3 is not met on it**.
+  `qwen2.5:32b` under the gate is still unmeasured.
 
 - **A book card is never a quote from the book, the first screen teaches, and the front page shows
   the work before it explains it.** From the design critique of 16.09, §1 and §2.

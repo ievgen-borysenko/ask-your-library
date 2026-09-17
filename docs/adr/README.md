@@ -156,6 +156,22 @@ at the gate and another in the report. The cost is stated rather than hidden —
 say it too, the count credits the card and not the book, which is the conservative direction and the
 house rule for cards.
 
+Measured 2026-09-17 on two local models, each run under the gate on `c79018a` and compared with the
+same model's pre-gate run on `169b511`, both golden sets at `--repeat 3`
+([`../eval-results/2026-09-16-local-models-repeat3.md`](../eval-results/2026-09-16-local-models-repeat3.md))
+— **and the two do not agree, which is why the acceptance is recorded per model.** `qwen2.5:14b`
+kept its behaviour item for item (9/11 and 10/10), `broken` went 2 → 0 with
+`confirmed == checked_book_text` at 34/34 over the same 34 quotes, `dropped_unverified` was 2 per
+attempt (`not_found` 2; `no_hit` / `cross_book` / `short` 0; `repinned` 0) from the two questions
+that had carried the broken quotes, and the LLM calls (79) and the steps distribution did not move.
+`mistral-small3.2:24b-ctx20k` went `broken` 8–9 → 0 with `confirmed == checked_book_text` at 50/50
+and 10–11 dropped per attempt (`not_found` 26, `no_hit` 6 over three attempts), and **lost one
+behavioural PASS on two attempts of three** — `c03` with `titles 0/1`, its surviving evidence
+carrying no citation once a second quote was refused. `cross_book` and `short` fired on neither
+model, so the conservative re-pin limits above cost nothing measured so far; the hold on a
+fully-dropped step did cost 6 LLM calls and 502 s on that model, on two items that still pass.
+`qwen2.5:32b` has not been run under the gate.
+
 The two gates run **one** function over one index of the run's passages (`classify_quote`,
 `passage_index`), and `validate`'s own classification was rewritten onto it. That is the decision,
 not an implementation detail: a second reading of "is this quote inside that passage" is exactly how
@@ -193,14 +209,23 @@ counts.
 the hits of the run minus the books the *evidence* names, so evidence the gate thinned makes a book
 look uncovered and the one probe of a run fires where it would not have before. That is arguably
 right — a book whose only quotes were dropped genuinely is not covered — and it costs a step from
-the same budget the paragraph above already stretches. No code changed for it; it is a **measured
-effect**, and the gate's run is to report the coverage-probe firing count beside the baseline's
-([`../evaluation.md`](../evaluation.md)).
+the same budget the paragraph above already stretches. No code changed for it. It was to be reported
+as the coverage-probe firing count beside the baseline's, and **that turned out not to be
+measurable**: the probe has no counter in the sidecar and leaves no marker in `steps_log`, so neither
+the baseline nor either gate run says how often it fired. Recording it is in `../backlog.md`.
 
-**Not measured yet:** the acceptance is a confirmed ratio of 1.0 by construction on evidence, a
-published drop rate (with its breakdown by reason and the re-pin count), the coverage-probe firing
-count, and behaviour at `--repeat` not below the baseline being produced on the three local models.
-Nothing here was re-run against it.
+**Measured 2026-09-17, per model** (`../eval-results/2026-09-16-local-models-repeat3.md`; each model
+run under the gate on `c79018a` against its own pre-gate run on `169b511`, both golden sets at
+`--repeat 3`). Conditions 1 and 2 — a confirmed ratio of 1.0 by construction on evidence, and a
+published drop rate with its breakdown by reason and the re-pin count — are met on both models.
+Condition 3, behaviour at `--repeat` not below the baseline, is **met on `qwen2.5:14b`** (9/11 and
+10/10, item for item, with the same steps and calls) and **not met on
+`mistral-small3.2:24b-ctx20k`**, which goes 11/11 → 10/11 on two attempts of three: `c03` with
+`titles 0/1`, its surviving evidence carrying no citation once a second quote is refused. The
+options are listed in `../backlog.md` and none is adopted here.
+
+**Still unmeasured:** the coverage-probe firing count (no counter to read), `qwen2.5:32b` under the
+gate, and every hosted model under it.
 
 ## ADR-005: `observe` sees a fixed budget of each hit; the rest of the loop sees only evidence
 

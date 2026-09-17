@@ -75,11 +75,14 @@ open ones often refer to them.
   at the `observe` gate, so `synthesize` consumes verified evidence only — a broken quote is dropped
   before the answer, an unattributed one is re-pinned to the passage that holds it, and the
   post-synthesis check stays as the report (ADR-004, second amendment of 16.09). **The behavioural
-  effect is unmeasured until the next local run:** the paired baseline on three local models is
-  being produced, the gate's own run follows it, and the acceptance is a confirmed ratio of 1.0 by
-  construction, a published drop rate, and behaviour at repeat not below the baseline. Still open
-  from #29: citation by evidence id, checked against the answer's own sentences, and a broken quote
-  failing the evaluation instead of only being counted.
+  effect was measured 17.09 on two local models**
+  (`docs/eval-results/2026-09-16-local-models-repeat3.md`): a confirmed ratio of 1.0 by construction
+  and a published drop rate on both, and behaviour at repeat not below the baseline on
+  `qwen2.5:14b` but **not** on `mistral-small3.2:24b-ctx20k`, which loses `c03` on two attempts of
+  three — the open decision is the bullet below. Still unmeasured: the coverage-probe firing count
+  (no counter exists), `qwen2.5:32b` under the gate, and hosted models. Still open from #29:
+  citation by evidence id, checked against the answer's own sentences, and a broken quote failing
+  the evaluation instead of only being counted.
 - Behavioural scoring is heuristic (substring titles, refusal phrase markers); refusal markers are
   loose ("do not have", "доказів") and should be anchored to the library; an LLM judge for answer
   correctness remains future work.
@@ -313,8 +316,68 @@ open ones often refer to them.
   says which kind of run it was (`N attempts per item` vs `single run`), and `answers-<ts>.json`
   is the machine-readable record beside the Markdown: the fingerprint as fields, every attempt
   with its answer and its `score()` dict. A run at `--repeat 1` writes the Markdown byte for byte
-  as before. Failures are published alongside the numbers, as they already were. Not done: no
-  repeated run has been made, so no published number carries a spread yet.
+  as before. Failures are published alongside the numbers, as they already were. **Measured
+  16.09**: three local models against both golden sets at `--repeat 3 --record-plans
+  --clarify-pick second` on `169b511`
+  (`docs/eval-results/2026-09-16-local-models-repeat3.md`), so published numbers carry a spread now
+  — and the spread on the behaviour rows is **zero**. No per-question verdict moved on any of
+  189 item-attempts; `qwen2.5:32b` was byte-identical on every item of both sets. What the repeat
+  measured is latency (30–196 s per question for identical answers on the shipped default).
+- **Open decision: the evidence gate's acceptance is met on the shipped default and not on
+  `mistral-small3.2:24b-ctx20k`.** Measured 17.09
+  (`docs/eval-results/2026-09-16-local-models-repeat3.md`): that model goes `broken` 8–9 → 0 and
+  `confirmed == checked_book_text` 50/50, and loses one behavioural PASS on two attempts of three
+  (`c03`, `titles 0/1`) plus 6 LLM calls and 502 s a set. Three options are on the table and none is
+  adopted: accept the trade as the price of zero broken quotes; let a step whose quotes were all
+  dropped count toward the empty streak after the Nth rather than being held (returns `c04` and `c10`
+  toward their baseline step counts, does not touch `c03`); or strengthen the quoting instruction
+  where quoting happens — `OBSERVE_RULES` and the `observe` payload, which already demand a
+  character-exact copy but never say that a failing quote is now discarded, nor show the model which
+  of its quotes were dropped. That third one is the only option that could move `c03`. It needs a new
+  behavioural run on both models, but it does **not** invalidate the planner recordings: a recording
+  goes stale on `PLAN_RULES` and `RETRY_RULE` only, the two hashes its header carries
+  (`eval/plan_recording.py`), and `OBSERVE_RULES` is in neither. `qwen2.5:32b` under the gate is
+  unmeasured and would inform the choice.
+- **A recording batch self-dirties its own code stamp from the second run onward.**
+  `eval/recordings/` is committed by design and the run fingerprint hashes `git diff HEAD` together
+  with the un-ignored untracked files. A *single* run is fine — the clean check runs before the
+  recorder writes, so run 1 of the 16.09 batch was `--require-clean --record-plans` and stamped
+  `code_clean: true` — but every later run is measured against a tree holding its predecessors'
+  recordings (five different `dirty(...)` checksums over the six runs). The gate run of the same
+  night is the control: it recorded nothing, still stamped `c79018a+dirty(2005429d26f5)` because the
+  baseline's recordings were untracked in the tree, and stamped the *same* checksum on both its sets.
+  So the trigger is an un-ignored untracked file, not the act of recording. Two fixes: commit the
+  recordings as soon as they are made (which is what closes it for this tree), or exclude
+  `eval/recordings/` from the dirty hash — it is an input the fingerprint already names by checksum
+  through the golden file, and a recording cannot change the code that produced it.
+- **`k10-hybrid-named-book` plans one query on `mistral-small3.2:24b-ctx20k` where the golden item
+  requires two to four.** Found by replaying the 16.09 recordings on 17.09
+  (`eval/run_plan_eval.py`, `docs/eval-results/2026-09-16-local-models-repeat3.md`): three attempts
+  of three, `FAIL: mode answer -> act, queries 1 OUTSIDE 2-4, book filter Dracula — Bram Stoker`. The
+  mode and the named-book resolution are right and match both qwen models; only the query count is
+  wrong. It is the deterministic half of `plan()` on a recorded reply, so it is reproducible for free
+  and needs no run: `uv run eval/run_plan_eval.py --recording
+  eval/recordings/en-demo-catalog.72eb2c2b2655.mistral-small3.2-24b-ctx20k.jsonl k10-hybrid-named-book`.
+- **Record how often the coverage probe fires.** ADR-013's probe spends a search step out of the
+  question's budget, and the acceptance for `#29` asked for its firing count as one of two figures to
+  read beside the gate's numbers — but it has no counter in the sidecar and leaves no marker in
+  `steps_log`, so neither the baseline nor either gate run can answer it. A counter per question and
+  in totals, alongside `dropped_unverified`, would make the question answerable next time it is
+  asked.
+- **Verify the clarify path is model-independent.** On the runs of 16.09
+  `mistral-small3.2:24b-ctx20k` asked the `c09` clarify, had the choice applied and reported
+  `clarify choice applied`, yet its recording holds exactly one plan call per attempt (33 for 11
+  items × 3), where both qwen models recorded a second plan call for every clarified item
+  (`qwen2.5:14b` 36 calls with one clarify, `qwen2.5:32b` 39 with two). Either the clarify reply
+  re-enters the graph without re-planning on some branch, or the recorder misses that call on one of
+  the two paths; both are defects and they are not the same defect. Read
+  `eval/recordings/en-demo.edc151948a58.*.jsonl` beside the three sidecars' `clarify_*` fields.
+- **A hosted run for behaviour spread.** Next, and the reason the row above is not fully closed: at
+  `temperature=0` a local model answers the same way every time, so `--repeat` cannot tell a stable
+  9/11 from a lucky one on that backend. The question needs a provider that samples —
+  `LLM_BACKEND=openrouter`, the core set at `--repeat 3` or more, `--require-clean`, on the user's
+  explicit go and inside a named budget. Until then every published behaviour verdict is a single
+  behavioural sample however many attempts produced it.
 - ADR-012: `SEARCH_HIT_CHARS` is a config knob, default raised 1,200 -> 2,500 after measuring
   1,200 / 2,500 / 4,000 on the core set (c03 complete at 2,500 and 4,000; c06 is not a window
   problem, the answering passage is never in the window).
