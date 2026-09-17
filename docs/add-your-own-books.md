@@ -1,9 +1,11 @@
 # Add your own books
 
 ```bash
-LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books          # index a folder
-LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books --dry-run  # what it would index, no writes
-LIBRARY_DB_PATH=~/ayl-index uv run ask-library "..."        # ask it
+LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books            # index a folder
+LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books --dry-run  # what it would change, no writes
+LIBRARY_DB_PATH=~/ayl-index uv run ayl-add --doctor           # ledger vs index, no writes
+LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books --prune    # also delete books whose file is gone
+LIBRARY_DB_PATH=~/ayl-index uv run ask-library "..."          # ask it
 ```
 
 Every `.txt` / `.md` file under the folder (recursively) is **one book**. Skipped, and reported
@@ -15,18 +17,48 @@ others are still indexed, and every skip is named on stderr (hidden ones as a si
 the count and the first few names, so one hidden directory cannot bury the rest). Only a folder
 in which *nothing* is indexable is an error, and then the existing index is left untouched.
 
-Re-running the command re-indexes: a book's rows are replaced, never appended, so `ayl-add` on
-the same folder twice leaves the index unchanged, and adding a folder to an existing index leaves
-the books already in it alone. The update is **staged**: every book of the run is embedded into a
-staging table, together with the rows of the books that stay, and the live table is only replaced
-once that staging table is complete, with the FTS index and the fingerprint rebuilt right after.
-An embedder that dies on book 7 of 20 therefore leaves the index exactly as it was — the price is
-that an update rewrites the whole table, so adding one book to a large library costs a full
-rewrite (embeddings are only computed for the books of the run). That rewrite is **streamed**:
-the existing rows are read and republished in Arrow record batches of 2,000 rows, so the run
-holds one batch plus the current book's chunks in memory, not the index. The disk and time cost
-still scale with the index — a rewrite copies every row — and LanceDB keeps the previous table
-files until its own cleanup, so a large index briefly needs room for both copies.
+Re-running the command re-indexes, **one book at a time**. Each book is resolved to a stable
+`book_id` in the index's `books` ledger, its rows are deleted by that id and the new ones
+appended, and its ledger row is written before and after — so a run that adds one book to a
+library of three hundred touches that book alone, and the other 299 are neither read nor
+rewritten. The first build of a table is still a single staged publish (nothing to update yet).
+
+The id is **minted, never derived**. That is what makes a correction cheap: fix `author:` in a
+file, re-run, and the same book is updated rather than indexed a second time — the ledger matches
+the book by its content digest when its key changed, and by its key when its content changed. It
+also makes an interruption visible. Deleting and appending is not one transaction, so a crash in
+between leaves a book out of the index; the ledger row still says `requested`, and the **recovery
+pass at the start of the next run** finds it, re-indexes it when that run covers it, and names it
+when it does not. Nothing else in the index can tell you that a book you added last month is
+quietly absent.
+
+The BM25 (full-text) index is still rebuilt **whole** after every run, because LanceDB drops it
+with the table it belongs to. That cost is now measured rather than assumed: **0.8 s for the
+7,285 rows of the demo corpus**, about 0.1 ms a row, and the seconds of each run are written into
+the ledger rows it wrote. An incremental merge is not worth its complexity at that price.
+
+The index is checked, not trusted:
+
+```
+uv run ayl-add --doctor
+```
+
+reconciles the ledger against the index tables and reports the drift — a book the ledger calls
+indexed with no rows, a book in the index the ledger has no row for, a book requested and never
+finished, one key with two ids. It writes nothing and exits non-zero when it finds something, so
+it can gate a script. Re-running `ayl-add` is what repairs.
+
+**A book whose file is gone** is reported, not deleted: a folder that failed to mount, a file
+being edited in place and a half-finished sync all look exactly like a deletion. `--dry-run` lists
+such books as `VANISHED`, a normal run names them at the end, and only `--prune` removes their
+rows and their ledger entry.
+
+**Upgrading an existing index** needs nothing from you. The first run over an index built before
+the ledger backfills one row per book already in it (`chunker: legacy`, because nothing recorded
+which chunker wrote them) and adds the `book_id` column to the table by a staged copy that
+re-embeds nothing. One caveat, stated because it is invisible otherwise: a backfilled row carries
+no content digest, so the *first* author correction after such an upgrade still creates a second
+book. The re-ingest records the digest, and every correction after it renames in place.
 
 **The book key** is `Title — Author` — the string the agent cites and filters chapter reads on.
 It is taken from, in priority order:
@@ -101,7 +133,14 @@ table with **no** fingerprint at all (matching dims prove nothing about the mode
 refused before anything is embedded: one table, one model. Stamp a known-good unstamped table
 with `uv run scripts/ingest_demo_corpus.py --stage stamp-meta`, or rebuild it.
 
-Prefer to build the index yourself? The table contract is unchanged: `transcripts_<backend>`
-(and optionally `cards_<backend>`) with columns `chunk_id, note, book, source, section, text,
-vector`, stamped via `index_meta.write_index_meta`. `ayl-add` is that contract with a CLI in
-front of it.
+Prefer to build the index yourself? The table contract: `transcripts_<backend>` (and optionally
+`cards_<backend>`) with columns `chunk_id, note, book, source, section, text, vector, book_id`,
+stamped via `index_meta.write_index_meta` — which now also records the chunker and a schema
+version. `book_id` is new and sits *beside* `note` rather than replacing it, so chunk ids are
+byte-for-byte what they always were; a table without the column still reads, and the next
+`ayl-add` over it adds one. Beside the index tables is the `books` ledger — `book_id`, `key`,
+`title`, `author`, `source_ref`, `sha256`, `chunker`, `embedding_model`, `status`, `error`,
+`requested_at`, `indexed_at`, `rows`, `fts_seconds` — which is what `--doctor` reads. The
+catalogue deliberately does not: what your library holds is answered from the rows that can
+actually be searched, never from the record of what was ingested. `ayl-add` is that contract with
+a CLI in front of it.

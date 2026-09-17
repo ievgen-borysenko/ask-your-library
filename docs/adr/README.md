@@ -5,7 +5,7 @@ what it was measured to buy. They were written from the code rather than ahead o
 describe the system as built; where a variant was tried and dropped, the rejected variant is part
 of the record, because it is usually the more useful half.
 
-Twenty-three decisions, in the order they were taken. ADR-016 is written out as a file of its own
+Twenty-four decisions, in the order they were taken. ADR-016 is written out as a file of its own
 because it changed the planner's contract and added a node to the graph; the rest are summarised
 here. ADR-017 to ADR-023 were recorded on 2026-09-16, after the fact: a review of this tree found
 seven decisions the code had made and no record named. The four that constrain what may be built
@@ -530,7 +530,11 @@ its quotes confirmed. The review rounds are the more useful part of the record �
 followed, a table with no fingerprint is refused rather than stamped after the fact, a row key
 carries a digest of the book key so two titles that reduce to the same ASCII slug stay two books,
 an update is a staged rebuild with a single publish, and a missing cards table became a supported
-shape with a visible notice instead of a silent degradation. A later audit closed two more defects
+shape with a visible notice instead of a silent degradation. Two of those are **partly superseded
+by ADR-024** (2026-09-17) and must be read with it: an update is now a per-book delete-and-append
+keyed by a minted `book_id`, not a staged rebuild — the staged publish survives only for the first
+build of a table and for the demo corpus — and the row key's digest is no longer what a re-ingest
+matches on, because a key derived from title and author is exactly what a correction changes. A later audit closed two more defects
 in the splitter: duplicate section names, and short real chapters and the text before the first
 heading disappearing without a word. One limitation is documented rather than fixed — a `CHAPTER I`
 that repeats across volumes in one file is read as a contents line and merged into the section
@@ -651,6 +655,11 @@ half an hour to build, while a write that mixes two chunkers cannot be undone at
 deliberately **not** the embedder's rule above, which is fatal on read and stays so. `created` is
 there for a human reading the table; no code routes on it.
 
+**Half of that is now done** (ADR-024, 2026-09-17): the row carries `chunker` and
+`schema_version`, written by both ingest paths. The *policy* is not — nothing warns and nothing
+refuses — so a table stamped with another chunker is still read without a word, and #27 is now
+exactly the enforcement and nothing else.
+
 ## ADR-021: The action channel is a reserved string marker in `current_query`
 
 Status: accepted; recorded 2026-09-16, after the fact. The typed channel is deferred (#25).
@@ -726,6 +735,70 @@ The model client is built with `max_retries=0` and one client per attempt, so a 
 recomputed rather than sampled once and reused by every retry; what is retryable, how long the wait
 is, and which regime a call runs under are decided once per call in `llm.py`, and `synthesize` is
 never capped — dense reasoning that today is recorded only in docstrings.
+
+## ADR-024: A book ledger with a minted id; `ayl-add` updates one book at a time
+
+Status: accepted (2026-09-17). Partly supersedes ADR-015; completes half of what ADR-020 left to
+#27.
+
+A book was a derived string and its row key a digest of that string (`bookkey.slug`), so a
+corrected `author:` indexed a second book and deleted nothing — ADR-015's own recorded
+consequence. `ayl-add` published by staged full rebuild because LanceDB OSS has no rename; the FTS
+index was rebuilt whole every time; `_index_meta` carried no chunker or schema version, so a
+re-chunk (#28) would leave a mixed index nothing could detect; and nothing recorded which files
+had been *requested*, so "which of my books did not make it in" had no answer at all.
+
+**Decision.** A `books` ledger table beside the index tables: `book_id` minted once and never
+derived, `key`, `title`, `author`, `source_ref`, `sha256`, `chunker`, `embedding_model`, `status`
+(requested / indexed / failed), `error`, `requested_at`, `indexed_at`, `rows`, `fts_seconds`. Its
+API is `resolve` / `begin` / `commit` / `fail` / `missing` / `diff`. `ayl-add` becomes a per-book
+delete-then-append keyed by `book_id`, with the ledger row written before and after and a recovery
+pass at the start of every run. Rows carry `book_id` **beside** `note` for one release, so every
+chunk id stays byte-compatible. `_index_meta` gains `chunker` and `schema_version`; readers
+tolerate their absence and nothing refuses on them here.
+
+**The alternatives.** *(A) The staged rebuild as it was* — crash-safe and simple, but it has no
+identity at all, which is the actual defect; the cost argument for replacing it turned out to be
+weak (see the measurements below), the correctness argument did not. *(B) Per-book upsert keyed by
+the derived slug* — cheap, but a corrected author still orphans rows, and the delete-then-add is
+not transactional either, so it buys the new failure mode without buying the identity. *(C)
+Ledger + per-book upsert with recovery* — chosen: the ledger is what makes an interrupted upsert
+recoverable, which is the argument for identity **before** incrementality. *(D) A separate SQLite
+metadata store* — rejected: two stores to keep consistent, and everything else already reads
+LanceDB.
+
+**What it was measured to buy, and what it was not.** Two numbers were taken on the built demo
+corpus (7,285 transcript rows, M3 Pro) because the backlog asked for them before anything was
+replaced. The **FTS rebuild is 0.8 s** — about 0.1 ms a row — so it stays whole, and an
+incremental merge (#33) is not worth its complexity at that price. The **staged full rebuild is
+0.2 s**, against 0.01 s for a per-book delete-and-append of one 59-row book. So at demo scale the
+publish was *never* the cost the review supposed it was, and the honest claim for the per-book
+path is not speed: it is that a correction renames instead of duplicating, that an interruption is
+visible, and that "which of my files did not index" has an answer. The cost argument returns only
+at a library an order of magnitude larger, and it has not been measured there.
+
+**Consequences.** Easier: re-ingest, correction, upgrade, and the folder diff (`--dry-run`), with
+a vanished file reported and deleted only under `--prune`. Harder: two writes per book that must
+agree, so a **stale ledger is a new class of failure** — reconciled by `ayl-add --doctor`, which
+reports six shapes of drift and repairs none of them, because a check that rewrites what it checks
+is not evidence. The crash window moved rather than closed: between the delete and the append one
+book is absent, which the recovery pass finds on the next run (rows present under a `requested`
+row mean the append landed and only the ledger write was lost, since one book is one `table.add()`;
+a `failed` row with rows present is never promoted, because those rows are an earlier version).
+The catalogue keeps reading the index tables and not the ledger, or ADR-016's "the count is the
+length of that list" weakens into a history of ingests.
+
+**The gate.** Book identity moved into one module (`bookkey.py`) in the same change, and the risk
+of that move is silent: a `slug` that differs by one character makes a delete match nothing. So
+the exact keys, row keys and chunk ids of both ingest paths were frozen from the code as it stood
+before (`tests/fixtures/book_identity.json`, generated at `b2157cb`) and checked against the built
+index: all 35 book keys and all 1,228 chapter-level chunk-id prefixes reproduce exactly.
+
+**Still open.** The enforcement half of #27 (warn on read, refuse on write for a chunker or schema
+mismatch). A book backfilled from a pre-ledger index has no content digest, so the first author
+correction after that upgrade still mints a second id — `--doctor` reports the pair. And the cards
+table is joined to the transcripts table by the book key string alone; the ledger does not
+reconcile them.
 
 [reports]: ../eval-results/
 [backlog]: ../backlog.md

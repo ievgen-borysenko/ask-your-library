@@ -55,7 +55,7 @@ comparison is in [Known limits](known-limits.md).
 
 The ingest is staged and cached in `data/`, so it is safe to interrupt and re-run:
 `--stage prepare-text|prepare-audio|prepare-canaries|ingest|cards` runs one stage, `--book <substring>`
-re-ingests a single book in place. Sources are checksum-pinned in `corpus/manifest.yaml`
+re-ingests a single book in place (`ayl-add --doctor` reports whether the index and its book ledger agree). Sources are checksum-pinned in `corpus/manifest.yaml`
 (`--no-verify` to skip). The text path works on any OS; two books come from LibriVox audio and
 their Whisper transcripts are committed under `corpus/prepared-audio/`, so the full corpus
 builds everywhere. Running the transcription itself (`--retranscribe`) needs macOS with MLX

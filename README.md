@@ -202,7 +202,7 @@ themselves are in [`docs/eval-results/`](docs/eval-results/).
 | [`docs/overview.md`](docs/overview.md) | What the project is, in full, and what it does |
 | [`docs/quick-start.md`](docs/quick-start.md) | Install on any system, the demo corpus, the CLI, the web UI, the eval commands |
 | [`docs/configuration.md`](docs/configuration.md) | Every environment variable, and the fully local, no-account setup |
-| [`docs/add-your-own-books.md`](docs/add-your-own-books.md) | `ayl-add`: book keys, chapters, what is skipped, staged re-indexing |
+| [`docs/add-your-own-books.md`](docs/add-your-own-books.md) | `ayl-add`: book keys, chapters, what is skipped, per-book re-indexing and the ledger |
 | [`docs/evaluation.md`](docs/evaluation.md) | The two harnesses, three golden sets, the measured runs and the ablation |
 | [`docs/privacy-and-threat-model.md`](docs/privacy-and-threat-model.md) | Data flow, threat model, the four injection layers and their limits |
 

@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+- **A book has an identity a correction survives, and an ingest ledger says what went in**
+  (#26, [ADR-024](adr/README.md)). A `books` table beside the index tables carries a `book_id`
+  minted once and never derived from title, author or path, with the book's source, digest,
+  chunker, embedding model, status (requested / indexed / failed) and error. `ayl-add` updates
+  **one book at a time** by that id — resolve, write the ledger row, delete that book's rows,
+  append the new ones, write the ledger row again — so correcting `author:` now renames a book
+  instead of indexing a second one, a file that moved inside the folder is the same book, and the
+  books a run does not name are neither read nor rewritten. Rows carry `book_id` beside `note`,
+  so every chunk id is byte-for-byte what it was.
+
+  Because the delete and the append are not one transaction, a crash between them leaves one book
+  out of the index with a ledger row that still says `requested`; the **recovery pass at the start
+  of every run** finds it, re-indexes it when the run covers it and names it when it does not. A
+  book whose file has vanished is **reported and kept** — a folder that failed to mount looks
+  exactly like a deletion — and removed only under `--prune`. `--dry-run` prints the diff against
+  the ledger, and `ayl-add --doctor` reconciles ledger against index and reports six shapes of
+  drift without repairing any of them. An index built before all this is backfilled on first use
+  (`chunker: legacy`) and gains the `book_id` column by a staged copy that re-embeds nothing.
+
+  Two numbers, taken on the built demo corpus before anything was replaced: the **whole FTS
+  rebuild is 0.8 s** for 7,285 rows, so it stays whole; the **staged full rebuild it replaced was
+  0.2 s**, against 0.01 s for a per-book write. At this scale the publish was never the cost the
+  design review supposed — the honest claim for the per-book path is identity and recoverability,
+  not speed.
+
+  Also: `_index_meta` gains `chunker` and `schema_version`, written by both ingest paths, with no
+  refusal on either yet (#27 brings the policy); the catalogue deliberately still reads the index
+  tables and not the ledger, so ADR-016's exhaustiveness is untouched; and book identity moved
+  into one module, `bookkey.py`, from the four that held halves of it. That move is gated by a
+  frozen fixture of the exact keys, row keys and chunk ids both ingest paths produce, checked
+  against the built index: all 35 book keys and all 1,228 chapter-level chunk-id prefixes
+  reproduce exactly.
+
 - **The first measurement with a spread, and the baseline the evidence gate will be read against.**
   `docs/eval-results/2026-09-16-local-models-repeat3.md`, with the six planner recordings the runs
   wrote (`eval/recordings/`, committed).
