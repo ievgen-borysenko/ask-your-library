@@ -13,6 +13,22 @@ from pathlib import Path
 
 from ..sanitize import strip_control_chars
 
+# What a chunk IS, as one name that can be written down and compared.
+#
+# `sentence-pack-1` is this module's rule: whole sentences packed to
+# TRANSCRIPT_TARGET_CHARS with a sentence-level overlap, chapter boundaries
+# supplied by the caller. Bump it whenever a change here would make the chunks
+# of a re-ingest different text from the chunks already in an index (#28 moves
+# the target and caps a punctuation-free sentence, so it bumps this) — not for
+# a refactor that produces the same chunks.
+#
+# It lives HERE, in the module that decides what a chunk is, and is imported by
+# everything that records it: `_index_meta.chunker` on both ingest paths, the
+# `chunker` column of every ledger row, and the mismatch policy that reads them
+# back (`index_meta.version_mismatch`). One constant, because a version written
+# from two places is two versions.
+CHUNKER_VERSION = "sentence-pack-1"
+
 # Card sections longer than MAX are split on bullet boundaries, packing up to TARGET.
 MAX_CHUNK_CHARS = 2000
 TARGET_CHUNK_CHARS = 1400
