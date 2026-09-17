@@ -145,8 +145,10 @@ def test_the_report_says_no_model_was_called_and_what_it_cannot_measure(replayed
     assert "NO MODEL WAS CALLED" in report
     assert "plan-replay-recording.jsonl" in report        # the recording it came from
     assert "CANNOT measure a change to `PLAN_RULES`" in report
-    assert "plan PASS 3/4" in report
-    assert "mode_ok 3/4" in report
+    assert "plan PASS 3/5" in report
+    assert "mode_ok 3/5" in report
+    # the gate's own row, counted and explained (#70)
+    assert "gate_refusal 1/5" in report
     assert "corpus/manifest.yaml" in report               # which catalogue answered
 
 
@@ -503,7 +505,7 @@ def test_a_system_prompt_that_does_not_match_the_recorded_call_is_drift(replayed
 def test_allow_drift_accepts_it_and_still_says_so(replayed):
     result = replayed("--allow-drift", repayload={"f02-named-book"})
     assert result["code"] == 0
-    assert "payload drift on 1 of 4 attempts" in result["report"]
+    assert "payload drift on 1 of 5 attempts" in result["report"]
     assert list(result["sidecar"]["payload_drift"]) == ["f02-named-book"]
 
 
