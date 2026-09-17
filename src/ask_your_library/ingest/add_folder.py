@@ -46,7 +46,7 @@ from .chunking import CHUNKER_VERSION, Chunk, embedding_text, pack_sentences, \
     parse_frontmatter, rows_for, split_sentences
 from .doctor import check_ledger
 from .fts import build_fts_index
-from .ledger import REQUESTED, Ledger, backfill_from_index, open_ledger
+from .ledger import LEGACY_CHUNKER, REQUESTED, Ledger, backfill_from_index, open_ledger
 from .backup import BackupError, backup, manifest_lines, read_manifest, restore
 from .lock import IngestBusy, ingest_lock
 from .publish import NoRowsError, add_ledger_columns, book_revisions, rebuild_table, \
@@ -565,8 +565,12 @@ def drop_for_rebuild(db, table_name: str, ledger: Ledger, keeping: set[str]) -> 
         ledger.begin(row["book_id"], key=key, source_ref=row.get("source_ref") or "",
                      sha256=row.get("sha256") or "",
                      # the chunker that BUILT it, not this code's: nothing was
-                     # re-chunked here, and the row is a record of what was
-                     chunker=row.get("chunker") or CHUNKER_VERSION,
+                     # re-chunked here, and the row is a record of what was.
+                     # A row that records none is `legacy` — the name the ledger
+                     # gives an absence everywhere else — because claiming this
+                     # code's chunker for rows nobody can vouch for is how an
+                     # index stops being able to say it is mixed (#27, #28).
+                     chunker=row.get("chunker") or LEGACY_CHUNKER,
                      embedding_model=row.get("embedding_model") or "")
         orphaned.append(f"{key or row['book_id']}: its rows were in {table_name} and this "
                         f"rebuild does not cover it — run ayl-add over its folder "

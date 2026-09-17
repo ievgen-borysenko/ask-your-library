@@ -48,6 +48,20 @@ class RunUsage:
     evidence_distilled: int = 0   # how many of those it kept as evidence
     evidence_dropped_no_hit: int = 0   # evidence items without a resolvable hit_id (dropped)
     redacted_lines: int = 0       # lines sanitize_context redacted (injection)
+    # The chapter-read window (#28, ADR-025), as three counts that only mean
+    # something together: how many chapter reads ran, how many of them said
+    # what they were looking for, and how many of THOSE opened a window
+    # somewhere other than the head of the chapter. The middle number is the
+    # one nothing else can see — whether the model fills the optional field at
+    # all — and without it a read path that never aims is indistinguishable
+    # from one that aims and finds nothing.
+    chapter_reads: int = 0
+    chapter_reads_aimed: int = 0
+    chapter_windows_opened: int = 0
+    # Times a chapter query came back at CHAPTER_ROW_CAP, so the section (or
+    # the candidate books) may be longer than what was read. It is logged as a
+    # warning where it happens; this is what carries it into a report.
+    chapter_row_cap_hits: int = 0
     # Time budget of the run: the deadline counts from `started`, minus the time
     # the run spent paused at a clarify waiting for the reader (`paused`).
     started: float = field(default_factory=time.monotonic)
@@ -127,6 +141,10 @@ def usage_snapshot() -> dict:
             "model": u.model, "hits_seen": u.hits_seen,
             "evidence_distilled": u.evidence_distilled, "redacted_lines": u.redacted_lines,
             "evidence_dropped_no_hit": u.evidence_dropped_no_hit,
+            "chapter_reads": u.chapter_reads,
+            "chapter_reads_aimed": u.chapter_reads_aimed,
+            "chapter_windows_opened": u.chapter_windows_opened,
+            "chapter_row_cap_hits": u.chapter_row_cap_hits,
             "by_role": by_role,
             "cost_usd": _cost(u.input_tokens, u.output_tokens)}
 

@@ -191,14 +191,27 @@ def test_without_a_read_query_the_chapter_is_read_from_its_head(monkeypatch, tmp
 
 
 def test_a_query_the_chapter_does_not_carry_falls_back_to_the_head(monkeypatch, tmp_path):
+    """And "falls back to the head" is meant character for character: a query
+    that misses must be indistinguishable from a read that named none, or there
+    are two kinds of head read and only one of them was ever measured."""
     text = long_chapter()
     marker = chapter_marker("Some Book", "Chapter 3", "zeppelins over montevideo")
 
     result, _ = act_on_chapter(monkeypatch, tmp_path, marker, text)
 
     passage = result["hits"][0]["text"]
-    assert passage.startswith(text[:200])
     assert library.HEAD_MARKER_PREFIX not in passage
+    assert passage == library.join_chapter([{"chunk_id": "b/c/1", "text": text}],
+                                           config.CHAPTER_HIT_CHARS)
+
+
+def test_a_window_that_opens_at_the_first_character_is_the_head_cut():
+    """Not only the unmatched query: a match inside the first window IS the
+    head of the chapter, and it must be written as one — markers reserve room,
+    and room reserved for a marker that is not written is a shorter read."""
+    text = long_chapter(needle_at=0.0)
+    head = library.join_chapter([{"chunk_id": "b/c/1", "text": text}], config.CHAPTER_HIT_CHARS)
+    assert window_around(text, "drowned lamp seventh stair", config.CHAPTER_HIT_CHARS) == head
 
 
 def test_the_window_act_stored_is_the_text_observe_is_shown(monkeypatch, tmp_path):
@@ -319,22 +332,41 @@ def test_the_joiner_between_two_chunks_survives_the_window(monkeypatch, tmp_path
 
 # --- the marker that carries the read query ---------------------------------
 
-def test_a_read_query_rides_on_the_marker_and_a_piped_section_still_survives():
-    """The optional field is recognised FROM THE RIGHT and only by its prefix —
-    the same rule as the "|status" of a read_chapters entry, and for the same
-    reason: a section name may contain "|" and is looked up literally."""
+def test_a_read_query_rides_on_a_marker_of_its_own():
+    """Whether a read query is present is answered by the marker NAME, which
+    only this code writes — never by a field peeled off the right, which a
+    chapter heading could spell (see the probes below)."""
     plain = chapter_marker("A Book — An Author", "Chapter 3")
     assert plain == "__chapter__|A Book — An Author|Chapter 3"
     assert split_read_query(plain) == (plain, "")
 
-    piped = chapter_marker("A Book — An Author", "Chapter 3 | part two", "the drowned lamp")
-    action, query = split_read_query(piped)
-    assert action == "__chapter__|A Book — An Author|Chapter 3 | part two"
-    assert query == "the drowned lamp"
-    assert action.split("|", 2)[2] == "Chapter 3 | part two"
+    aimed = chapter_marker("A Book — An Author", "Chapter 3", "the drowned lamp")
+    assert aimed == "__chapter_q__|the drowned lamp|A Book — An Author|Chapter 3"
+    assert split_read_query(aimed) == (plain, "the drowned lamp")
 
 
-def test_a_pipe_in_the_read_query_cannot_eat_the_section():
+# Two headings a book may really have, and both of them used to be read as the
+# grammar's own punctuation: the first handed `act` a read query the model never
+# wrote and a section the index does not hold, the second truncated the section
+# to "A". The section has to come back out byte for byte, with and without a
+# query of its own.
+SECTION_PROBES = ["Weird|q=evil query", "A|q=", "Chapter 3 | part two", "q=", "|"]
+
+
+@pytest.mark.parametrize("section", SECTION_PROBES)
+@pytest.mark.parametrize("query", ["", "the drowned lamp"])
+def test_a_section_that_spells_the_grammar_round_trips_byte_for_byte(section, query):
+    action, read_query = split_read_query(chapter_marker("A Book — An Author", section, query))
+
+    assert read_query == query
+    assert action.startswith("__chapter__|")
+    marker_parts = action.split("|", 2)          # exactly what `act` does
+    assert len(marker_parts) == 3
+    assert marker_parts[1] == "A Book — An Author"
+    assert marker_parts[2] == section             # byte for byte, pipes and all
+
+
+def test_a_pipe_in_the_read_query_cannot_eat_the_book_or_the_section():
     marker = chapter_marker("A Book", "Chapter 3", "the lamp | the stair")
     action, query = split_read_query(marker)
     assert action.split("|", 2) == ["__chapter__", "A Book", "Chapter 3"]
@@ -343,6 +375,23 @@ def test_a_pipe_in_the_read_query_cannot_eat_the_section():
 
 def test_a_search_query_is_never_trimmed_by_the_marker_rule():
     assert split_read_query("what happened|q=really") == ("what happened|q=really", "")
+    assert split_read_query("__chapter__|A Book|Weird|q=evil query") == (
+        "__chapter__|A Book|Weird|q=evil query", "")
+
+
+def test_a_malformed_query_marker_is_handed_on_whole_and_reads_nothing(monkeypatch, tmp_path):
+    """`__chapter_q__|` with nothing after it names no chapter. It must reach
+    `act`'s malformed-marker guard, not a read of some invented section."""
+    assert split_read_query("__chapter_q__|only a query") == ("__chapter_q__|only a query", "")
+
+    monkeypatch.setattr(nodes, "read_chapter",
+                        lambda *a, **k: pytest.fail("no read for a malformed marker"))
+    llm.reset_usage()
+    scratchpad = tmp_path / "scratch.md"
+    scratchpad.write_text("")
+    result = nodes.act({"current_query": "__chapter_q__|only a query", "steps_taken": 1,
+                        "read_chapters": [], "scratchpad_path": str(scratchpad)})
+    assert result["hits"] == [] and result["read_chapters"] == []
 
 
 def test_reflect_passes_on_what_the_model_is_looking_for(monkeypatch):
@@ -366,3 +415,39 @@ def test_a_read_decision_without_the_field_is_the_marker_it_always_was(monkeypat
              "mode": "answer", "steps_taken": 1, "empty_streak": 0, "clarify_asked": False}
 
     assert nodes.reflect(state)["current_query"] == "__chapter__|Some Book|Chapter 3"
+
+
+# --- what the report can say about all this ---------------------------------
+
+def test_the_counts_tell_a_read_that_aimed_from_one_that_found_nothing(monkeypatch, tmp_path):
+    """The three numbers a run has to be able to publish (#28). The middle one
+    is the point: whether the model fills the optional field at all is invisible
+    in the steps log, and a read path that never aims looks exactly like one
+    that aims and misses."""
+    text = long_chapter()
+
+    def counts(marker):
+        act_on_chapter(monkeypatch, tmp_path, marker, text)    # resets the usage itself
+        usage = llm.usage_snapshot()
+        return (usage["chapter_reads"], usage["chapter_reads_aimed"],
+                usage["chapter_windows_opened"])
+
+    assert counts("__chapter__|Some Book|Chapter 3") == (1, 0, 0)
+    assert counts(chapter_marker("Some Book", "Chapter 3",
+                                 "drowned lamp seventh stair")) == (1, 1, 1)
+    assert counts(chapter_marker("Some Book", "Chapter 3",
+                                 "zeppelins over montevideo")) == (1, 1, 0)
+
+
+def test_a_book_that_talks_about_chapters_beginning_earlier_is_not_service_text():
+    """The head marker is in-band text, so a book could in principle spell it.
+    The read status is decided on the WHOLE marker, digits and all, which no
+    sentence of prose is; an exact imitation is still read as service text, and
+    that limit is the one the cut marker at the other end has always had."""
+    prose = "[chapter begins earlier: the storm had broken] and the keeper slept."
+    assert not library.chapter_is_cut(prose)
+    assert provenance._segments(prose)[0].startswith("chapter begins earlier")
+
+    exact = library.head_marker(40) + "and the keeper slept."
+    assert library.chapter_is_cut(exact)
+    assert "begins earlier" not in provenance._segments(exact)[0]

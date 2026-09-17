@@ -69,6 +69,7 @@ from ask_your_library.catalog import CATALOG_OPS
 from ask_your_library.graph import build_graph
 from ask_your_library.bookkey import title_of
 from ask_your_library.i18n import t
+from ask_your_library import library
 from ask_your_library.config import (CHAPTER_HIT_CHARS, MAX_CLARIFY_CANDIDATES, MAX_EMPTY_STREAK, MAX_STEPS,
                                      PRICE_IN_PER_MTOK, PRICE_OUT_PER_MTOK, QUESTION_DEADLINE_S, SEARCH_HIT_CHARS)
 from ask_your_library.llm import usage_snapshot
@@ -274,7 +275,20 @@ def usage_fields(usage: dict | None = None) -> dict:
     the graph, and the error path in main(), have no result to read."""
     usage = usage_snapshot() if usage is None else usage
     return {"cost_usd": round(usage.get("cost_usd", 0.0), 4), "llm_calls": usage.get("llm_calls", 0),
-            "tokens_in": usage.get("input_tokens", 0), "tokens_out": usage.get("output_tokens", 0)}
+            "tokens_in": usage.get("input_tokens", 0), "tokens_out": usage.get("output_tokens", 0),
+            # The chapter-read window (#28), three counts that only mean
+            # something together: reads, reads that said what they were looking
+            # for, and reads whose window moved off the head of the chapter.
+            # `steps_log` cannot answer the middle one — it prints the marker
+            # cut to 80 characters — and it is the one number that says whether
+            # the model uses the field at all. Plus the times a chapter query
+            # came back at the row cap, which is a ceiling the re-chunk moved.
+            # `.get` throughout: a record written before these existed reads
+            # back as the run it was, one that never opened a window.
+            "chapter_reads": usage.get("chapter_reads", 0),
+            "chapter_reads_aimed": usage.get("chapter_reads_aimed", 0),
+            "chapter_windows_opened": usage.get("chapter_windows_opened", 0),
+            "chapter_row_cap_hits": usage.get("chapter_row_cap_hits", 0)}
 
 
 def role_seconds(usage: dict) -> dict:
@@ -805,7 +819,9 @@ def empty_totals() -> dict:
             "behavior_ok": 0, "titles_mentioned": 0, "titles_expected": 0,
             "facts_found": 0, "facts_expected": 0, "facts_items": 0, "facts_items_ok": 0,
             "drill_expected": 0, "drill_ok": 0, "cost_usd": 0.0, "llm_calls": 0,
-            "tokens_in": 0, "tokens_out": 0}
+            "tokens_in": 0, "tokens_out": 0,
+            "chapter_reads": 0, "chapter_reads_aimed": 0, "chapter_windows_opened": 0,
+            "chapter_row_cap_hits": 0}
 
 
 def render_summary(totals: dict, per_group: dict, repeat: int, attempt_totals: list[dict],
@@ -849,6 +865,15 @@ def render_summary(totals: dict, per_group: dict, repeat: int, attempt_totals: l
                    if totals["dropped_unverified"] else "")
                 + (f"; {totals['repinned']} quotes re-pinned to the passage that holds them"
                    if totals["repinned"] else "")
+                # The chapter-read window (#28), on the same rule again: a run
+                # that read no chapter writes the line it always wrote.
+                + (f"; chapter reads {totals['chapter_reads']} "
+                   f"({totals['chapter_reads_aimed']} named what they were looking for, "
+                   f"{totals['chapter_windows_opened']} opened a window off the head of the "
+                   f"chapter)" if totals["chapter_reads"] else "")
+                + (f"; {totals['chapter_row_cap_hits']} chapter query(ies) hit the "
+                   f"{library.CHAPTER_ROW_CAP}-row cap"
+                   if totals["chapter_row_cap_hits"] else "")
                 + f"; evidence items {totals['evidence']}\n"
                 + headline
                 + f"; expected titles mentioned {totals['titles_mentioned']}/{totals['titles_expected']}"
@@ -1213,6 +1238,9 @@ def main(argv: list[str] | None = None) -> None:
                 totals["evidence"] += r["evidence_items"]
                 for key in ("cost_usd", "llm_calls", "tokens_in", "tokens_out"):
                     totals[key] += r[key]
+                for key in ("chapter_reads", "chapter_reads_aimed",
+                            "chapter_windows_opened", "chapter_row_cap_hits"):
+                    totals[key] += r.get(key, 0)
                 sc = r["score"]
                 totals["behavior_ok"] += int(sc["behavior_ok"])
                 totals["titles_mentioned"] += sc["titles_mentioned"]
@@ -1250,6 +1278,16 @@ def main(argv: list[str] | None = None) -> None:
                               f"another book")
                 if r.get("repinned"):
                     drill += f", {r['repinned']} quotes re-pinned"
+                if r.get("chapter_reads"):
+                    # Only on a question that read a chapter at all, so every
+                    # other row is the row it has always been.
+                    drill += (f", chapter reads {r['chapter_reads']} "
+                              f"({r.get('chapter_reads_aimed', 0)} named what they were looking "
+                              f"for, {r.get('chapter_windows_opened', 0)} opened a window off the "
+                              f"head)")
+                if r.get("chapter_row_cap_hits"):
+                    drill += (f", {r['chapter_row_cap_hits']} chapter query(ies) hit the "
+                              f"{library.CHAPTER_ROW_CAP}-row cap")
                 if r.get("catalog"):
                     drill += (f", catalog {r['catalog']['op']}: {r['catalog']['count']} of {r['catalog']['total']}"
                               + (" — MISROUTED content question" if sc.get("catalog_misroute") else ""))
