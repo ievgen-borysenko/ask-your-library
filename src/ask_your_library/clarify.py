@@ -5,7 +5,7 @@ question offers and which evidence survives the reader's choice.
 """
 import re
 
-from .library import title_of
+from .bookkey import title_of
 from .state import AgentState
 
 # Ordinal words are matched as whole words; Ukrainian stems take a suffix

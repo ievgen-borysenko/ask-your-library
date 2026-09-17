@@ -45,6 +45,7 @@ import lancedb
 import requests
 import yaml
 
+from ask_your_library.bookkey import book_key
 from ask_your_library.config import DB_PATH, EMBED_BACKEND
 from ask_your_library.embeddings import get_embedder
 from ask_your_library.index_meta import check_index, read_index_meta, write_index_meta
@@ -222,8 +223,11 @@ def save_prepared(entry: dict, chapters: list[tuple[str, str]], provenance: str)
     prepared_path(entry).write_text(json.dumps({
         "note": entry["id"],
         # "Title — Author", matching the cards' H1 form — so the book field is
-        # consistent across both tables and stays unambiguous as the corpus grows
-        "book": f"{entry['title']} — {entry['author']}",
+        # consistent across both tables and stays unambiguous as the corpus
+        # grows. Through `bookkey.book_key`, the same function `ayl-add` mints
+        # with: for a manifest entry it is the identity it always was (the
+        # fields are already clean), and one rule means one place to change.
+        "book": book_key(entry["title"], entry["author"]),
         "source": provenance,
         "chapters": [{"title": t, "text": b} for t, b in chapters],
     }, ensure_ascii=False), encoding="utf-8")

@@ -22,13 +22,16 @@ from langgraph.types import interrupt
 from . import llm
 from .catalog import (mixed_intent, parse_catalog_request, render_catalog, resolve_title,
                       run_catalog)
+# read_key / read_status / READ_STATUSES are re-exported, not used here: the
+# grammar is this node's contract with `reflect`, and it is read (and tested)
+# as part of it.
+from .bookkey import READ_STATUSES, read_key, read_status, same_chapter  # noqa: F401
 from .clarify import _chosen_book, _clarify_candidates, _evidence_after_clarify
 from .config import (CHAPTER_HIT_CHARS, LLM_TIMEOUT_S, MAX_CLARIFY_CANDIDATES, MAX_EMPTY_STREAK,
                      MAX_STEPS, SEARCH_HIT_CHARS)
 from .coverage import coverage_probe
 from .i18n import t
-from .library import (TITLE_SEPARATOR, BookEntry, chapter_is_cut, list_books, read_chapter,
-                      search_both, title_of)
+from .library import BookEntry, chapter_is_cut, list_books, read_chapter, search_both
 from .llm import data_block
 from .prompts import OBSERVE_RULES, PLAN_RULES, REFLECT_RULES, SYNTHESIZE_RULES
 from .provenance import _valid_evidence, validate  # noqa: F401  (validate is wired by graph.py)
@@ -273,50 +276,8 @@ def catalog(state: AgentState) -> dict:
             "queries": [], "current_query": "", "stop_reason": t("stop_catalog")}
 
 
-READ_STATUSES = ("complete", "partial", "empty", "ambiguous")
-
-
-def read_key(entry: str) -> str:
-    """'book|section' of a read_chapters entry, whether or not it carries a
-    trailing '|status'. Section names may themselves contain '|', so the status
-    is recognised from the right and only when it is a known value."""
-    head, _, last = entry.rpartition("|")
-    return head if last in READ_STATUSES else entry
-
-
-def read_status(entry: str) -> str:
-    """Status of a read_chapters entry; legacy two-part entries count as complete."""
-    last = entry.rpartition("|")[2]
-    return last if last in READ_STATUSES else "complete"
-
-
-def same_chapter(wanted: str, entry: str) -> bool:
-    """Does a read_chapter request name a chapter already in read_chapters?
-    "Some Book|Chapter 59" and "Some Book|59" are the same chapter; so are
-    "Don Quixote|..." and "Don Quixote — Miguel de Cervantes|..." (act records
-    the canonical key, reflect may ask with the bare title), but two different
-    full keys never are ("Emma — Jane Austen" is not "Emma — Other Author").
-    After an ambiguous read only the identical bare request is a repeat: the
-    full key is exactly what the model is told to try next. The trailing
-    "|status" of an entry is not part of the key, but a "|" inside a section
-    name is."""
-    def split(value: str) -> tuple[str, str]:
-        book, _, section = read_key(value).partition("|")
-        return book.strip().lower(), section.lower().replace("chapter ", "").strip()
-
-    w_book, w_section = split(wanted)
-    e_book, e_section = split(entry)
-    if w_section != e_section:
-        return False
-    if w_book == e_book:
-        return True
-    if read_status(entry) == "ambiguous":
-        return False
-    w_full, e_full = TITLE_SEPARATOR in w_book, TITLE_SEPARATOR in e_book
-    if w_full and e_full:
-        return False
-    return title_of(w_book) == title_of(e_book)
-
+# The read_chapters grammar — read_key / read_status / same_chapter, and the
+# bare-title rule under it — lives in `bookkey` with the rest of book identity.
 
 # ---------------------------------------------------------------- act
 def act(state: AgentState) -> dict:

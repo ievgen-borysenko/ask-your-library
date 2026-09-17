@@ -31,7 +31,8 @@ from typing import NamedTuple
 from .catalog import resolve_title
 from .config import SEARCH_HIT_CHARS
 from .i18n import t
-from .library import BookEntry, author_of, title_of
+from .bookkey import author_of, title_of
+from .library import BookEntry
 from . import llm
 from .sanitize import LINE_BREAK_RE, strip_control_chars
 from .state import AgentState

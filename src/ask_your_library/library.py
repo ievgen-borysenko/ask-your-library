@@ -13,6 +13,11 @@ from dataclasses import dataclass
 import lancedb
 from lancedb.expr import col, lit
 
+# Book identity — the key, its two halves and the bare-title match — lives in
+# `bookkey`, the one module allowed to decide what a book is called. Re-exported
+# here because "the book key" has read like `library.TITLE_SEPARATOR` to the
+# agent, the eval harness and the interfaces since before that module existed.
+from .bookkey import TITLE_SEPARATOR, author_of, names_book, title_of  # noqa: F401
 from .config import DB_PATH, EMBED_BACKEND, TABLES
 from .embeddings import get_embedder
 from .index_meta import check_index
@@ -183,8 +188,6 @@ def _sql_quote(value: str) -> str:
     return value.replace("'", "''")
 
 
-TITLE_SEPARATOR = " — "   # index key for a book is "Title — Author"; reflect may hand back only the title
-
 # Cap on a chapter query. With the book in the `where` clause it is no longer
 # the boundary that decides WHICH book is found — the query returns the chunks
 # of one section of one book (of the handful sharing a bare title), not the
@@ -196,16 +199,6 @@ TITLE_SEPARATOR = " — "   # index key for a book is "Title — Author"; reflec
 # read still reports "found" and `join_chapter`'s "characters not shown"
 # undercounts what was left in the database.
 CHAPTER_ROW_CAP = 1000
-
-
-def title_of(book_key: str) -> str:
-    """'Moby Dick' for the index key 'Moby Dick — Herman Melville'."""
-    return book_key.rsplit(TITLE_SEPARATOR, 1)[0].strip()
-
-
-def author_of(book_key: str) -> str:
-    """'Herman Melville' for 'Moby Dick — Herman Melville'; "" for a key without the separator."""
-    return book_key.rsplit(TITLE_SEPARATOR, 1)[1].strip() if TITLE_SEPARATOR in book_key else ""
 
 
 # --- the catalogue: what the index holds, as data --------------------------------
@@ -286,8 +279,9 @@ def rows_for_book(rows: list[dict], book: str) -> list[dict]:
     exact = [r for r in rows if r["book"] == book]
     if exact:
         return exact
-    # title_of: the author is the last part, a title may itself contain the separator
-    return [r for r in rows if title_of(r["book"]) == book]
+    # bookkey.names_book: the author is the last part, a title may itself
+    # contain the separator, and a bare title never matches as a prefix
+    return [r for r in rows if names_book(book, r["book"])]
 
 
 def join_chapter(rows: list[dict], max_chars: int) -> str:

@@ -25,9 +25,7 @@ need an LLM to distil each book) and are not generated here — the agent
 searches full text alone when the cards table is absent.
 """
 import argparse
-import hashlib
 import logging
-import re
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -36,10 +34,11 @@ from pathlib import Path
 import lancedb
 import pyarrow as pa
 
+from ..bookkey import (MAX_TITLE_LINE, UNKNOWN_AUTHOR, book_key, slug,
+                       split_title_author)
 from ..config import DB_PATH, EMBED_BACKEND
 from ..embeddings import get_embedder
 from ..index_meta import check_index, read_index_meta, write_index_meta
-from ..library import TITLE_SEPARATOR
 from ..sanitize import LINE_BREAK_RE, strip_control_chars
 from .chapters import MergedHeading, split_book_sections
 from .chunking import Chunk, embedding_text, pack_sentences, parse_frontmatter, rows_for, \
@@ -99,14 +98,6 @@ class IngestError(Exception):
 
 BOOK_SUFFIXES = (".txt", ".md", ".markdown")
 MARKDOWN_SUFFIXES = (".md", ".markdown")
-UNKNOWN_AUTHOR = "Unknown"
-
-# Separators accepted between a title and an author, longest first so " -- "
-# is not consumed by " - ". The canonical key always uses TITLE_SEPARATOR.
-AUTHOR_SEPARATORS = (" — ", " – ", " -- ", " - ", "—", "–")
-# A first line is only read as a title line when it is this short: a narrative
-# sentence containing " by " must not be mistaken for "Title by Author".
-MAX_TITLE_LINE = 120
 
 
 @dataclass
@@ -122,29 +113,9 @@ class Book:
 
 
 # --- book key ---------------------------------------------------------------
-
-def book_key(title: str, author: str) -> str:
-    """The key the agent cites and filters on, so it is also the string that
-    ends up in a terminal, in a prompt and in a chunk id: control and invisible
-    formatting characters are dropped before anything downstream sees them."""
-    title = re.sub(r"\s+", " ", strip_control_chars(title)).strip()
-    author = re.sub(r"\s+", " ", strip_control_chars(author)).strip() or UNKNOWN_AUTHOR
-    return f"{title}{TITLE_SEPARATOR}{author}"
-
-
-def split_title_author(raw: str) -> tuple[str, str] | None:
-    """"Title — Author" / "Title by Author" -> (title, author); None otherwise.
-    Split on the LAST separator: a title may itself contain a dash."""
-    text = raw.strip()
-    for separator in AUTHOR_SEPARATORS:
-        if separator in text:
-            title, _, author = text.rpartition(separator)
-            if title.strip() and author.strip():
-                return title.strip(), author.strip()
-    match = re.search(r"^(.+)\s+by\s+(\S.*)$", text, re.I)   # greedy: the LAST " by "
-    if match and match.group(1).strip():
-        return match.group(1).strip(), match.group(2).strip()
-    return None
+# `book_key`, `split_title_author` and `slug` live in `ask_your_library.bookkey`
+# with the rest of book identity; what stays here is where a key is FOUND in a
+# file — front matter, a first title line, the file name.
 
 
 def key_from_frontmatter(meta: dict) -> str | None:
@@ -183,23 +154,6 @@ def key_from_filename(path: Path) -> str:
     if parts:
         return book_key(*parts)
     return book_key(path.stem, UNKNOWN_AUTHOR)
-
-
-SLUG_DIGEST_CHARS = 8
-
-
-def slug(text: str) -> str:
-    """Row key derived from the book key: stable across file renames, so
-    re-adding the same book replaces its rows instead of duplicating them.
-
-    The readable part is ASCII-only and cut to 80 characters, which alone would
-    collapse distinct keys onto one row key (two Cyrillic titles both become
-    "book", and the second add would delete the first book's rows). A short
-    digest of the FULL key is appended, so the row key is unique per key while
-    still being readable in a chunk id."""
-    readable = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:80] or "book"
-    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:SLUG_DIGEST_CHARS]
-    return f"{readable}-{digest}"
 
 
 # --- reading a folder -------------------------------------------------------

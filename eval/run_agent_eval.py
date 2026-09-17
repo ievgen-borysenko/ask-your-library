@@ -67,7 +67,7 @@ import yaml
 
 from ask_your_library.catalog import CATALOG_OPS
 from ask_your_library.graph import build_graph
-from ask_your_library.library import title_of
+from ask_your_library.bookkey import title_of
 from ask_your_library.i18n import t
 from ask_your_library.config import (CHAPTER_HIT_CHARS, MAX_CLARIFY_CANDIDATES, MAX_EMPTY_STREAK, MAX_STEPS,
                                      PRICE_IN_PER_MTOK, PRICE_OUT_PER_MTOK, QUESTION_DEADLINE_S, SEARCH_HIT_CHARS)
