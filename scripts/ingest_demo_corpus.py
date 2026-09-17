@@ -49,14 +49,16 @@ from ask_your_library.bookkey import author_of, book_key, chunk_id, title_of
 from ask_your_library.config import DB_PATH, EMBED_BACKEND
 from ask_your_library.embeddings import get_embedder
 from ask_your_library.index_meta import (META_TABLE, check_index, read_index_meta,
-                                         write_index_meta)
+                                         refuse_version_mismatch, write_index_meta)
 from ask_your_library.ingest import (Chunk, build_fts_index, chunk_card, embedding_text,
                                      pack_sentences, rows_for, split_sentences)
 # Chapter splitting lives in the package so every ingest path (this script and
 # the generic `ayl-add`) cuts books into sections identically.
 from ask_your_library.ingest.chapters import (DEFAULT_CHAPTER_RE, MIN_CHAPTER_CHARS,  # noqa: F401
                                               split_chapters, with_parts)
-from ask_your_library.ingest.ledger import CHUNKER_VERSION, open_ledger
+from ask_your_library.ingest.chunking import CHUNKER_VERSION
+from ask_your_library.ingest.ledger import open_ledger
+from ask_your_library.ingest.lock import IngestBusy, ingest_lock
 from ask_your_library.ingest.publish import (add_ledger_columns, rebuild_table,
                                              recover_staging, revision_of, table_names,
                                              upsert_book_rows)
@@ -448,7 +450,13 @@ def refuse_unsafe_partial_reingest(db, name: str, embedder) -> None:
     matching dims, and dims prove nothing about the model — two 1024-dim models
     look identical to it. So an unstamped table is refused here too, exactly as
     `ayl-add` refuses it; a full rebuild (no --book) or --stage stamp-meta is
-    the way out."""
+    the way out.
+
+    The CHUNKER is refused on the same grounds and by the same words as
+    `ayl-add` (#27): an upsert into a table another chunker built leaves two
+    chunkers' rows in one table with nothing to tell them apart. The way out is
+    the same too, and it is the reason this guard sits on `--book` alone — a
+    full rebuild replaces every row, so it is not a mix, it is the repair."""
     problem = check_index(db, name, embedder.model, embedder.dims)
     if problem:
         sys.exit(f"refusing partial re-ingest of {name}: {problem}")
@@ -460,6 +468,10 @@ def refuse_unsafe_partial_reingest(db, name: str, embedder) -> None:
             f"degrades retrieval silently.\n"
             f"Stamp it if you know it was built with {embedder.model!r} "
             f"(--stage stamp-meta), or re-ingest the whole corpus without --book.")
+    refusal = refuse_version_mismatch(db, name)
+    if refusal:
+        sys.exit(refusal.replace(f"refusing to write {name}",
+                                 f"refusing partial re-ingest of {name}", 1))
 
 
 def ingest_transcripts_table(backend: str, book_filter: str | None, entry_ids: list[str]) -> None:
@@ -561,23 +573,34 @@ def ingest_cards_table(backend: str) -> None:
     print(f"cards done: {len(cards)} cards -> {table.count_rows()} chunks")
 
 
-def stamp_existing_tables(backend: str) -> None:
-    """Fingerprint tables built before stamps existed. Assumes they were built
-    with the embedder configured right now — only run this when that is true.
+def stamp_existing_tables(backend: str, chunker: str | None = None) -> None:
+    """Fingerprint tables built before stamps existed. Asserts that they were
+    built with the embedder configured right now — only run this when that is
+    true. It is the operator's vouching, not a measurement: nothing in a table
+    records which model made its vectors, which is why this command exists.
 
-    Neither `chunker` nor `schema_version` is named here, and that is the point:
-    nothing recorded which chunker built such a table, so the chunker stays
-    empty rather than claiming the current one, and the version is read from the
-    table's own columns. The embedder is the one thing this command asserts, and
-    the one thing the operator is being asked to vouch for."""
+    `--chunker <version>` extends the vouching to the chunker, and it is opt-in
+    for the same reason the embedder is asserted rather than read. An unstamped
+    chunker means "nobody recorded it", which every reader and every write
+    accepts in silence (#27); stamping one makes a later mismatch a warning on
+    read and a refusal on write, which is worth having and is worth being asked
+    for. `--chunker current` is the version this code chunks at, spelled out in
+    the printed line so the assertion is on the record.
+
+    `schema_version` is never named here: the version is a claim about the rows
+    and is read from the table's own columns (`index_meta.schema_version_of`).
+    Nothing an operator can vouch for changes what the columns are."""
     embedder = get_embedder(backend)
+    if chunker == "current":
+        chunker = CHUNKER_VERSION
     db = lancedb.connect(DB_PATH)
     for name in (f"cards_{backend}", f"transcripts_{backend}"):
         if name not in table_names(db):
             print(f"  {name}: not found, skipped")
             continue
-        write_index_meta(db, name, backend, embedder.model, embedder.dims)
-        print(f"  {name}: stamped {embedder.model} / {embedder.dims}d")
+        write_index_meta(db, name, backend, embedder.model, embedder.dims, chunker=chunker)
+        print(f"  {name}: stamped {embedder.model} / {embedder.dims}d"
+              + (f" / chunker {chunker}" if chunker else " (no chunker claimed)"))
 
 
 # --- main -------------------------------------------------------------------
@@ -595,6 +618,12 @@ def main() -> None:
                                    "of the book key for --stage ingest")
     ap.add_argument("--no-verify", action="store_true",
                     help="skip manifest checksum verification of sources")
+    ap.add_argument("--chunker", metavar="VERSION",
+                    help="--stage stamp-meta only: also assert WHICH chunker built the "
+                         f"existing tables ('current' = {CHUNKER_VERSION!r}). Off by default: "
+                         "an unstamped chunker means nobody recorded it, and that is read and "
+                         "written without a word; a stamped one warns on read and refuses on "
+                         "write when it disagrees with this code")
     ap.add_argument("--refetch", action="store_true",
                     help="re-download the Gutenberg texts even when a copy is cached "
                          "(the old copy is kept next to it as pg<id>.txt.prev; refuses "
@@ -619,18 +648,29 @@ def main() -> None:
     if args.stage in ("all", "prepare-audio"):
         print("== prepare-audio ==")
         prepare_audio(entries, retranscribe=args.retranscribe)
-    if args.stage in ("all", "ingest"):
-        print("== ingest transcripts ==")
-        ingest_transcripts_table(args.backend, args.book, [e["id"] for e in entries])
-    if args.stage in ("all", "cards"):
-        print("== ingest cards ==")
-        ingest_cards_table(args.backend)
-    if args.stage == "checksums":
-        print("== pin source checksums into the manifest ==")
-        write_checksums()
-    if args.stage == "stamp-meta":
-        print("== stamp existing tables with the configured embedding model ==")
-        stamp_existing_tables(args.backend)
+    # Every stage that WRITES the index holds the ingest lock for its length
+    # (#27): `ayl-add --backup` refuses to copy an index while one of these is
+    # running, and these refuse to start while a copy is being taken. The
+    # prepare stages are not here — they write `corpus/prepared/`, not the
+    # index — and neither is `checksums`, which writes the manifest.
+    try:
+        if args.stage in ("all", "ingest"):
+            print("== ingest transcripts ==")
+            with ingest_lock(DB_PATH, command=f"ingest_demo_corpus.py --stage {args.stage}"):
+                ingest_transcripts_table(args.backend, args.book, [e["id"] for e in entries])
+        if args.stage in ("all", "cards"):
+            print("== ingest cards ==")
+            with ingest_lock(DB_PATH, command=f"ingest_demo_corpus.py --stage {args.stage}"):
+                ingest_cards_table(args.backend)
+        if args.stage == "checksums":
+            print("== pin source checksums into the manifest ==")
+            write_checksums()
+        if args.stage == "stamp-meta":
+            print("== stamp existing tables with the configured embedding model ==")
+            with ingest_lock(DB_PATH, command="ingest_demo_corpus.py --stage stamp-meta"):
+                stamp_existing_tables(args.backend, args.chunker)
+    except IngestBusy as error:
+        sys.exit(str(error))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,164 @@
+"""The mismatch policy where a user meets it: `ayl-add`, the reader, `--doctor`.
+
+`tests/test_index_meta.py` covers the decision itself — what counts as a
+mismatch and what does not. This covers the four places the decision is acted
+on, and the one thing they must not agree about: a read goes on, a write stops.
+
+No network: the embedder is faked and the index is a tmp_path LanceDB.
+"""
+import lancedb
+import pytest
+
+from ask_your_library import index_meta, library
+from ask_your_library.ingest import add_folder
+from ask_your_library.ingest.doctor import check_ledger
+from test_add_folder import PARA, fake_embedder, write  # noqa: F401
+
+TABLES = ["transcripts_ollama", "cards_ollama"]
+BODY = PARA * 4
+
+
+@pytest.fixture
+def index(tmp_path, fake_embedder):  # noqa: F811
+    """A folder of two books, indexed exactly as `ayl-add` would."""
+    folder = tmp_path / "books"
+    write(folder, "The Green Ledger - A. Keeper.txt", BODY)
+    write(folder, "Sea Notes - B. Mate.txt", BODY + " The tide turned at four.")
+    add_folder.add_books(add_folder.read_folder(folder), "ollama", tmp_path / "db", folder)
+    return folder
+
+
+def restamp(db_path, chunker="sentence-pack-2", schema_version=None):
+    """Re-write the fingerprint as some other version of the code would have.
+
+    The stamp is rewritten rather than the rows: what the policy acts on is the
+    claim, and a test that re-chunked would be testing the chunker instead."""
+    db = lancedb.connect(db_path)
+    index_meta.write_index_meta(db, "transcripts_ollama", "ollama", "fake-embed", 4,
+                                chunker=chunker, schema_version=schema_version)
+    return db
+
+
+def test_a_fresh_index_is_stamped_with_the_chunker_that_built_it(index, tmp_path):
+    row = index_meta.read_index_meta(lancedb.connect(tmp_path / "db"), "transcripts_ollama")
+    assert row["chunker"] == add_folder.CHUNKER_VERSION
+    assert row["schema_version"] == index_meta.SCHEMA_VERSION
+
+
+def test_the_ledger_records_the_same_chunker_as_the_stamp(index, tmp_path):
+    """One constant, two places that record it. They are the same string or the
+    stamp is a claim about something the ledger disagrees with."""
+    from ask_your_library.ingest.ledger import open_ledger
+
+    db = lancedb.connect(tmp_path / "db")
+    stamp = index_meta.read_index_meta(db, "transcripts_ollama")["chunker"]
+    assert {row["chunker"] for row in open_ledger(db).all_rows()} == {stamp}
+
+
+def test_ayl_add_refuses_to_write_an_index_another_chunker_built(index, tmp_path, capsys):
+    restamp(tmp_path / "db")
+
+    code = add_folder.main([str(index), "--db", str(tmp_path / "db")])
+
+    assert code == 1
+    error = capsys.readouterr().err
+    assert "refusing to write transcripts_ollama" in error
+    assert "sentence-pack-2" in error and add_folder.CHUNKER_VERSION in error
+    assert "ayl-add --backup" in error
+
+
+def test_ayl_add_refuses_an_index_written_by_a_newer_release(index, tmp_path, capsys):
+    restamp(tmp_path / "db", chunker=add_folder.CHUNKER_VERSION,
+            schema_version=index_meta.SCHEMA_VERSION + 1)
+
+    code = add_folder.main([str(index), "--db", str(tmp_path / "db")])
+
+    assert code == 1
+    assert "refusing to write transcripts_ollama" in capsys.readouterr().err
+
+
+def test_a_refused_write_leaves_the_index_exactly_as_it_was(index, tmp_path):
+    """The refusal comes before anything is embedded or deleted, which is the
+    only order in which it is worth anything: a mixed index is what it exists
+    to prevent."""
+    db = lancedb.connect(tmp_path / "db")
+    before = db.open_table("transcripts_ollama").count_rows()
+    restamp(tmp_path / "db")
+
+    assert add_folder.main([str(index), "--db", str(tmp_path / "db")]) == 1
+
+    db = lancedb.connect(tmp_path / "db")
+    assert db.open_table("transcripts_ollama").count_rows() == before
+    assert index_meta.read_index_meta(db, "transcripts_ollama")["chunker"] == "sentence-pack-2"
+
+
+def test_a_reader_warns_and_goes_on(index, tmp_path, monkeypatch, caplog, fake_embedder):  # noqa: F811
+    """The half that must NOT refuse. An index another chunker built took the
+    same half hour to build as any other, and it answers from the chunks it
+    has."""
+    restamp(tmp_path / "db")
+    monkeypatch.setattr(library, "_embedder", fake_embedder)
+    monkeypatch.setattr(library, "_checked_tables", set())
+    db = lancedb.connect(tmp_path / "db")
+
+    with caplog.at_level("WARNING"):
+        table = library.open_table(db, "transcripts_ollama")
+
+    assert table.count_rows() > 0                 # opened, not refused
+    assert any("sentence-pack-2" in record.message for record in caplog.records)
+
+
+def test_the_reader_warns_once_per_process(index, tmp_path, monkeypatch, caplog, fake_embedder):  # noqa: F811
+    """Every search opens the table. A warning per search would be a warning
+    per question, which is how a real one stops being read."""
+    restamp(tmp_path / "db")
+    monkeypatch.setattr(library, "_embedder", fake_embedder)
+    monkeypatch.setattr(library, "_checked_tables", set())
+    db = lancedb.connect(tmp_path / "db")
+
+    with caplog.at_level("WARNING"):
+        for _ in range(3):
+            library.open_table(db, "transcripts_ollama")
+
+    assert sum("sentence-pack-2" in record.message for record in caplog.records) == 1
+
+
+def test_preflight_reports_a_mismatch_as_a_notice_not_a_problem(monkeypatch, tmp_path):
+    """Degraded, not broken: the interfaces start, and the person asking is
+    told — before the next `ayl-add` refuses them mid-ingest."""
+    from ask_your_library import preflight as pf
+    from test_preflight import healthy
+
+    # `healthy` describes the hosted default; without this the local-model
+    # check runs too and reports an Ollama model nobody pulled. test_preflight's
+    # own autouse fixture does the same thing for the tests in that file.
+    monkeypatch.setattr(pf, "LLM_BACKEND", "openrouter")
+    monkeypatch.setattr(pf, "EMBED_BACKEND", "ollama")
+    monkeypatch.setattr(pf, "OPENROUTER_NEEDS_KEY", True)
+    monkeypatch.setattr(pf, "OLLAMA_EMBED_MODEL", "bge-m3")
+    preflight = healthy(monkeypatch, tmp_path, list(pf.TABLES.values()))
+    monkeypatch.setattr(preflight, "warn_version_mismatch",
+                        lambda db, name: f"{name} was built by chunker 'x'")
+
+    result = preflight.check_environment()
+
+    assert result == []                                  # not fatal
+    assert any("chunker" in notice for notice in result.notices)
+
+
+def test_doctor_reads_the_stamp_out_whether_or_not_it_disagrees(index, tmp_path):
+    report = check_ledger(lancedb.connect(tmp_path / "db"), TABLES)
+    assert report.ok
+    assert any(add_folder.CHUNKER_VERSION in line for line in report.stamps)
+    assert any("row schema" in line for line in report.stamps)
+
+
+def test_doctor_names_a_mismatch_and_exits_non_zero(index, tmp_path, capsys):
+    restamp(tmp_path / "db")
+
+    code = add_folder.main(["--doctor", "--db", str(tmp_path / "db")])
+
+    assert code == 1
+    out = capsys.readouterr().out
+    assert "VERSION MISMATCH" in out and "sentence-pack-2" in out
+    assert "ayl-add --backup" in out
