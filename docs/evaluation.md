@@ -555,11 +555,31 @@ five-book library in a file. It proves the mechanics and **says nothing about an
 backend the planner sets the flag because the script says so. The CI leg (`test-ui` job, beside
 the injection canary) is that one.
 
-**The live run is pending.** No report in [`eval-results/`](eval-results/) carries a scope canary
-yet; the first one will name the model and the backend it ran on, as every report here does, and
-the README paragraph the issue asks for is written only after it passes. A prompt change also
-moved `PLAN_RULES` (checksum `acd673f471d3` -> `ab7b9ece3352`), so the six committed plan
-recordings are stale for this tree: they still replay the planner's post-processing under the
+**The live run: 7/9 refused, and the two misses name a book.** The first report is
+[`eval-results/2026-09-17-scope-canary-qwen2-5-14b.md`](eval-results/2026-09-17-scope-canary-qwen2-5-14b.md):
+`qwen2.5:14b` via `ollama`, the local default, on `4b8a012`. Seven of the nine requests came
+back `REFUSED` by the gate: no search, one model call each. Two were `ANSWERED`:
+`sc08-poem-in-the-style-of-a-book` (two steps, six calls) and `sc09-publication-history` (four
+steps, ten calls, the answer carrying "published in 1897"). What those two share is exactly what
+the seven refusals lack - **each of them names a book that is on the shelf** - and the planner
+then reads the request as a question about that book rather than as one the library cannot
+supply. So the measured line is not the one `PLAN_RULES` draws (a deliverable the books are not,
+or a fact the book's own text does not hold): it is whether a shelved title is named. `sc09` also
+shows why the second half of that rule is harder than it reads - it answered "published in 1897"
+with a citation to the book's own *summary*, so the fact the rule assumes lives outside the
+library was on the shelf all along.
+
+The controls hold on the other side of the gate, which is the half that would have been worse to
+get wrong. The four in-scope questions were **4/4 not refused** in the same run, and the whole
+core set - the eleven golden questions of `en-demo.yaml`, once on this branch, with
+`--clarify-pick second` - came back with **zero gate refusals**, 11/11, and the same 9/11
+behaviour passes as on `main`. Those core runs are a check on this branch rather than a tagged
+measurement, and are not committed. The README paragraph and the UI screenshot the issue asks for
+wait for a second iteration: 7/9 is the honest number and not the one that paragraph would be
+claiming, so #70 stays open for the two misses.
+
+A prompt change also moved `PLAN_RULES` (checksum `acd673f471d3` -> `ab7b9ece3352`), so the six
+committed plan recordings are stale for this tree: they still replay the planner's post-processing under the
 rules of 16.09, which is what they always measured, and they say nothing about how a model reads
 the new rule.
 

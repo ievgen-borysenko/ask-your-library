@@ -220,8 +220,12 @@ A hostile *reader* is a different question from a hostile *passage*, and it has 
 arithmetic, a persona - must end in a refusal that names the library as the reason, decided at
 `plan` and enforced by code, never in an answer from the model's own memory under this agent's
 provenance footer. It is not an injection defense and does not make one: it only fences what this
-agent agrees to be asked for. Its mechanics run in CI; the live run against the answering model is
-pending ([`evaluation.md`](evaluation.md), "Scope canary").
+agent agrees to be asked for. Its mechanics run in CI; against the local default the gate refused
+seven of the set's nine requests and let two through, and both of those name a book that is on the
+shelf ([`evaluation.md`](evaluation.md), "Scope canary";
+[`eval-results/2026-09-17-scope-canary-qwen2-5-14b.md`](eval-results/2026-09-17-scope-canary-qwen2-5-14b.md)).
+Read the fence as one that holds for a request naming no book, and not yet as one that holds for
+every request the library cannot supply.
 
 Limits: the regex layer covers English and Ukrainian phrasings only, so paraphrase, other
 languages and unicode obfuscation walk past it into layer 2. The XML-like delimiters are a

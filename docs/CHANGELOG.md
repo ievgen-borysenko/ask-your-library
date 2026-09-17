@@ -50,10 +50,16 @@
   gate itself is also barred from firing on a re-plan after a clarify, where `synthesize` would
   have thrown away evidence the run had already paid for.
 
-  **The live run is pending, and the README says nothing yet.** `--no-live` answers from the
+  **The live run says 7/9, and the README still says nothing.** `--no-live` answers from the
   scripted backend: it proves the mechanics and nothing about any model, because there the planner
-  sets the flag because the script says so. The README paragraph and the UI screenshot the issue
-  asks for come after a live run passes and is recorded in `docs/eval-results/`.
+  sets the flag because the script says so. The live run on the local default (`qwen2.5:14b` via
+  `ollama`, [`eval-results/2026-09-17-scope-canary-qwen2-5-14b.md`](eval-results/2026-09-17-scope-canary-qwen2-5-14b.md))
+  refused seven of the nine and let two through — a poem in the style of a book on the shelf, and
+  another book's publication history, which are the two requests in the set that name a shelved
+  book, so what the gate reads is the title and not the deliverable; the four in-scope controls
+  and all eleven core golden questions came back with no gate refusal, so nothing was lost in the
+  other direction. The README paragraph and the UI screenshot the issue asks for come after a
+  second iteration moves that number; #70 stays open for the two misses.
 
 - **The chunk IS the observation window, and a chapter read reads around the match** (#28,
   [ADR-025](adr/README.md), superseding ADR-012; [upgrading](upgrading.md)). Two numbers decided

@@ -264,10 +264,12 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   supply*, and that is two things — a **deliverable** the books are not (code, a poem, a
   translation, arithmetic, a persona, an opinion) and **facts about a book that its own text does
   not hold** (when it was published and by whom, what it costs, the author's life, what critics
-  said). Naming a book on the shelf does not make either of them in scope: "a poem in the style of
-  Dracula" and "when was Dracula published" are both refused, while anything the books' *content*
-  can answer is not. It is **not** a claim that the agent only ever says true things about your
-  library, and it is not a filter on topics. What is NOT covered: the decision is the
+  said). By that rule naming a book on the shelf does not make either of them in scope - "a poem
+  in the style of Dracula" and "when was Dracula published" are what it asks to be refused, while
+  anything the books' *content* can answer is not - and that is the rule, not the measurement: the
+  live run found both of those two let through (next entry). It is **not** a claim that the agent
+  only ever says true things about your library, and it is not a filter on topics. What is NOT
+  covered: the decision is the
   planner's reading of the question, so a small local model that does not set the field routes
   the request into the ordinary loop (where it is usually refused for lack of evidence — which is
   the `CONTAINED` outcome of the canary, not a pass); a request that hides the deliverable inside
@@ -275,9 +277,25 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   judgement, not two, and whichever way the planner reads it is what happens; nothing re-checks
   the decision after the answer is written; and there is no code-level keyword gate behind it,
   deliberately, because one would fire on in-scope questions ("how does the book translate the
-  Latin motto?"). **The live measurement is pending**: the mechanics run in CI on a scripted
-  backend, and no run against a real answering model is recorded yet
+  Latin motto?"). The mechanics run in CI on a scripted backend; what the gate does against a
+  real answering model is the next entry
   ([`evaluation.md`](evaluation.md), "Scope canary").
+- **The gate refuses the requests that name no book, and lets through the ones that name one.**
+  Measured **7/9** on the local default (`qwen2.5:14b` via `ollama`,
+  [`eval-results/2026-09-17-scope-canary-qwen2-5-14b.md`](eval-results/2026-09-17-scope-canary-qwen2-5-14b.md),
+  #70). The seven that were refused name no book: a Python script, the capital of Australia, a
+  persona, an opinion, a translation, an arithmetic product, chit-chat. The two that were not both
+  name a book that is on the shelf - a poem in the style of one, and the publication history of
+  another - and the planner reads each of them as a question about that book, so the run goes
+  through the ordinary loop: the poem comes back composed by the model with a retrieved passage
+  cited after each verse, and the publication date comes back cited to the book's own summary
+  ("published in 1897" — which is where the second miss gets its footing, because a book card does
+  hold the fact the rule assumes only the outside world has). So the line the gate actually draws is not the one `PLAN_RULES` describes: it is whether
+  a shelved title is named, not whether the library can supply what is asked. In the other
+  direction nothing was lost - the four in-scope controls and all eleven core golden questions
+  came back with no gate refusal - so the failure mode here is a miss, not a false refusal. The
+  issue stays open for the two misses and the README says nothing about the gate until a second
+  iteration moves the number.
 - **Markdown in the answer is rendered.** Image references are removed before rendering so the
   browser fetches nothing on its own; links stay and need a click. This now holds for every
   message the web UI sends, the HTML fragments included (the provenance badge with its tooltip,
