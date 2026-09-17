@@ -94,8 +94,11 @@ out, and it discards what it replaces — so take a copy first.
 **This release is the first time that happens.** The chunker changed in #28 (`sentence-pack-1` ->
 `sentence-pack-2`: chunks packed to 2,400 characters instead of 4,000, so a hit is no longer
 longer than the window the model reads it through), so an index built before 2026-09-17 warns on
-every read and refuses the next write until you run the three commands below — over **each** of
-the folders your library came from. Expect a full re-embed and about 55% more rows. Cards are cut
+every read and refuses the next write until you run the three commands below. Expect a full
+re-embed and about 55% more rows. If your index was fed from more than one folder, `--rebuild`
+goes **once** — it drops the whole table, so a second one would throw away what the first
+produced — and every other folder follows with a plain `uv run ayl-add <folder>`, which appends.
+A rebuild that would drop another folder's books refuses and says so before dropping anything. Cards are cut
 by a different rule and are not affected. See [upgrading](upgrading.md) for what the warning and
 the refusal actually say.
 

@@ -48,18 +48,26 @@ append would leave two chunkers' rows in one table.
 **Your own library, in order:**
 
 ```bash
-uv run ayl-add --backup ~/ayl-backups --db ~/ayl-index          # 1. the copy that survives step 2
+uv run ayl-add --backup ~/ayl-backups --db ~/ayl-index          # 1. the copy that survives step 3
 uv run ayl-add --doctor --db ~/ayl-index                        # 2. read the stamps; exits non-zero on the mismatch
 uv run ayl-add ~/books --rebuild --backup ~/ayl-backups --db ~/ayl-index   # 3. re-chunk and re-embed
+uv run ayl-add ~/more-books --db ~/ayl-index                    # 4. every OTHER folder, plain
 ```
 
 Step 3 takes its own backup first and then replaces every row, so step 1 is only belt-and-braces
 if you are running the two back to back — but take it anyway if the index is the only copy of a
 library you spent hours building. It re-embeds everything: budget roughly what the first build
 took (about half an hour for the demo corpus on an M3 Pro, longer for a large library), and expect
-**around 55% more rows** out of the same text. Feed `--rebuild` **every** folder your library came
-from, one run each: a rebuild drops the table, so books from folders this run does not name lose
-their rows and are reported by name at the end as `requested`.
+**around 55% more rows** out of the same text.
+
+**`--rebuild` goes once, whatever the number of folders.** It drops the whole transcripts table,
+so it rebuilds the INDEX and not a folder — running it once per folder would leave only the folder
+that ran last, each run dropping what the one before it wrote. After the rebuild there is no
+mismatch left to refuse, so every other folder goes in with a plain `ayl-add <folder>`, which
+appends. A `--rebuild` that would drop another folder's books stops before it drops anything and
+says exactly this, naming them; `--rebuild --force` goes ahead and reports every book it orphaned
+(their ids are kept and their rows are not, so they go back to `requested` until you re-add their
+folder).
 
 **The demo corpus** has its own rebuild and does not go through `ayl-add`:
 
