@@ -19,6 +19,7 @@ The catalogue is deliberately not consulted: it answers from the index tables
 import logging
 from dataclasses import dataclass, field
 
+from ..index_meta import read_index_meta, version_mismatch
 from .ledger import INDEXED, TABLE, open_ledger
 
 log = logging.getLogger(__name__)
@@ -47,6 +48,14 @@ class LedgerReport:
     duplicate_keys: list[str] = field(default_factory=list)
     # The ledger's own row count against the index's, per book.
     row_count_drift: list[str] = field(default_factory=list)
+    # What each table is stamped with — embedder, chunker, row schema — read
+    # out whether or not anything is wrong with it. `doctor` is where somebody
+    # goes to find out what they are holding before they upgrade, and a stamp
+    # reported only when it disagrees is a stamp nobody can check in advance.
+    stamps: list[str] = field(default_factory=list)
+    # A stamped chunker or row schema this code cannot match (#27): the same
+    # sentence the reader gets as a warning and the writer as a refusal.
+    version_mismatches: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
     @property
@@ -54,12 +63,17 @@ class LedgerReport:
         return not (self.indexed_but_absent or self.in_index_but_not_in_ledger
                     or self.orphan_row_counts or self.never_indexed
                     or self.duplicate_keys or self.row_count_drift
-                    or self.cards_without_a_book)
+                    or self.cards_without_a_book or self.version_mismatches)
 
     def lines(self) -> list[str]:
         out = [f"ledger: {self.books_in_ledger} book(s); index "
                f"({', '.join(self.checked_tables) or 'no tables'}): "
                f"{self.books_in_index} book key(s)"]
+        for stamp in self.stamps:
+            out.append(f"  stamp: {stamp}")
+        for line in self.version_mismatches:
+            out.append(f"  VERSION MISMATCH    {line} — reads with a warning, refuses to be "
+                       f"written to; back up (`ayl-add --backup <dir>`) and rebuild")
         for note in self.notes:
             out.append(f"  note: {note}")
         for key in self.indexed_but_absent:
@@ -90,6 +104,28 @@ class LedgerReport:
         return out
 
 
+def _read_stamps(db, report: LedgerReport) -> None:
+    """What each checked table is stamped with, against what this code writes.
+
+    The embedder is not re-checked here — that is `check_index`, it runs before
+    every search and before every write, and it is fatal in both places, so a
+    reconciliation report is not where anyone would first learn of it. What
+    this adds is the pair `check_index` cannot speak about: the chunker and the
+    row schema, whose whole policy is that they do not stop a read."""
+    for name in report.checked_tables:
+        meta = read_index_meta(db, name)
+        if meta is None:
+            report.stamps.append(f"{name}: no fingerprint (built before stamps existed)")
+            continue
+        report.stamps.append(
+            f"{name}: {meta.get('model')} / {meta.get('dims')}d, chunker "
+            f"{meta.get('chunker') or '(none recorded)'}, row schema "
+            f"{meta.get('schema_version')}, stamped {meta.get('created')}")
+        detail = version_mismatch(db, name)
+        if detail:
+            report.version_mismatches.append(detail)
+
+
 def check_ledger(db, table_names: list[str], ledger_table: str = TABLE) -> LedgerReport:
     """Compare the ledger with the index tables named, and report.
 
@@ -100,6 +136,7 @@ def check_ledger(db, table_names: list[str], ledger_table: str = TABLE) -> Ledge
     names = db.list_tables() if hasattr(db, "list_tables") else db.table_names()
     present = list(getattr(names, "tables", names))
     report.checked_tables = [name for name in table_names if name in present]
+    _read_stamps(db, report)
 
     # Per table, not merged: only the transcripts table ever carries `book_id`
     # (see the cards note below), and merging the two made the orphan check

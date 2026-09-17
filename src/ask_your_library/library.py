@@ -20,7 +20,7 @@ from lancedb.expr import col, lit
 from .bookkey import TITLE_SEPARATOR, author_of, names_book, title_of  # noqa: F401
 from .config import DB_PATH, EMBED_BACKEND, TABLES
 from .embeddings import get_embedder
-from .index_meta import check_index
+from .index_meta import check_index, warn_version_mismatch
 
 log = logging.getLogger(__name__)
 
@@ -61,11 +61,21 @@ def has_table(db, table_name: str) -> bool:
 
 def open_table(db, table_name: str):
     """Open a table, refusing (once per process) an index built by a different
-    embedding model than the configured one."""
+    embedding model than the configured one — and WARNING, once per process,
+    about a chunker or a row schema that disagrees.
+
+    The two halves are deliberately not alike (ADR-020, #27). A foreign
+    embedder makes the search meaningless, so it raises. A foreign chunker
+    makes it worse, not meaningless: the same text, cut differently, still
+    retrieves and still quotes verbatim. Refusing to read that would throw away
+    an index that took about half an hour to build, which is precisely what an
+    upgrade must never do — so the reader says so and goes on, and it is the
+    WRITE path that refuses (`add_folder.refuse_version_mismatch`)."""
     if table_name not in _checked_tables:
         problem = check_index(db, table_name, embedder().model, embedder().dims)
         if problem:
             raise RuntimeError(problem)
+        warn_version_mismatch(db, table_name)
         _checked_tables.add(table_name)
     return db.open_table(table_name)
 
