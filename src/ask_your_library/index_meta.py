@@ -18,15 +18,60 @@ def _table_names(db) -> list[str]:
     return list(getattr(names, "tables", names))
 
 
-def write_index_meta(db, table: str, backend: str, model: str, dims: int) -> None:
+# The shape of an index row: bumped when a reader can no longer read a table
+# written by an older ingest without knowing which one wrote it. 1 is every
+# index built before the ledger; 2 adds the `book_id` column beside `note`.
+SCHEMA_VERSION = 2
+
+
+def write_index_meta(db, table: str, backend: str, model: str, dims: int,
+                     chunker: str | None = None,
+                     schema_version: int = SCHEMA_VERSION) -> None:
+    """Stamp a table with what built it.
+
+    `chunker` and `schema_version` are written here from 2026-09-17 (ADR-024).
+    Readers must tolerate their absence — every index built before this has no
+    such fields — and nothing refuses on them yet: the policy decided for that
+    is warn on read, refuse on write (ADR-020's note, #27), and refusing before
+    the warning exists would invalidate a half-hour build over a field that has
+    never once been written."""
     row = {"table": table, "backend": backend, "model": model, "dims": int(dims),
-           "created": time.strftime("%Y-%m-%dT%H:%M:%S")}
+           "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
+           "chunker": chunker or "", "schema_version": int(schema_version)}
     if META_TABLE in _table_names(db):
         meta = db.open_table(META_TABLE)
         meta.delete(f"`table` = '{table}'")
-        meta.add([row])
+        try:
+            meta.add([row])
+        except Exception:
+            # A `_index_meta` written before these two fields existed has a
+            # five-column schema, and LanceDB will not take a wider row. The
+            # table is tiny (one row per index table) and carries no vectors,
+            # so it is rewritten with the wider schema rather than dropping the
+            # new fields — which would make the stamp lie about itself.
+            log.info("%s: widening the fingerprint table with chunker/schema_version",
+                     META_TABLE)
+            kept = [r for r in _all_meta_rows(db) if r.get("table") != table]
+            db.drop_table(META_TABLE)
+            db.create_table(META_TABLE, [{**_with_new_fields(r)} for r in kept] + [row])
     else:
         db.create_table(META_TABLE, [row])
+
+
+def _all_meta_rows(db) -> list[dict]:
+    table = db.open_table(META_TABLE)
+    count = table.count_rows() if hasattr(table, "count_rows") else 0
+    return table.search().limit(max(count, 1)).to_list()
+
+
+def _with_new_fields(row: dict) -> dict:
+    """An old fingerprint row, carried into the wider schema. Empty and 1, not
+    a guess: nothing recorded which chunker wrote that table, and saying
+    "legacy" is the ledger's word for the same absence."""
+    return {"table": row.get("table", ""), "backend": row.get("backend", ""),
+            "model": row.get("model", ""), "dims": int(row.get("dims", 0) or 0),
+            "created": row.get("created", ""),
+            "chunker": row.get("chunker", "") or "", "schema_version": int(row.get("schema_version", 1) or 1)}
 
 
 def read_index_meta(db, table: str) -> dict | None:

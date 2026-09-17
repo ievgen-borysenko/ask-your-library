@@ -139,7 +139,7 @@ class Ledger:
     # --- identity ----------------------------------------------------------
 
     def resolve(self, title: str, author: str = "", sha256: str = "",
-                source_ref: str = "") -> str:
+                source_ref: str = "", claimed: frozenset[str] | set[str] = frozenset()) -> str:
         """The `book_id` for this book: an existing row's id when the KEY or the
         SHA256 matches one, a newly minted one otherwise.
 
@@ -152,7 +152,14 @@ class Ledger:
         The key is tried first: it is what the reader and the agent see. A
         sha256 match is only consulted when no key matches, and an empty sha256
         never matches anything (a book whose source could not be digested must
-        not collide with every other such book)."""
+        not collide with every other such book).
+
+        `claimed` is the ids this run has already handed out. Two files with
+        identical bytes under two different titles are two books, not one
+        renamed one — without this they would share an id and each would delete
+        the other's rows, which is the very failure the ledger exists to end.
+        It narrows the sha rule only: an exact key match is an exact key match,
+        and two files resolving to one key is refused before this is reached."""
         key = book_key(title, author)
         rows = self.all_rows()
         for row in rows:
@@ -160,7 +167,7 @@ class Ledger:
                 return row["book_id"]
         if sha256:
             for row in rows:
-                if row.get("sha256") == sha256:
+                if row.get("sha256") == sha256 and row["book_id"] not in claimed:
                     log.info("%s: same content as %r, keeping book_id %s",
                              key, row.get("key"), row["book_id"])
                     return row["book_id"]

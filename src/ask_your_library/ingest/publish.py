@@ -115,3 +115,70 @@ def upsert_book_rows(table, note: str, rows: list[dict]) -> None:
     table.delete(f"note = '{note.replace(chr(39), chr(39) * 2)}'")
     if rows:
         table.add(rows)
+
+
+# --- the per-book path ------------------------------------------------------
+
+BOOK_ID_COLUMN = "book_id"
+
+
+def has_book_id(table) -> bool:
+    return BOOK_ID_COLUMN in table.schema.names
+
+
+def add_book_id_column(db, name: str, book_id_of, batch_rows: int = COPY_BATCH_ROWS):
+    """Give an existing table a `book_id` column, without re-embedding anything.
+
+    An index built before the ledger has rows keyed by `note` alone, and a
+    per-book update keyed by `book_id` cannot touch them. The column is filled
+    from the ledger through `book_id_of(note)`; a row whose `note` the ledger
+    does not know gets "", which `doctor` then reports rather than the ingest
+    guessing.
+
+    A staged rebuild, so the live table stays queryable and an interrupted run
+    is finished or discarded by `recover_staging` like any other. The vectors
+    are carried over as Arrow batches in the table's own schema — the fixed-size
+    list stays a fixed-size list, and no row is re-read through Python floats."""
+    table = db.open_table(name)
+    if has_book_id(table):
+        return table
+
+    def batches():
+        for batch in table_batches(table, batch_rows):
+            ids = [book_id_of(note) or "" for note in batch.column("note").to_pylist()]
+            yield batch.append_column(BOOK_ID_COLUMN, pa.array(ids, pa.string()))
+
+    log.info("%s: adding a %s column (%d rows, no re-embedding)",
+             name, BOOK_ID_COLUMN, table.count_rows())
+    return rebuild_table(db, name, batches())
+
+
+def replace_book_rows(table, book_id: str, note: str, rows: list[dict]) -> None:
+    """Replace one book's rows in the live table: delete, then append.
+
+    Matched on `book_id` OR `note`, and both are needed. `book_id` is what
+    survives a corrected author — the rows written under the old key carry the
+    same id, and only this clause removes them. `note` is what a row written
+    before the column existed has, and what a row whose ledger entry was lost
+    has: without it a re-add of such a book would append a second copy of every
+    chunk under the same chunk ids.
+
+    Not transactional — a crash between the delete and the add leaves the book
+    out of the index, with its ledger row still `requested`, which is exactly
+    what the recovery pass looks for."""
+    quoted_id = book_id.replace("'", "''")
+    quoted_note = note.replace("'", "''")
+    if has_book_id(table):
+        table.delete(f"{BOOK_ID_COLUMN} = '{quoted_id}' OR note = '{quoted_note}'")
+    else:
+        table.delete(f"note = '{quoted_note}'")
+    if rows:
+        table.add(rows)
+
+
+def rows_of_book(table, book_id: str) -> int:
+    """How many rows the index holds for a book id (0 when the column is not
+    there yet, which is the pre-ledger state, not an empty book)."""
+    if not has_book_id(table):
+        return 0
+    return table.count_rows(f"{BOOK_ID_COLUMN} = '{book_id.replace(chr(39), chr(39) * 2)}'")
