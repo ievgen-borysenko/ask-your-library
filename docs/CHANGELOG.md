@@ -2,6 +2,60 @@
 
 ## Unreleased
 
+- **A refused quote is told to the model that wrote it, the answer names the book, and a run of
+  all-dropped steps has a ceiling** (#29, [ADR-004 amended 2026-09-17](adr/README.md)). Three small
+  changes against what the gate's first measurement showed on `mistral-small3.2:24b-ctx20k`: 10-11
+  quotes refused per run, and on one question an answer that stopped naming the book once a second
+  quote was dropped.
+
+  **`observe` is told what it lost.** The gate now returns the refusals in words beside the counters
+  — the quote as the model wrote it (cut at 120 characters), the book it named, the rule that
+  stopped it — and the last `DROPPED_QUOTES_SHOWN` (6) of them travel on the state as
+  `dropped_quotes`. The next `observe` prompt carries them in a `<quotes_dropped_earlier>` block,
+  untrusted like any other model-written text, with one sentence saying why they were refused. Until
+  now a model that paraphrased was refused in silence and paraphrased again. `OBSERVE_RULES` says
+  the check is character by character and that fewer items beat a reworded one. The counters are
+  untouched and still sum. **Said exactly, because it is nearly a stronger claim than it is:** the
+  USER message of an `observe` step that lost nothing is byte for byte what it was, and its update
+  carries no new key — but the SYSTEM message changed for every run, `OBSERVE_RULES` being where the
+  two new sentences live. No run of this release is prompt-identical to a run of the last one; what
+  is unchanged is the data half of the message, so a difference in the numbers is a difference the
+  rules made and not one the block made.
+
+  **The answer names the book.** `SYNTHESIZE_RULES` asks for the title in the answer's own text, not
+  only in the `[book, chapter]` label, even where the evidence is thin — a reader who sees the first
+  sentence should know which book is being spoken of.
+
+  **A run of all-dropped steps now ends.** `MAX_DROPPED_STREAK` (2, a new setting) bounds the hold
+  decided on 16.09: the first all-dropped step still does not advance the CRAG gate, but the
+  `MAX_DROPPED_STREAK`th in a row — the second, at the default — is itself counted dry. A run of
+  them says the model cannot copy, not that the library has more to give, and each one costs a
+  search and two model calls. `dropped_streak` is the new state channel; it counts CONSECUTIVE
+  such steps, so any other step resets it — a dry one included, a dry step being the library
+  silent rather than the model failing to copy — and it is written only when it says something.
+
+  `PLAN_RULES` is untouched by this entry; what makes the committed plan recordings stale for this
+  tree is `#70` below, and not anything `#29` changed.
+
+  **Measured on both local models, on the re-chunked index, one attempt each**
+  ([`eval-results/2026-09-18-rechunk-and-observe-feedback.md`](eval-results/2026-09-18-rechunk-and-observe-feedback.md),
+  part B). `mistral-small3.2:24b-ctx20k` is **10/11** with **0 broken quotes** out of 32 checked —
+  its baseline was 11/11, 10/11, 10/11 over three attempts, so this run matches two of those three
+  and is one item below the best of them — and `c03`, the regression this change was written for,
+  now PASSES with `titles 1/1` on *fewer* evidence items than the attempts it failed on (6 against
+  9): the answer opens by naming *The Three Musketeers* while hedging exactly as before. **The failure moved rather than disappeared.**
+  `c05-quixote-windmills`, which passed all three baseline attempts, now fails with `titles 0/1`,
+  5 quotes refused as not character-exact and **zero** evidence surviving — and with no evidence
+  `synthesize` returns the fixed refusal by code, so the new naming rule is never even sent.
+  `qwen2.5:14b`, against the same index, goes **9/11 -> 10/11** and is below its baseline on no
+  item, at 0 broken out of 34 and one extra dropped quote; that pair is the closest on the page but
+  is not a one-change pair either, since #29 is only in the branch column and #71 only in the other.
+  **One attempt is not three**: the baseline measured low variability on both models and low
+  variability is not determinism, so neither number here carries a spread, and `c03` is one of the
+  items that did vary across the baseline's attempts. Whether `MAX_DROPPED_STREAK` ever fired is
+  **not** decidable from these runs either: no artifact records the streak or the per-step refusals,
+  and the report says so rather than claiming the cap.
+
 - **The engineer's shelf has cards and an index of its own** (#58,
   [`corpus-tech/README.md`](../corpus-tech/README.md), [add your own books](add-your-own-books.md)).
   `scripts/fetch_tech_shelf.py --stage cards` writes one book card per work through the project's
@@ -161,13 +215,25 @@
   logged. And the report carries three counts per question — chapter reads, reads that named what
   they were looking for, and reads whose window moved off the head of the chapter — because
   whether the model fills the new optional field at all is otherwise invisible, and that is the
-  first thing the pending measurement has to answer.
+  first thing the measurement had to answer. It answers it `7/7`: every chapter read the model made
+  named what it was looking for, and five of the seven moved the window off the head.
 
-  **What is not measured: whether answers get better.** That needs the re-ingest (~30 minutes) and
-  a paired core + catalogue run against the #66 gate baseline, and until those reports exist
-  nothing here claims it — [evaluation](evaluation.md), [known limits](known-limits.md) and the
-  ADR's acceptance all say so, and every published eval number was produced against the old
-  chunker.
+  **Measured, as a before/after, and no answer's verdict moved.**
+  [`eval-results/2026-09-18-rechunk-and-observe-feedback.md`](eval-results/2026-09-18-rechunk-and-observe-feedback.md),
+  part A: the corpus re-ingested at `sentence-pack-2` (11,282 rows, `--doctor` clean) and both
+  golden sets re-run on `qwen2.5:14b` at `--repeat 3` against the `#65` gate baseline of 16.09.
+  **Read it as a before/after over six merges, not as an isolated measurement of this entry**: the
+  code goes `c79018a` -> `c9e12bc`, which carries #66, #67, #68, #71 and #74 beside the re-chunk,
+  and the report lists what each one touches and which of them has a control run. What the pair
+  shows: behaviour unchanged item for item — **9/11 and 10/10**, the same two failures, the same
+  single clarify, the same 10/12 titles and 10/24 facts — at +2 LLM calls and +8.9% wall clock on
+  the research set, and −2 calls and −13% on the catalogue set. One row in it is **not** this
+  entry's: the items whose plan sets a retrieval book filter go 5 -> 2, and a control run of #71 on
+  the *old* index shows the same 2, so that belongs to #71's change to `PLAN_RULES`. What is not a
+  gain either: evidence items go 43 -> 50, but that is **eight more card matches and one fewer
+  book-text match** (card-only 9 -> 17, `checked_book_text` 34 -> 33) — seven more in net, none of
+  them more of the books. Whether answers get *better* is still not a claim these rows can make;
+  they are behaviour, provenance and cost, and correctness remains the reader's separate pass.
 
 - **An upgrade cannot quietly invalidate an index, and a backup survives one that can**
   (#27, [ADR-020](adr/README.md) amended, [docs/upgrading.md](upgrading.md)). Each index table is
@@ -391,13 +457,15 @@
 
   **The CRAG gate keeps its meaning.** A step whose quotes were all dropped is not a dry step: the
   passages were retrieved, so the library is not silent on the question. It neither advances the
-  empty streak nor resets it, two such steps in a row do not end a run, and `reflect` is told how
+  empty streak nor resets it, and `reflect` is told how
   many quotes were dropped so the next query is chosen with that in hand — a line added to its
   context only when there is something to say, so a clean run's prompt is the prompt every earlier
   run was decided on. This was the one way #29 could have bought provenance with behaviour, and it
   is the owner's decision of 16.09 rather than a reading of the code. Its price, said plainly: a
   model that quotes badly now runs to `MAX_STEPS` where the gate used to stop it at two, which is
-  four more model calls on the questions that produce the least.
+  four more model calls on the questions that produce the least — **bounded since 17.09 by
+  `MAX_DROPPED_STREAK` (see the bullet above): the hold covers the first such step, not a run of
+  them.**
 
   `dropped_unverified` — every well-formed quote the gate refused, whichever rule refused it — with
   `dropped_by_reason` splitting it into `no_hit`, `cross_book`, `short` and `not_found`, and

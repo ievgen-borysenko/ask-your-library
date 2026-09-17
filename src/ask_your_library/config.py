@@ -135,6 +135,13 @@ if CHAPTER_SCAN_CHARS < CHAPTER_HIT_CHARS:
 # different system and shows up in the eval fingerprint.
 MAX_STEPS = _positive_int("MAX_STEPS", "4", unit="steps")                 # search / chapter-read steps per question
 MAX_EMPTY_STREAK = _positive_int("MAX_EMPTY_STREAK", "2", unit="steps")   # CRAG gate: stop after this many dry steps in a row
+# The bound on a model that retrieves passages and never quotes them (#29). A
+# step whose every quote the provenance gate refused is still not a dry step —
+# the passages were there — but a run of them proves the model cannot copy, not
+# that the library has more to give, and each one costs a search plus two model
+# calls. After this many in a row such a step counts as dry, so the CRAG gate
+# above can end the run instead of spending the whole step budget on it.
+MAX_DROPPED_STREAK = _positive_int("MAX_DROPPED_STREAK", "2", unit="steps")
 # A list the reader can actually read (hits_log may name more books). At most 5: the clarify
 # resolver understands the ordinals 1..5 (first..fifth, перший..п'ятий); a sixth candidate
 # could be shown but never chosen by number.

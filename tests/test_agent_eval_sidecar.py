@@ -190,6 +190,10 @@ def test_the_sidecar_names_no_machine_and_no_person(monkeypatch, tmp_path):
     monkeypatch.setattr(harness, "GOLDEN_PATH", repo / "eval" / "golden" / "en-demo.yaml")
     assert harness.golden_location(repo) == "eval/golden/en-demo.yaml"
     real_facts = harness.run_facts(1)
+    # every knob that decides when the loop stops is a fact of the run, or the
+    # sidecar cannot say which system produced the numbers beside it
+    from ask_your_library import config
+    assert real_facts["max_dropped_streak"] == config.MAX_DROPPED_STREAK
 
     out = prepared(monkeypatch, tmp_path, [], lambda item, attempt: fake_result(item))
     sidecar = json.loads(only(out, ".json").read_text(encoding="utf-8"))
@@ -625,9 +629,13 @@ def test_the_fingerprint_says_single_run_at_one_attempt_and_names_n_above_it():
              "index": ["cards=x"], "strict_hit_id": True, "clarify_pick": None,
              "search_hit_chars": 2500, "chapter_hit_chars": 6000, "chapter_scan_chars": 60000,
              "max_steps": 8,
-             "max_empty_streak": 2, "max_clarify_candidates": 4, "question_deadline_s": 120,
+             "max_empty_streak": 2, "max_dropped_streak": 3, "max_clarify_candidates": 4,
+             "question_deadline_s": 120,
              "repeat": 1}
     assert harness.render_fingerprint(facts).endswith("| single run")
+    # all three loop budgets are rendered, in that order and each one its own
+    # number: a report that named two of them would describe two systems as one (#29)
+    assert "steps=8/2/3 |" in harness.render_fingerprint(facts)
     assert harness.render_fingerprint({**facts, "repeat": 5}).endswith("| 5 attempts per item")
 
 

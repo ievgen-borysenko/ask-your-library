@@ -29,7 +29,8 @@ from .bookkey import (READ_STATUSES, chapter_marker, read_key, read_status,  # n
                       same_chapter, split_read_query, unescape_marker)
 from .clarify import _chosen_book, _clarify_candidates, _evidence_after_clarify
 from .config import (CHAPTER_HIT_CHARS, CHAPTER_SCAN_CHARS, LLM_TIMEOUT_S,
-                     MAX_CLARIFY_CANDIDATES, MAX_EMPTY_STREAK, MAX_STEPS, SEARCH_HIT_CHARS)
+                     MAX_CLARIFY_CANDIDATES, MAX_DROPPED_STREAK, MAX_EMPTY_STREAK, MAX_STEPS,
+                     SEARCH_HIT_CHARS)
 from .coverage import coverage_probe
 from .i18n import t
 from .library import (HEAD_MARKER_PREFIX, BookEntry, chapter_is_cut, list_books,
@@ -46,6 +47,15 @@ log = logging.getLogger(__name__)
 # interfaces have a line per reason ("ev_catalog_fallback_<reason>",
 # "ui_catalog_fallback_<reason>") and the eval report prints the value.
 CATALOG_FALLBACKS = ("invalid_op", "after_clarify", "mixed_intent")
+
+# How many refused quotes `observe` shows the model on a later step (#29). Not a
+# setting: it is a shape of the prompt, and the prompt is what the eval numbers
+# are measured on, so it changes with a release and not with an environment. Six
+# is what a run of MAX_STEPS steps can plausibly refuse and still be told about
+# in a list a small local model reads to the end — the passages themselves are
+# already in that message, and a longer list would push them down the context
+# for no gain.
+DROPPED_QUOTES_SHOWN = 6
 
 # Per-hit text budget, shared by act (hits_log) and observe (prompt): the
 # quote-provenance check compares quotes against the passage as observe saw it,
@@ -103,6 +113,21 @@ def _call_timeout_reason() -> str:
             else t("stop_call_timeout", s=int(LLM_TIMEOUT_S)))
 
 
+def _reset_dropped_streak(state: AgentState, update: dict) -> dict:
+    """`plan` resets the loop's streaks, and this one is written only where
+    there is something to reset (#29).
+
+    A channel an update omits keeps the value it had, so the key is needed on
+    exactly one path: a plan that resumes mid-run, after a clarify, behind steps
+    that dropped every quote. On a first plan the number is already 0, and
+    writing it anyway would put a new key in every plan update of every run — the
+    same reason `observe` writes its counters only on the step that spent
+    one."""
+    if state.get("dropped_streak"):
+        update["dropped_streak"] = 0
+    return update
+
+
 def _catalogue() -> tuple[list[BookEntry], bool]:
     """The book list plan needs (the gate's scope and the retrieval filter), and
     whether it could be read at all. Before ADR-016 plan never touched LanceDB,
@@ -133,11 +158,12 @@ def plan(state: AgentState) -> dict:
         evidence, unresolved = _evidence_after_clarify(state)
         chosen = _chosen_book(state, unresolved)
         out_of_steps = state.get("steps_taken", 0) >= MAX_STEPS
-        return {"mode": "answer" if chosen else (state.get("mode") or "identify"), "queries": [],
-                "current_query": "", "evidence": evidence, "clarify_unresolved": unresolved,
-                "clarify_chosen": chosen, "book_filter": "", "book_unresolved": "",
-                "steps_taken": state.get("steps_taken", 0), "empty_streak": 0,
-                "stop_reason": t("stop_limit", n=MAX_STEPS) if out_of_steps else _deadline_reason()}
+        return _reset_dropped_streak(state, {
+            "mode": "answer" if chosen else (state.get("mode") or "identify"), "queries": [],
+            "current_query": "", "evidence": evidence, "clarify_unresolved": unresolved,
+            "clarify_chosen": chosen, "book_filter": "", "book_unresolved": "",
+            "steps_taken": state.get("steps_taken", 0), "empty_streak": 0,
+            "stop_reason": t("stop_limit", n=MAX_STEPS) if out_of_steps else _deadline_reason()})
 
     # Resolve the clarify reply BEFORE planning: the planner is a stateless
     # call and never saw the numbered list, so "the second one" means nothing
@@ -165,11 +191,12 @@ def plan(state: AgentState) -> dict:
         # whatever a clarify already carried (nothing, on a first plan — then
         # synthesize returns the honest refusal, still an answer and not a
         # crash).
-        return {"mode": state.get("mode") or "answer", "queries": [], "current_query": "",
-                "book_filter": "", "book_unresolved": "", "evidence": evidence,
-                "clarify_unresolved": unresolved, "clarify_chosen": chosen,
-                "steps_taken": state.get("steps_taken", 0), "empty_streak": 0,
-                "stop_reason": _call_timeout_reason()}
+        return _reset_dropped_streak(state, {
+            "mode": state.get("mode") or "answer", "queries": [], "current_query": "",
+            "book_filter": "", "book_unresolved": "", "evidence": evidence,
+            "clarify_unresolved": unresolved, "clarify_chosen": chosen,
+            "steps_taken": state.get("steps_taken", 0), "empty_streak": 0,
+            "stop_reason": _call_timeout_reason()})
     except ValueError:
         # No JSON twice (small local models do this): the run goes on with the
         # raw question as its one query, like reflect and observe degrade, and
@@ -177,8 +204,9 @@ def plan(state: AgentState) -> dict:
         decision = {}
 
     mode = llm.str_field(decision, "mode", ("identify", "answer", "catalog")) or "answer"
-    common = {"evidence": evidence, "clarify_unresolved": unresolved, "clarify_chosen": chosen,
-              "steps_taken": state.get("steps_taken", 0), "empty_streak": 0}
+    common = _reset_dropped_streak(state, {
+        "evidence": evidence, "clarify_unresolved": unresolved, "clarify_chosen": chosen,
+        "steps_taken": state.get("steps_taken", 0), "empty_streak": 0})
 
     # The scope gate (#70). A request that is not a question about these books
     # at all — write me code, translate this, what is 1234 × 5678, be my
@@ -461,16 +489,36 @@ def observe(state: AgentState) -> dict:
         data_block("result", h["text"][:limit], index=i, hit_id=h.get("hit_id", ""),
                    corpus=h["corpus"], book=h["book"], section=h["section"])
         for i, h in enumerate(state["hits"], 1))
-    user = "\n".join([data_block("question", state["question"]),
-                      data_block("search_query", state["current_query"]),
-                      data_block("search_results", results, trusted=True),
-                      # Restated next to the data on purpose: with the rules in
-                      # the system message, aggregation questions tempted the
-                      # model into writing comparison sentences as "quotes".
-                      "Reminder: every quote must be a contiguous, character-exact "
-                      "copy from ONE <result> above — never your own summary or "
-                      "comparison — and must carry that result's hit_id. "
-                      "Return ONLY the JSON described in the rules."])
+    lines = [data_block("question", state["question"]),
+             data_block("search_query", state["current_query"]),
+             data_block("search_results", results, trusted=True)]
+    earlier_dropped = state.get("dropped_quotes") or []
+    if earlier_dropped:
+        # What the gate refused on an earlier step, handed back in the model's
+        # own words (#29). Measured on mistral-small3.2:24b, a run lost 10-11
+        # quotes and was never told: it paraphrased, the quote was refused, and
+        # the next step paraphrased again. The body is UNTRUSTED for the same
+        # reason it is useful — these sentences are the model's, not a book's —
+        # so it goes through data_block's neutralization like any other content.
+        # Added only when there is something to add, so the USER message of a
+        # step that lost nothing is byte for byte the message it was before. The
+        # system message is not: OBSERVE_RULES gained two sentences in the same
+        # change, and every run sends those — the eval numbers of this release
+        # are comparable with the last one's on the data, not on the rules.
+        lines.append(data_block(
+            "quotes_dropped_earlier",
+            "\n".join(f'- [{d.get("reason", "")}] "{d.get("quote", "")}" '
+                      f'(cited: {d.get("book", "")})' for d in earlier_dropped)
+            + "\nThese quotes were refused because they were not a character-exact copy of the "
+              "result they cited; copy exactly this time."))
+    # Restated next to the data on purpose: with the rules in the system
+    # message, aggregation questions tempted the model into writing comparison
+    # sentences as "quotes".
+    lines.append("Reminder: every quote must be a contiguous, character-exact "
+                 "copy from ONE <result> above — never your own summary or "
+                 "comparison — and must carry that result's hit_id. "
+                 "Return ONLY the JSON described in the rules.")
+    user = "\n".join(lines)
     try:
         distilled = llm.ask_json(OBSERVE_RULES, user, role="observe")
     except llm.CallTimeout:
@@ -482,8 +530,16 @@ def observe(state: AgentState) -> dict:
         # CLI and the web UI read both by name, and an update that omitted them
         # ended the run in a KeyError instead of an answer, which is the very
         # failure this branch exists to prevent.
-        return {"evidence": state["evidence"], "empty_streak": state["empty_streak"] + 1,
-                "call_timed_out": True, "stop_reason": _call_timeout_reason()}
+        timed_out = {"evidence": state["evidence"], "empty_streak": state["empty_streak"] + 1,
+                     "call_timed_out": True, "stop_reason": _call_timeout_reason()}
+        if state.get("dropped_streak"):
+            # The step is counted dry, so the run of all-dropped steps is over
+            # and the streak that counts them is 0 — nothing was dropped here,
+            # the call never returned. Written only when there is something to
+            # reset: a channel an update omits keeps its value, and a clean run
+            # must emit the update this branch has always emitted (#29).
+            timed_out["dropped_streak"] = 0
+        return timed_out
     except ValueError:
         # Distillation failed: count the step as dry and let the loop decide
         distilled = {"evidence": []}
@@ -512,17 +568,34 @@ def observe(state: AgentState) -> dict:
     # verbatim is a different fact — the retrieval worked — so it does not
     # advance the streak toward MAX_EMPTY_STREAK. It does not reset it either:
     # such a step proved nothing about the library, so the dry steps before it
-    # stand. Two all-dropped steps in a row therefore do not end the run; the
-    # loop goes on to the next query and `reflect` is told how many quotes were
-    # dropped, so the planner searches with that in hand.
+    # stand. The loop goes on to the next query and `reflect` is told how many
+    # quotes were dropped, so the planner searches with that in hand.
+    #
+    # That hold is bounded (#29, 17.09): `dropped_streak` counts CONSECUTIVE
+    # all-dropped steps, and the MAX_DROPPED_STREAK'th of them is dry after all.
+    # A run of them says the model cannot copy, not that the library has more to
+    # give, and every one costs a search plus an `observe` and a `reflect` call
+    # — the cap bounds what a model that keeps retrieving passages and never
+    # quoting them may spend, without touching the first such step, which is the
+    # one the hold was decided for. Consecutive is the whole of it: ANY other
+    # step breaks the run, a dry one included, because a dry step is the library
+    # being silent and says nothing about the model's quoting. Carrying the
+    # count across it would end a later run of one on somebody else's evidence.
     if new_evidence:
-        empty_streak = 0
+        empty_streak = dropped_streak = 0
     elif gate.dropped_unverified:
-        empty_streak = state["empty_streak"]
+        dropped_streak = state.get("dropped_streak", 0) + 1
+        empty_streak = (state["empty_streak"] + 1 if dropped_streak >= MAX_DROPPED_STREAK
+                        else state["empty_streak"])
     else:
         empty_streak = state["empty_streak"] + 1
+        dropped_streak = 0
 
     update = {"evidence": state["evidence"] + new_evidence, "empty_streak": empty_streak}
+    # Same rule as the counters below: written only when it says something, so a
+    # run that never loses a quote emits the update it has always emitted.
+    if dropped_streak or dropped_streak != state.get("dropped_streak", 0):
+        update["dropped_streak"] = dropped_streak
     # Present only when it happened, so a run that drops nothing emits the event
     # it has always emitted, byte for byte (tests/test_runner_events.py, and the
     # two keys above that every interface reads by name). Both counters are
@@ -535,6 +608,12 @@ def observe(state: AgentState) -> dict:
         so_far = state.get("dropped_by_reason") or {}
         update["dropped_by_reason"] = {reason: (so_far.get(reason) or 0) + spent
                                        for reason, spent in gate.by_reason.items()}
+        # The refusals in words, for the next step's prompt. Bounded to the last
+        # DROPPED_QUOTES_SHOWN: the channel is a window on what just went wrong,
+        # not a ledger — the counters above are the ledger — and an unbounded
+        # list would grow the prompt with every step it is meant to fix.
+        update["dropped_quotes"] = ((state.get("dropped_quotes") or [])
+                                    + list(gate.dropped))[-DROPPED_QUOTES_SHOWN:]
     if gate.repinned:
         update["repinned"] = state.get("repinned", 0) + gate.repinned
     return update

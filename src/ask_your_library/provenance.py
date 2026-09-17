@@ -72,17 +72,32 @@ MIN_REPIN_TOKENS = 4
 # `dropped_unverified`; none of them is a fifth outcome beside it.
 DROP_REASONS = ("no_hit", "cross_book", "short", "not_found")
 
+# How much of a refused quote travels back to the model in the next `observe`
+# prompt (#29). Enough for the model to recognize the sentence it wrote and find
+# it again in the passage; short enough that six of them cost a line each rather
+# than a page each, on a prompt that already carries the passages themselves.
+DROPPED_QUOTE_CHARS = 120
+
 
 class EvidenceGate(NamedTuple):
     """What `observe`'s gate made of one distillate: the evidence that survived
     it, and how it was spent — items re-pinned to another passage of their own
-    book, and items dropped, counted by reason."""
+    book, and items dropped, counted by reason.
+
+    `dropped` is the same refusals as the counters, said in words instead of in
+    numbers: one entry per refused item, carrying the quote AS THE MODEL WROTE
+    IT (cut at DROPPED_QUOTE_CHARS), the book it named and the rule that stopped
+    it. The counters stay the record a report reads; this is what `observe`
+    shows the model on the next step, so a run that keeps paraphrasing is told
+    which sentences were refused instead of being refused again in silence
+    (#29). It is additive: the counters are unchanged and still sum."""
     evidence: list[dict]
     repinned: int = 0
     dropped_no_hit: int = 0
     dropped_cross_book: int = 0
     dropped_short: int = 0
     dropped_not_found: int = 0
+    dropped: tuple[dict, ...] = ()
 
     @property
     def dropped_unverified(self) -> int:
@@ -145,14 +160,23 @@ def _valid_evidence(items, hits: list[dict] | None = None) -> EvidenceGate:
     index = passage_index(hits) if hits is not None else {}
     valid: list[dict] = []
     repinned = 0
-    dropped = dict.fromkeys(DROP_REASONS, 0)
+    refused_counts = dict.fromkeys(DROP_REASONS, 0)
+    refused_items: list[dict] = []
 
-    def refuse(reason: str, cited_a_hit: bool) -> None:
+    def refuse(reason: str, cited_a_hit: bool, quote: str = "", book=None) -> None:
         """One place that records a refusal, so no path can drop a well-formed
         quote without it showing up in `dropped_unverified`. The usage counter
         keeps the meaning it has always had — an item with no resolvable hit id
-        — and is now one reason among four rather than the only one recorded."""
-        dropped[reason] += 1
+        — and is now one reason among four rather than the only one recorded.
+
+        The quote and the book are recorded as the MODEL wrote them, not as the
+        gate would have corrected them: the item is being handed back to the
+        model on the next step (#29), and a corrected citation would show it a
+        sentence it never produced."""
+        refused_counts[reason] += 1
+        refused_items.append({"quote": quote[:DROPPED_QUOTE_CHARS],
+                              "book": book.strip() if isinstance(book, str) else "",
+                              "reason": reason})
         if not cited_a_hit:
             llm._usage().evidence_dropped_no_hit += 1
 
@@ -171,7 +195,7 @@ def _valid_evidence(items, hits: list[dict] | None = None) -> EvidenceGate:
         if hits is not None:
             cited = by_id.get(hit_id)
             if cited is None and HIT_ID_STRICT:
-                refuse("no_hit", cited_a_hit=False)
+                refuse("no_hit", cited_a_hit=False, quote=quote, book=book)
                 continue
             if cited is None:
                 # Non-strict: the model named no usable hit, so there is no
@@ -181,7 +205,7 @@ def _valid_evidence(items, hits: list[dict] | None = None) -> EvidenceGate:
                 # book and that passage are both unambiguous.
                 holder, why = _sole_holder(quote, book, index)
                 if not holder:
-                    refuse(why, cited_a_hit=False)
+                    refuse(why, cited_a_hit=False, quote=quote, book=book)
                     continue
             else:
                 status, holder = classify_quote(quote, hit_id, index)
@@ -192,14 +216,14 @@ def _valid_evidence(items, hits: list[dict] | None = None) -> EvidenceGate:
                 # the same, because from the answer's side they are the same
                 # event — a distillate that did not become evidence.
                 if status == BROKEN:
-                    refuse("not_found", cited_a_hit=True)
+                    refuse("not_found", cited_a_hit=True, quote=quote, book=book)
                     continue
                 if holder != hit_id:
                     if quote_tokens(quote) < MIN_REPIN_TOKENS:
-                        refuse("short", cited_a_hit=True)
+                        refuse("short", cited_a_hit=True, quote=quote, book=book)
                         continue
                     if index[holder]["book"] != cited["book"]:
-                        refuse("cross_book", cited_a_hit=True)
+                        refuse("cross_book", cited_a_hit=True, quote=quote, book=book)
                         continue
                     repinned += 1
             hit = by_id[holder]
@@ -210,7 +234,8 @@ def _valid_evidence(items, hits: list[dict] | None = None) -> EvidenceGate:
             book, section = book.strip(), str(e.get("section") or "").strip()
         valid.append({"hit_id": hit_id, "book": book, "section": section, "quote": quote,
                       "why": str(e.get("why") or "").strip()[:300]})
-    return EvidenceGate(valid, repinned, **{f"dropped_{r}": n for r, n in dropped.items()})
+    return EvidenceGate(valid, repinned, **{f"dropped_{r}": n for r, n in refused_counts.items()},
+                        dropped=tuple(refused_items))
 
 
 # ---------------------------------------------------------------- validate

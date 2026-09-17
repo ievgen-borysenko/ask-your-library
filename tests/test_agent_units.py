@@ -1482,18 +1482,30 @@ def test_bool_field_is_its_boolean_half():
 
 
 def test_loop_budgets_are_config_knobs_read_once():
-    """MAX_STEPS / MAX_EMPTY_STREAK / MAX_CLARIFY_CANDIDATES come from the
-    environment through config, like the observe window; a non-positive value
+    """MAX_STEPS / MAX_EMPTY_STREAK / MAX_DROPPED_STREAK / MAX_CLARIFY_CANDIDATES come
+    from the environment through config, like the observe window; a non-positive value
     refuses to start, and the nodes read the same numbers config holds."""
     from conftest import fresh_output, run_fresh
     from ask_your_library import nodes, coverage
     assert nodes.MAX_STEPS == coverage.MAX_STEPS == config.MAX_STEPS
+    assert nodes.MAX_DROPPED_STREAK == config.MAX_DROPPED_STREAK
     code = ("from ask_your_library import config, nodes; "
-            "print(config.MAX_STEPS, nodes.MAX_STEPS, config.MAX_EMPTY_STREAK, config.MAX_CLARIFY_CANDIDATES)")
-    out = fresh_output(code, MAX_STEPS="6", MAX_EMPTY_STREAK="3", MAX_CLARIFY_CANDIDATES="2").split()
-    assert out == ["6", "6", "3", "2"]
+            "print(config.MAX_STEPS, nodes.MAX_STEPS, config.MAX_EMPTY_STREAK, "
+            "config.MAX_DROPPED_STREAK, config.MAX_CLARIFY_CANDIDATES)")
+    out = fresh_output(code, MAX_STEPS="6", MAX_EMPTY_STREAK="3", MAX_DROPPED_STREAK="5",
+                       MAX_CLARIFY_CANDIDATES="2").split()
+    assert out == ["6", "6", "3", "5", "2"]
+    # a blank line in a copied .env is the default, for the newest knob too
+    assert fresh_output(code, MAX_DROPPED_STREAK="").split()[3] == "2"
     bad = run_fresh("from ask_your_library import config", check=False, MAX_STEPS="0")
     assert bad.returncode != 0 and "positive number of steps" in bad.stderr
+    # the ceiling on all-dropped steps answers to the same rule: 0 would make every
+    # such step dry and undo the hold of 16.09 silently, a negative one is nonsense
+    for value in ("0", "-1"):
+        refused = run_fresh("from ask_your_library import config", check=False,
+                            MAX_DROPPED_STREAK=value)
+        assert refused.returncode != 0
+        assert "MAX_DROPPED_STREAK must be a positive number of steps" in refused.stderr
     # the resolver understands ordinals 1..5 only: a sixth candidate could be shown, never chosen by number
     from ask_your_library import clarify
     assert config.MAX_CLARIFY_CANDIDATES <= len(clarify.ORDINALS) == 5
@@ -1845,6 +1857,45 @@ def test_plan_after_a_clarify_past_the_deadline_goes_straight_to_synthesize(monk
     llm._usage().started -= 2
     assert nodes.route_after_plan({"steps_taken": 1, "current_query": "q", "clarification": "the first one"}) == "act"
     assert nodes.route_after_plan({"steps_taken": 1, "current_query": ""}) == "synthesize"
+
+
+def test_plan_resets_the_dropped_streak_only_where_there_is_one_to_reset(monkeypatch):
+    """`plan` starts the research loop over, so both streaks are 0 after it —
+    but a channel an update omits keeps its value, and a first plan's is already
+    0. Writing the key anyway would add it to every plan update of every run for
+    a number that did not move (#29). It is written on the one path that needs
+    it: a plan resuming mid-run, behind steps that dropped every quote.
+
+    All three exits of `plan` answer the same way, because a reader of the event
+    must not have to know which branch produced it."""
+    from ask_your_library import nodes
+    from openai import APITimeoutError
+
+    monkeypatch.setattr(llm, "ask_json",
+                        lambda system, user, role: {"mode": "answer", "queries": ["q1"]})
+    llm.reset_usage()
+    fresh = {"question": "q", "history": [], "steps_taken": 0}
+    assert "dropped_streak" not in nodes.plan(fresh)
+    assert nodes.plan({**fresh, "dropped_streak": 0}).get("dropped_streak") is None
+    assert nodes.plan({**fresh, "dropped_streak": 2})["dropped_streak"] == 0
+
+    # the clarify resume that has run out of steps: no planner call at all
+    monkeypatch.setattr(llm, "ask_json", lambda *a, **k: pytest.fail("no planner call"))
+    resumed = {"question": "q", "history": [], "steps_taken": config.MAX_STEPS,
+               "clarify_asked": True, "clarification": "the first one",
+               "clarify_candidates": ["B — A"], "evidence": []}
+    assert "dropped_streak" not in nodes.plan(resumed)
+    assert nodes.plan({**resumed, "dropped_streak": 1})["dropped_streak"] == 0
+
+    # and the branch where the planner's own call ran out of time
+    def timeout(system, user, role):
+        raise APITimeoutError(request=None)
+
+    monkeypatch.setattr(llm, "ask_json", timeout)
+    llm.reset_usage()
+    assert "dropped_streak" not in nodes.plan(fresh)
+    llm.reset_usage()
+    assert nodes.plan({**fresh, "dropped_streak": 3})["dropped_streak"] == 0
 
 
 def test_plan_degrades_when_the_planner_returns_no_json_twice(monkeypatch):
