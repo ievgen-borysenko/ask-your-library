@@ -43,6 +43,7 @@ from ..sanitize import LINE_BREAK_RE, strip_control_chars
 from .chapters import MergedHeading, split_book_sections
 from .chunking import Chunk, embedding_text, pack_sentences, parse_frontmatter, rows_for, \
     split_sentences
+from .doctor import check_ledger
 from .fts import build_fts_index
 from .ledger import (CHUNKER_VERSION, REQUESTED, Ledger, backfill_from_index,
                      open_ledger)
@@ -658,6 +659,21 @@ def print_diff(diff, db_path: Path) -> None:
             f"index; --prune removes it")
 
 
+def run_doctor(backend: str, db_path: Path) -> int:
+    """`ayl-add <anything> --doctor`: what the ledger and the index disagree
+    about. Exit 0 when they agree, 1 when they do not — so it can gate a
+    script, and so "no drift" is a statement and not the absence of output."""
+    if not Path(db_path).exists():
+        say(f"no index at {db_path}", error=True)
+        return 1
+    db = lancedb.connect(db_path)
+    report = check_ledger(db, [f"transcripts_{backend}", f"cards_{backend}"])
+    say(f"index {db_path}")
+    for line in report.lines():
+        say(line)
+    return 0 if report.ok else 1
+
+
 # --- entry point ------------------------------------------------------------
 
 def main(argv: list[str] | None = None) -> int:
@@ -665,7 +681,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="ayl-add",
         description="Index a folder of .txt / .md books into the Ask Your Library LanceDB.")
-    parser.add_argument("folder", type=Path, help="folder of .txt / .md files (searched recursively)")
+    # Optional only because --doctor reads the index and needs no folder; a
+    # run without either is the argparse error it always was.
+    parser.add_argument("folder", type=Path, nargs="?",
+                        help="folder of .txt / .md files (searched recursively)")
     parser.add_argument("--backend", default=EMBED_BACKEND, choices=("ollama", "openrouter"),
                         help="embedding backend; also selects the table suffix")
     parser.add_argument("--db", type=Path, default=None,
@@ -676,6 +695,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--prune", action="store_true",
                         help="also DELETE the rows of books whose file is no longer in the "
                              "folder (without it they are reported and kept)")
+    parser.add_argument("--doctor", action="store_true",
+                        help="reconcile the book ledger against the index tables and report "
+                             "any drift; read nothing else, write nothing")
     parser.add_argument("--cards", action="store_true",
                         help="not implemented (see the message it prints)")
     args = parser.parse_args(argv)
@@ -689,6 +711,12 @@ def main(argv: list[str] | None = None) -> int:
             error=True)
         return 2
 
+    if args.doctor:
+        return run_doctor(args.backend, (args.db.expanduser() if args.db else DB_PATH))
+    if args.folder is None:
+        say("no folder given: `ayl-add <folder>`, or `ayl-add --doctor` to check an "
+            "existing index", error=True)
+        return 2
     folder = args.folder.expanduser()
     if not folder.is_dir():
         say(f"not a folder: {folder}", error=True)

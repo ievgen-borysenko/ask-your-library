@@ -17,6 +17,7 @@ from ask_your_library.catalog import (CatalogResult, content_clue, fold, mixed_i
                                       parse_catalog_request, render_catalog, resolve_author,
                                       resolve_title, run_catalog)
 from ask_your_library.i18n import t
+from ask_your_library.ingest.ledger import open_ledger
 from ask_your_library.library import TITLE_SEPARATOR, BookEntry, list_books
 
 
@@ -107,6 +108,22 @@ def test_a_book_with_a_canary_row_among_real_rows_is_still_a_book(index):
 def test_a_row_without_a_book_key_is_skipped(index):
     index(cards=[], transcripts=[row(MOBY), {**row(GULLIVER, n=2), "book": None}])
     assert [b.key for b in list_books()] == [MOBY]
+
+
+def test_the_catalogue_answers_from_the_index_tables_and_never_from_the_ledger(index,
+                                                                              tmp_path):
+    """ADR-016's guarantee is that the count is the length of a list of things
+    that can be searched; ADR-024 kept the ledger out of this path for exactly
+    that reason. A ledger that disagrees — a book requested and never indexed,
+    a book pruned from the folder — must change nothing here."""
+    index(cards=[], transcripts=[row(MOBY), row(GULLIVER, "pg:829")])
+    before = [b.key for b in list_books()]
+
+    ledger = open_ledger(lancedb.connect(str(tmp_path / "db")))
+    ledger.begin(ledger.resolve("A Requested Book", "Nobody"), key="A Requested Book — Nobody")
+    ledger.commit(ledger.resolve("A Book Whose Rows Are Gone", "Nobody"), rows=7)
+
+    assert [b.key for b in list_books()] == before == [GULLIVER, MOBY]
 
 
 class RecordingQuery:
