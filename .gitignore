@@ -5,6 +5,13 @@
 data/
 *.lance
 
+# The engineer's shelf (#58) holds no text of its own: every work is fetched
+# from its publisher by scripts/fetch_tech_shelf.py and prepared locally. What
+# IS committed is corpus-tech/manifest.yaml (sources, licences, checksums) and
+# corpus-tech/toc/ (the chapter lists), which is the whole reviewable record.
+corpus-tech/raw/
+corpus-tech/prepared/
+
 # Secrets: every .env variant except the committed example
 .env
 .env.*
