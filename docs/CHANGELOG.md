@@ -15,18 +15,24 @@
   untrusted like any other model-written text, with one sentence saying why they were refused. Until
   now a model that paraphrased was refused in silence and paraphrased again. `OBSERVE_RULES` says
   the check is character by character and that fewer items beat a reworded one. The counters are
-  untouched and still sum, and a run that loses no quote sends the prompt it always sent, byte for
-  byte.
+  untouched and still sum. **Said exactly, because it is nearly a stronger claim than it is:** the
+  USER message of an `observe` step that lost nothing is byte for byte what it was, and its update
+  carries no new key — but the SYSTEM message changed for every run, `OBSERVE_RULES` being where the
+  two new sentences live. No run of this release is prompt-identical to a run of the last one; what
+  is unchanged is the data half of the message, so a difference in the numbers is a difference the
+  rules made and not one the block made.
 
   **The answer names the book.** `SYNTHESIZE_RULES` asks for the title in the answer's own text, not
   only in the `[book, chapter]` label, even where the evidence is thin — a reader who sees the first
   sentence should know which book is being spoken of.
 
   **A run of all-dropped steps now ends.** `MAX_DROPPED_STREAK` (2, a new setting) bounds the hold
-  decided on 16.09: the first all-dropped step still does not advance the CRAG gate, but once this
-  many have run in a row the step counts as dry after all. A run of them says the model cannot copy,
-  not that the library has more to give, and each one costs a search and two model calls.
-  `dropped_streak` is the new state channel, written only when it says something.
+  decided on 16.09: the first all-dropped step still does not advance the CRAG gate, but the
+  `MAX_DROPPED_STREAK`th in a row — the second, at the default — is itself counted dry. A run of
+  them says the model cannot copy, not that the library has more to give, and each one costs a
+  search and two model calls. `dropped_streak` is the new state channel; it counts CONSECUTIVE
+  such steps, so any other step resets it — a dry one included, a dry step being the library
+  silent rather than the model failing to copy — and it is written only when it says something.
 
   `PLAN_RULES` is unchanged, so every plan recording still replays.
 

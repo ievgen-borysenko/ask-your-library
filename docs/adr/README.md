@@ -200,8 +200,10 @@ the gate spent, the honest refusal included.
 **Amended 2026-09-17: the hold is bounded, and a refused quote is told to the model that wrote it
 (#29).** Two of the three changes here answer the measurement above rather than revise its
 reasoning. *First*, `MAX_DROPPED_STREAK` (2) caps the hold: the paragraph above stands for the first
-all-dropped step, and `dropped_streak` counts them, but once that many have run in a row the step
-counts as dry after all and the CRAG gate may end the run. The hold was decided so that a model's
+all-dropped step, and `dropped_streak` counts CONSECUTIVE ones — any other step resets it, a dry
+step included, because a dry step is the library being silent and says nothing about the model's
+quoting. The `MAX_DROPPED_STREAK`th such step in a row (the second, at the default of 2) is itself
+the one that counts as dry, so the CRAG gate may end the run there. The hold was decided so that a model's
 bad quoting would not be read as the library's silence; a *run* of such steps is no longer about the
 library at all — it says the model cannot copy — and each one costs a search plus an `observe` and a
 `reflect` call, which is the cost the paragraph after the next already priced at four extra calls.
@@ -215,7 +217,10 @@ who could act on it: the model paraphrased, was refused, and paraphrased again. 
 unchanged and still sum; this channel is never read by a report. *Third*, `SYNTHESIZE_RULES` asks the
 answer to name the book in its own text and not only in the `[book, chapter]` label, which is the
 one behavioural regression the measurement found (`c03`, `titles 0/1`, on the model whose evidence
-thinned). All three are additive, and a run that loses no quote sends the prompt it always sent.
+thinned). All three are additive, and the claim that goes with that word is narrower than it looks:
+the USER message of an `observe` step that lost nothing is byte for byte what it was, and so is its
+update, but the SYSTEM message changed for every run — `OBSERVE_RULES` and `SYNTHESIZE_RULES` are
+where the new sentences live. No run of this release is prompt-identical to one made before it.
 `PLAN_RULES` did not change, so the plan recordings still replay. **Measured: not yet** — the
 behavioural run that decides whether `c03` comes back is pending, and nothing above is claimed on
 numbers until it is appended here.
@@ -226,8 +231,9 @@ stopped after two steps. Where the CRAG gate used to end such a run at step 2, i
 the local default, roughly the difference between a question of five model calls and one of nine.
 That is the price of not shortening the search, paid exactly by the runs that produce the least, and
 it is the reason the acceptance below is about behaviour at repeat and not only about the quote
-counts. (Bounded by the amendment of 2026-09-17 above: `MAX_DROPPED_STREAK` all-dropped steps in a
-row and the next one counts as dry, so the price is paid once and not for the whole step budget.)
+counts. (Bounded by the amendment of 2026-09-17 above: the `MAX_DROPPED_STREAK`th all-dropped step
+in a row is dry itself, so the price is paid for the steps under the cap and not for the whole step
+budget.)
 
 **A second coupling, not decided here: the coverage gate (ADR-013).** `coverage._uncovered_books` is
 the hits of the run minus the books the *evidence* names, so evidence the gate thinned makes a book

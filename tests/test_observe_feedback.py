@@ -15,7 +15,8 @@ import importlib.util
 import json
 from pathlib import Path
 
-from ask_your_library import llm, nodes, prompts, provenance
+from ask_your_library import config, llm, nodes, prompts, provenance
+from ask_your_library.llm import data_block
 from ask_your_library.provenance import DROPPED_QUOTE_CHARS, _valid_evidence
 
 HITS = [{"hit_id": "s1h1", "corpus": "transcripts", "book": "Moby Dick — Herman Melville",
@@ -81,17 +82,54 @@ def test_a_refusal_records_an_empty_book_when_the_model_named_none():
 
 # --- what the next prompt carries -------------------------------------------
 
-def test_a_run_that_lost_nothing_sends_the_prompt_it_always_sent(monkeypatch):
-    """The byte-for-byte guarantee, on the prompt and on the update both: the
-    feedback block and the two new channels exist only where something went
-    wrong, so a clean run is decided on exactly the context every earlier run
-    was decided on."""
+def test_a_step_that_lost_nothing_sends_the_user_message_it_always_sent(monkeypatch):
+    """The guarantee, said exactly and checked as a whole string rather than by
+    the absence of a tag: on a step that lost nothing the USER message is byte
+    for byte the one `observe` built before this change, and the update carries
+    no new key.
+
+    What is NOT claimed: that the run is prompt-identical to an earlier one.
+    OBSERVE_RULES gained two sentences and every call sends them in the SYSTEM
+    message, so the rules half changed for everybody — see the test below."""
+    state = observe_state()
     result, user = run_observe(monkeypatch, [
         {"hit_id": "s1h1", "book": "Moby Dick", "quote": "Call me Ishmael.", "why": "narrator"}])
 
-    assert "quotes_dropped_earlier" not in user
+    # the message as the code built it before the feedback block existed
+    limit = nodes.per_hit_limit(len(state["hits"]))
+    results = "\n".join(
+        data_block("result", h["text"][:limit], index=i, hit_id=h.get("hit_id", ""),
+                   corpus=h["corpus"], book=h["book"], section=h["section"])
+        for i, h in enumerate(state["hits"], 1))
+    expected = "\n".join([data_block("question", state["question"]),
+                          data_block("search_query", state["current_query"]),
+                          data_block("search_results", results, trusted=True),
+                          "Reminder: every quote must be a contiguous, character-exact "
+                          "copy from ONE <result> above — never your own summary or "
+                          "comparison — and must carry that result's hit_id. "
+                          "Return ONLY the JSON described in the rules."])
+    assert user == expected
     assert "dropped_quotes" not in result and "dropped_streak" not in result
     assert result["empty_streak"] == 0
+
+
+def test_the_rules_half_of_the_prompt_did_change_for_every_run(monkeypatch):
+    """The other side of the sentence above, kept honest: the system message is
+    what every call sends, clean or not, and it is not what it was. A reader
+    comparing this release's eval numbers with the last one's is comparing two
+    sets of rules over the same data."""
+    seen = {}
+
+    def ask_json(system, user, role):
+        seen["system"] = system
+        return {"evidence": []}
+
+    monkeypatch.setattr(llm, "ask_json", ask_json)
+    llm.reset_usage()
+    nodes.observe(observe_state())
+
+    assert seen["system"] == prompts.OBSERVE_RULES
+    assert "checked character by character" in seen["system"]
 
 
 def test_earlier_refusals_reach_the_next_prompt_in_the_models_own_words(monkeypatch):
@@ -179,15 +217,61 @@ def test_evidence_resets_both_streaks(monkeypatch):
     assert result["empty_streak"] == 0 and result["dropped_streak"] == 0
 
 
-def test_a_truly_dry_step_advances_only_the_empty_streak(monkeypatch):
-    """Nothing quoted and nothing refused: the library had nothing to give, and
-    the streak of all-dropped steps is not about this step at all."""
+def test_a_truly_dry_step_breaks_the_run_of_all_dropped_steps(monkeypatch):
+    """Nothing quoted and nothing refused: the library had nothing to give.
+    That advances the dry streak and RESETS the other one, because the cap
+    counts consecutive steps — a dry step says nothing about the model's
+    quoting, so it cannot be the middle of a run of bad quoting."""
     monkeypatch.setattr(nodes, "MAX_DROPPED_STREAK", 2)
     result, _ = run_observe(monkeypatch, [], empty_streak=0, dropped_streak=1)
 
     assert result["empty_streak"] == 1
-    assert result["dropped_streak"] == 1
+    assert result["dropped_streak"] == 0
     assert "dropped_quotes" not in result
+
+
+def test_dropped_then_dry_then_dropped_never_reaches_the_ceiling(monkeypatch):
+    """The sequence the word "consecutive" is for, walked step by step. Two
+    all-dropped steps with a dry one between them are not two in a row: the cap
+    must not fire, and the run must not end at the CRAG gate on a streak the
+    library's own silence interrupted."""
+    monkeypatch.setattr(nodes, "MAX_DROPPED_STREAK", 2)
+    refused = [{"hit_id": "s9h9", "book": "Ivanhoe", "quote": "Unknown hit id."}]
+
+    first, _ = run_observe(monkeypatch, refused, empty_streak=0, dropped_streak=0)
+    assert (first["empty_streak"], first["dropped_streak"]) == (0, 1)
+
+    dry, _ = run_observe(monkeypatch, [], empty_streak=first["empty_streak"],
+                         dropped_streak=first["dropped_streak"])
+    assert (dry["empty_streak"], dry["dropped_streak"]) == (1, 0)
+
+    third, _ = run_observe(monkeypatch, refused, empty_streak=dry["empty_streak"],
+                           dropped_streak=dry["dropped_streak"])
+    assert (third["empty_streak"], third["dropped_streak"]) == (1, 1)
+    # one short of MAX_EMPTY_STREAK, so `reflect` does not stop the run
+    assert third["empty_streak"] < config.MAX_EMPTY_STREAK
+
+
+def test_a_timed_out_observe_call_ends_the_run_of_all_dropped_steps(monkeypatch):
+    """The call never returned, so this step dropped nothing and the run of
+    all-dropped steps is over. The key is written only where there is something
+    to reset: the branch's update is what it always was on a clean run, and
+    that matters because every interface reads this update by name."""
+    from openai import APITimeoutError
+
+    def timeout(system, user, role):
+        raise APITimeoutError(request=None)
+
+    monkeypatch.setattr(llm, "ask_json", timeout)
+    llm.reset_usage()
+
+    after_drops = nodes.observe(observe_state(empty_streak=0, dropped_streak=2))
+    assert after_drops["dropped_streak"] == 0 and after_drops["empty_streak"] == 1
+    assert after_drops["call_timed_out"] is True
+
+    clean = nodes.observe(observe_state(empty_streak=0))
+    assert "dropped_streak" not in clean
+    assert set(clean) == {"evidence", "empty_streak", "call_timed_out", "stop_reason"}
 
 
 # --- the rules the models are given -----------------------------------------

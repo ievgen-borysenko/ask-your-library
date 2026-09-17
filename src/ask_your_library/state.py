@@ -36,9 +36,11 @@ class AgentState(TypedDict):
                            # A step whose quotes were all dropped as unverified is not dry: the
                            # passages were there, so it neither advances the streak nor resets it —
                            # until MAX_DROPPED_STREAK of them in a row, when it does (see below)
-    dropped_streak: int    # consecutive steps whose every quote the gate refused. At
-                           # MAX_DROPPED_STREAK the step counts as dry after all: the bound on a
-                           # model that keeps retrieving passages and never quotes them (#29)
+    dropped_streak: int    # CONSECUTIVE steps whose every quote the gate refused; any other step
+                           # resets it to 0, a dry one included (a dry step is the library silent,
+                           # not the model failing to copy). The MAX_DROPPED_STREAK'th such step in
+                           # a row is itself counted dry: the bound on a model that keeps retrieving
+                           # passages and never quotes them (#29)
     # the observe gate (#29), as run totals: every well-formed quote the gate refused, the
     # same number split by the rule that refused it (no_hit / cross_book / short / not_found,
     # summing to it), and the quotes re-pinned to the passage of the SAME book that holds them
