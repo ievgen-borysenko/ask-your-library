@@ -27,8 +27,10 @@ Two ingest paths are covered, because they mint keys differently:
   three key sources (front matter, a first title line, the file name) and the
   cases that made the current rules what they are.
 """
+import importlib.util
 import json
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -38,6 +40,14 @@ from ask_your_library.bookkey import book_key
 from ask_your_library.ingest import add_folder
 
 REPO = Path(__file__).resolve().parents[1]
+# The demo ingest is a script, not a module of the package; both halves of this
+# gate have to run the code that actually writes the index.
+_spec = importlib.util.spec_from_file_location(
+    "ingest_demo_corpus", REPO / "scripts" / "ingest_demo_corpus.py")
+demo = importlib.util.module_from_spec(_spec)
+sys.modules.setdefault("ingest_demo_corpus", demo)
+_spec.loader.exec_module(demo)
+
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "book_identity.json"
 MANIFEST = REPO / "corpus" / "manifest.yaml"
 TOC_DIR = REPO / "corpus" / "toc"
@@ -101,7 +111,19 @@ def demo_identity() -> list[dict]:
             # so a `book_key` that drifts by one character fails here.
             "book": book_key(entry["title"], entry["author"]),
             "note": entry["id"],
-            "chunk_id_prefixes": [f"{entry['id']}#{title or 'full'}" for title in titles],
+            # Through `chunk_prepared`, the demo ingest's own chunker, so the
+            # frozen ids gate the production function and not a copy of its
+            # format string. One short sentence per chapter packs to exactly one
+            # chunk, and the id is cut back to `note#<chapter>`: the trailing
+            # "/N" is the packer's business, and the packer is not what moved.
+            "chunk_id_prefixes": [
+                c.chunk_id.rsplit("/", 1)[0]
+                for c in demo.chunk_prepared({
+                    "note": entry["id"],
+                    "book": book_key(entry["title"], entry["author"]),
+                    "source": "fixture",
+                    "chapters": [{"title": title, "text": "One sentence of text."}
+                                 for title in titles]})],
         })
     return out
 

@@ -97,6 +97,36 @@ def slug(text: str) -> str:
     return f"{readable}-{digest}"
 
 
+# --- the chunk id -----------------------------------------------------------
+
+# What an untitled section is called inside a chunk id. Not a sentinel — a book
+# may genuinely contain a section titled "full" — which is why the folder
+# ingest's ids carry an ordinal as well (see `chunk_id`).
+UNTITLED_SECTION = "full"
+
+
+def chunk_id(note: str, section: str, position: int, ordinal: int | None = None) -> str:
+    """The id of one chunk: `note#[ordinal.]section/position`.
+
+    This is the retrieval dedupe key, the ordering key within a chapter
+    (`rsplit("/", 1)` gives the position) and part of what a re-ingest must
+    reproduce byte for byte, so it lives here with the rest of book identity
+    rather than once per ingest path — it used to be an f-string in each, and
+    the two were only the same by inspection.
+
+    `ordinal` is the section's position in the book, and the two ingest paths
+    differ in whether they need it. The folder ingest passes it because a
+    section TITLE alone is not a unique name: an untitled preamble is written as
+    "full" and a book may contain a section actually titled "full", which would
+    give the two identical ids and drop each other's chunks out of the results.
+    The demo corpus omits it because its titles are already unique per book —
+    `save_prepared` refuses a book with repeated chapter titles outright, which
+    is a stronger guarantee made earlier."""
+    name = section or UNTITLED_SECTION
+    head = f"{ordinal}.{name}" if ordinal is not None else name
+    return f"{note}#{head}/{position}"
+
+
 # --- the bare-title rules ---------------------------------------------------
 # Three consumers ask the same question in three shapes: does this name, which
 # may be a full key or only a title, mean this book?

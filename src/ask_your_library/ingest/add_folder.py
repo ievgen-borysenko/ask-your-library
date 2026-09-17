@@ -34,7 +34,7 @@ from pathlib import Path
 
 import lancedb
 
-from ..bookkey import (MAX_TITLE_LINE, UNKNOWN_AUTHOR, author_of, book_key, slug,
+from ..bookkey import (MAX_TITLE_LINE, UNKNOWN_AUTHOR, author_of, book_key, chunk_id, slug,
                        split_title_author, title_of)
 from ..config import DB_PATH, EMBED_BACKEND
 from ..embeddings import get_embedder
@@ -47,8 +47,8 @@ from .doctor import check_ledger
 from .fts import build_fts_index
 from .ledger import (CHUNKER_VERSION, REQUESTED, Ledger, backfill_from_index,
                      open_ledger)
-from .publish import NoRowsError, add_book_id_column, rebuild_table, recover_staging, \
-    replace_book_rows, rows_of_book, table_names
+from .publish import NoRowsError, add_ledger_columns, book_revisions, rebuild_table, \
+    recover_staging, replace_book_rows, revision_of, rows_of_book, table_names
 
 log = logging.getLogger(__name__)
 
@@ -292,7 +292,7 @@ def chunks_for(book: Book) -> list[Chunk]:
     for section, (title, text) in enumerate(book.sections, 1):
         for i, packed in enumerate(pack_sentences(split_sentences(text)), 1):
             chunks.append(Chunk(
-                chunk_id=f"{book.note}#{section}.{title or 'full'}/{i}",
+                chunk_id=chunk_id(book.note, title, i, ordinal=section),
                 note=book.note,
                 book=book.book,
                 source=book.source,
@@ -423,18 +423,31 @@ def recover_interrupted(db, table_name: str, ledger: Ledger, about_to_write: set
     """The recovery pass at the start of a run: every ledger row that says a
     book was requested and never confirmed indexed.
 
-    Two shapes, told apart by whether the index holds the book's rows.
+    What decides the outcome is the REVISION the rows carry, never the fact that
+    rows exist. `begin` marks a book `requested` before its text is embedded, so
+    at that moment the index still holds the PREVIOUS version of it — and a
+    crash there (a power cut, not an exception, which is recorded as `failed`)
+    leaves `requested` with a full set of perfectly good, perfectly stale rows.
+    Reading presence alone, this pass used to call that a completed append and
+    mark the old text current. Nothing else in the system could then tell.
 
-    *Rows present* — the crash fell between the append and the ledger's second
-    write. One book is one `table.add()`, and LanceDB commits an append as a
-    unit, so rows present mean the whole book is there; the ledger is corrected
-    to say so.
+    So each book's rows are asked which version of it they are (`book_rev`, a
+    short prefix of the digest the ledger recorded when the write began) and
+    compared with what the ledger expected:
 
-    *No rows* — the crash fell between the delete and the append, which is the
-    window the per-book path opens and the reason this ledger exists. The book
-    is re-ingested when this run covers it, and reported by key when it does
-    not: nothing else in the index can tell the user that a book they added
-    last week is silently absent.
+    *The revision matches* — the append landed and only the ledger's second
+    write was lost. One book is one `table.add()`, which LanceDB commits as a
+    unit, so those rows are the whole book at that revision; the ledger is
+    corrected to say so.
+
+    *The revision does not match, or the rows cannot say* (empty, mixed, or
+    written before the column existed) — the index holds something other than
+    what was asked for. Re-indexed when this run covers the book, reported as
+    stale when it does not. Never committed: calling an older text current is
+    the one thing a ledger must not do.
+
+    *No rows at all* — the crash fell between the delete and the append. Same
+    two outcomes, and the report says which case it was.
 
     Returns the lines to report."""
     report: list[str] = []
@@ -444,16 +457,26 @@ def recover_interrupted(db, table_name: str, ledger: Ledger, about_to_write: set
     for row in ledger.missing():
         key, book_id = row.get("key") or "(no key)", row["book_id"]
         present = rows_of_book(table, book_id)
-        if present and row.get("status") == REQUESTED:
+        expected = revision_of(row.get("sha256") or "")
+        revisions = book_revisions(table, book_id) if present else set()
+        current = bool(expected) and revisions == {expected}
+
+        if present and current and row.get("status") == REQUESTED:
             ledger.commit(book_id, rows=present)
-            report.append(f"recovered {key}: its {present} rows are in the index, "
-                          f"the ledger now says so")
-        elif present:
+            report.append(f"recovered {key}: its {present} rows are the text that was "
+                          f"requested, and the ledger now says so")
+        elif present and row.get("status") != REQUESTED:
             # `failed`, with rows: the index holds an EARLIER version of this
-            # book. Never silently promoted to `indexed` — that would call
-            # stale content current, which is the one thing a ledger is for.
+            # book. Never silently promoted to `indexed`.
             report.append(f"failed {key}: {row.get('error') or 'no reason recorded'} — the "
                           f"rows in the index are from an earlier run")
+        elif present and key in about_to_write:
+            report.append(f"re-indexing {key}: an earlier run left the index holding an "
+                          f"older version of it")
+        elif present:
+            report.append(f"STALE {key}: requested, but the {present} rows in the index are "
+                          f"an older version of it — run ayl-add over its folder again "
+                          f"(the index is still answering from the older text)")
         elif key in about_to_write:
             report.append(f"re-indexing {key}: an earlier run did not finish it")
         else:
@@ -564,13 +587,13 @@ def add_books(books: list[Book], backend: str, db_path: Path, folder: Path | Non
         counts["sections"] += len(book.sections)
         counts["chunks"] += len(chunks)
         counts["merged_headings"] += len(book.merged_headings)
-        return book_id, rows_for(chunks, vectors, book_id)
+        return book_id, rows_for(chunks, vectors, book_id, revision_of(book.text_sha256))
 
     written: list[tuple[str, int]] = []
     if existing:
         # The per-book path. The column has to be there before a delete can be
         # keyed on it; filling it is a staged rebuild that re-embeds nothing.
-        add_book_id_column(db, table_name, _book_id_by_note(ledger))
+        add_ledger_columns(db, table_name, _book_id_by_note(ledger))
         table = db.open_table(table_name)
         for i, book in enumerate(books, 1):
             prepared = prepare(book)

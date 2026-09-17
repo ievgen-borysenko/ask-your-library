@@ -194,7 +194,12 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
 - **The delete and the append are not one transaction.** A crash between them leaves one book out
   of the index; its ledger row still says `requested`, and the recovery pass at the start of the
   next `ayl-add` finds it, re-indexes it when the run covers it and reports it by name when it
-  does not. The window is narrower than the one it replaced (a staged rebuild was all-or-nothing
+  does not. The same pass also catches the subtler shape: a crash while a book was being embedded
+  leaves the index holding the PREVIOUS version of it, with nothing about the rows to say so.
+  Every row therefore carries the revision of the book it was built from, and recovery compares
+  it with what the ledger asked for — matching, the rows are confirmed; not matching, the book is
+  re-indexed or reported as `STALE` and never marked indexed, because calling an older text
+  current is the one thing a ledger must not do. The window is narrower than the one it replaced (a staged rebuild was all-or-nothing
   but rewrote the whole table), and it is visible instead of silent — which is why the ledger
   came before the incremental path, not after it. **A reader sees that window too:** for the
   fraction of a second between the delete and the append, a question asked in the web UI or the
@@ -254,6 +259,9 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   the drift. A stale ledger is itself a failure mode now; that check is how it becomes visible.
 - **The chunker and the schema version are recorded but not enforced.** `_index_meta` now carries
   `chunker` and `schema_version` beside the embedding fingerprint, written by both ingest paths.
+  The version is read from the table's own columns rather than assumed, so a table an ingest has
+  not yet migrated, and the cards table — which never gains the ledger columns — are stamped for
+  what they actually are.
   Nothing refuses on them yet: a table stamped with another chunker is read without a word. The
   policy decided for that — warn on read, refuse on write, unlike the embedder's fatal-on-read
   rule — is #27, and until it lands a mixed-chunker index is detectable by reading the stamp and

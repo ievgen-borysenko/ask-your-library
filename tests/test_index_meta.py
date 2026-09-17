@@ -1,13 +1,18 @@
 """Embedding-index fingerprint checks with an in-memory fake LanceDB."""
 import pyarrow as pa
+import pytest
 
 from ask_your_library import index_meta
 
 
 class FakeTable:
-    def __init__(self, rows, dims):
+    def __init__(self, rows, dims, columns=()):
         self.rows = rows
-        self.schema = pa.schema([("vector", pa.list_(pa.float32(), dims))])
+        # The columns matter now: `write_index_meta` reads the fingerprint
+        # table's own schema to decide whether a row fits it, rather than
+        # finding out by attempting the write.
+        self.schema = pa.schema([("vector", pa.list_(pa.float32(), dims))]
+                                + [(name, pa.string()) for name in columns])
 
     def search(self):
         return self
@@ -21,7 +26,7 @@ class FakeTable:
         return self
 
     def to_list(self):
-        return self._filtered
+        return getattr(self, "_filtered", self.rows)
 
     def delete(self, expr):
         key = expr.split("'")[1]
@@ -42,7 +47,8 @@ class FakeDB:
         return self.tables[name]
 
     def create_table(self, name, rows):
-        self.tables[name] = FakeTable(list(rows), 1)
+        rows = list(rows)
+        self.tables[name] = FakeTable(rows, 1, columns=tuple(rows[0]) if rows else ())
         return self.tables[name]
 
 
@@ -75,10 +81,23 @@ def test_restamping_replaces_the_previous_row():
 
 # --- the two fields ADR-024 added, against a real LanceDB --------------------
 
+def _table_with_ledger_columns(db, name, dims=1024):
+    return db.create_table(name, [{"chunk_id": "a/1", "note": "a", "book": "A — B",
+                                   "source": "local:a", "section": "One", "text": "t",
+                                   "vector": [0.0] * dims, "book_id": "id", "book_rev": "rev"}])
+
+
+def _legacy_table(db, name, dims=1024):
+    return db.create_table(name, [{"chunk_id": "a/1", "note": "a", "book": "A — B",
+                                   "source": "local:a", "section": "One", "text": "t",
+                                   "vector": [0.0] * dims}])
+
+
 def test_a_stamp_carries_the_chunker_and_the_schema_version(tmp_path):
     import lancedb
 
     db = lancedb.connect(tmp_path / "db")
+    _table_with_ledger_columns(db, "transcripts_ollama")
     index_meta.write_index_meta(db, "transcripts_ollama", "ollama", "bge-m3", 1024,
                                 chunker="sentence-pack-1")
     row = index_meta.read_index_meta(db, "transcripts_ollama")
@@ -97,6 +116,7 @@ def test_a_fingerprint_table_written_before_the_two_fields_is_widened_not_narrow
     db.create_table(index_meta.META_TABLE, [
         {"table": "cards_ollama", "backend": "ollama", "model": "bge-m3", "dims": 1024,
          "created": "2026-01-01T00:00:00"}])
+    _table_with_ledger_columns(db, "transcripts_ollama")
 
     index_meta.write_index_meta(db, "transcripts_ollama", "ollama", "bge-m3", 1024,
                                 chunker="sentence-pack-1")
@@ -168,6 +188,7 @@ def test_the_write_path_is_what_finishes_an_interrupted_widening(tmp_path):
     from ask_your_library.ingest.publish import table_names
 
     db = _mid_widening(tmp_path)
+    _table_with_ledger_columns(db, "transcripts_ollama")
     index_meta.write_index_meta(db, "transcripts_ollama", "ollama", "bge-m3", 1024,
                                 chunker="sentence-pack-1")
     assert index_meta.META_TABLE + "__staging" not in table_names(db)
@@ -184,6 +205,7 @@ def test_the_widening_keeps_every_other_row_when_it_rewrites_the_table(tmp_path)
          "created": "2026-01-01T00:00:00"},
         {"table": "transcripts_openrouter", "backend": "openrouter", "model": "te3", "dims": 1536,
          "created": "2026-01-02T00:00:00"}])
+    _table_with_ledger_columns(db, "transcripts_ollama")
 
     index_meta.write_index_meta(db, "transcripts_ollama", "ollama", "bge-m3", 1024,
                                 chunker="sentence-pack-1")
@@ -205,3 +227,94 @@ def test_the_check_before_a_search_does_not_recover_either(tmp_path):
     db.create_table("transcripts_ollama", [{"vector": [0.0] * 1024, "text": "t"}])
     assert index_meta.check_index(db, "transcripts_ollama", "bge-m3", 1024) is None
     assert index_meta.META_TABLE + "__staging" in table_names(db)
+
+
+# --- the version is a claim about the rows, so it is read from them ----------
+
+def test_a_legacy_table_is_stamped_version_1_not_the_current_shape(tmp_path):
+    """The version says what a reader must know to read the rows. Stamping an
+    unmigrated table with the current number is worse than not stamping it: it
+    claims columns the rows do not have, and the claim is what a later refusal
+    (#27) would act on."""
+    import lancedb
+
+    db = lancedb.connect(tmp_path / "db")
+    _legacy_table(db, "transcripts_ollama")
+    index_meta.write_index_meta(db, "transcripts_ollama", "ollama", "bge-m3", 1024,
+                                chunker="legacy")
+    assert index_meta.read_index_meta(db, "transcripts_ollama")["schema_version"] == 1
+
+
+def test_the_cards_table_is_stamped_version_1_because_it_never_gains_the_columns(tmp_path):
+    """A card is a distillate of a book and the ledger's unit is the book, so no
+    card row carries a `book_id` — by design, not by omission."""
+    import lancedb
+
+    db = lancedb.connect(tmp_path / "db")
+    _legacy_table(db, "cards_ollama")
+    index_meta.write_index_meta(db, "cards_ollama", "ollama", "bge-m3", 1024,
+                                chunker="sentence-pack-1")
+    assert index_meta.read_index_meta(db, "cards_ollama")["schema_version"] == 1
+
+
+def test_a_migrated_table_is_stamped_the_current_version(tmp_path):
+    import lancedb
+
+    db = lancedb.connect(tmp_path / "db")
+    _table_with_ledger_columns(db, "transcripts_ollama")
+    index_meta.write_index_meta(db, "transcripts_ollama", "ollama", "bge-m3", 1024)
+    assert index_meta.read_index_meta(db, "transcripts_ollama")["schema_version"] == \
+        index_meta.SCHEMA_VERSION
+
+
+def test_a_caller_may_still_name_the_version(tmp_path):
+    import lancedb
+
+    db = lancedb.connect(tmp_path / "db")
+    _legacy_table(db, "transcripts_ollama")
+    index_meta.write_index_meta(db, "transcripts_ollama", "ollama", "bge-m3", 1024,
+                                schema_version=7)
+    assert index_meta.read_index_meta(db, "transcripts_ollama")["schema_version"] == 7
+
+
+def test_a_failure_while_staging_the_widening_leaves_the_live_table_intact(tmp_path,
+                                                                           monkeypatch):
+    """The window the review named: the live fingerprint table must not be
+    touched until a complete replacement exists, or a failure there leaves an
+    index that looks unstamped — which `ayl-add` then refuses to write to."""
+    import lancedb
+
+    from ask_your_library.ingest.publish import table_names
+
+    db = lancedb.connect(tmp_path / "db")
+    before = [
+        {"table": "cards_ollama", "backend": "ollama", "model": "bge-m3", "dims": 1024,
+         "created": "2026-01-01T00:00:00"},
+        {"table": "transcripts_openrouter", "backend": "openrouter", "model": "te3",
+         "dims": 1536, "created": "2026-01-02T00:00:00"}]
+    db.create_table(index_meta.META_TABLE, before)      # the narrow, pre-ADR-024 shape
+    _table_with_ledger_columns(db, "transcripts_ollama")
+
+    real_create = type(db).create_table
+
+    def fail_on_staging(self, name, *args, **kwargs):
+        if name.endswith("__staging"):
+            raise RuntimeError("disk full")
+        return real_create(self, name, *args, **kwargs)
+
+    monkeypatch.setattr(type(db), "create_table", fail_on_staging)
+    with pytest.raises(RuntimeError, match="disk full"):
+        index_meta.write_index_meta(db, "transcripts_ollama", "ollama", "bge-m3", 1024,
+                                    chunker="sentence-pack-1")
+
+    monkeypatch.undo()
+    # every row still there, still readable, and no staging table left behind
+    assert index_meta.META_TABLE in table_names(db)
+    assert index_meta.META_TABLE + "__staging" not in table_names(db)
+    assert index_meta.read_index_meta(db, "cards_ollama")["created"] == "2026-01-01T00:00:00"
+    assert index_meta.read_index_meta(db, "transcripts_openrouter")["dims"] == 1536
+    # and the writer can simply try again
+    index_meta.write_index_meta(db, "transcripts_ollama", "ollama", "bge-m3", 1024,
+                                chunker="sentence-pack-1")
+    assert index_meta.read_index_meta(db, "transcripts_ollama")["chunker"] == "sentence-pack-1"
+    assert index_meta.read_index_meta(db, "cards_ollama")["created"] == "2026-01-01T00:00:00"

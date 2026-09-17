@@ -36,7 +36,12 @@ in the same move, and nothing is left to tell a correction from a second copy. T
 indexed as a new book and the old one is reported as vanished; `--prune` clears it. Put the title
 and author in front matter if you expect to correct them.
 
-The ledger also makes an interruption visible. Deleting and appending is not one transaction, so a crash in
+The ledger also makes an interruption visible, and it is careful about what it concludes from
+one. A crash while a book was being embedded leaves the index holding the *previous* version of
+that book, which from the outside is indistinguishable from a finished write — so every row
+carries the revision of the book it was built from, and the recovery pass compares that with what
+the ledger asked for. Matching, the rows are confirmed; not matching, the book is re-indexed, or
+reported as `STALE` if this run does not cover it. It is never quietly marked as done. Deleting and appending is not one transaction, so a crash in
 between leaves a book out of the index; the ledger row still says `requested`, and the **recovery
 pass at the start of the next run** finds it, re-indexes it when that run covers it, and names it
 when it does not. Nothing else in the index can tell you that a book you added last month is
@@ -149,17 +154,22 @@ refused before anything is embedded: one table, one model. Stamp a known-good un
 with `uv run scripts/ingest_demo_corpus.py --stage stamp-meta`, or rebuild it.
 
 Prefer to build the index yourself? The table contract: `transcripts_<backend>` (and optionally
-`cards_<backend>`) with columns `chunk_id, note, book, source, section, text, vector, book_id`,
+`cards_<backend>`) with columns `chunk_id, note, book, source, section, text, vector, book_id,
+book_rev`,
 stamped via `index_meta.write_index_meta` — which now also records the chunker and a schema
-version. `book_id` is new and sits *beside* `note` rather than replacing it, so chunk ids are
-byte-for-byte what they always were; a table without the column still reads, and the next
+version. `book_id` and `book_rev` are new and sit *beside* `note` rather than replacing it, so chunk ids
+are byte-for-byte what they always were; a table without the column still reads, and the next
 `ayl-add` over it adds one. Beside the index tables is the `books` ledger — `book_id`, `key`,
 `title`, `author`, `source_ref`, `sha256`, `chunker`, `embedding_model`, `status`, `error`,
 `requested_at`, `indexed_at`, `rows`, `fts_seconds` — which is what `--doctor` reads. `sha256` is
 a digest of the book's *text*, taken after the front matter and any title line are off it, so
 correcting the metadata does not read as a different book; `source_ref` is
 `local:<folder digest>:<path inside the folder>`, the folder as a digest rather than a path so
-that nothing in the ledger names a directory on your machine. The
+that nothing in the ledger names a directory on your machine. The index rows carry the first
+16 characters of that digest as `book_rev`, which is what lets a recovery tell a finished write
+from the version before it. `schema_version` is read from the table's own columns: `2` once the
+rows carry `book_id` and `book_rev`, `1` for a table not yet migrated and for the cards table,
+which never gains them. The
 catalogue deliberately does not: what your library holds is answered from the rows that can
 actually be searched, never from the record of what was ingested. `ayl-add` is that contract with
 a CLI in front of it.

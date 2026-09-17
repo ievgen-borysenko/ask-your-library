@@ -45,7 +45,7 @@ import lancedb
 import requests
 import yaml
 
-from ask_your_library.bookkey import author_of, book_key, title_of
+from ask_your_library.bookkey import author_of, book_key, chunk_id, title_of
 from ask_your_library.config import DB_PATH, EMBED_BACKEND
 from ask_your_library.embeddings import get_embedder
 from ask_your_library.index_meta import (META_TABLE, check_index, read_index_meta,
@@ -57,8 +57,9 @@ from ask_your_library.ingest import (Chunk, build_fts_index, chunk_card, embeddi
 from ask_your_library.ingest.chapters import (DEFAULT_CHAPTER_RE, MIN_CHAPTER_CHARS,  # noqa: F401
                                               split_chapters, with_parts)
 from ask_your_library.ingest.ledger import CHUNKER_VERSION, open_ledger
-from ask_your_library.ingest.publish import (add_book_id_column, rebuild_table,
-                                             recover_staging, table_names, upsert_book_rows)
+from ask_your_library.ingest.publish import (add_ledger_columns, rebuild_table,
+                                             recover_staging, revision_of, table_names,
+                                             upsert_book_rows)
 from ask_your_library.sanitize import strip_control_chars
 
 REPO = Path(__file__).resolve().parents[1]
@@ -407,7 +408,7 @@ def chunk_prepared(doc: dict) -> list[Chunk]:
         for j, text in enumerate(packed, 1):
             title = chapter["title"]
             chunks.append(Chunk(
-                chunk_id=f"{doc['note']}#{title or 'full'}/{j}",
+                chunk_id=chunk_id(doc["note"], title, j),
                 note=doc["note"],
                 book=doc["book"],
                 source=doc["source"],
@@ -504,7 +505,8 @@ def ingest_transcripts_table(backend: str, book_filter: str | None, entry_ids: l
             written[book_id] = len(chunks)
             print(f"  [{i}/{len(docs)}] {doc['book']}: {len(chunks)} chunks "
                   f"(total {progress['total']})", flush=True)
-            yield doc["note"], rows_for(chunks, vectors, book_id)
+            yield doc["note"], rows_for(chunks, vectors, book_id,
+                                        revision_of(ledger.get(book_id).get("sha256") or ""))
 
     if book_filter and name in table_names(db):
         # Re-ingest selected books in place: replace their rows, never append.
@@ -516,7 +518,7 @@ def ingest_transcripts_table(backend: str, book_filter: str | None, entry_ids: l
         # nothing — it is a staged copy of the rows that are already there.
         by_note = {row["source_ref"].split(":", 1)[1]: row["book_id"]
                    for row in ledger.all_rows() if row.get("source_ref", "").startswith("manifest:")}
-        add_book_id_column(db, name, by_note.get)
+        add_ledger_columns(db, name, by_note.get)
         table = db.open_table(name)
         for note, rows in batches():
             upsert_book_rows(table, note, rows)
@@ -561,7 +563,13 @@ def ingest_cards_table(backend: str) -> None:
 
 def stamp_existing_tables(backend: str) -> None:
     """Fingerprint tables built before stamps existed. Assumes they were built
-    with the embedder configured right now — only run this when that is true."""
+    with the embedder configured right now — only run this when that is true.
+
+    Neither `chunker` nor `schema_version` is named here, and that is the point:
+    nothing recorded which chunker built such a table, so the chunker stays
+    empty rather than claiming the current one, and the version is read from the
+    table's own columns. The embedder is the one thing this command asserts, and
+    the one thing the operator is being asked to vouch for."""
     embedder = get_embedder(backend)
     db = lancedb.connect(DB_PATH)
     for name in (f"cards_{backend}", f"transcripts_{backend}"):

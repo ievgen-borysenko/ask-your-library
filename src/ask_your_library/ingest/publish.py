@@ -120,36 +120,68 @@ def upsert_book_rows(table, note: str, rows: list[dict]) -> None:
 # --- the per-book path ------------------------------------------------------
 
 BOOK_ID_COLUMN = "book_id"
+# The version of the BOOK whose text these rows were built from: the first
+# characters of the ledger row's `sha256`. Without it, rows being present under
+# a book says nothing about WHICH version of the book they are — and a recovery
+# pass that read presence alone would mark the previous version as current.
+BOOK_REV_COLUMN = "book_rev"
+LEDGER_COLUMNS = (BOOK_ID_COLUMN, BOOK_REV_COLUMN)
+# Enough of a sha256 to identify a revision of one book among the handful a
+# ledger row ever holds; the full digest stays in the ledger.
+REV_CHARS = 16
+
+
+def revision_of(sha256: str) -> str:
+    """The short revision tag written into a book's rows. "" when the source
+    could not be digested — which is not a revision and must never compare equal
+    to one."""
+    return (sha256 or "")[:REV_CHARS]
 
 
 def has_book_id(table) -> bool:
     return BOOK_ID_COLUMN in table.schema.names
 
 
-def add_book_id_column(db, name: str, book_id_of, batch_rows: int = COPY_BATCH_ROWS):
-    """Give an existing table a `book_id` column, without re-embedding anything.
+def has_ledger_columns(table) -> bool:
+    return all(name in table.schema.names for name in LEDGER_COLUMNS)
+
+
+def add_ledger_columns(db, name: str, book_id_of, batch_rows: int = COPY_BATCH_ROWS):
+    """Give an existing table the `book_id` and `book_rev` columns, without
+    re-embedding anything.
 
     An index built before the ledger has rows keyed by `note` alone, and a
-    per-book update keyed by `book_id` cannot touch them. The column is filled
+    per-book update keyed by `book_id` cannot touch them. `book_id` is filled
     from the ledger through `book_id_of(note)`; a row whose `note` the ledger
     does not know gets "", which `doctor` then reports rather than the ingest
-    guessing.
+    guessing. `book_rev` is left empty for every carried-over row: nothing
+    recorded which version of the book those rows were built from, and an empty
+    revision is honest about that — it matches no revision, so a book whose rows
+    predate the column is re-indexed rather than assumed current.
 
     A staged rebuild, so the live table stays queryable and an interrupted run
     is finished or discarded by `recover_staging` like any other. The vectors
     are carried over as Arrow batches in the table's own schema — the fixed-size
     list stays a fixed-size list, and no row is re-read through Python floats."""
     table = db.open_table(name)
-    if has_book_id(table):
+    if has_ledger_columns(table):
         return table
+
+    existing = set(table.schema.names)
 
     def batches():
         for batch in table_batches(table, batch_rows):
-            ids = [book_id_of(note) or "" for note in batch.column("note").to_pylist()]
-            yield batch.append_column(BOOK_ID_COLUMN, pa.array(ids, pa.string()))
+            notes = batch.column("note").to_pylist()
+            if BOOK_ID_COLUMN not in existing:
+                ids = [book_id_of(note) or "" for note in notes]
+                batch = batch.append_column(BOOK_ID_COLUMN, pa.array(ids, pa.string()))
+            if BOOK_REV_COLUMN not in existing:
+                batch = batch.append_column(
+                    BOOK_REV_COLUMN, pa.array([""] * len(notes), pa.string()))
+            yield batch
 
-    log.info("%s: adding a %s column (%d rows, no re-embedding)",
-             name, BOOK_ID_COLUMN, table.count_rows())
+    log.info("%s: adding the %s columns (%d rows, no re-embedding)",
+             name, " and ".join(LEDGER_COLUMNS), table.count_rows())
     return rebuild_table(db, name, batches())
 
 
@@ -182,3 +214,18 @@ def rows_of_book(table, book_id: str) -> int:
     if not has_book_id(table):
         return 0
     return table.count_rows(f"{BOOK_ID_COLUMN} = '{book_id.replace(chr(39), chr(39) * 2)}'")
+
+
+def book_revisions(table, book_id: str) -> set[str]:
+    """Which revisions of a book the index currently holds under its id.
+
+    One row per chunk, all written by one `table.add()`, so this is normally one
+    value — the revision that run wrote. Anything else (an empty set, `{""}`
+    from rows that predate the column, or two values) means the rows are not a
+    known-good copy of one version, and the caller must not treat them as one."""
+    if not has_ledger_columns(table):
+        return set()
+    quoted = book_id.replace("'", "''")
+    rows = table.search().where(f"{BOOK_ID_COLUMN} = '{quoted}'").select(
+        [BOOK_REV_COLUMN]).limit(max(table.count_rows(), 1)).to_list()
+    return {row.get(BOOK_REV_COLUMN) or "" for row in rows}

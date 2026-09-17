@@ -780,7 +780,10 @@ failure than a silent takeover. `ayl-add` becomes a per-book
 delete-then-append keyed by `book_id`, with the ledger row written before and after and a recovery
 pass at the start of every run. Rows carry `book_id` **beside** `note` for one release, so every
 chunk id stays byte-compatible. `_index_meta` gains `chunker` and `schema_version`; readers
-tolerate their absence and nothing refuses on them here.
+tolerate their absence and nothing refuses on them here. The version is derived from the stamped
+table's own columns rather than asserted, because a version is a claim about the rows and a stamp
+that claims what the rows do not have is worse than no stamp — it is what a later refusal (#27)
+would act on.
 
 **The alternatives.** *(A) The staged rebuild as it was* — crash-safe and simple, but it has no
 identity at all, which is the actual defect; the cost argument for replacing it turned out to be
@@ -812,9 +815,13 @@ tolerate the staged copy instead and read it where the live table is missing. It
 agree, so a **stale ledger is a new class of failure** — reconciled by `ayl-add --doctor`, which
 reports six shapes of drift and repairs none of them, because a check that rewrites what it checks
 is not evidence. The crash window moved rather than closed: between the delete and the append one
-book is absent, which the recovery pass finds on the next run (rows present under a `requested`
-row mean the append landed and only the ledger write was lost, since one book is one `table.add()`;
-a `failed` row with rows present is never promoted, because those rows are an earlier version).
+book is absent, which the recovery pass finds on the next run. What that pass may NOT do is infer completion from rows
+being present: `begin` marks a book `requested` before its text is embedded, so a crash there
+leaves a full set of perfectly good, perfectly stale rows. Each row therefore carries `book_rev`,
+the revision of the book it was built from, and recovery compares it with the revision the ledger
+recorded — equal, the append landed and only the ledger write was lost (one book is one
+`table.add()`, committed as a unit); unequal, absent or mixed, the book is re-indexed or reported
+`STALE`, never marked indexed.
 The catalogue keeps reading the index tables and not the ledger, or ADR-016's "the count is the
 length of that list" weakens into a history of ingests.
 

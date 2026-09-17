@@ -266,20 +266,102 @@ def test_a_crash_between_the_delete_and_the_append_is_found_and_repaired(tmp_pat
 
 def test_a_crash_between_the_append_and_the_ledger_write_is_repaired_from_the_index(
         tmp_path, monkeypatch):
-    """The other half of the window. One book is one `table.add()`, so rows
-    present mean the whole book is present; the ledger is corrected, not the
-    index."""
+    """One half of the window. The rows carry the revision that was requested,
+    so they ARE the requested text: one book is one `table.add()`, which LanceDB
+    commits as a unit, and only the ledger's second write was lost."""
     folder = make_folder(tmp_path)
     monkeypatch.setattr(add_folder, "get_embedder", lambda backend: FakeEmbedder())
     add(tmp_path, folder)
 
     ledger = ledger_of(tmp_path)
     sea = next(r for r in ledger.all_rows() if r["key"].startswith("Sea"))
-    ledger.begin(sea["book_id"], key=sea["key"], source_ref=sea["source_ref"])
+    ledger.begin(sea["book_id"], key=sea["key"], source_ref=sea["source_ref"],
+                 sha256=sea["sha256"])
     assert ledger_of(tmp_path).missing()             # `requested`, with its rows in place
 
     counts = add(tmp_path, folder)
     assert any("recovered Sea Notes" in line for line in counts["recovered"])
+    assert ledger_of(tmp_path).missing() == []
+
+
+def test_a_crash_while_embedding_never_commits_the_previous_text_as_current(tmp_path,
+                                                                            monkeypatch):
+    """The other half, and the one that used to be got wrong. `begin` marks a
+    book `requested` BEFORE its text is embedded, so at that moment the index
+    still holds the previous version — a full set of perfectly good, perfectly
+    stale rows. Recovery read presence alone and called that a completed append,
+    which marked the old text current with nothing left to notice.
+
+    Here the run that follows does not cover the book (its file has moved out of
+    the folder), so re-indexing is not available and the only safe outcome is to
+    say so."""
+    folder = make_folder(tmp_path)
+    monkeypatch.setattr(add_folder, "get_embedder", lambda backend: FakeEmbedder())
+    add(tmp_path, folder)
+    sea_file = folder / "Sea Notes - B. Mate.txt"
+
+    # the crash: the file is edited, the run marks `requested`, and it dies
+    # while embedding — the index still holds the version before the edit
+    sea_file.write_text(BODY + " A second edition.", encoding="utf-8")
+    edited = next(b for b in add_folder.read_folder(folder) if b.book.startswith("Sea"))
+    ledger = ledger_of(tmp_path)
+    sea = next(r for r in ledger.all_rows() if r["key"].startswith("Sea"))
+    ledger.begin(sea["book_id"], key=sea["key"], source_ref=sea["source_ref"],
+                 sha256=edited.text_sha256)
+
+    sea_file.rename(tmp_path / "moved-away.txt")     # the next run cannot re-index it
+    counts = add(tmp_path, folder)
+
+    assert any(line.startswith("STALE Sea Notes") for line in counts["recovered"])
+    # never committed: the ledger still says the book is not indexed
+    after = ledger_of(tmp_path).get(sea["book_id"])
+    assert after["status"] == "requested"
+    assert [r["key"] for r in ledger_of(tmp_path).missing()] == ["Sea Notes — B. Mate"]
+    # and the index is honest about what it is still answering from
+    assert "A second edition." not in " ".join(r["text"] for r in rows(tmp_path))
+
+
+def test_a_crash_while_embedding_is_re_indexed_when_the_run_covers_the_book(tmp_path,
+                                                                            monkeypatch):
+    folder = make_folder(tmp_path)
+    monkeypatch.setattr(add_folder, "get_embedder", lambda backend: FakeEmbedder())
+    add(tmp_path, folder)
+
+    (folder / "Sea Notes - B. Mate.txt").write_text(BODY + " A second edition.",
+                                                    encoding="utf-8")
+    edited = next(b for b in add_folder.read_folder(folder) if b.book.startswith("Sea"))
+    ledger = ledger_of(tmp_path)
+    sea = next(r for r in ledger.all_rows() if r["key"].startswith("Sea"))
+    ledger.begin(sea["book_id"], key=sea["key"], source_ref=sea["source_ref"],
+                 sha256=edited.text_sha256)
+
+    counts = add(tmp_path, folder)
+    assert any("older version" in line and "re-indexing Sea Notes" in line
+               for line in counts["recovered"])
+    assert ledger_of(tmp_path).missing() == []
+    assert "A second edition." in " ".join(r["text"] for r in rows(tmp_path))
+
+
+def test_rows_that_predate_the_revision_column_are_never_taken_for_current(tmp_path,
+                                                                           monkeypatch):
+    """An index migrated from before the ledger carries an empty revision. Empty
+    is not a revision: it matches nothing, so such a book is re-indexed rather
+    than assumed to hold what was asked for."""
+    folder = make_folder(tmp_path)
+    monkeypatch.setattr(add_folder, "get_embedder", lambda backend: FakeEmbedder())
+    add(tmp_path, folder)
+
+    db = lancedb.connect(tmp_path / "db")
+    sea = next(r for r in open_ledger(db).all_rows() if r["key"].startswith("Sea"))
+    stripped = [{**row, "book_rev": ""} for row in rows(tmp_path)]
+    db.drop_table("transcripts_ollama")
+    db.create_table("transcripts_ollama", stripped)
+    open_ledger(db).begin(sea["book_id"], key=sea["key"], source_ref=sea["source_ref"],
+                          sha256=sea["sha256"])
+
+    counts = add(tmp_path, folder)
+    assert any("Sea Notes" in line and ("older version" in line or "STALE" in line)
+               for line in counts["recovered"])
 
 
 def test_a_book_that_failed_is_never_promoted_to_indexed_by_the_recovery_pass(tmp_path,

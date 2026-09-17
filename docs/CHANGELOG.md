@@ -22,7 +22,10 @@
 
   Because the delete and the append are not one transaction, a crash between them leaves one book
   out of the index with a ledger row that still says `requested`; the **recovery pass at the start
-  of every run** finds it, re-indexes it when the run covers it and names it when it does not. A
+  of every run** finds it, re-indexes it when the run covers it and names it when it does not. It
+  decides on the revision each row carries, never on rows merely being present — a crash while a
+  book was being embedded leaves the previous version of it in place, and that must not be
+  confirmed as current. A
   book whose file has vanished is **reported and kept** — a folder that failed to mount looks
   exactly like a deletion — and removed only under `--prune`. `--dry-run` prints the diff against
   the ledger, and `ayl-add --doctor` reconciles ledger against index and reports six shapes of
