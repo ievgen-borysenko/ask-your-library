@@ -426,14 +426,18 @@ def test_crag_gate_stops_after_two_dry_steps_without_a_reflect_call_and_refuses(
     assert by_name(events, "metrics")[0]["stop_reason"] == t("stop_crag", n=config.MAX_EMPTY_STREAK)
 
 
-def test_two_all_dropped_steps_are_not_dry_and_do_not_stop_the_run(run):
+def test_an_all_dropped_step_is_not_dry_and_the_run_goes_on(run):
     """The sharp edge of #29 (system-design review 16.09 §3(a), and the owner's
     decision of the same day: "dropped" is a counter of its own, never a dry
     step). A step whose every quote fails the gate DID retrieve passages — the
     library was not silent on the question — so it must not advance the streak
-    toward MAX_EMPTY_STREAK. Two of them in a row would otherwise end the run at
-    the CRAG gate, which is how this change would have bought provenance with
-    behaviour instead of adding it."""
+    toward MAX_EMPTY_STREAK. Ending the run here is how this change would have
+    bought provenance with behaviour instead of adding it.
+
+    The hold is bounded since 17.09 (MAX_DROPPED_STREAK, ADR-004 amended): the
+    SECOND all-dropped step in a row does count as dry, which is why the middle
+    streak below reads 1. One such step still costs the run nothing, and the
+    third step's evidence resets the streak either way."""
     nowhere = "Ishmael was a lawyer in Boston."
     model = ScriptedModel(
         plan=[{"mode": "answer", "queries": ["q1", "q2", "q3"]}],
@@ -447,7 +451,8 @@ def test_two_all_dropped_steps_are_not_dry_and_do_not_stop_the_run(run):
     )
     _, events, _ = run(model, FakeLibrary(lambda q: [MOBY]), "Who is Ishmael?")
     assert names(events).count("act") == 3                    # the run was not cut short at the gate
-    assert [u["empty_streak"] for u in by_name(events, "observe")] == [0, 0, 0]
+    assert [u["empty_streak"] for u in by_name(events, "observe")] == [0, 1, 0]
+    assert [u.get("dropped_streak") for u in by_name(events, "observe")] == [1, 2, 0]
     # run totals, and absent from the step that dropped nothing (the event contract)
     assert [u.get("dropped_unverified") for u in by_name(events, "observe")] == [1, 2, None]
     assert by_name(events, "reflect")[-1]["stop_reason"] == t("stop_enough")
@@ -458,6 +463,34 @@ def test_two_all_dropped_steps_are_not_dry_and_do_not_stop_the_run(run):
     p = by_name(events, "validate")[0]["provenance"]
     assert p["dropped_unverified"] == 2 and p["broken"] == 0
     assert p["confirmed"] == p["checked_book_text"] == 1
+
+
+def test_a_run_of_all_dropped_steps_reaches_the_ceiling_and_stops(run):
+    """The bound on the hold above (#29, 17.09; MAX_DROPPED_STREAK). One
+    all-dropped step says the model failed to copy a passage that was there; a
+    RUN of them says the model cannot copy at all, and every one costs a search
+    plus an `observe` and a `reflect` call against a budget the question has
+    once. From the second one on such a step counts as dry, so the CRAG gate
+    ends the run instead of spending the whole step budget on a model that
+    keeps retrieving passages and never quotes them."""
+    nowhere = "Ishmael was a lawyer in Boston."
+    model = ScriptedModel(
+        plan=[{"mode": "answer", "queries": ["q1", "q2", "q3", "q4"]}],
+        observe=[{"evidence": [evidence(MOBY, "transcripts", f"s{n}h2", quote=nowhere)]}
+                 for n in (1, 2, 3)],
+        reflect=[{"decision": "search", "next_query": "q2"},
+                 {"decision": "search", "next_query": "q3"}],
+    )
+    answer, events, _ = run(model, FakeLibrary(lambda q: [MOBY]), "Who is Ishmael?")
+
+    assert [u["empty_streak"] for u in by_name(events, "observe")] == [0, 1, 2]
+    assert [u["dropped_streak"] for u in by_name(events, "observe")] == [1, 2, 3]
+    assert names(events).count("act") == 3          # the fourth query is never run
+    assert model.roles().count("reflect") == 2      # the third stop is the pre-check: no call
+    assert by_name(events, "reflect")[-1]["stop_reason"] == t("stop_crag", n=config.MAX_EMPTY_STREAK)
+    # and the reader is still told it was the quoting that failed, not the library
+    assert answer == t("refusal_answer")
+    assert "3 quotes dropped before the answer" in by_name(events, "validate")[0]["verification"]
 
 
 def test_a_dropped_step_holds_the_dry_streak_and_does_not_reset_it(run):

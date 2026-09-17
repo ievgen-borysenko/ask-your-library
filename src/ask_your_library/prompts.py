@@ -43,6 +43,9 @@ contiguous copy-paste from ONE result — never merge pieces, never translate,
 never reword. If no exact sentence supports the point, skip that result.
 Skip irrelevant results. Copy "hit_id", "book" and "section" exactly from the attributes
 of the ONE result the quote was copied from; provenance is checked against that result.
+Every quote is checked character by character against the result it cites and is discarded
+if it does not match, so a paraphrase or a sentence merged from two places earns nothing.
+When a quote of yours was refused, return fewer items rather than reword it.
 
 Return ONLY JSON: {"evidence": [{"hit_id": "...", "book": "...", "section": "...",
 "quote": "...", "why": "one short line"}]}"""
@@ -79,5 +82,8 @@ Every claim must cite its source as [book, chapter], with the book and the secti
 evidence line it came from filled in — each evidence line opens with exactly that label,
 already filled in, so copy it. "book" and "chapter" are placeholders, never write them
 literally, and never write a label the evidence does not carry. {lang}
+Name in your own text the book each evidence line comes from — the title is in the label
+that line carries — even when the evidence is thin or covers only part of the question: a
+reader who sees only your first sentence must know which book is being spoken of.
 If evidence only partially covers the question, say honestly what is missing.
 Plain text and markdown only — NO emoji."""

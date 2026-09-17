@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+- **A refused quote is told to the model that wrote it, the answer names the book, and a run of
+  all-dropped steps has a ceiling** (#29, [ADR-004 amended 2026-09-17](adr/README.md)). Three small
+  changes against what the gate's first measurement showed on `mistral-small3.2:24b-ctx20k`: 10-11
+  quotes refused per run, and on one question an answer that stopped naming the book once a second
+  quote was dropped.
+
+  **`observe` is told what it lost.** The gate now returns the refusals in words beside the counters
+  — the quote as the model wrote it (cut at 120 characters), the book it named, the rule that
+  stopped it — and the last `DROPPED_QUOTES_SHOWN` (6) of them travel on the state as
+  `dropped_quotes`. The next `observe` prompt carries them in a `<quotes_dropped_earlier>` block,
+  untrusted like any other model-written text, with one sentence saying why they were refused. Until
+  now a model that paraphrased was refused in silence and paraphrased again. `OBSERVE_RULES` says
+  the check is character by character and that fewer items beat a reworded one. The counters are
+  untouched and still sum, and a run that loses no quote sends the prompt it always sent, byte for
+  byte.
+
+  **The answer names the book.** `SYNTHESIZE_RULES` asks for the title in the answer's own text, not
+  only in the `[book, chapter]` label, even where the evidence is thin — a reader who sees the first
+  sentence should know which book is being spoken of.
+
+  **A run of all-dropped steps now ends.** `MAX_DROPPED_STREAK` (2, a new setting) bounds the hold
+  decided on 16.09: the first all-dropped step still does not advance the CRAG gate, but once this
+  many have run in a row the step counts as dry after all. A run of them says the model cannot copy,
+  not that the library has more to give, and each one costs a search and two model calls.
+  `dropped_streak` is the new state channel, written only when it says something.
+
+  `PLAN_RULES` is unchanged, so every plan recording still replays.
+
 - **The chunk IS the observation window, and a chapter read reads around the match** (#28,
   [ADR-025](adr/README.md), superseding ADR-012; [upgrading](upgrading.md)). Two numbers decided
   how much of a retrieved passage the model ever saw and nothing related them: the chunker packed
@@ -288,13 +316,15 @@
 
   **The CRAG gate keeps its meaning.** A step whose quotes were all dropped is not a dry step: the
   passages were retrieved, so the library is not silent on the question. It neither advances the
-  empty streak nor resets it, two such steps in a row do not end a run, and `reflect` is told how
+  empty streak nor resets it, and `reflect` is told how
   many quotes were dropped so the next query is chosen with that in hand — a line added to its
   context only when there is something to say, so a clean run's prompt is the prompt every earlier
   run was decided on. This was the one way #29 could have bought provenance with behaviour, and it
   is the owner's decision of 16.09 rather than a reading of the code. Its price, said plainly: a
   model that quotes badly now runs to `MAX_STEPS` where the gate used to stop it at two, which is
-  four more model calls on the questions that produce the least.
+  four more model calls on the questions that produce the least — **bounded since 17.09 by
+  `MAX_DROPPED_STREAK` (see the bullet above): the hold covers the first such step, not a run of
+  them.**
 
   `dropped_unverified` — every well-formed quote the gate refused, whichever rule refused it — with
   `dropped_by_reason` splitting it into `no_hit`, `cross_book`, `short` and `not_found`, and

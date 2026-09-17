@@ -34,13 +34,22 @@ class AgentState(TypedDict):
     steps_taken: int       # how many search steps have run so far
     empty_streak: int      # consecutive DRY steps — no evidence and nothing dropped (CRAG gate).
                            # A step whose quotes were all dropped as unverified is not dry: the
-                           # passages were there, so it neither advances the streak nor resets it
+                           # passages were there, so it neither advances the streak nor resets it —
+                           # until MAX_DROPPED_STREAK of them in a row, when it does (see below)
+    dropped_streak: int    # consecutive steps whose every quote the gate refused. At
+                           # MAX_DROPPED_STREAK the step counts as dry after all: the bound on a
+                           # model that keeps retrieving passages and never quotes them (#29)
     # the observe gate (#29), as run totals: every well-formed quote the gate refused, the
     # same number split by the rule that refused it (no_hit / cross_book / short / not_found,
     # summing to it), and the quotes re-pinned to the passage of the SAME book that holds them
     dropped_unverified: int
     dropped_by_reason: dict
     repinned: int
+    # the last DROPPED_QUOTES_SHOWN refusals in words, {quote, book, reason}: what `observe` hands
+    # back to the model on the next step, so a run that paraphrases is told which sentences were
+    # refused instead of being refused again in silence (#29). Never read by a report — the
+    # counters above are the record
+    dropped_quotes: list[dict]
     read_chapters: list[str]  # chapter reads attempted: "book|section|status", status = complete | partial | empty
     clarification: str     # the user's reply to a clarifying question
     clarify_candidates: list[str]  # book keys the clarify question offered, in the order shown

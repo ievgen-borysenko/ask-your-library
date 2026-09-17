@@ -197,13 +197,37 @@ when there is one to add. No new stop reason was needed, because a dropped step 
 by that rule; when the loop ends by another one the reason names that rule and the counters say what
 the gate spent, the honest refusal included.
 
+**Amended 2026-09-17: the hold is bounded, and a refused quote is told to the model that wrote it
+(#29).** Two of the three changes here answer the measurement above rather than revise its
+reasoning. *First*, `MAX_DROPPED_STREAK` (2) caps the hold: the paragraph above stands for the first
+all-dropped step, and `dropped_streak` counts them, but once that many have run in a row the step
+counts as dry after all and the CRAG gate may end the run. The hold was decided so that a model's
+bad quoting would not be read as the library's silence; a *run* of such steps is no longer about the
+library at all — it says the model cannot copy — and each one costs a search plus an `observe` and a
+`reflect` call, which is the cost the paragraph after the next already priced at four extra calls.
+The cap bounds that price without touching the case the hold was decided for. *Second*, the gate now
+returns its refusals in words beside the counters (`EvidenceGate.dropped`: the quote as the model
+wrote it, cut at 120 characters, the book it named, the rule that stopped it), the last six travel on
+the state as `dropped_quotes`, and the next `observe` prompt carries them in a
+`<quotes_dropped_earlier>` block — untrusted, because these sentences are the model's and not a
+book's. The gate refused 10-11 quotes per run on `mistral-small3.2:24b-ctx20k` and said so to nobody
+who could act on it: the model paraphrased, was refused, and paraphrased again. The counters are
+unchanged and still sum; this channel is never read by a report. *Third*, `SYNTHESIZE_RULES` asks the
+answer to name the book in its own text and not only in the `[book, chapter]` label, which is the
+one behavioural regression the measurement found (`c03`, `titles 0/1`, on the model whose evidence
+thinned). All three are additive, and a run that loses no quote sends the prompt it always sent.
+`PLAN_RULES` did not change, so the plan recordings still replay. **Measured: not yet** — the
+behavioural run that decides whether `c03` comes back is pending, and nothing above is claimed on
+numbers until it is appended here.
+
 **What the hold decision really costs, said as a number.** A model that quotes badly is no longer
 stopped after two steps. Where the CRAG gate used to end such a run at step 2, it now runs to
 `MAX_STEPS` (4), and every extra step is a search plus an `observe` call plus a `reflect` call — on
 the local default, roughly the difference between a question of five model calls and one of nine.
 That is the price of not shortening the search, paid exactly by the runs that produce the least, and
 it is the reason the acceptance below is about behaviour at repeat and not only about the quote
-counts.
+counts. (Bounded by the amendment of 2026-09-17 above: `MAX_DROPPED_STREAK` all-dropped steps in a
+row and the next one counts as dry, so the price is paid once and not for the whole step budget.)
 
 **A second coupling, not decided here: the coverage gate (ADR-013).** `coverage._uncovered_books` is
 the hits of the run minus the books the *evidence* names, so evidence the gate thinned makes a book
