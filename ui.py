@@ -631,6 +631,10 @@ def render_event(node_name: str, update: dict, view: RunView | None = None) -> N
     if node_name == "plan":
         if update["mode"] == "catalog":
             lines = [t("ui_plan_catalog", op=update["catalog_request"]["op"])]
+        elif update["mode"] == "refusal":
+            # The scope gate (#70): no queries were planned, so the step says
+            # what happened instead of listing an empty query.
+            lines = [t("ui_plan_refusal")]
         else:
             queries = [update["current_query"]] + update["queries"]
             lines = [t("ui_mode", mode=update["mode"]), t("ui_queries")]

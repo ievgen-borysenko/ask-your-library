@@ -40,6 +40,11 @@ mapping from a golden item to what the planner owes it is spelled out in
   queries_range   as many queries as PLAN_RULES asks for (2-4)
   mode_exact      DIAGNOSTIC, never part of the verdict: the planner's own
                   `identify` / `answer` reading against the item's type
+  gate_refusal    counted, and reported per item: the scope gate (#70) ended the
+                  run at `plan`, before any search. It fails `mode_ok` for every
+                  item whose type is not `refusal` — these files hold questions
+                  somebody expects an answer to — and a refusal carries no
+                  queries by contract, so the two query rows are absent for it
 
 Two files beside every run, the shape family of the main harness:
 `eval/results/plan-replay-<ts>.md` and `plan-replay-<ts>.json`.
@@ -124,10 +129,25 @@ QUERIES_MIN, QUERIES_MAX = 2, 4
 # same after a clarify settles a book. It is reported as `mode_exact`, beside
 # the verdict and never inside it, because a change that moves it is worth
 # reading about.
+#
+#   the scope gate (#70)  -> mode "refusal": `plan` ended the run before any
+#                           search, because the planner marked the request as one
+#                           the library cannot answer. That is a THIRD route, and
+#                           the golden set pins it hard from one side: every item
+#                           in these files is a question somebody expects an
+#                           answer to, so a gate refusal is a correct route only
+#                           for an item whose type is `refusal` — where the
+#                           expected outcome IS a refusal — and a wrong one
+#                           everywhere else, however sensible the reply looked.
+#                           Counted on its own row (`gate_refusal`), because
+#                           "the planner refused 3 of 42" is the number a prompt
+#                           change to the scope rule has to be read against.
 MODE_BY_TYPE = {"identify": "identify", "answer": "answer", "aggregation": "answer",
                 "refusal": "answer", "catalog": "catalog"}
 # the rows that make up the per-attempt verdict, in report order
 PLAN_SCORES = ("mode_ok", "op_ok", "book_filter_ok", "fallback_ok", "queries_ok", "queries_range")
+# every row the report and the sidecar count, verdict rows plus the diagnostics
+REPORTED_ROWS = (*PLAN_SCORES, "mode_exact", "gate_refusal")
 
 
 # --- the catalogue plan() resolves names against ------------------------------
@@ -195,12 +215,18 @@ def score_plan(item: dict, update: dict, route: str) -> dict:
     two, like `score()` next door). See the mapping above for every rule."""
     request = update.get("catalog_request") or {}
     took_catalog = update.get("mode") == "catalog" and bool(request) and route == "catalog"
+    # The scope gate (#70). `mode: "refusal"` means plan ended the run: no query
+    # was produced and no search will happen, so this is a route of its own and
+    # not a variant of the research loop — which is what `not took_catalog`
+    # would otherwise have scored it as, green, for a run that never searched.
+    gate_refusal = update.get("mode") == "refusal"
     kind = item["type"]
     out = {"mode": update.get("mode") or "", "route": route,
            "op": request.get("op", ""), "book_filter": update.get("book_filter") or "",
            "book_unresolved": update.get("book_unresolved") or "",
            "catalog_fallback": update.get("catalog_fallback") or "",
            "plan_fallback": bool(update.get("plan_fallback")),
+           "gate_refusal": gate_refusal,
            "mode_exact": update.get("mode") == MODE_BY_TYPE[kind]}
     if kind == "catalog":
         out["mode_ok"] = took_catalog
@@ -212,15 +238,24 @@ def score_plan(item: dict, update: dict, route: str) -> dict:
             # the research controls: routed there by the planner's own reading,
             # not rescued by the catalogue gate (the `research` branch of score())
             out["mode_ok"] = out["mode_ok"] and not update.get("catalog_fallback")
+    if gate_refusal and kind != "refusal":
+        # A question the set expects an answer to, refused before it was read:
+        # the route is wrong whatever else the plan got right. For a `refusal`
+        # item the expected outcome IS a refusal, so the gate reaching it early
+        # is left to the row above rather than failed here.
+        out["mode_ok"] = False
     out["fallback_ok"] = not out["plan_fallback"]
     # A fallback made NO routing decision: the planner produced nothing usable
     # and code searched the raw question. "not the catalogue path" is true of it
     # only because there was no path to take, and counting that as a correct
     # route would mark every failed planner green on the row that matters most.
     out["mode_ok"] = out["mode_ok"] and out["fallback_ok"]
-    if not took_catalog:
-        # A catalogue decision carries no queries by contract, so these two rows
-        # do not exist for it — an absent row is not a failed one.
+    if not took_catalog and not gate_refusal:
+        # A catalogue decision carries no queries by contract, and neither does
+        # a gate refusal — the whole point of it is that nothing is searched —
+        # so these two rows do not exist for either. An absent row is not a
+        # failed one, and counting "0 queries" against a refusal would fail it
+        # twice for the one decision `mode_ok` already judges.
         queries = queries_of(update)
         out["queries"] = len(queries)
         out["queries_ok"] = bool(queries) and all(q.strip() for q in queries)
@@ -270,6 +305,11 @@ def render_row(record: dict) -> str:
     """One replayed attempt as the report's heading line."""
     s = record["score"]
     bits = [f"mode {s['mode'] or '-'} -> {s['route']}"]
+    if s.get("gate_refusal"):
+        # Said in words, not left to be inferred from `mode refusal -> synthesize`:
+        # this is the one route on which nothing was searched at all.
+        bits.append("REFUSED AT THE SCOPE GATE (out of scope: no query, no search)"
+                    + ("" if s.get("mode_ok") else " — this item's type expects an answer"))
     if s.get("op"):
         bits.append(f"op {s['op']}" + ("" if s.get("op_ok", True) else " NOT the expected op"))
     if "queries" in s:
@@ -357,10 +397,12 @@ def render_summary(out, records: list, missing: list) -> str:
                      f"({', '.join(sorted(set(drifted)))}): the request plan() builds now is not "
                      "the one that was recorded, so these replies answer a payload this tree no "
                      "longer sends. Not part of PASS, and not a number to publish.")
-    for row in (*PLAN_SCORES, "mode_exact"):
+    for row in REPORTED_ROWS:
         measured = [r for r in records if row in r["score"]]
         if measured:
-            note = " (diagnostic, not part of PASS)" if row == "mode_exact" else ""
+            note = (" (diagnostic, not part of PASS)" if row == "mode_exact" else
+                    " (attempts the scope gate ended before any search; a correct route only "
+                    "for a `refusal` item)" if row == "gate_refusal" else "")
             lines.append(f"- {row} {sum(r['score'][row] for r in measured)}/{len(measured)}{note}")
     lines.append("- what this run did NOT measure: the planner's prompt, retrieval, the answer, "
                  "quote provenance, cost")
@@ -398,7 +440,7 @@ def write_sidecar(path: Path, report_path: Path, facts: dict, recording, records
                    "attempts": len(records),
                    **{row: {"ok": sum(r["score"][row] for r in records if row in r["score"]),
                             "of": sum(1 for r in records if row in r["score"])}
-                      for row in (*PLAN_SCORES, "mode_exact")}},
+                      for row in REPORTED_ROWS}},
         "attempts": records,
     }
     scratch = path.with_suffix(".json.tmp")

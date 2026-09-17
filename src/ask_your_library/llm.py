@@ -537,3 +537,22 @@ def str_field(payload: dict, key: str, choices: tuple[str, ...] | None = None) -
     if choices is not None and value not in choices:
         return None
     return value
+
+
+# The strings a model writes when the schema asked for a boolean. Small local
+# models quote their booleans often enough that reading only `true` would make
+# a flag they DID set look unset — and the one flag this helper serves (the
+# planner's `out_of_scope`) decides whether a request is refused, so a missed
+# "true" is a request answered that should not have been.
+TRUE_STRINGS = ("true", "yes", "1")
+
+
+def bool_field(payload: dict, key: str) -> bool:
+    """The boolean half of `str_field`: True when `key` is JSON `true` or one
+    of TRUE_STRINGS written as a string, False for everything else — a missing
+    key, `false`, a number, a list, prose. Never raises: an off-schema value is
+    "absent", which for a flag means "not set"."""
+    value = payload.get(key)
+    if isinstance(value, bool):
+        return value
+    return isinstance(value, str) and value.strip().lower() in TRUE_STRINGS

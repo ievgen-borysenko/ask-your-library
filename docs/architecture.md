@@ -245,7 +245,7 @@ src/ask_your_library/  agent package: graph, nodes, model client (llm.py), promp
 scripts/               ingest_demo_corpus.py - staged, cached corpus build
 corpus/                manifest.yaml (checksums), book cards, canaries, audio transcripts,
                        toc/ (committed chapter titles; the card-grounding test uses them)
-eval/                  retrieval eval, agent eval, injection canary, golden sets, report summarizer
+eval/                  retrieval eval, agent eval, injection and scope canaries, golden sets, report summarizer
 tests/                 unit tests and the golden-set / manifest CI guard
 docs/                  backlog.md (known gaps, v0.2), CHANGELOG.md, adr/ (decision records),
                        eval-results/, examples/

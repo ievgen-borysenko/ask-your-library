@@ -36,6 +36,19 @@ _T = {
         "en": "I searched both the book cards and the transcripts, but found "
               "no evidence for this question in the library. Honest answer: I don't know.",
     },
+    # The scope refusal (#70): the request asked for something the library
+    # cannot supply, so no search ran at all. It must NOT read like the refusal
+    # above — that one says "I searched and found nothing", which would be a
+    # false account of a run with no search step — and it must name the library
+    # as the reason, which is the whole claim being measured.
+    "out_of_scope_answer": {
+        "ua": "Це пошук по твоїй власній бібліотеці книжок, а не універсальний асистент: "
+              "я відповідаю лише з того, що кажуть книжки на полиці, і не можу відповісти "
+              "на прохання, якого бібліотека не може виконати. Запитай про книжку з полиці.",
+        "en": "This is a search over your own book library, not a general assistant: I answer "
+              "only from what the books on your shelf say, and I cannot answer a request the "
+              "library cannot supply. Ask me about a book on your shelf instead.",
+    },
     "verif_no_evidence": {
         "ua": "доказів немає — відповідь і є чесною відмовою",
         "en": "no evidence — the answer itself is an honest refusal",
@@ -134,6 +147,18 @@ _T = {
     "stop_call_timeout": {
         "ua": "виклик моделі не вклався в LLM_TIMEOUT_S ({s} с): відповідаю з того, що вже знайдено",
         "en": "a model call exceeded LLM_TIMEOUT_S ({s} s): answering from what was found",
+    },
+    # No search ran: the planner read the request as one the library cannot
+    # answer at all, and code ended the run at `plan` (#70). NOT "not about the
+    # books" — a poem in the style of Dracula and the date Dracula was published
+    # are both about a book on the shelf and both out of scope. What they have in
+    # common is the one thing this line may claim, and it is the same thing the
+    # refusal itself says: the library cannot supply what was asked for.
+    "stop_out_of_scope": {
+        "ua": "поза межами бібліотеки: запит просить того, чого бібліотека не може дати — "
+              "відмова без пошуку",
+        "en": "outside the library: the request asks for something the library cannot supply — "
+              "refused without a search",
     },
     "stop_catalog": {
         "ua": "каталог: відповідь з таблиць індексу, без пошуку",
@@ -338,6 +363,8 @@ _T = {
                 "en": "[plan] mode={mode}, queries: {queries}"},
     "ev_plan_catalog": {"ua": "[plan] mode=catalog, операція: {op}",
                         "en": "[plan] mode=catalog, operation: {op}"},
+    "ev_plan_refusal": {"ua": "[plan] поза межами бібліотеки: відмова без пошуку",
+                        "en": "[plan] outside the library: refusing without a search"},
     "ev_catalog_fallback_invalid_op": {"ua": "[plan] планер назвав операцію каталогу, якої нема: шукаю в текстах",
                                        "en": "[plan] the planner named a catalogue operation that does not exist: searching the texts instead"},
     "ev_catalog_fallback_after_clarify": {"ua": "[plan] запит до каталогу після уточнення не виконується: продовжую пошук у вибраній книжці",
@@ -431,6 +458,8 @@ _T = {
     # ---- web ui: agent-step trace and metrics footer
     "ui_mode": {"ua": "режим: {mode}", "en": "mode: {mode}"},
     "ui_plan_catalog": {"ua": "режим: catalog, операція: {op}", "en": "mode: catalog, operation: {op}"},
+    "ui_plan_refusal": {"ua": "поза межами бібліотеки: відмова без пошуку",
+                        "en": "outside the library: refusing without a search"},
     "ui_catalog_fallback_invalid_op": {"ua": "планер назвав операцію каталогу, якої нема: шукаю в текстах",
                                        "en": "the planner named a catalogue operation that does not exist: searching the texts instead"},
     "ui_catalog_fallback_after_clarify": {"ua": "запит до каталогу після уточнення не виконується: продовжую пошук у вибраній книжці",
