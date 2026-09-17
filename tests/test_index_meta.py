@@ -131,8 +131,9 @@ def test_a_fingerprint_table_written_before_the_two_fields_is_widened_not_narrow
 
 
 def test_readers_tolerate_a_stamp_without_the_new_fields(tmp_path):
-    """No refusal in this release: the policy for a chunker mismatch is warn on
-    read, refuse on write (#27), and neither is implemented yet."""
+    """A five-column fingerprint row — every index built before ADR-024 — is
+    read without a word: the embedder check passes on it, and the chunker
+    policy has nothing to compare (see the `absent` tests below)."""
     import lancedb
 
     db = lancedb.connect(tmp_path / "db")
@@ -318,3 +319,103 @@ def test_a_failure_while_staging_the_widening_leaves_the_live_table_intact(tmp_p
                                 chunker="sentence-pack-1")
     assert index_meta.read_index_meta(db, "transcripts_ollama")["chunker"] == "sentence-pack-1"
     assert index_meta.read_index_meta(db, "cards_ollama")["created"] == "2026-01-01T00:00:00"
+
+
+# --- the mismatch policy: warn on read, refuse on write (#27) ----------------
+#
+# Four combinations are exercised — read x write against a chunker and against
+# a row schema — plus the two absences, because "nothing recorded it" must
+# behave differently from "it disagrees" or the first upgrade after this warns
+# every reader of every index built before it.
+
+def _stamped(tmp_path, chunker="sentence-pack-1", schema_version=None, dims=1024):
+    """An index with one transcripts table and a fingerprint that says what the
+    test needs it to say."""
+    import lancedb
+
+    db = lancedb.connect(tmp_path / "db")
+    _table_with_ledger_columns(db, "transcripts_ollama", dims=dims)
+    index_meta.write_index_meta(db, "transcripts_ollama", "ollama", "bge-m3", dims,
+                                chunker=chunker, schema_version=schema_version)
+    return db
+
+
+def test_a_foreign_chunker_warns_on_read_and_the_index_still_opens(tmp_path, caplog):
+    """The asymmetry this whole policy is: a chunker mismatch is a degradation,
+    not a broken index, and refusing to READ it would throw away a build that
+    takes about half an hour — which is the thing an upgrade must never do."""
+    db = _stamped(tmp_path, chunker="sentence-pack-2")
+    with caplog.at_level("WARNING"):
+        line = index_meta.warn_version_mismatch(db, "transcripts_ollama")
+    assert line and "sentence-pack-2" in line and "sentence-pack-1" in line
+    # the remedy names the flag that actually gets out of this: a plain
+    # `ayl-add <folder>` would hit the same refusal again
+    assert "--rebuild" in line and "--backup" in line
+    assert any("sentence-pack-2" in record.message for record in caplog.records)
+    # and the embedder check, which IS fatal on read, still says nothing
+    assert index_meta.check_index(db, "transcripts_ollama", "bge-m3", 1024) is None
+
+
+def test_a_foreign_chunker_refuses_a_write(tmp_path):
+    db = _stamped(tmp_path, chunker="sentence-pack-2")
+    refusal = index_meta.refuse_version_mismatch(db, "transcripts_ollama")
+    assert refusal and refusal.startswith("refusing to write transcripts_ollama")
+    assert "sentence-pack-2" in refusal and "sentence-pack-1" in refusal
+    # the reason a write is treated differently from a read, in the text itself
+    assert "two chunkers" in refusal and "--rebuild" in refusal and "--backup" in refusal
+
+
+def test_an_index_written_by_a_newer_release_warns_on_read(tmp_path):
+    db = _stamped(tmp_path, schema_version=index_meta.SCHEMA_VERSION + 1)
+    line = index_meta.warn_version_mismatch(db, "transcripts_ollama")
+    assert line and str(index_meta.SCHEMA_VERSION + 1) in line
+    assert str(index_meta.SCHEMA_VERSION) in line and "newer" in line
+
+
+def test_an_index_written_by_a_newer_release_refuses_a_write(tmp_path):
+    db = _stamped(tmp_path, schema_version=index_meta.SCHEMA_VERSION + 1)
+    refusal = index_meta.refuse_version_mismatch(db, "transcripts_ollama")
+    assert refusal and str(index_meta.SCHEMA_VERSION + 1) in refusal
+    assert refusal.startswith("refusing to write transcripts_ollama")
+
+
+def test_an_absent_chunker_stamp_is_neither_warned_about_nor_refused(tmp_path):
+    """The state of every index built before the field existed, and of every
+    table `--stage stamp-meta` fingerprints without `--chunker`. Inventing a
+    disagreement out of an absence is what would make an upgrade noisy for
+    everyone who has one of these."""
+    db = _stamped(tmp_path, chunker="")
+    assert index_meta.warn_version_mismatch(db, "transcripts_ollama") is None
+    assert index_meta.refuse_version_mismatch(db, "transcripts_ollama") is None
+
+
+def test_the_ledgers_legacy_marker_is_an_absence_too(tmp_path):
+    """`legacy` is what a backfill writes: "indexed before anything recorded
+    which chunker did it". Comparing it to a version would turn every
+    pre-ledger index into a permanent mismatch."""
+    db = _stamped(tmp_path, chunker=index_meta.LEGACY_CHUNKER)
+    assert index_meta.warn_version_mismatch(db, "transcripts_ollama") is None
+    assert index_meta.refuse_version_mismatch(db, "transcripts_ollama") is None
+
+
+def test_a_table_with_no_fingerprint_at_all_is_not_a_mismatch(tmp_path):
+    import lancedb
+
+    db = lancedb.connect(tmp_path / "db")
+    _table_with_ledger_columns(db, "transcripts_ollama")
+    assert index_meta.version_mismatch(db, "transcripts_ollama") is None
+
+
+def test_an_older_row_schema_is_the_upgrade_path_and_not_a_mismatch(tmp_path):
+    """#67 added `book_id` and `book_rev` to existing tables IN PLACE, without
+    re-embedding a row, and `ayl-add` re-stamps as it goes. Calling that a
+    mismatch would warn every reader about something the next ingest fixes —
+    and the cards table, which never gains those columns, would warn for ever."""
+    db = _stamped(tmp_path, schema_version=index_meta.SCHEMA_VERSION - 1)
+    assert index_meta.warn_version_mismatch(db, "transcripts_ollama") is None
+    assert index_meta.refuse_version_mismatch(db, "transcripts_ollama") is None
+
+
+def test_the_matching_stamp_says_nothing(tmp_path):
+    db = _stamped(tmp_path)
+    assert index_meta.version_mismatch(db, "transcripts_ollama") is None

@@ -2,6 +2,71 @@
 
 ## Unreleased
 
+- **An upgrade cannot quietly invalidate an index, and a backup survives one that can**
+  (#27, [ADR-020](adr/README.md) amended, [docs/upgrading.md](upgrading.md)). Each index table is
+  stamped with the chunker that cut its rows and the shape those rows have; from this release
+  something acts on both. A **read warns** — one line naming the stamped version, the version this
+  code writes and the way out, logged once per table and shown as a startup notice, while the index
+  goes on answering. A **write refuses**: `ayl-add` stops before it embeds or deletes anything, and
+  so does the demo corpus's `--book` upsert. The asymmetry is the decision: differently-cut text
+  still retrieves and still quotes verbatim, so refusing to *read* it would throw away half an hour
+  of building over a degradation — but one append leaves two chunkers' rows in a table with nothing
+  to tell them apart, and that cannot be undone. (The embedding model keeps its own, stricter rule:
+  fatal on read, because a query vector from one model against documents from another is not a
+  search.)
+
+  Two absences deliberately stay silent, which is most of the work: an unrecorded chunker means
+  nobody recorded it, not that it disagrees, and an *older* row schema is the upgrade this project
+  performs in place — so neither warns. `--doctor` now reads every stamp out whether or not it
+  agrees, because that is where somebody looks before upgrading, and exits non-zero on a mismatch.
+  `CHUNKER_VERSION` moved into the chunking module, which is the only thing that decides what a
+  chunk is; the ledger and both `_index_meta` writers record that one constant. Cards keep a
+  constant of their own (`CARD_CHUNKER_VERSION`) and are compared against it, because a card is cut
+  on its `## section` headings and never by the sentence packer — one constant for both would make
+  the packer's next bump refuse every card write over a change that did not touch cards.
+
+  **`ayl-add <folder> --rebuild`** is the way out, and the refusals name it: a plain re-run hits the
+  same refusal, which left deleting the index directory by hand as the only remedy and nothing said
+  so. It drops the transcripts table and indexes the folder from scratch — the one write that is
+  not a mix — keeping the `books` ledger, because re-minting the ids would turn the whole library
+  into new books. Books the ledger holds that the folder does not lose their rows with the table:
+  they go back to `requested` and are named at the end of the run. Since a rebuild discards what it
+  replaces, it requires `--backup <dir>` in the same command (taken first — a failed backup stops
+  the rebuild) or an explicit `--force`.
+
+  **The web UI's chat database got the same pair.** `ui.py` creates its tables with `CREATE TABLE
+  IF NOT EXISTS`, which by design leaves an existing table alone — so a `chat.db` from an older
+  release keeps its old columns, looks healthy, and fails on the first insert naming a column it
+  does not have, in the middle of a question. At every start the columns the schema declares are
+  now compared with the ones that are there and the difference is warned about by name, and the
+  file carries a chat-schema version of its own.
+
+  **`ayl-add --backup <dir>`** copies the LanceDB directory and the web UI's `chat.db` into a
+  timestamped directory with a `MANIFEST.json` — what was copied, the stamps, the row count per
+  table, the ledger size, the code version, a sha256 per file and one over the set. The copy is the
+  easy half; the product is the statement that it was taken when the index was whole. Both write
+  paths now hold an ingest lock beside the index directory and the backup takes the same one, so a
+  copy cannot start mid-ingest and an ingest cannot start mid-copy (a second `ayl-add` in another
+  terminal is refused, naming the command and pid that holds it). The lock is an **`flock`** held
+  by the operating system on a file **beside** the index, keyed by its resolved path — so it
+  survives the rename a restore publishes with, two spellings of one index are one lock, and there
+  is no stale state to detect and nothing to clear by hand: the kernel releases it when the holder
+  ends, however it ends. The file is never deleted, and the pid and command written in it exist
+  only so a refusal can say who is holding it. The chat database is taken through **SQLite's own
+  backup**, one consistent snapshot in one file rather than a main file copied beside somebody
+  else's write-ahead log. The index restore is staged beside the target and published by rename,
+  rolling back if the swap fails, and so is the chat database's; a **symlink inside the index** is
+  refused at backup and at restore, because a copy follows links while the digests skip them. Any staged rebuild caught half-swapped is
+  finished first, because a copy taken in that window restores to a missing table.
+  **`--restore`** re-verifies every digest before touching anything, refuses to overwrite a live
+  index without `--force`, refuses while an ingest is in flight, and **moves the index it replaces
+  aside rather than deleting it** — and it follows a symlinked `LIBRARY_DB_PATH` rather than
+  replacing the link, so the real directory is what moves and what is written. A destination inside
+  the index is refused (a copy of a directory into itself), and a failure part-way through removes
+  the half-written directory rather than leaving something shaped like a backup with no manifest.
+  `--stage stamp-meta --chunker current` lets an operator vouch for the chunker of an old index the
+  way they already vouch for its embedder.
+
 - **A book has an identity a correction survives, and an ingest ledger says what went in**
   (#26, [ADR-024](adr/README.md)). A `books` table beside the index tables carries a `book_id`
   minted once and never derived from title, author or path, with the book's source, digest,

@@ -5,6 +5,8 @@ LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books            # index a folder
 LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books --dry-run  # what it would change, no writes
 LIBRARY_DB_PATH=~/ayl-index uv run ayl-add --doctor           # ledger vs index, no writes
 LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books --prune    # also delete books whose file is gone
+LIBRARY_DB_PATH=~/ayl-index uv run ayl-add --backup ~/backups # copy the index + chat.db, verified
+LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books --rebuild --backup ~/backups  # copy, then rebuild
 LIBRARY_DB_PATH=~/ayl-index uv run ask-library "..."          # ask it
 ```
 
@@ -73,12 +75,39 @@ the run says so, because `ayl-add` never writes the cards table and a card is a 
 that usually came from the demo corpus. The catalogue then lists that key as a book with no text
 until you delete the card yourself, and `--doctor` names it as a card without a book.
 
-**Upgrading an existing index** needs nothing from you. The first run over an index built before
-the ledger backfills one row per book already in it (`chunker: legacy`, because nothing recorded
-which chunker wrote them) and adds the `book_id` column to the table by a staged copy that
-re-embeds nothing. One caveat, stated because it is invisible otherwise: a backfilled row carries
-no content digest, so the *first* author correction after such an upgrade still creates a second
-book. The re-ingest records the digest, and every correction after it renames in place.
+**Upgrading an existing index** usually needs nothing from you, and the exceptions say so out
+loud. The first run over an index built before the ledger backfills one row per book already in it
+(`chunker: legacy`, because nothing recorded which chunker wrote them) and adds the `book_id`
+column to the table by a staged copy that re-embeds nothing. One caveat, stated because it is
+invisible otherwise: a backfilled row carries no content digest, so the *first* author correction
+after such an upgrade still creates a second book. The re-ingest records the digest, and every
+correction after it renames in place.
+
+What an upgrade may NOT do is silently invalidate an index that took half an hour to build. Each
+table is stamped with the chunker and the row schema that wrote it, and a disagreement **warns on
+read and refuses on write**: the index goes on answering, and the next `ayl-add` into it stops
+before embedding or deleting anything, naming both versions and the way out. A rebuild is the way
+out, and it discards what it replaces — so take a copy first:
+
+```bash
+uv run ayl-add --backup ~/ayl-backups --db ~/ayl-index    # index + chat.db + a verified manifest
+uv run ayl-add --doctor --db ~/ayl-index                  # what this code makes of that index
+uv run ayl-add ~/books --rebuild --backup ~/ayl-backups --db ~/ayl-index   # copy, drop, re-index
+uv run ayl-add --restore ~/ayl-backups/<timestamp> --db ~/ayl-index --force
+```
+
+`--rebuild` is what a refusal names, because a plain re-run hits the same refusal: it drops the
+transcripts table and indexes the folder from scratch. The `books` ledger is kept, so every book
+keeps its minted id; books the ledger holds that this folder does not lose their rows with the
+table, go back to `requested` and are named at the end of the run. It needs `--backup <dir>` in
+the same command (taken first) or `--force`.
+
+`--backup` refuses while an ingest is running (both write paths hold an `flock` on a lock file
+beside the index directory, `.ayl-ingest-<name>.lock`) and finishes any half-swapped staged rebuild
+before it copies, which is what makes the copy a copy of a *whole* index. `--restore` verifies every
+digest before it touches anything, stages the copy beside the target and publishes it by rename, and
+moves the index it replaces aside rather than deleting it. The whole procedure, and what each kind
+of upgrade costs, is [`docs/upgrading.md`](upgrading.md).
 
 **The book key** is `Title — Author` — the string the agent cites and filters chapter reads on.
 It is taken from, in priority order:

@@ -260,6 +260,17 @@ _T = {
         "ua": "Індекс не відповідає налаштованій embedding-моделі: {detail}",
         "en": "Index does not match the configured embedding model: {detail}",
     },
+    # The chunker / row-schema half of the same check, and deliberately NOT a
+    # problem: the index answers. `detail` is one English sentence built in
+    # `index_meta` (it names table, stamped value, expected value and the
+    # commands), because a rebuild command translated into a second language is
+    # a second command to keep true.
+    "pf_version_mismatch": {
+        "ua": "Індекс побудований іншою версією коду (він працює, але результати — старі "
+              "чанки): {detail}",
+        "en": "This index was built by another version of the code (it still answers, from "
+              "the chunks it holds): {detail}",
+    },
     "pf_header": {
         "ua": "Середовище не готове:",
         "en": "The environment is not ready:",

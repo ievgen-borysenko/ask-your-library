@@ -35,15 +35,18 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..bookkey import author_of, book_key, title_of
+# The chunker version is the chunking module's own name for what it produces,
+# re-exported here because a ledger row records it and half the tree imports it
+# from the ledger. Defined in one place only: see `chunking.CHUNKER_VERSION`.
+from .chunking import CHUNKER_VERSION  # noqa: F401
 
 log = logging.getLogger(__name__)
 
 TABLE = "books"
 
-# The chunker version stamped on a book indexed by the current code. Bump it
-# when the chunking changes what a chunk is (#28); `legacy` is what a backfill
-# writes, meaning "indexed before anything recorded which chunker did it".
-CHUNKER_VERSION = "sentence-pack-1"
+# What a backfill writes: "indexed before anything recorded which chunker did
+# it". Not a version — it is the ledger's word for the absence of one, and
+# nothing compares it to `CHUNKER_VERSION` expecting a match.
 LEGACY_CHUNKER = "legacy"
 
 REQUESTED, INDEXED, FAILED = "requested", "indexed", "failed"

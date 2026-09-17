@@ -13,7 +13,7 @@ the hosted lines ship commented out with what they cost written beside them.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `LIBRARY_DB_PATH` | `data/lancedb` | LanceDB with `cards_<backend>` / `transcripts_<backend>` |
+| `LIBRARY_DB_PATH` | `data/lancedb` | LanceDB with `cards_<backend>` / `transcripts_<backend>`, the `books` ledger and the `_index_meta` stamps. It is a directory, so a backup of it is a file copy — `ayl-add --backup <dir>` is the one that says when a copy is safe ([upgrading](upgrading.md)). While an ingest runs it holds an `flock` on `.ayl-ingest-<name>.lock` BESIDE this directory (`data/.ayl-ingest-lancedb.lock` for the default); a second `ayl-add`, a backup or a restore is refused until it finishes. The lock is the operating system's, so it is released the moment the holder ends, however it ends — there is nothing to clear by hand |
 | `EMBED_BACKEND` | `ollama` | `ollama` (local bge-m3) or `openrouter`; also selects the table suffix |
 | `OLLAMA_URL` | `http://localhost:11434` | Local Ollama endpoint |
 | `OLLAMA_EMBED_MODEL` | `bge-m3` | Embedding model, 1024 dims, multilingual |
@@ -43,7 +43,7 @@ the hosted lines ship commented out with what they cost written beside them.
 | `LANGCHAIN_TRACING_V2` / `LANGSMITH_TRACING_V2` | (unset) | Set both to `false` to keep tracing off whatever the environment inherited: `LANGSMITH_TRACING_V2` is read first, then `LANGCHAIN_TRACING_V2`, then the legacy `*_TRACING` flags |
 | `CHAINLIT_USERNAME` / `CHAINLIT_PASSWORD` | `admin` / `change-me` | Web UI login |
 | `CHAINLIT_AUTH_SECRET` | generated | Signs login tokens; persisted to `.chainlit/auth-secret` |
-| `AYL_CHAINLIT_DIR` | `.chainlit/` next to `ui.py` | Where the UI writes its chat db and auth secret; tests and the canary point it at a temp dir |
+| `AYL_CHAINLIT_DIR` | `.chainlit/` next to `ui.py` | Where the UI writes its chat db and auth secret; tests and the canary point it at a temp dir. `ayl-add --backup` / `--restore` read the same variable to find `chat.db` (and `--chat-db <path>` overrides it) |
 | `AYL_ALLOW_DEFAULT_LOGIN` | (unset) | `1` allows the placeholder password (local demo only) |
 | `AYL_ALLOW_START_WITHOUT_KEY` | (unset) | `1` lets `ui.py` be imported without an OpenRouter key (tests, the injection canary). The gate it bypasses only exists when a key is needed at all, so it does nothing in the default local configuration; with a hosted answering model or hosted embeddings the server otherwise refuses to start, before anyone can log in |
 | `AYL_CLARIFY_TIMEOUT_S` | `300` | How long the web UI's ask-back waits for the reader before the agent goes on without an answer. The default is five minutes, for a person reading a numbered list; `tests/ui` shortens it so a test can watch one expire. A value that is not a whole number above 0 is refused at startup rather than rounded |
@@ -53,6 +53,19 @@ the hosted lines ship commented out with what they cost written beside them.
 
 `ask-library --help` and `ask-library --version` need none of it: they print and exit before
 the preflight, so they work in a fresh clone with no key and no index.
+
+Changing `EMBED_BACKEND` or `OLLAMA_EMBED_MODEL` after an index is built points the agent at
+vectors another model produced: the index is stamped with the model that made it, and the CLI and
+the web UI **refuse to start** against a mismatch rather than answering from a search that means
+nothing. Changing the code's chunker does not refuse a read — it warns, once per table, and shows
+the same line as a startup notice, because differently-cut text still retrieves; the refusal there
+is on the next `ayl-add`. Either way the remedy is a rebuild — `ayl-add <folder> --rebuild
+--backup <dir>`, which takes the copy first — and a rebuild discards what it replaces:
+[`docs/upgrading.md`](upgrading.md) is what each case costs.
+
+The web UI's `chat.db` is checked the same way and never migrated: `CREATE TABLE IF NOT EXISTS`
+leaves an older file's columns alone, so at every start the columns the schema declares are
+compared with the ones that are there and the difference is warned about by name.
 
 ### Exit codes
 

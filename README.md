@@ -203,6 +203,7 @@ themselves are in [`docs/eval-results/`](docs/eval-results/).
 | [`docs/quick-start.md`](docs/quick-start.md) | Install on any system, the demo corpus, the CLI, the web UI, the eval commands |
 | [`docs/configuration.md`](docs/configuration.md) | Every environment variable, and the fully local, no-account setup |
 | [`docs/add-your-own-books.md`](docs/add-your-own-books.md) | `ayl-add`: book keys, chapters, what is skipped, per-book re-indexing and the ledger |
+| [`docs/upgrading.md`](docs/upgrading.md) | What an upgrade may change, the mismatch policy, `ayl-add --backup` / `--restore` and when a copy is safe |
 | [`docs/evaluation.md`](docs/evaluation.md) | The two harnesses, three golden sets, the measured runs and the ablation |
 | [`docs/privacy-and-threat-model.md`](docs/privacy-and-threat-model.md) | Data flow, threat model, the four injection layers and their limits |
 

@@ -189,8 +189,10 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   neither read nor rewritten. The demo corpus keeps its staged whole-table rebuild (and its
   `--book` upsert): it builds a pinned corpus from scratch and has no run that adds one book. What
   still costs a full rebuild: a change of embedding model, and a change of chunker (#28) — both
-  invalidate every vector or every chunk id in the table. The BM25 index is rebuilt whole after
-  every run, measured at 0.8 s for the demo corpus's 7,285 rows.
+  invalidate every vector or every chunk id in the table. Neither happens silently: the index is
+  stamped with both, a reader warns and a write refuses (see the entry below and
+  [upgrading](upgrading.md)), and `ayl-add --backup` is what survives the rebuild. The BM25 index
+  is rebuilt whole after every run, measured at 0.8 s for the demo corpus's 7,285 rows.
 - **The delete and the append are not one transaction.** A crash between them leaves one book out
   of the index; its ledger row still says `requested`, and the recovery pass at the start of the
   next `ayl-add` finds it, re-indexes it when the run covers it and reports it by name when it
@@ -257,12 +259,47 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   questions the catalogue cannot answer — what was requested, and what failed — are what
   `ayl-add --doctor` answers, by reconciling the ledger against the index tables and reporting
   the drift. A stale ledger is itself a failure mode now; that check is how it becomes visible.
-- **The chunker and the schema version are recorded but not enforced.** `_index_meta` now carries
+- **The chunker and the schema version are enforced unevenly, on purpose.** `_index_meta` carries
   `chunker` and `schema_version` beside the embedding fingerprint, written by both ingest paths.
   The version is read from the table's own columns rather than assumed, so a table an ingest has
   not yet migrated, and the cards table — which never gains the ledger columns — are stamped for
-  what they actually are.
-  Nothing refuses on them yet: a table stamped with another chunker is read without a word. The
-  policy decided for that — warn on read, refuse on write, unlike the embedder's fatal-on-read
-  rule — is #27, and until it lands a mixed-chunker index is detectable by reading the stamp and
-  by nothing else.
+  what they actually are. A disagreeing chunker (or a row schema NEWER than this code's) **warns
+  on read and refuses on write**: the index goes on answering from the chunks it holds, and the
+  next `ayl-add` into it stops before embedding or deleting anything. That is not the embedder's
+  rule, which is fatal on read, and the difference is deliberate — a rebuild costs about half an
+  hour and a read of differently-cut text is a degradation, not a broken index, while one
+  mixed-chunker write cannot be undone at all. See [upgrading](upgrading.md).
+  **What it cannot detect:** an index already mixed before this shipped, because nothing recorded
+  which chunker wrote those rows; an absent chunker stamp is treated as the absence it is, read
+  and written without a word. And only the stamp is compared — nothing measures the rows, so an
+  index whose stamp was asserted by hand (`--stage stamp-meta --chunker …`) is trusted exactly as
+  far as the person who asserted it. The way out is `ayl-add <folder> --rebuild`, which drops the
+  table and re-indexes — it keeps the ledger's minted ids, but the books the ledger holds that
+  this folder does not lose their rows with the table and are reported as `requested`, to be
+  re-indexed from their own folders.
+- **The web UI's chat database is checked, not migrated.** `ui.py` creates its tables with
+  `CREATE TABLE IF NOT EXISTS`, so a `chat.db` written by an older release keeps its old columns
+  for ever. At startup the columns the schema declares are compared with the ones that are there
+  and the difference is **warned** about, naming the missing columns; the file carries a
+  chat-schema version of its own. Nothing alters the table: there is no `ALTER TABLE` migration
+  and none is planned, because the failure is rare, the schema is Chainlit's rather than this
+  project's, and the remedy (move the file aside, let it be recreated) destroys the conversation
+  history and has to be the reader's decision. Until it is taken, the UI works for everything that
+  does not touch the missing column.
+- **A backup is a file copy with a statement attached, and the statement has limits.**
+  `ayl-add --backup <dir>` copies the LanceDB directory and the web UI's `chat.db` with a manifest
+  (the stamps, the row counts, a sha256 per file), after taking the ingest lock and finishing any
+  interrupted staged rebuild — those two are what make the copy a copy of a whole index rather
+  than of one caught mid-write. The lock is an **`flock`** on a file beside the index directory, so
+  a crash never leaves it held — the kernel releases it with the process — but it is still
+  **advisory and single-machine**: only this project's own write paths take it, nothing stops `cp`
+  or any other program from writing while it is held, and on a network share `flock` means whatever
+  that share implements (a refusal naming another machine says so). Restoring stages its copy
+  beside the target and publishes by rename, and **never deletes** the index it replaces — it is
+  moved aside and named — so a restore costs the disk of both until you remove one. `.scratch/`
+  and `.env` are not copied at all, and the chat database is snapshotted through SQLite rather
+  than copied as files, so a `chat.db` SQLite cannot open is reported and skipped rather than
+  copied as bytes. A **symlink inside the index** is refused outright rather than copied or
+  followed: a copy follows links while the digests skip them, so the manifest would describe a set
+  of files that is not the set of files in the directory. LanceDB writes none, so this only ever
+  refuses something somebody put there.

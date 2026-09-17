@@ -1,9 +1,25 @@
-"""Embedding-index fingerprint: which model built a table, and with what dims.
+"""Embedding-index fingerprint: which model built a table, with what dims,
+which chunker, and in which row shape.
 
 Tables are named per backend (cards_ollama, ...), but the model behind a
 backend is configurable. Reusing an index built by another model fails late
 (different dims) or, worse, silently degrades retrieval (same dims). Ingest
 stamps every table it builds; readers check the stamp before searching.
+
+Three things are stamped and they are NOT enforced alike (ADR-020, #27):
+
+* the **embedder** is fatal on read. Another model of the same width degrades
+  retrieval with nothing to see, and a query vector from one model against
+  document vectors from another is not a search at all.
+* the **chunker** and the **row schema** warn on read and refuse on write.
+  Chunks made by another chunker still answer — the text is the same text, cut
+  differently — so refusing to read would throw away an index that took about
+  half an hour to build, over a degradation. A WRITE is the opposite: mixing
+  two chunkers in one table cannot be undone except by rebuilding the whole of
+  it, and nothing afterwards can tell which rows came from which.
+
+An ABSENT chunker stamp is neither: it is every index built before this field
+existed, it is logged at info level, and it is read and written without a word.
 """
 import logging
 import time
@@ -11,6 +27,8 @@ import time
 # The staged publish this module needs is the ingest's, and `ingest.publish`
 # imports nothing from the package, so this direction costs no cycle. Only
 # `write_index_meta` uses the recovery half: see the note in `read_index_meta`.
+from .ingest.chunking import CARD_CHUNKER_VERSION, CHUNKER_VERSION
+from .ingest.ledger import LEGACY_CHUNKER
 from .ingest.publish import (LEDGER_COLUMNS, STAGING_SUFFIX, rebuild_table,
                              recover_staging)
 
@@ -42,10 +60,9 @@ def write_index_meta(db, table: str, backend: str, model: str, dims: int,
 
     `chunker` and `schema_version` are written here from 2026-09-17 (ADR-024).
     Readers must tolerate their absence — every index built before this has no
-    such fields — and nothing refuses on them yet: the policy decided for that
-    is warn on read, refuse on write (ADR-020's note, #27), and refusing before
-    the warning exists would invalidate a half-hour build over a field that has
-    never once been written.
+    such fields — and what acts on their PRESENCE is the policy above:
+    `warn_version_mismatch` on every read, `refuse_version_mismatch` on every
+    write that would append to a table somebody else's chunker built.
 
     `schema_version` is DERIVED from the table being stamped unless the caller
     names one. A version is a claim about the rows, and a stamp that claims
@@ -183,3 +200,125 @@ def check_index(db, table_name: str, model: str, dims: int) -> str | None:
         return (f"{table_name} was built with {meta['model']!r}, configured embedder is "
                 f"{model!r} — rebuild the index or set the matching embedding model")
     return None
+
+
+# --- the chunker and the row schema: warn on read, refuse on write -----------
+
+# The one remedy sentence, so the warning and the refusal cannot drift into
+# recommending two different things.
+#
+# It names `--rebuild`, and it has to: a plain `ayl-add <folder>` over a
+# mismatched index hits this very refusal again, which left the only way out as
+# deleting the index directory by hand — a remedy no message mentioned and
+# nobody should have to guess. `--rebuild` drops the table and re-indexes,
+# which is the one write that is not a mix; `--backup` is in the same command
+# because a rebuild discards every row it replaces.
+REBUILD_HINT = ("The way out is a rebuild, which replaces every row: "
+                "`uv run ayl-add <folder> --rebuild --backup <dir>` takes a copy first, drops the "
+                "table and re-indexes (`--rebuild --force` skips the copy). For the demo corpus, "
+                "`uv run scripts/ingest_demo_corpus.py --stage ingest` is already a full rebuild.")
+
+# One table kind, one chunking rule. Cards are cut on their "## section"
+# headings and transcripts by the sentence packer, so the packer's version says
+# nothing about a cards table — stamping it there would make #28's bump refuse
+# every card write for a reason that is not true of cards. The name prefix is
+# what decides, exactly as `doctor` and the ingest paths already read it.
+CARDS_PREFIX = "cards"
+
+
+def expected_chunker(table: str) -> str:
+    """The chunker version THIS code would stamp on `table`."""
+    return CARD_CHUNKER_VERSION if table.startswith(CARDS_PREFIX) else CHUNKER_VERSION
+
+
+# Tables already warned about in this process, keyed by index and by the exact
+# disagreement. The dedupe lives here rather than in each caller, so the reader,
+# the preflight and anything added later cannot each warn once about the same
+# thing — three lines for one fact is how a real warning stops being read.
+_warned: set[tuple[str, str, str]] = set()
+
+
+def version_mismatch(db, table: str, chunker: str | None = None,
+                     schema_version: int = SCHEMA_VERSION) -> str | None:
+    """What the stamp on `table` claims against what this code does, as one
+    sentence naming BOTH values — or None when they agree, or when there is
+    nothing to compare.
+
+    Two cases are a mismatch, and each is the direction in which the running
+    code cannot produce what the table already holds:
+
+    **A different chunker.** The rows were cut by a rule this code no longer
+    applies, so a re-ingest of one book would put differently-shaped text in
+    beside them.
+
+    **A NEWER row schema.** The table was stamped by an ingest that writes a
+    shape this code does not know, and reading it cannot be assumed safe.
+
+    An OLDER stamped schema is deliberately not a mismatch. That is the upgrade
+    this project actually performs — #67 added `book_id` and `book_rev` to
+    existing tables in place, without re-embedding a row — and `ayl-add`
+    migrates and re-stamps such a table on its next run. Calling it a mismatch
+    would warn every reader of every index built before the last release, about
+    something the next ingest silently fixes.
+
+    An ABSENT chunker (empty, or no fingerprint row at all) is not a mismatch
+    either: nothing recorded which chunker built those rows, and inventing a
+    disagreement out of an absence is exactly what the ledger's `legacy` marker
+    exists to avoid. `legacy` itself is that absence written down, and is
+    treated the same way.
+
+    `chunker` defaults to the version that belongs to THIS table's kind
+    (`expected_chunker`): a cards table is compared with the card chunker and a
+    transcripts table with the sentence packer, because they are two rules and
+    a bump to one is not a claim about the other."""
+    chunker = chunker or expected_chunker(table)
+    meta = read_index_meta(db, table)
+    if meta is None:
+        return None
+    stamped_chunker = (meta.get("chunker") or "").strip()
+    if stamped_chunker and stamped_chunker not in (LEGACY_CHUNKER, chunker):
+        return (f"{table} was built by chunker {stamped_chunker!r}, this code chunks as "
+                f"{chunker!r}")
+    stamped_schema = int(meta.get("schema_version", 0) or 0)
+    if stamped_schema > schema_version:
+        return (f"{table} is stamped row-schema version {stamped_schema}, this code reads "
+                f"version {schema_version} — the index was written by a newer ask-your-library")
+    return None
+
+
+def warn_version_mismatch(db, table: str, chunker: str | None = None,
+                          schema_version: int = SCHEMA_VERSION) -> str | None:
+    """The read-side half of the policy: one warning line, or None.
+
+    Logged here so every reader warns identically, and ONCE per process per
+    index per disagreement — the dedupe is this module's, not each caller's, so
+    `library.open_table` and the preflight cannot both log the same sentence.
+    The line is still RETURNED every time: a caller with a user in front of it
+    (preflight's notices) must show it at every start, and only the log is
+    deduplicated. Never raises, never refuses: the index answers, and its
+    answers come from the chunks it holds."""
+    detail = version_mismatch(db, table, chunker, schema_version)
+    if detail is None:
+        return None
+    line = f"{detail}. The index still answers, from the chunks it already holds. {REBUILD_HINT}"
+    key = (str(getattr(db, "uri", "") or ""), table, detail)
+    if key not in _warned:
+        _warned.add(key)
+        log.warning("%s", line)
+    return line
+
+
+def refuse_version_mismatch(db, table: str, chunker: str | None = None,
+                            schema_version: int = SCHEMA_VERSION) -> str | None:
+    """The write-side half: the refusal text, or None when the write may go on.
+
+    Returned rather than raised, because the two write paths raise different
+    things (`IngestError` in `ayl-add`, `sys.exit` in the demo script) and the
+    words have to be the same in both."""
+    detail = version_mismatch(db, table, chunker, schema_version)
+    if detail is None:
+        return None
+    return (f"refusing to write {table}: {detail}. A write would leave one table holding rows "
+            f"from two chunkers, and nothing afterwards can tell which rows came from which — "
+            f"unlike a read, that cannot be undone except by rebuilding the whole table.\n"
+            f"{REBUILD_HINT}")

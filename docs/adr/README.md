@@ -648,21 +648,64 @@ alone is the cheap half of that — 1024 is bge-m3 and several other models. A f
 everything that shaped a table — chunker, splitter version, schema, source digests — was rejected as
 more than could be kept truthful at the time, and it is still the direction.
 
-So the row answers exactly one question, "which embedder built this table", and answers it before a
-search rather than after a bad answer. It cannot answer which chunker or which schema: after a
-re-chunk (#28) a half-rebuilt index is a mixed index nothing can detect, and nothing records which
-files were requested at all. #27 is to extend the row with `chunker` and `schema_version`; **none of
-that is implemented yet**, and the policy decided for it when it is — recorded here so the change
-starts from it — is *warn on read, refuse on write*: a chunker or schema that disagrees degrades
-retrieval rather than breaking it, and refusing on read would invalidate an index that took about
-half an hour to build, while a write that mixes two chunkers cannot be undone at all. That is
-deliberately **not** the embedder's rule above, which is fatal on read and stays so. `created` is
-there for a human reading the table; no code routes on it.
+So the row answered exactly one question, "which embedder built this table", and answered it before
+a search rather than after a bad answer. It could not answer which chunker or which schema: after a
+re-chunk (#28) a half-rebuilt index is a mixed index nothing can detect, and nothing recorded which
+files were requested at all. #27 was to extend the row with `chunker` and `schema_version`, and the
+policy decided for it — recorded here before the change, so the change would start from it — was
+*warn on read, refuse on write*: a chunker or schema that disagrees degrades retrieval rather than
+breaking it, and refusing on read would invalidate an index that took about half an hour to build,
+while a write that mixes two chunkers cannot be undone at all. That is deliberately **not** the
+embedder's rule above, which is fatal on read and stays so. `created` is there for a human reading
+the table; no code routes on it.
 
-**Half of that is now done** (ADR-024, 2026-09-17): the row carries `chunker` and
-`schema_version`, written by both ingest paths. The *policy* is not — nothing warns and nothing
-refuses — so a table stamped with another chunker is still read without a word, and #27 is now
-exactly the enforcement and nothing else.
+**Amended 2026-09-17 (#27): the policy above is implemented, in these words.**
+ADR-024 added the two fields; this is what now acts on them.
+
+*What counts as a mismatch* (`index_meta.version_mismatch`): a stamped chunker that differs from
+the one belonging to that table's KIND — `chunking.CHUNKER_VERSION` for a transcripts table,
+`CARD_CHUNKER_VERSION` for a cards table, because a card is cut on its `## section` headings and
+never by the sentence packer, and one constant for both would make the packer's next bump refuse
+card writes over a change that did not touch cards — or a stamped `schema_version` HIGHER than
+this code's, an index written by a newer release. Two things deliberately do not: an **older** stamped schema, which is
+the migration this project actually performs (ADR-024 added `book_id`/`book_rev` to existing tables
+in place, and the next `ayl-add` migrates and re-stamps), and would otherwise warn every reader of
+every index built before the last release about something the next ingest fixes; and an **absent**
+chunker — empty, or the ledger's `legacy` — which means nobody recorded it, and inventing a
+disagreement out of an absence is what `legacy` exists to avoid.
+
+*On read*, one warning line naming both values and the way out, logged once per table per process
+in `library.open_table` and shown by preflight as a **notice**, not a problem: the interfaces
+start, the index answers from the chunks it holds. *On write*, `ayl-add` refuses before it embeds
+or deletes anything — and before it RECOVERS anything: both checks are reads (`read_index_meta`
+never recovers, and takes a staged fingerprint table read-only), so they run ahead of
+`recover_staging` and a refused run promotes and drops nothing on its way to saying no (`refuse_chunker_mismatch`, beside the embedder's refusal), and so does the
+demo corpus's `--book` upsert — but **not** its full rebuild, which replaces every row and is
+therefore the repair rather than a mix. `--doctor` reads every stamp out whether or not it
+disagrees, because it is where somebody looks *before* an upgrade, and exits non-zero on a
+mismatch.
+
+*And the half a refusal cannot supply*: a refusal that names no way out is a dead end, and a plain
+`ayl-add <folder>` over a mismatched index hits the same refusal again — which left deleting the
+index directory by hand as the only remedy, mentioned nowhere. So `ayl-add <folder> --rebuild`
+drops the table and re-indexes: the one write that is not a mix, and the only one a refusal can
+honestly recommend. It keeps the `books` ledger, because re-minting the ids would turn every book
+into a new book — the defect ADR-024 exists to prevent, arriving by the back door — and it names
+the books it does not cover, whose rows went with the table, putting them back to `requested`.
+Because a rebuild discards what it replaces, `--rebuild` requires `--backup <dir>` in the same
+command or an explicit `--force`, and a failed backup stops it. `ayl-add --backup` copies the
+index directory and the chat database with a manifest (the stamps, the row counts, a sha256 per
+file), taking the ingest lock and finishing any staged rebuild first; `--restore` verifies that
+manifest before it puts anything back. The remedy sentence is one constant, so the warning and
+the refusal cannot drift into recommending two different things.
+
+*The chat database got the same pair* (#27's second bullet): a `schema_version` row written into
+`chat.db` itself, and a startup check of the columns `ui.py`'s schema declares against the columns
+that are there. `CREATE TABLE IF NOT EXISTS` leaves an older table exactly as it was, so the
+failure it prevents is an insert naming a column that does not exist, mid-question, as an SQLite
+error in a log. A warning, not a refusal, and for a reason the index policy does not have: the
+remedy is to move the file aside, and that throws away every past conversation.
+See [`docs/upgrading.md`](../upgrading.md).
 
 ## ADR-021: The action channel is a reserved string marker in `current_query`
 
@@ -782,8 +825,8 @@ pass at the start of every run. Rows carry `book_id` **beside** `note` for one r
 chunk id stays byte-compatible. `_index_meta` gains `chunker` and `schema_version`; readers
 tolerate their absence and nothing refuses on them here. The version is derived from the stamped
 table's own columns rather than asserted, because a version is a claim about the rows and a stamp
-that claims what the rows do not have is worse than no stamp — it is what a later refusal (#27)
-would act on.
+that claims what the rows do not have is worse than no stamp — it is what the refusal added in #27
+acts on (ADR-020, amended 2026-09-17).
 
 **The alternatives.** *(A) The staged rebuild as it was* — crash-safe and simple, but it has no
 identity at all, which is the actual defect; the cost argument for replacing it turned out to be
@@ -831,8 +874,7 @@ the exact keys, row keys and chunk ids of both ingest paths were frozen from the
 before (`tests/fixtures/book_identity.json`, generated at `b2157cb`) and checked against the built
 index: all 35 book keys and all 1,228 chapter-level chunk-id prefixes reproduce exactly.
 
-**Still open.** The enforcement half of #27 (warn on read, refuse on write for a chunker or schema
-mismatch). A book backfilled from a pre-ledger index records neither a digest nor a file, so the
+**Still open.** A book backfilled from a pre-ledger index records neither a digest nor a file, so the
 first correction after that upgrade still mints a second id — `--doctor` reports the pair. The
 cards table is joined to the transcripts table by the book key string alone; no card row carries a
 `book_id`, and the ledger does not reconcile the two corpora — `--doctor` says so in its report

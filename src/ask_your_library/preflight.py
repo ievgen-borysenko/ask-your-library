@@ -27,7 +27,7 @@ from .config import (DB_PATH, EMBED_BACKEND, LLM_BACKEND, OLLAMA_EMBED_MODEL, OL
                      ORCHESTRATOR_MODEL, TABLES)
 from .embeddings import get_embedder, openrouter_api_key
 from .i18n import t
-from .index_meta import check_index
+from .index_meta import check_index, warn_version_mismatch
 
 
 # The exit status an interface gives the shell for each class of first-run
@@ -214,6 +214,16 @@ def check_environment() -> PreflightResult:
                     mismatch = check_index(db, name, emb.model, emb.dims)
                     if mismatch:
                         problem("index_mismatch", t("pf_index_mismatch", detail=mismatch))
+                    # Degraded, not broken, and for that reason a NOTICE and not
+                    # a problem: a table built by another chunker answers, from
+                    # the chunks it has. Said to the reader and not only to the
+                    # log, because the remedy is a rebuild they have to decide
+                    # to spend half an hour on — and because the write path will
+                    # refuse the next `ayl-add` over this index, and being told
+                    # then, mid-ingest, is being told too late.
+                    stale = warn_version_mismatch(db, name)
+                    if stale:
+                        notices.append(t("pf_version_mismatch", detail=stale))
             except Exception as error:  # a key error for openrouter etc. is reported above
                 if not problems:
                     problem("index_mismatch",
