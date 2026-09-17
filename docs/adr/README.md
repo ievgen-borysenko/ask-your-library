@@ -530,12 +530,16 @@ its quotes confirmed. The review rounds are the more useful part of the record �
 followed, a table with no fingerprint is refused rather than stamped after the fact, a row key
 carries a digest of the book key so two titles that reduce to the same ASCII slug stay two books,
 an update is a staged rebuild with a single publish, and a missing cards table became a supported
-shape with a visible notice instead of a silent degradation. Two of those are **partly superseded
-by ADR-024** (2026-09-17) and must be read with it: an update is now a per-book delete-and-append
-keyed by a minted `book_id`, not a staged rebuild — the staged publish survives only for the first
-build of a table and for the demo corpus — and the row key's digest is no longer what a re-ingest
-matches on, because a key derived from title and author is exactly what a correction changes. A later audit closed two more defects
-in the splitter: duplicate section names, and short real chapters and the text before the first
+shape with a visible notice instead of a silent degradation.
+
+Two of those are **partly superseded by ADR-024** (2026-09-17). An update is no longer a staged
+rebuild with a single publish: it is a per-book delete-and-append keyed by a minted `book_id`, and
+the staged publish survives only for the first build of a table and for the demo corpus. And the
+row key's digest is no longer what a re-ingest matches on. The digest still does the job it was
+added for — two titles that reduce to the same ASCII slug stay two row keys — but a key derived
+from title and author is exactly what a correction changes, so identity moved to the ledger.
+
+A later audit closed two more defects in the splitter: duplicate section names, and short real chapters and the text before the first
 heading disappearing without a word. One limitation is documented rather than fixed — a `CHAPTER I`
 that repeats across volumes in one file is read as a contents line and merged into the section
 above it, reported, never lost.
@@ -751,7 +755,28 @@ had been *requested*, so "which of my books did not make it in" had no answer at
 **Decision.** A `books` ledger table beside the index tables: `book_id` minted once and never
 derived, `key`, `title`, `author`, `source_ref`, `sha256`, `chunker`, `embedding_model`, `status`
 (requested / indexed / failed), `error`, `requested_at`, `indexed_at`, `rows`, `fts_seconds`. Its
-API is `resolve` / `begin` / `commit` / `fail` / `missing` / `diff`. `ayl-add` becomes a per-book
+API is `resolve` / `begin` / `commit` / `fail` / `missing` / `diff`.
+
+**Which book is this?** `resolve` adopts an existing id on two signals and refuses to on a third,
+and the order is the part that had to be got right. (1) **The key.** `Title — Author` is what the
+reader sees and what the agent cites, so a book that still answers to its key is that book,
+whatever happened to its text. (2) **The source.** Failing the key, the file at the same path in
+the same folder is the same book whose metadata was corrected — which is the case the derived row
+key could never express, and the whole point of the issue. `source_ref` is
+`local:<folder digest>:<path inside it>`: the folder is in the reference because one index can be
+fed from several folders, and without it a `notes.md` in a second library would be the first
+library's book — and, worse, `--prune` run on either folder would delete the other's. (3) **The
+digest adopts nothing.** A sha256 match alone is reported and not acted on: a byte-identical copy
+of a book under another title would otherwise take over the first book's id, and its next write
+would delete the first book's rows — a loss the staged rebuild this replaces could not produce. The
+digest is of the book's TEXT, taken after the front matter and any title line are off it, because
+correcting `author:` rewrites the file and changes nothing about the book.
+
+One edge is left deliberately unresolved and is tested as such: when the key comes from the FILE
+NAME, renaming the file changes the key and the path at once, and nothing remains to tell "I
+corrected the author" from "I added another copy". That is indexed as a second book and the first
+is reported as vanished, which `--prune` clears — a visible extra book being much the better
+failure than a silent takeover. `ayl-add` becomes a per-book
 delete-then-append keyed by `book_id`, with the ledger row written before and after and a recovery
 pass at the start of every run. Rows carry `book_id` **beside** `note` for one release, so every
 chunk id stays byte-compatible. `_index_meta` gains `chunker` and `schema_version`; readers
@@ -795,10 +820,12 @@ before (`tests/fixtures/book_identity.json`, generated at `b2157cb`) and checked
 index: all 35 book keys and all 1,228 chapter-level chunk-id prefixes reproduce exactly.
 
 **Still open.** The enforcement half of #27 (warn on read, refuse on write for a chunker or schema
-mismatch). A book backfilled from a pre-ledger index has no content digest, so the first author
-correction after that upgrade still mints a second id — `--doctor` reports the pair. And the cards
-table is joined to the transcripts table by the book key string alone; the ledger does not
-reconcile them.
+mismatch). A book backfilled from a pre-ledger index records neither a digest nor a file, so the
+first correction after that upgrade still mints a second id — `--doctor` reports the pair. The
+cards table is joined to the transcripts table by the book key string alone; no card row carries a
+`book_id`, and the ledger does not reconcile the two corpora — `--doctor` says so in its report
+rather than leaving it to be discovered. And the per-book write is visible to a concurrent reader:
+see `known-limits.md`.
 
 [reports]: ../eval-results/
 [backlog]: ../backlog.md

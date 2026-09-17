@@ -196,7 +196,11 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   next `ayl-add` finds it, re-indexes it when the run covers it and reports it by name when it
   does not. The window is narrower than the one it replaced (a staged rebuild was all-or-nothing
   but rewrote the whole table), and it is visible instead of silent — which is why the ledger
-  came before the incremental path, not after it.
+  came before the incremental path, not after it. **A reader sees that window too:** for the
+  fraction of a second between the delete and the append, a question asked in the web UI or the
+  CLI searches an index in which that one book does not exist, and it answers without it rather
+  than waiting or failing — the staged rebuild it replaced kept the old table queryable to the
+  moment of the swap instead. Re-ask the question, or index when nobody is asking.
 - **English corpus assumption.** The planner prompt hardcodes English search queries. Questions
   in other languages work (bge-m3 is multilingual), the queries do not.
 - **"Your own library" covers plain text only, and without cards.** `ayl-add` takes `.txt` and
@@ -224,16 +228,21 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   titles by substring match. `get_chapter` caps at 1000 chunks / 12k chars and reconciles
   section naming (`Chapter 59` vs `59`) heuristically.
 - **A book's identity is minted; its NAME is still a derived string.** Every book has a `book_id`
-  in the `books` ledger, assigned once and never recomputed, and `ayl-add` updates by that id — so
-  correcting `author:` renames a book instead of indexing a second one, and a file that moved
-  inside the folder is the same book. What is still derived is the `Title — Author` key itself,
-  which is what the agent cites, what the chapter filter matches and what the catalogue lists; a
-  book card whose heading differs from its transcript's key by one character still lists as two
-  books, because the two tables are joined by that string and nothing reconciles them. Two
-  remaining edges: a book backfilled from an index built before the ledger has no content digest,
-  so the *first* author correction after that upgrade still creates a second book (the next one
-  does not); and two files with identical bytes under different titles are kept apart only within
-  a single run.
+  in the `books` ledger, assigned once and never recomputed, and `ayl-add` updates by that id. A
+  book is recognised by its key, or — when the key is what changed — by being the same file in the
+  same folder: so correcting `author:` in the front matter or on the title line renames the book
+  rather than indexing a second one, and a file that moved inside the folder keeps its key and so
+  its id. **Renaming the file itself to correct the key is the case this cannot carry**: the key
+  and the path change together and nothing distinguishes a correction from a second copy, so the
+  new name is indexed as a new book and the old one is reported as vanished (`--prune` clears it).
+  Identical content alone never adopts an id — a byte-identical copy under another title is a
+  second book, with a warning naming the first, because the alternative is one book silently
+  replacing another. What is still derived is the `Title — Author` key itself, which is what the
+  agent cites, what the chapter filter matches and what the catalogue lists; a book card whose
+  heading differs from its transcript's key by one character still lists as two books, because the
+  two tables are joined by that string and no card row carries a `book_id`. And a book backfilled
+  from an index built before the ledger records neither a digest nor a file, so the *first*
+  correction after that upgrade still creates a second book (the next one does not).
 - **The catalogue is what the index holds, not what your folder holds.** It counts the distinct
   book keys of the index tables and never reads the ledger (ADR-016, ADR-024), so "N of N books"
   stays exactly as exhaustive as it was — but a book whose file you deleted is still listed until

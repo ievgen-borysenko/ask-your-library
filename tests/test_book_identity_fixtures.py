@@ -34,6 +34,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from ask_your_library.bookkey import book_key
 from ask_your_library.ingest import add_folder
 
 REPO = Path(__file__).resolve().parents[1]
@@ -94,8 +95,11 @@ def demo_identity() -> list[dict]:
             "id": entry["id"],
             "title": entry["title"],
             "author": entry["author"],
-            # save_prepared() writes exactly this; chunk_prepared() reads it back
-            "book": f"{entry['title']} — {entry['author']}",
+            # Through `book_key`, which is what `save_prepared()` now calls and
+            # therefore what this half has to exercise: the frozen value was
+            # produced by the f-string the demo ingest used before the refactor,
+            # so a `book_key` that drifts by one character fails here.
+            "book": book_key(entry["title"], entry["author"]),
             "note": entry["id"],
             "chunk_id_prefixes": [f"{entry['id']}#{title or 'full'}" for title in titles],
         })

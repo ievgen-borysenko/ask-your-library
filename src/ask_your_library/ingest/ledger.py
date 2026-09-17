@@ -69,6 +69,19 @@ def _quote(value: str) -> str:
     return value.replace("'", "''")
 
 
+def _parse_local_ref(ref: str) -> tuple[str, str] | None:
+    """(folder tag, path inside it) of a `local:<tag>:<path>` reference.
+
+    None for any other shape — `manifest:` from the demo corpus, `note:` from a
+    backfill, or a `local:` reference written before the folder tag existed.
+    None means "this folder says nothing about that row", which is what keeps
+    `--prune` from deleting a book it has no evidence about."""
+    if not ref.startswith("local:"):
+        return None
+    parts = ref.split(":", 2)
+    return (parts[1], parts[2]) if len(parts) == 3 else None
+
+
 def _row(**values) -> dict:
     row = {name: "" for name in FIELDS}
     row["rows"] = 0
@@ -140,37 +153,57 @@ class Ledger:
 
     def resolve(self, title: str, author: str = "", sha256: str = "",
                 source_ref: str = "", claimed: frozenset[str] | set[str] = frozenset()) -> str:
-        """The `book_id` for this book: an existing row's id when the KEY or the
-        SHA256 matches one, a newly minted one otherwise.
+        """The `book_id` for this book: an existing row's id when this is a book
+        the ledger already holds, a newly minted one otherwise.
 
-        The two match rules are what make a correction cheap in opposite
-        directions. Same key, new content — the book was re-exported or
-        re-chunked — keeps its id. Same content, new key — the author was
-        corrected, or the file renamed — also keeps its id, which is the case
-        that used to create a second book.
+        Two rules adopt an existing id, and their order is the whole design.
 
-        The key is tried first: it is what the reader and the agent see. A
-        sha256 match is only consulted when no key matches, and an empty sha256
-        never matches anything (a book whose source could not be digested must
-        not collide with every other such book).
+        **The key.** `Title — Author` is what the reader sees and what the agent
+        cites, so a book that still answers to its key is that book, whatever
+        happened to its text: a re-export, a re-chunk, a corrected typo in the
+        body all keep the id.
 
-        `claimed` is the ids this run has already handed out. Two files with
-        identical bytes under two different titles are two books, not one
-        renamed one — without this they would share an id and each would delete
-        the other's rows, which is the very failure the ledger exists to end.
-        It narrows the sha rule only: an exact key match is an exact key match,
-        and two files resolving to one key is refused before this is reached."""
+        **The source.** Failing that, the file at the same place in the same
+        folder is the same book whose metadata was corrected — which is the case
+        the derived row key could never express, and the reason this issue
+        exists. `source_ref` carries a digest of the folder beside the path
+        inside it, so two libraries that happen to share a relative path are not
+        each other.
+
+        **The digest adopts nothing.** A sha256 match alone is *reported and not
+        acted on*: a byte-identical copy of a book under another title, in
+        another folder, would otherwise take over the first book's id and its
+        next write would delete the first book's rows — a loss the staged
+        rebuild this replaced could not produce. The reviewer's rule, kept
+        exactly: a digest may adopt an id only where the key or the source
+        already matched, and in both those cases a rule above has returned. So
+        the digest's job here is to say "you have this text already, under
+        another name", which is information, not a decision. It is still
+        recorded on the row, where `--doctor` reads it.
+
+        `claimed` is the ids this run has already handed out, and it narrows
+        both adopting rules: within one run two files are two books, never one
+        of them twice."""
         key = book_key(title, author)
         rows = self.all_rows()
         for row in rows:
             if row.get("key") == key:
                 return row["book_id"]
-        if sha256:
+        if source_ref:
             for row in rows:
-                if row.get("sha256") == sha256 and row["book_id"] not in claimed:
-                    log.info("%s: same content as %r, keeping book_id %s",
-                             key, row.get("key"), row["book_id"])
+                if row.get("source_ref") == source_ref and row["book_id"] not in claimed:
+                    log.info("%s: the file %s already holds %r — the same book, its metadata "
+                             "corrected; keeping book_id %s",
+                             key, source_ref, row.get("key"), row["book_id"])
                     return row["book_id"]
+        if sha256:
+            twin = next((row for row in rows
+                         if row.get("sha256") == sha256 and row["book_id"] not in claimed), None)
+            if twin:
+                log.warning("%s: the same text is already indexed as %r (%s). Indexing it as a "
+                            "SECOND book: a book is replaced only when its key or its file "
+                            "matches, never on content alone.",
+                            key, twin.get("key"), twin.get("source_ref") or "no source recorded")
         book_id = uuid.uuid4().hex
         self._put(_row(book_id=book_id, key=key, title=title_of(key), author=author_of(key),
                        sha256=sha256, source_ref=source_ref, status=REQUESTED,
@@ -241,29 +274,40 @@ class Ledger:
         return {row["key"]: row for row in self.all_rows() if row.get("key")}
 
     def diff(self, folder: Path, files: Iterable[Path] | None = None,
-             key_of=None) -> FolderDiff:
+             key_of=None, scope: str = "", path_of=None) -> FolderDiff:
         """What this folder holds against what the ledger holds.
 
-        `files` and `key_of` are injected by the caller (`ayl-add` passes its
-        own file discovery and its own key rules) so this module does not have
-        to know how a folder becomes books — and so the diff is computed from
-        exactly the files the ingest would read, never a second, subtly
-        different listing.
+        `files`, `key_of` and `path_of` are injected by the caller (`ayl-add`
+        passes its own file discovery, its own key rules and its own source
+        references) so this module does not have to know how a folder becomes
+        books — and so the diff is computed from exactly the files the ingest
+        would read, never a second, subtly different listing.
 
-        A file is "known" when its KEY has a ledger row, not when its path has
-        one: a book that moved inside the folder is the same book. A row is
-        "vanished" when its `source_ref` names a file that is no longer there —
-        reported, never deleted here."""
+        A file is "known" when its KEY has a ledger row, or when its SOURCE
+        REFERENCE has one: a book that moved inside the folder is the same book,
+        and so is a book whose author was corrected in place.
+
+        A row is "vanished" when it belongs to THIS folder and names a file that
+        is no longer there. `scope` is the caller's folder tag, and it is what
+        keeps a second library out of the answer: without it every book of every
+        other folder in the same index reads as vanished here — and `--prune`
+        would then delete them. Rows written by another ingest path (the demo
+        corpus's `manifest:`, a backfill's `note:`) are never vanished either,
+        for the same reason: this folder is no evidence about them."""
         if files is None or key_of is None:
             raise ValueError("diff needs the caller's file list and key rule")
         folder = Path(folder)
         rows_by_key = self.by_key()
+        rows_by_source = {row["source_ref"]: row for row in self.all_rows()
+                          if row.get("source_ref")}
         new: list[Path] = []
         known: list[tuple[Path, str]] = []
         seen_ids: set[str] = set()
         for path in files:
             key = key_of(path)
             row = rows_by_key.get(key) if key else None
+            if row is None and path_of is not None:
+                row = rows_by_source.get(path_of(path))
             if row:
                 known.append((path, row["book_id"]))
                 seen_ids.add(row["book_id"])
@@ -273,10 +317,13 @@ class Ledger:
         for row in self.all_rows():
             if row["book_id"] in seen_ids:
                 continue
-            ref = row.get("source_ref") or ""
-            if not ref.startswith("local:"):
+            parsed = _parse_local_ref(row.get("source_ref") or "")
+            if parsed is None:
                 continue                    # not from a folder: the demo corpus
-            if not (folder / ref[len("local:"):]).exists():
+            row_scope, relative = parsed
+            if scope and row_scope != scope:
+                continue                    # another folder's book, not this one's
+            if not (folder / relative).exists():
                 vanished.append(row)
         vanished.sort(key=lambda row: row.get("key") or "")
         return FolderDiff(new=sorted(new), known=sorted(known), vanished=vanished)

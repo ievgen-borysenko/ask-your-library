@@ -34,8 +34,8 @@ from pathlib import Path
 
 import lancedb
 
-from ..bookkey import (MAX_TITLE_LINE, UNKNOWN_AUTHOR, book_key, slug,
-                       split_title_author)
+from ..bookkey import (MAX_TITLE_LINE, UNKNOWN_AUTHOR, author_of, book_key, slug,
+                       split_title_author, title_of)
 from ..config import DB_PATH, EMBED_BACKEND
 from ..embeddings import get_embedder
 from ..index_meta import check_index, read_index_meta, write_index_meta
@@ -111,6 +111,12 @@ class Book:
     source: str                        # provenance, file name only (no local paths)
     path: Path
     sections: list[tuple[str, str]]
+    # sha256 of the book's TEXT — the body after the front matter and any title
+    # line have been taken off it, which is exactly the part that gets chunked
+    # and embedded. Deliberately not a digest of the file: correcting `author:`
+    # in the front matter rewrites the file and changes nothing about the book,
+    # and the ledger has to be able to see that.
+    text_sha256: str = ""
     # contents lines merged into the section above them, reported by the CLI
     merged_headings: list[MergedHeading] = field(default_factory=list)
 
@@ -244,7 +250,7 @@ def read_book(path: Path, folder: Path) -> Book | None:
                     path.relative_to(folder), heading.title, heading.body_chars,
                     heading.target)
     return Book(note=slug(key), book=key, source=f"local:{path.name}", path=path,
-                sections=sections, merged_headings=merged)
+                sections=sections, text_sha256=text_digest(body), merged_headings=merged)
 
 
 def read_folder(folder: Path) -> list[Book]:
@@ -335,24 +341,64 @@ def refuse_model_mismatch(db, table: str, embedder) -> None:
             f"embedder {embedder.model!r} produces {embedder.dims} — rebuild the index.")
 
 
-def sha256_of(path: Path) -> str:
-    """Digest of the source file as it is on disk.
+def text_digest(body: str) -> str:
+    """sha256 of a book's text.
 
-    The ledger matches on it when the book key changed (a corrected author),
-    which is the case that used to index a second book. Streamed, because a
-    library holds files of a few megabytes and there is no reason to hold one
-    in memory to hash it. Unreadable is "" — never a hash of nothing, which
-    would make every unreadable file the same book."""
-    digest = hashlib.sha256()
+    Of the TEXT, not of the file: the ledger uses this to recognise a book
+    whose metadata changed, and the metadata lives in the same file. Correct
+    `author:` in the front matter, or fix the author on the title line, and the
+    file's bytes change while the book does not — so a file digest would call
+    the corrected book a different book, which is the defect this whole issue
+    is about. The body handed here is the one that gets chunked and embedded,
+    after `parse_frontmatter` and after a title line has been lifted off it."""
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def folder_digest(folder: Path | None) -> str:
+    """A short, stable tag for the folder a book was indexed from.
+
+    One index can be fed from several folders (`LIBRARY_DB_PATH` is one
+    database, `ayl-add <folder>` names one folder per run), and two libraries
+    may well both hold `notes.md`. Without the folder in the reference, a file
+    at the same relative path in a second folder would look like the FIRST
+    folder's book — and adopt its id, and replace its rows. A digest rather
+    than the path itself: the ledger is read out loud in `--doctor` output and
+    in the run summary, and nothing there should name a directory on this
+    machine."""
+    if folder is None:
+        return "nofolder"
     try:
-        with open(path, "rb") as handle:
-            for block in iter(lambda: handle.read(1 << 20), b""):
-                digest.update(block)
-    except OSError as error:
-        log.warning("%s: could not be digested (%s); the ledger will match on the key alone",
-                    path.name, error)
-        return ""
-    return digest.hexdigest()
+        resolved = str(Path(folder).resolve())
+    except OSError:
+        resolved = str(folder)
+    return hashlib.sha256(resolved.encode("utf-8")).hexdigest()[:8]
+
+
+def source_ref_for(book: "Book", folder: Path | None) -> str:
+    """`local:<folder digest>:<path inside the folder>` — what the ledger
+    records as a book's source, and what `resolve` matches a corrected book on."""
+    return f"local:{folder_digest(folder)}:{relative_name(book, folder)}"
+
+
+def parse_source_ref(ref: str) -> tuple[str, str] | None:
+    """(folder digest, relative path) of a `local:` reference, or None for a
+    reference written by another ingest path (`manifest:`, `note:`)."""
+    if not ref.startswith("local:"):
+        return None
+    parts = ref.split(":", 2)
+    if len(parts) != 3:
+        return None
+    return parts[1], parts[2]
+
+
+def display_source(ref: str) -> str:
+    """A source reference as a person should read it: the file, and the folder
+    named by its tag rather than by its path."""
+    parsed = parse_source_ref(ref)
+    if not parsed:
+        return ref
+    digest, relative = parsed
+    return f"{relative} (folder {digest})"
 
 
 def open_book_ledger(db, backend: str, embedder) -> Ledger:
@@ -411,7 +457,7 @@ def recover_interrupted(db, table_name: str, ledger: Ledger, about_to_write: set
         elif key in about_to_write:
             report.append(f"re-indexing {key}: an earlier run did not finish it")
         else:
-            source = row.get("source_ref") or "an unrecorded source"
+            source = display_source(row.get("source_ref") or "") or "an unrecorded source"
             report.append(f"MISSING {key}: requested from {source}, never indexed — "
                           f"run ayl-add over that folder again to finish it")
     return report
@@ -429,8 +475,17 @@ def folder_diff(db_path: Path, backend: str, books: list[Book], folder: Path):
     ledger = open_ledger(db)
     if not ledger.exists():
         return None
+    return folder_ledger_diff(ledger, folder, books)
+
+
+def folder_ledger_diff(ledger: Ledger, folder: Path, books: list[Book]):
+    """The ledger's diff for these books, scoped to this folder — the one place
+    the injected rules are assembled, so the dry run, the run summary and
+    `--prune` cannot answer differently."""
     by_path = {book.path: book.book for book in books}
-    return ledger.diff(folder, files=list(by_path), key_of=by_path.get)
+    refs = {book.path: source_ref_for(book, folder) for book in books}
+    return ledger.diff(folder, files=list(by_path), key_of=by_path.get,
+                       scope=folder_digest(folder), path_of=refs.get)
 
 
 def add_books(books: list[Book], backend: str, db_path: Path, folder: Path | None = None,
@@ -471,10 +526,13 @@ def add_books(books: list[Book], backend: str, db_path: Path, folder: Path | Non
     # bytes are two books, not one of them renamed.
     ids: dict[str, str] = {}
     for book in books:
+        # title and author SEPARATELY: `book_key` is what `resolve` compares on,
+        # and handing it the composite key as a title produced
+        # "Title — Author — Unknown", which matches no row ever written. Every
+        # re-ingest of an edited book then minted a fresh id.
         ids[book.note] = ledger.resolve(
-            book.book, "", sha256=sha256_of(book.path),
-            source_ref=f"local:{relative_name(book, folder)}",
-            claimed=set(ids.values()))
+            title_of(book.book), author_of(book.book), sha256=book.text_sha256,
+            source_ref=source_ref_for(book, folder), claimed=set(ids.values()))
 
     def prepare(book: Book) -> tuple[str, list[dict]] | None:
         """One book, embedded, as rows ready to write. None when it chunked to
@@ -488,9 +546,8 @@ def add_books(books: list[Book], backend: str, db_path: Path, folder: Path | Non
             log.warning("%s: produced no text chunks, skipped", book.path.name)
             ledger.fail(book_id, "produced no text chunks")
             return None
-        ledger.begin(book_id, key=book.book,
-                     source_ref=f"local:{relative_name(book, folder)}",
-                     sha256=sha256_of(book.path), embedding_model=embedder.model)
+        ledger.begin(book_id, key=book.book, source_ref=source_ref_for(book, folder),
+                     sha256=book.text_sha256, embedding_model=embedder.model)
         try:
             vectors = embedder.embed_docs([embedding_text(c) for c in chunks])
         except Exception as error:
@@ -592,8 +649,7 @@ def _book_id_by_note(ledger: Ledger):
 
 
 def folder_vanished(ledger: Ledger, folder: Path, books: list[Book]) -> list[dict]:
-    by_path = {book.path: book.book for book in books}
-    return ledger.diff(folder, files=list(by_path), key_of=by_path.get).vanished
+    return folder_ledger_diff(ledger, folder, books).vanished
 
 
 def prune_books(db, table_name: str, ledger: Ledger, rows: list[dict]) -> int:
@@ -655,8 +711,8 @@ def print_diff(diff, db_path: Path) -> None:
     for path, _ in diff.known:
         say(f"      replaces  {path.name}")
     for row in diff.vanished:
-        say(f"      VANISHED  {row.get('key')} ({row.get('source_ref')}) — still in the "
-            f"index; --prune removes it")
+        say(f"      VANISHED  {row.get('key')} ({display_source(row.get('source_ref') or '')}) "
+            f"— still in the index; --prune removes it")
 
 
 def run_doctor(backend: str, db_path: Path) -> int:
@@ -742,7 +798,8 @@ def main(argv: list[str] | None = None) -> int:
         f"(whole, every run)")
     for row in counts["vanished"]:
         say(f"still in the index, but no longer in the folder: {row.get('key')} "
-            f"({row.get('source_ref')}) — re-run with --prune to delete its rows")
+            f"({display_source(row.get('source_ref') or '')}) — re-run with --prune to "
+            f"delete its rows")
     if counts["pruned"]:
         say(f"pruned {counts['pruned']} book(s) whose file is gone")
     if not counts["cards_table"]:

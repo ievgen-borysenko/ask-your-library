@@ -701,8 +701,8 @@ def test_a_failed_book_leaves_the_books_that_worked_and_says_which_failed(tmp_pa
     after = {r["chunk_id"]: r["text"] for r in table.search().limit(1000).to_list()}
     # the book that was embedded before the failure was written; the other one
     # kept the rows it had, and no book lost its rows
-    assert set(after) >= set(before) - {"gone"}
-    assert any(after[i] != before[i] for i in set(after) & set(before))
+    assert set(after) >= set(before)
+    assert any(after[i] != before[i] for i in set(before))
 
     ledger = open_ledger(db)
     failed = [r for r in ledger.all_rows() if r["status"] == "failed"]

@@ -9,6 +9,7 @@ import lancedb
 import pytest
 
 from ask_your_library.index_meta import SCHEMA_VERSION, read_index_meta
+from ask_your_library.ingest.doctor import check_ledger
 from ask_your_library.ingest import add_folder, publish
 from ask_your_library.ingest.ledger import CHUNKER_VERSION, LEGACY_CHUNKER, open_ledger
 from test_add_folder import PARA, FakeEmbedder, fake_embedder, write  # noqa: F401
@@ -45,7 +46,8 @@ def test_a_first_run_writes_a_ledger_row_per_book(tmp_path, fake_embedder):
     assert sorted(entries) == ["Sea Notes — B. Mate", "The Green Ledger — A. Keeper"]
     keeper = entries["The Green Ledger — A. Keeper"]
     assert keeper["status"] == "indexed" and keeper["rows"] > 0
-    assert keeper["source_ref"] == "local:The Green Ledger - A. Keeper.txt"
+    assert keeper["source_ref"].endswith(":The Green Ledger - A. Keeper.txt")
+    assert keeper["source_ref"].startswith("local:")
     assert keeper["chunker"] == CHUNKER_VERSION
     assert keeper["embedding_model"] == "fake-embed" and len(keeper["sha256"]) == 64
     assert keeper["indexed_at"] and keeper["requested_at"]
@@ -92,16 +94,23 @@ def test_re_adding_one_book_replaces_only_that_books_rows(tmp_path, fake_embedde
     assert len(ids) == len(set(ids))          # no duplicated chunks
 
 
-def test_a_corrected_author_updates_the_book_instead_of_indexing_a_second_one(tmp_path,
-                                                                             fake_embedder):
-    """The defect this issue exists for: the row key is a digest of the book
-    key, so the delete used to match nothing and the library held both."""
+def test_a_corrected_author_in_the_front_matter_renames_the_book(tmp_path, fake_embedder):
+    """The claim the documentation makes, tested exactly as the documentation
+    describes it: edit `author:` in the file, re-run, one book.
+
+    This is the defect the whole issue exists for. Note what does NOT carry it:
+    the key changes (that is what a correction is), and the file's bytes change
+    too, so neither the key nor a digest of the FILE can recognise the book. The
+    file at the same place in the folder can, and the digest of the book's TEXT
+    (taken after the front matter is off it) is unchanged, which is why the
+    ledger records that rather than a digest of the file."""
     folder = tmp_path / "books"
-    write(folder, "Moby Dick - H. Melville.txt", BODY)
+    write(folder, "moby.md", "---\ntitle: Moby Dick\nauthor: H. Melville\n---\n\n" + BODY)
     add(tmp_path, folder)
     before = ledger_of(tmp_path).all_rows()[0]["book_id"]
 
-    (folder / "Moby Dick - H. Melville.txt").rename(folder / "Moby Dick - Herman Melville.txt")
+    (folder / "moby.md").write_text(
+        "---\ntitle: Moby Dick\nauthor: Herman Melville\n---\n\n" + BODY, encoding="utf-8")
     add(tmp_path, folder)
 
     entries = ledger_of(tmp_path).all_rows()
@@ -109,6 +118,81 @@ def test_a_corrected_author_updates_the_book_instead_of_indexing_a_second_one(tm
     assert entries[0]["book_id"] == before          # minted once, never re-derived
     assert entries[0]["key"] == "Moby Dick — Herman Melville"
     assert {r["book"] for r in rows(tmp_path)} == {"Moby Dick — Herman Melville"}
+
+
+def test_a_corrected_author_on_the_title_line_renames_the_book_too(tmp_path, fake_embedder):
+    folder = tmp_path / "books"
+    write(folder, "moby.md", "# Moby Dick by H. Melville\n\n" + BODY)
+    add(tmp_path, folder)
+    before = ledger_of(tmp_path).all_rows()[0]["book_id"]
+
+    (folder / "moby.md").write_text("# Moby Dick by Herman Melville\n\n" + BODY,
+                                    encoding="utf-8")
+    add(tmp_path, folder)
+    entries = ledger_of(tmp_path).all_rows()
+    assert len(entries) == 1 and entries[0]["book_id"] == before
+    assert {r["book"] for r in rows(tmp_path)} == {"Moby Dick — Herman Melville"}
+
+
+def test_editing_a_books_text_does_not_mint_a_second_ledger_row(tmp_path, fake_embedder):
+    """`resolve` is handed the title and the author separately. Handed the
+    composite key as a title it produced "Title — Author — Unknown", which
+    matches no row ever written, so every re-ingest of an edited book minted a
+    fresh id and the ledger grew one `indexed` row per edit."""
+    folder = tmp_path / "books"
+    write(folder, "Moby Dick - Herman Melville.txt", BODY)
+    add(tmp_path, folder)
+    first = ledger_of(tmp_path).all_rows()[0]["book_id"]
+
+    for edit in range(1, 4):
+        (folder / "Moby Dick - Herman Melville.txt").write_text(
+            BODY + f" Edit {edit}.", encoding="utf-8")
+        add(tmp_path, folder)
+
+    entries = ledger_of(tmp_path).all_rows()
+    assert len(entries) == 1 and entries[0]["book_id"] == first
+    assert entries[0]["rows"] == len(rows(tmp_path))
+    assert check_ledger(lancedb.connect(tmp_path / "db"),
+                        ["transcripts_ollama", "cards_ollama"]).ok
+
+
+def test_a_byte_identical_book_in_another_folder_does_not_replace_the_first(tmp_path,
+                                                                            fake_embedder,
+                                                                            caplog):
+    """A digest match adopts nothing. Both books must survive: the alternative
+    is that the second folder's run silently deletes the first folder's rows,
+    which the staged rebuild this replaced could not do."""
+    one = tmp_path / "one"
+    two = tmp_path / "two"
+    write(one, "Moby Dick - Herman Melville.txt", BODY)
+    write(two, "A Different Title - Someone Else.txt", BODY)
+    add_folder.add_books(add_folder.read_folder(one), "ollama", tmp_path / "db", one)
+    with caplog.at_level("WARNING"):
+        add_folder.add_books(add_folder.read_folder(two), "ollama", tmp_path / "db", two)
+
+    entries = {row["key"]: row for row in ledger_of(tmp_path).all_rows()}
+    assert sorted(entries) == ["A Different Title — Someone Else",
+                               "Moby Dick — Herman Melville"]
+    assert len({row["book_id"] for row in entries.values()}) == 2
+    assert {r["book"] for r in rows(tmp_path)} == set(entries)
+    assert "SECOND book" in caplog.text
+
+
+def test_the_books_of_another_folder_are_never_reported_as_vanished_or_pruned(tmp_path,
+                                                                              fake_embedder):
+    """One index, two folders. Every book of the other folder is missing from
+    this one by construction, and `--prune` would have deleted all of them."""
+    one = tmp_path / "one"
+    two = tmp_path / "two"
+    write(one, "The Green Ledger - A. Keeper.txt", BODY)
+    write(two, "Sea Notes - B. Mate.txt", BODY + " The tide turned at four.")
+    add_folder.add_books(add_folder.read_folder(one), "ollama", tmp_path / "db", one)
+    counts = add_folder.add_books(add_folder.read_folder(two), "ollama", tmp_path / "db",
+                                  two, prune=True)
+
+    assert counts["vanished"] == [] and counts["pruned"] == 0
+    assert {r["book"] for r in rows(tmp_path)} == {"The Green Ledger — A. Keeper",
+                                                   "Sea Notes — B. Mate"}
 
 
 def test_a_renamed_file_of_the_same_book_is_not_a_second_book(tmp_path, fake_embedder):
@@ -119,8 +203,28 @@ def test_a_renamed_file_of_the_same_book_is_not_a_second_book(tmp_path, fake_emb
     add(tmp_path, folder)
 
     assert len(ledger_of(tmp_path).all_rows()) == 1
-    assert ledger_of(tmp_path).all_rows()[0]["source_ref"] == "local:moby-dick-final.txt"
+    assert ledger_of(tmp_path).all_rows()[0]["source_ref"].endswith(":moby-dick-final.txt")
     assert len({r["book"] for r in rows(tmp_path)}) == 1
+
+
+def test_renaming_the_FILE_to_change_the_key_is_a_new_book_and_the_old_one_is_reported(
+        tmp_path, fake_embedder):
+    """The edge the rules cannot resolve, pinned so it stays deliberate. When
+    the key comes from the file name, renaming the file changes the key AND the
+    path at once, and nothing left distinguishes "I corrected the author" from
+    "I added another copy". The second book is indexed and the first is reported
+    as vanished, which `--prune` then clears — rather than a silent takeover."""
+    folder = tmp_path / "books"
+    write(folder, "Moby Dick - H. Melville.txt", BODY)
+    add(tmp_path, folder)
+    (folder / "Moby Dick - H. Melville.txt").rename(folder / "Moby Dick - Herman Melville.txt")
+    counts = add(tmp_path, folder)
+
+    assert [row["key"] for row in counts["vanished"]] == ["Moby Dick — H. Melville"]
+    assert len(ledger_of(tmp_path).all_rows()) == 2
+    counts = add(tmp_path, folder, prune=True)
+    assert counts["pruned"] == 1
+    assert {r["book"] for r in rows(tmp_path)} == {"Moby Dick — Herman Melville"}
 
 
 # --- the crash window --------------------------------------------------------

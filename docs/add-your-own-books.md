@@ -23,10 +23,20 @@ appended, and its ledger row is written before and after — so a run that adds 
 library of three hundred touches that book alone, and the other 299 are neither read nor
 rewritten. The first build of a table is still a single staged publish (nothing to update yet).
 
-The id is **minted, never derived**. That is what makes a correction cheap: fix `author:` in a
-file, re-run, and the same book is updated rather than indexed a second time — the ledger matches
-the book by its content digest when its key changed, and by its key when its content changed. It
-also makes an interruption visible. Deleting and appending is not one transaction, so a crash in
+The id is **minted, never derived**. That is what makes a correction cheap: fix `author:` in the
+front matter (or on the title line), re-run, and the same book is updated rather than indexed a
+second time. Two signals identify a book — its key, and failing that the fact that it is the same
+file in the same folder, which is what a correction leaves untouched. Content alone identifies
+nothing: a byte-identical copy of a book under another title is a second book, with a warning
+naming the first, because the alternative is one book silently replacing another.
+
+One case the rules cannot carry, and it is worth knowing before it surprises you: when the key
+comes from the **file name**, renaming the file to correct the author changes the key and the path
+in the same move, and nothing is left to tell a correction from a second copy. The new name is
+indexed as a new book and the old one is reported as vanished; `--prune` clears it. Put the title
+and author in front matter if you expect to correct them.
+
+The ledger also makes an interruption visible. Deleting and appending is not one transaction, so a crash in
 between leaves a book out of the index; the ledger row still says `requested`, and the **recovery
 pass at the start of the next run** finds it, re-indexes it when that run covers it, and names it
 when it does not. Nothing else in the index can tell you that a book you added last month is
@@ -51,7 +61,9 @@ it can gate a script. Re-running `ayl-add` is what repairs.
 **A book whose file is gone** is reported, not deleted: a folder that failed to mount, a file
 being edited in place and a half-finished sync all look exactly like a deletion. `--dry-run` lists
 such books as `VANISHED`, a normal run names them at the end, and only `--prune` removes their
-rows and their ledger entry.
+rows and their ledger entry. Only books of the folder you named are ever considered: one index can
+hold several folders, and the books of the others are not missing merely because this folder does
+not have them.
 
 **Upgrading an existing index** needs nothing from you. The first run over an index built before
 the ledger backfills one row per book already in it (`chunker: legacy`, because nothing recorded
@@ -140,7 +152,11 @@ version. `book_id` is new and sits *beside* `note` rather than replacing it, so 
 byte-for-byte what they always were; a table without the column still reads, and the next
 `ayl-add` over it adds one. Beside the index tables is the `books` ledger — `book_id`, `key`,
 `title`, `author`, `source_ref`, `sha256`, `chunker`, `embedding_model`, `status`, `error`,
-`requested_at`, `indexed_at`, `rows`, `fts_seconds` — which is what `--doctor` reads. The
+`requested_at`, `indexed_at`, `rows`, `fts_seconds` — which is what `--doctor` reads. `sha256` is
+a digest of the book's *text*, taken after the front matter and any title line are off it, so
+correcting the metadata does not read as a different book; `source_ref` is
+`local:<folder digest>:<path inside the folder>`, the folder as a digest rather than a path so
+that nothing in the ledger names a directory on your machine. The
 catalogue deliberately does not: what your library holds is answered from the rows that can
 actually be searched, never from the record of what was ingested. `ayl-add` is that contract with
 a CLI in front of it.

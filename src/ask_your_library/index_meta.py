@@ -8,6 +8,10 @@ stamps every table it builds; readers check the stamp before searching.
 import logging
 import time
 
+# The staged publish this module needs is the ingest's, and `ingest.publish`
+# imports nothing from the package, so this direction costs no cycle.
+from .ingest.publish import rebuild_table, recover_staging
+
 log = logging.getLogger(__name__)
 
 META_TABLE = "_index_meta"
@@ -35,6 +39,7 @@ def write_index_meta(db, table: str, backend: str, model: str, dims: int,
     is warn on read, refuse on write (ADR-020's note, #27), and refusing before
     the warning exists would invalidate a half-hour build over a field that has
     never once been written."""
+    recover_staging(db, META_TABLE)
     row = {"table": table, "backend": backend, "model": model, "dims": int(dims),
            "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
            "chunker": chunker or "", "schema_version": int(schema_version)}
@@ -49,11 +54,17 @@ def write_index_meta(db, table: str, backend: str, model: str, dims: int,
             # table is tiny (one row per index table) and carries no vectors,
             # so it is rewritten with the wider schema rather than dropping the
             # new fields — which would make the stamp lie about itself.
+            #
+            # Through the staging table, not drop-then-create: this table is
+            # what every reader checks before it opens an index, and a crash
+            # between the drop and the create would leave an index that looks
+            # unstamped — which `ayl-add` REFUSES to write to. `recover_staging`
+            # above closes that window on the next open, the same way it does
+            # for the index tables themselves.
             log.info("%s: widening the fingerprint table with chunker/schema_version",
                      META_TABLE)
-            kept = [r for r in _all_meta_rows(db) if r.get("table") != table]
-            db.drop_table(META_TABLE)
-            db.create_table(META_TABLE, [{**_with_new_fields(r)} for r in kept] + [row])
+            kept = [_with_new_fields(r) for r in _all_meta_rows(db) if r.get("table") != table]
+            rebuild_table(db, META_TABLE, [kept + [row]])
     else:
         db.create_table(META_TABLE, [row])
 
@@ -75,6 +86,9 @@ def _with_new_fields(row: dict) -> dict:
 
 
 def read_index_meta(db, table: str) -> dict | None:
+    # A widening that was interrupted leaves the staged copy behind; finishing
+    # it here means a reader never sees a stamped index as unstamped.
+    recover_staging(db, META_TABLE)
     if META_TABLE not in _table_names(db):
         return None
     rows = db.open_table(META_TABLE).search().where(f"`table` = '{table}'").limit(1).to_list()

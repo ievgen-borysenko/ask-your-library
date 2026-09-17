@@ -12,6 +12,14 @@
   books a run does not name are neither read nor rewritten. Rows carry `book_id` beside `note`,
   so every chunk id is byte-for-byte what it was.
 
+  A book is recognised by its key, or — when the key is what a correction changed — by being the
+  same file in the same folder. Identical content on its own adopts nothing: a byte-identical copy
+  under another title is a second book, with a warning naming the first, because the alternative is
+  one book quietly replacing another. The digest the ledger keeps is of the book's *text*, taken
+  after the front matter is off it, so a metadata-only edit is visibly the same book; the source
+  reference carries a digest of the folder beside the path inside it, so two libraries in one index
+  are never each other's books — and `--prune` cannot reach across them.
+
   Because the delete and the append are not one transaction, a crash between them leaves one book
   out of the index with a ledger row that still says `requested`; the **recovery pass at the start
   of every run** finds it, re-indexes it when the run covers it and names it when it does not. A

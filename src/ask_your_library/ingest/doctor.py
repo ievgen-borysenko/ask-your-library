@@ -91,22 +91,54 @@ def check_ledger(db, table_names: list[str], ledger_table: str = TABLE) -> Ledge
     present = list(getattr(names, "tables", names))
     report.checked_tables = [name for name in table_names if name in present]
 
+    # Per table, not merged: only the transcripts table ever carries `book_id`
+    # (see the cards note below), and merging the two made the orphan check
+    # below unreachable — every index looked clean because the cards rows
+    # always supplied a missing column.
     rows_by_id: dict[str, int] = {}
     keys_in_index: set[str] = set()
+    rows_without_id = 0
+    id_column_missing: list[str] = []
+    card_keys: set[str] = set()
+    text_keys: set[str] = set()
     for name in report.checked_tables:
         table = db.open_table(name)
         count = table.count_rows()
         if not count:
             continue
-        columns = ["book"] + (["book_id"] if "book_id" in table.schema.names else [])
-        if "book_id" not in columns:
-            report.notes.append(f"{name} has no book_id column yet (an index built before the "
-                                f"ledger); the next ayl-add over it adds one")
+        is_cards = name.startswith("cards")
+        has_id = "book_id" in table.schema.names
+        if not has_id and not is_cards:
+            id_column_missing.append(name)
+        columns = ["book"] + (["book_id"] if has_id else [])
         for row in table.search().select(columns).limit(count).to_list():
-            if row.get("book"):
-                keys_in_index.add(row["book"])
+            key = row.get("book")
+            if key:
+                keys_in_index.add(key)
+                (card_keys if is_cards else text_keys).add(key)
+            if is_cards:
+                continue                # a card is not a book: see the note below
             book_id = row.get("book_id") or ""
-            rows_by_id[book_id] = rows_by_id.get(book_id, 0) + 1
+            if book_id:
+                rows_by_id[book_id] = rows_by_id.get(book_id, 0) + 1
+            elif has_id:
+                rows_without_id += 1
+
+    for name in id_column_missing:
+        report.notes.append(f"{name} has no book_id column yet (an index built before the "
+                            f"ledger); the next ayl-add over this index adds one")
+    if card_keys:
+        # Stated rather than assumed: the ledger's unit is the book, a card is a
+        # distillate of one, and no card row carries a book_id. The two tables
+        # are joined by the book key STRING alone, which is why a card whose
+        # heading differs by one character is two books in the catalogue.
+        unmatched = sorted(card_keys - text_keys)
+        report.notes.append(
+            f"cards are matched to books by their key string, not by book_id "
+            f"({len(card_keys)} card key(s)"
+            + (f", {len(unmatched)} with no full-text book of the same key: "
+               f"{', '.join(unmatched[:3])}" if unmatched else ", all with a full-text book")
+            + ")")
 
     ledger_rows = ledger.all_rows()
     report.books_in_ledger = len(ledger_rows)
@@ -137,11 +169,11 @@ def check_ledger(db, table_names: list[str], ledger_table: str = TABLE) -> Ledge
             report.in_index_but_not_in_ledger.append(key)
 
     for book_id, count in rows_by_id.items():
-        if book_id and book_id not in by_id:
+        if book_id not in by_id:
             report.orphan_row_counts["unknown book_id"] = \
                 report.orphan_row_counts.get("unknown book_id", 0) + count
-    # Rows with an EMPTY book_id are only an orphan once the table has the
-    # column at all: before that every row has one, and the note above says so.
-    if "" in rows_by_id and not report.notes:
-        report.orphan_row_counts["no book_id"] = rows_by_id[""]
+    # A row with an EMPTY book_id in a table that HAS the column: the migration
+    # filled it from the ledger and found nothing for this row's `note`.
+    if rows_without_id:
+        report.orphan_row_counts["no book_id"] = rows_without_id
     return report

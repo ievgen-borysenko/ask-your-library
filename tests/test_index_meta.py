@@ -122,3 +122,46 @@ def test_readers_tolerate_a_stamp_without_the_new_fields(tmp_path):
          "created": "2026-01-01T00:00:00"}])
     assert index_meta.check_index(db, "transcripts_ollama", "bge-m3", 4) is None
     assert "chunker" not in index_meta.read_index_meta(db, "transcripts_ollama")
+
+
+def test_an_interrupted_widening_still_leaves_a_readable_fingerprint(tmp_path):
+    """The widening goes through the staging table, because this is the table
+    every reader checks before opening an index: an index that looks unstamped
+    is one `ayl-add` refuses to write to. A crash after the old table was
+    dropped is finished on the next read, not left behind."""
+    import lancedb
+
+    from ask_your_library.ingest.publish import table_names
+
+    db = lancedb.connect(tmp_path / "db")
+    widened = [
+        {"table": "cards_ollama", "backend": "ollama", "model": "bge-m3", "dims": 1024,
+         "created": "2026-01-01T00:00:00", "chunker": "", "schema_version": 1},
+        {"table": "transcripts_ollama", "backend": "ollama", "model": "bge-m3", "dims": 1024,
+         "created": "2026-01-02T00:00:00", "chunker": "sentence-pack-1", "schema_version": 2}]
+    # the crash: staging complete, the live table already gone
+    db.create_table(index_meta.META_TABLE + "__staging", widened)
+    assert index_meta.META_TABLE not in table_names(db)
+
+    row = index_meta.read_index_meta(db, "transcripts_ollama")
+    assert row is not None and row["chunker"] == "sentence-pack-1"
+    assert index_meta.read_index_meta(db, "cards_ollama")["model"] == "bge-m3"
+    assert index_meta.META_TABLE + "__staging" not in table_names(db)
+
+
+def test_the_widening_keeps_every_other_row_when_it_rewrites_the_table(tmp_path):
+    import lancedb
+
+    db = lancedb.connect(tmp_path / "db")
+    db.create_table(index_meta.META_TABLE, [
+        {"table": "cards_ollama", "backend": "ollama", "model": "bge-m3", "dims": 1024,
+         "created": "2026-01-01T00:00:00"},
+        {"table": "transcripts_openrouter", "backend": "openrouter", "model": "te3", "dims": 1536,
+         "created": "2026-01-02T00:00:00"}])
+
+    index_meta.write_index_meta(db, "transcripts_ollama", "ollama", "bge-m3", 1024,
+                                chunker="sentence-pack-1")
+
+    assert index_meta.read_index_meta(db, "cards_ollama")["created"] == "2026-01-01T00:00:00"
+    assert index_meta.read_index_meta(db, "transcripts_openrouter")["dims"] == 1536
+    assert index_meta.read_index_meta(db, "transcripts_ollama")["schema_version"] == 2
