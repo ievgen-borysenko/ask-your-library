@@ -54,6 +54,50 @@ def test_parts_use_heading_offsets_not_body_search():
     assert [t for t, _ in chapters] == ["PART ONE — CHAPTER I.", "PART TWO — CHAPTER I."]
 
 
+def test_a_part_without_chapters_is_its_own_section():
+    """Dumas's Celebrated Crimes: "*THE CENCI—1598*" has no CHAPTER headings, and
+    the whole essay used to run on inside "THE BORGIAS — CHAPTER XVI"."""
+    cenci = "Should you ever go to Rome and visit the villa Pamphili. " * 8
+    text = ("*THE BORGIAS*\n\nCHAPTER I\n" + BODY + "\nCHAPTER II\n" + BODY + "\n\n"
+            "*THE CENCI—1598*\n\n" + cenci + "\n\n*MARY STUART*\n\nCHAPTER I\n" + BODY)
+    chapters = dict(ingest.split_chapters(text, r"^CHAPTER [IVX]+$", r"^\*([^*]+)\*$"))
+    assert list(chapters) == ["THE BORGIAS — CHAPTER I", "THE BORGIAS — CHAPTER II",
+                              "THE CENCI—1598", "MARY STUART — CHAPTER I"]
+    assert chapters["THE BORGIAS — CHAPTER II"] == BODY.strip()
+    assert chapters["THE CENCI—1598"] == cenci.strip()
+
+
+def test_a_parts_lead_in_before_its_first_chapter_is_its_own_section():
+    prologue = "PROLOGUE. On the 8th of April, 1492, in a bedroom. " * 6
+    text = ("OF BENEFITS.\n\nCHAPTER I.\n" + BODY + "\n"
+            "OF ANGER.\n\n" + prologue + "\nCHAPTER I.\n" + BODY + "\n")
+    chapters = dict(ingest.split_chapters(text, r"^CHAPTER [IVX]+\.$", r"^(OF [A-Z]+)\.$"))
+    assert list(chapters) == ["OF BENEFITS — CHAPTER I.", "OF ANGER", "OF ANGER — CHAPTER I."]
+    assert chapters["OF BENEFITS — CHAPTER I."] == BODY.strip()
+    assert chapters["OF ANGER"] == prologue.strip()
+
+
+def test_contents_page_part_lines_do_not_open_sections():
+    """Romeo and Juliet's contents page lists "ACT II" above an indented scene
+    list long enough to pass the size filter; only the last "ACT II" is the act."""
+    scenes = "".join(f"     Scene {n}. A street in Verona, a long description.\n" for n in range(8))
+    chorus = "CHORUS.\nNow old desire doth in his deathbed lie. " * 6
+    text = ("Contents\n\nACT I\n" + scenes + "\nACT II\n" + scenes + "\n\n"
+            "ACT I\nSCENE I. A public place.\n" + BODY + "\n"
+            "ACT II\n" + chorus + "\nSCENE I. A garden.\n" + BODY + "\n")
+    chapters = ingest.split_chapters(text, r"^SCENE [IVX]+\..*$", r"^(ACT [IV]+)$")
+    assert [t for t, _ in chapters] == [
+        "ACT I — SCENE I. A public place.", "ACT II", "ACT II — SCENE I. A garden."]
+
+
+def test_a_part_heading_matched_mid_line_keeps_the_rest_of_its_line_out_of_the_body():
+    intro = "Lemuel Gulliver sets out from Bristol on the Antelope. " * 6
+    text = ("PART I. A VOYAGE TO LILLIPUT.\n\n" + intro + "\nCHAPTER I.\n" + BODY + "\n")
+    chapters = dict(ingest.split_chapters(text, r"^CHAPTER [IVX]+\.$",
+                                          r"^(PART [IV]+)\. A VOYAGE TO"))
+    assert chapters["PART I"] == intro.strip()
+
+
 # --- the --book partial re-ingest guard ---------------------------------------
 
 class FakeEmbedder:
