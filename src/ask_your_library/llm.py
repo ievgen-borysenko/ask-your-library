@@ -25,7 +25,7 @@ from langchain_openai import ChatOpenAI
 # every wrapper subclasses the openai one, so an isinstance check still sees them.
 from openai import APIConnectionError, APIStatusError, APITimeoutError
 
-from .config import (LLM_BACKEND, LLM_BASE_URL, LLM_MAX_RETRIES, LLM_NEEDS_KEY, LLM_TIMEOUT_S,
+from .config import (LLM_BACKEND, LLM_BASE_URL, LLM_MAX_RETRIES, LLM_NEEDS_KEY, LLM_REASONING, LLM_TIMEOUT_S,
                      MAX_OUTPUT_TOKENS, ORCHESTRATOR_MODEL, PRICE_IN_PER_MTOK, PRICE_OUT_PER_MTOK,
                      QUESTION_DEADLINE_S)
 from .embeddings import openrouter_api_key
@@ -400,8 +400,14 @@ def llm(role: str = "", capped: bool | None = None) -> ChatOpenAI:
     # an `options` block are accepted and ignored — and it is inert for models
     # without the thinking capability (qwen2.5 answers the same), so it goes on
     # every local call. It is never sent to the hosted backend, where "none" is
-    # not a value every model's API takes.
-    local_only = {"reasoning_effort": "none"} if LLM_BACKEND == "ollama" else {}
+    # not a value every model's API takes. The hosted backend gets OpenRouter's
+    # own form instead, and only when LLM_REASONING=off asks for it.
+    if LLM_BACKEND == "ollama":
+        thinking = {"reasoning_effort": "none"}
+    elif LLM_REASONING == "off":
+        thinking = {"extra_body": {"reasoning": {"enabled": False}}}
+    else:
+        thinking = {}
     return ChatOpenAI(
         model=ORCHESTRATOR_MODEL,
         api_key=openrouter_api_key() if LLM_NEEDS_KEY else "ollama",
@@ -419,7 +425,7 @@ def llm(role: str = "", capped: bool | None = None) -> ChatOpenAI:
         # not bound; the question deadline catches it between steps.)
         timeout=httpx.Timeout(call_timeout_s(role, capped), connect=CONNECT_TIMEOUT_S),
         max_retries=0,
-        **local_only,
+        **thinking,
     )
 
 

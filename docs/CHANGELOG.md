@@ -2,17 +2,21 @@
 
 ## Unreleased
 
-- **The hosted default is `google/gemini-3.8-flash`, with `anthropic/claude-sonnet-5` as the
-  documented backup.** Only `LLM_BACKEND=openrouter` changes; the shipped default stays local.
-  `ORCHESTRATOR_MODEL` defaults to Gemini and `PRICE_IN_PER_MTOK` / `PRICE_OUT_PER_MTOK` to its
-  $0.75 / $3.75, in `config.py` and in the three commented lines of `.env.example` that
-  `install-mac.sh --hosted` uncomments. On the same commit and index as a Sonnet 4.6 baseline
-  (11/11 core at $0.0456, 10/10 catalogue at $0.0164), Gemini scored 10/11 at $0.0202 and 10/10 at
-  $0.0103, Sonnet 5 10/11 at $0.0445 and 10/10 at $0.0114; the miss is the same item for both, `c09`,
-  answered with both candidate books instead of the clarify the golden asks for. Single runs:
+- **The hosted default is `deepseek/deepseek-v4-flash-0731` with its thinking off, with
+  `google/gemini-3.8-flash` as the documented backup; `LLM_REASONING` is new.** Only
+  `LLM_BACKEND=openrouter` changes; the shipped default stays local. `ORCHESTRATOR_MODEL` defaults
+  to the new model and `PRICE_IN_PER_MTOK` / `PRICE_OUT_PER_MTOK` to its $0.06 / $0.12, in
+  `config.py` and in the three commented lines of `.env.example` that `install-mac.sh --hosted`
+  uncomments; the backup sits under them as `## ` lines the installer leaves alone.
+  `LLM_REASONING` (`off` by default, or `provider`; anything else refuses to start) sends
+  OpenRouter's `reasoning: {"enabled": false}` on the hosted backend, which is how the new default
+  was measured; the eval fingerprint names it (`via openrouter (reasoning off)`) and the planner
+  recording header carries it as `reasoning`. On the same commit and index as a Sonnet 4.6
+  baseline (11/11 core at $0.0456, 10/10 catalogue at $0.0164), the new default scored 11/11 at
+  $0.0006 and 10/10 at $0.0002, Gemini 10/11 at $0.0202 and 10/10 at $0.0103. Single runs:
   [`eval-results/2026-09-18-hosted-models.md`](eval-results/2026-09-18-hosted-models.md), which also
-  carries the two cheaper candidates that were not chosen. Every earlier hosted figure in the docs
-  stays labelled Sonnet 4.6.
+  carries the candidates that were not chosen. The README's results table and every earlier hosted
+  figure stay labelled Sonnet 4.6, and the README now says they predate the change.
 
 - **A refused quote is told to the model that wrote it, the answer names the book, and a run of
   all-dropped steps has a ceiling** (#29, [ADR-004 amended 2026-09-17](adr/README.md)). Three small

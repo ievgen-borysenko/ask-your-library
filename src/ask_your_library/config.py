@@ -70,9 +70,19 @@ if LLM_BACKEND == "ollama":
     ORCHESTRATOR_MODEL = OLLAMA_LLM_MODEL
     LLM_BASE_URL = f"{OLLAMA_URL.rstrip('/')}/v1"
 else:
-    ORCHESTRATOR_MODEL = _env("ORCHESTRATOR_MODEL", "google/gemini-3.8-flash")
+    ORCHESTRATOR_MODEL = _env("ORCHESTRATOR_MODEL", "deepseek/deepseek-v4-flash-0731")
     LLM_BASE_URL = OPENROUTER_BASE_URL
 LLM_NEEDS_KEY = LLM_BACKEND != "ollama"
+# Thinking on the hosted backend. `off` sends OpenRouter's
+# `reasoning: {"enabled": false}`, which turns a hybrid model's thinking off;
+# the default hosted model was measured that way, and the same family with its
+# thinking on answered about five times slower
+# (docs/eval-results/2026-09-18-hosted-models.md). `provider` sends nothing and
+# leaves the model's own default. Not applied to the local backend, which has
+# its own switch in llm.py. Anything else refuses to start.
+LLM_REASONING = _env("LLM_REASONING", "off")
+if LLM_REASONING not in ("off", "provider"):
+    raise ValueError(f"LLM_REASONING must be 'off' or 'provider', got {LLM_REASONING!r}")
 # The key is also needed when the embeddings come from OpenRouter, whatever
 # runs the answering model; preflight and the UI gate check this one.
 OPENROUTER_NEEDS_KEY = LLM_NEEDS_KEY or EMBED_BACKEND == "openrouter"
@@ -192,8 +202,8 @@ if LLM_BACKEND == "ollama":
     PRICE_IN_PER_MTOK = float(_env("OLLAMA_PRICE_IN_PER_MTOK", "0"))
     PRICE_OUT_PER_MTOK = float(_env("OLLAMA_PRICE_OUT_PER_MTOK", "0"))
 else:
-    PRICE_IN_PER_MTOK = float(_env("PRICE_IN_PER_MTOK", "0.75"))
-    PRICE_OUT_PER_MTOK = float(_env("PRICE_OUT_PER_MTOK", "3.75"))
+    PRICE_IN_PER_MTOK = float(_env("PRICE_IN_PER_MTOK", "0.06"))
+    PRICE_OUT_PER_MTOK = float(_env("PRICE_OUT_PER_MTOK", "0.12"))
 
 # --- UI language -----------------------------------------------------------
 # "ua" is this project's code for Ukrainian (kept distinct from the UK country code).

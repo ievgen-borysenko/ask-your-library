@@ -23,8 +23,8 @@ def test_ollama_backend_points_the_client_at_ollama_with_no_key_and_no_price():
     # name reads as an allow-list check, and https://openrouter.ai.example.com
     # would pass one.
     backend, model, base, needs_key, pin, pout = json.loads(_out(code, LLM_BACKEND="openrouter"))
-    assert backend == "openrouter" and needs_key and pin == 0.75 and pout == 3.75
-    assert base == "https://openrouter.ai/api/v1" and model == "google/gemini-3.8-flash"
+    assert backend == "openrouter" and needs_key and pin == 0.06 and pout == 0.12
+    assert base == "https://openrouter.ai/api/v1" and model == "deepseek/deepseek-v4-flash-0731"
 
 
 def test_the_shipped_default_is_the_local_backend():
@@ -101,6 +101,28 @@ def test_the_local_backend_asks_the_model_not_to_think_and_the_hosted_one_does_n
     assert json.loads(_out(code, LLM_BACKEND="openrouter", OPENROUTER_API_KEY="sk-test")) is None
 
 
+def test_the_hosted_backend_turns_thinking_off_only_when_asked():
+    """The hosted default was measured with its thinking off; with it on the
+    same family answered about five times slower. `LLM_REASONING=off` (the
+    default) sends OpenRouter's `reasoning: {"enabled": false}`, `provider`
+    sends nothing, and the local backend never gets the hosted form."""
+    code = ("import json; from ask_your_library import llm; "
+            "captured = {}\n"
+            "class Fake:\n"
+            "    def __init__(self, **kw): captured.update(kw)\n"
+            "llm.ChatOpenAI = Fake; llm.llm(); print(json.dumps(captured.get('extra_body')))")
+    off = {"reasoning": {"enabled": False}}
+    assert json.loads(_out(code, LLM_BACKEND="openrouter", OPENROUTER_API_KEY="sk-test")) == off
+    assert json.loads(_out(code, LLM_BACKEND="openrouter", OPENROUTER_API_KEY="sk-test",
+                           LLM_REASONING="provider")) is None
+    assert json.loads(_out(code, LLM_BACKEND="ollama", OLLAMA_LLM_MODEL="qwen2.5:7b")) is None
+
+
+def test_an_unknown_reasoning_value_refuses_to_start():
+    r = _run("import ask_your_library.config", check=False, LLM_REASONING="on")
+    assert r.returncode != 0 and "LLM_REASONING must be" in r.stderr
+
+
 def test_openrouter_backend_still_refuses_without_a_key():
     code = "from ask_your_library import preflight; print(preflight.check_api_key() is not None)"
     assert _out(code, LLM_BACKEND="openrouter") == "True"
@@ -120,7 +142,7 @@ def test_an_env_with_the_hosted_block_cannot_send_the_local_mode_to_openrouter(t
                     r"\1=", (tmp_path / ".env").read_text(encoding="utf-8"), flags=re.M)
     # The three really are in the file to be uncommented; a silent no-op here
     # would make the rest of this test prove nothing.
-    assert "\nORCHESTRATOR_MODEL=google/" in hosted and "\nPRICE_IN_PER_MTOK=0.75" in hosted
+    assert "\nORCHESTRATOR_MODEL=deepseek/" in hosted and "\nPRICE_IN_PER_MTOK=0.06" in hosted
     (tmp_path / ".env").write_text(hosted, encoding="utf-8")
     code = ("from ask_your_library import config; import json; "
             "print(json.dumps([config.ORCHESTRATOR_MODEL, config.LLM_BASE_URL, config.PRICE_IN_PER_MTOK]))")
@@ -133,7 +155,7 @@ def test_an_env_with_the_hosted_block_cannot_send_the_local_mode_to_openrouter(t
     # backend, which is the one whose defaults these three names have.
     (tmp_path / ".env").write_text("PRICE_IN_PER_MTOK=\nPRICE_OUT_PER_MTOK= \nORCHESTRATOR_MODEL=\n")
     model, base, price = json.loads(_out(code, cwd=str(tmp_path), LLM_BACKEND="openrouter"))
-    assert model == "google/gemini-3.8-flash" and price == 0.75
+    assert model == "deepseek/deepseek-v4-flash-0731" and price == 0.06
 
 
 def test_preflight_checks_the_model_the_client_will_call(monkeypatch):

@@ -97,7 +97,7 @@ available (`bash scripts/install-mac.sh --hosted`) and is the only thing here th
 under [Privacy and cost](#privacy-and-cost) below and in
 [`docs/known-limits.md`](docs/known-limits.md). On a Mac the default `qwen2.5:14b` answers a catalogue
 question ("how many books do I have?") in 1 to 12 s and a research one in 61 to 217 s, at $0; the
-hosted `claude-sonnet-4.6` takes 1 to 2 s and 8 to 61 s — a mean of 27 to 28 s over the eleven
+hosted `claude-sonnet-4.6` (the hosted default until 18.09) takes 1 to 2 s and 8 to 61 s — a mean of 27 to 28 s over the eleven
 research questions of the core eval set — for about $0.002 and $0.05 respectively. Free costs time.
 Every figure here is a measured single run, over the rows of that one kind of question, and
 [`docs/cost.md`](docs/cost.md) names which run and which rows each one comes from.
@@ -140,7 +140,11 @@ routing conditions are drawn node by node, with the decision records behind them
 | Cost per question, mean (Sonnet 4.6 via OpenRouter, configured rates) | $0.049 | $0.027 | $0.043 |
 
 **Every number in this table was measured on the hosted configuration** (`LLM_BACKEND=openrouter`,
-Sonnet 4.6), which is what the cost row prices. The **default configuration is local and free** —
+Sonnet 4.6), which is what the cost row prices. **It was measured before the hosted default
+changed:** on 2026-09-18 the hosted default moved from Sonnet 4.6 to
+`deepseek/deepseek-v4-flash-0731` with its thinking off, chosen on the core and catalogue sets in
+[`docs/eval-results/2026-09-18-hosted-models.md`](docs/eval-results/2026-09-18-hosted-models.md);
+this table has not been re-run on it yet. The **default configuration is local and free** —
 a different answering model, so a different system, and none of these numbers describes it.
 Measure your own model before trusting it: `uv run eval/run_agent_eval.py` names the backend it
 ran with in every report's fingerprint.
@@ -191,9 +195,10 @@ themselves are in [`docs/eval-results/`](docs/eval-results/).
   [`docs/privacy-and-threat-model.md`](docs/privacy-and-threat-model.md).
 - **Choose the hosted model and it does leave.** With `LLM_BACKEND=openrouter` the question **and
   the retrieved corpus fragments** go to that provider, and on to the model vendor.
-- A question on the default local model costs **nothing**. On the hosted default (Gemini 3.8 Flash
-  since 18.09) it costs about **$0.02 on the core set**, on Sonnet 4.6 it was **$0.04-0.05** at
-  v0.2.0-rc1 ([`docs/cost.md`](docs/cost.md)); `validate` is free in both, it is plain code.
+- A question on the default local model costs **nothing**. On the hosted default (DeepSeek V4
+  Flash with thinking off, since 18.09) it cost **under $0.001** on the core set in the run that
+  chose it; on Sonnet 4.6, the hosted default before, it was **$0.04-0.05** at v0.2.0-rc1
+  ([`docs/cost.md`](docs/cost.md)); `validate` is free in both, it is plain code.
 - Designed for **localhost, single user**, not for internet exposure — the full text, the four injection layers and their limits: [`docs/privacy-and-threat-model.md`](docs/privacy-and-threat-model.md), [`docs/cost.md`](docs/cost.md).
 
 ## Docs
