@@ -58,7 +58,16 @@ the configuration every number below was run on. Not every report in
 [`eval-results/`](eval-results/) is hosted — the two local ones named above are local, and each
 report's provenance header names the backend it ran with.
 
-The hosted orchestrator is Claude Sonnet via OpenRouter. A typical *research* question costs roughly
+**The hosted default is `deepseek/deepseek-v4-flash-0731` with its thinking off since
+2026-09-18** (`LLM_REASONING=off`), with `google/gemini-3.8-flash` as the documented backup; both
+were measured against the Sonnet 4.6 baseline on the same commit and index in
+[`eval-results/2026-09-18-hosted-models.md`](eval-results/2026-09-18-hosted-models.md). There the
+new default scored 11/11 on the core set at $0.0006 per question (mean 24 s) and 10/10 on the
+catalogue set at $0.0002; Gemini 10/11 at $0.0202 and 10/10 at $0.0103; Sonnet 4.6 11/11 at
+$0.0456 and 10/10 at $0.0164. Single runs, answers not graded by hand. Every other hosted figure on
+this page is Sonnet 4.6 at its $3/$15 rates, measured before the change.
+
+The hosted orchestrator of the runs below is Claude Sonnet 4.6 via OpenRouter. A typical *research* question costs roughly
 **$0.04-0.05 on the demo sets** at v0.2.0-rc1 (core mean $0.049, extended $0.043 — both sets are
 research questions end to end; a catalogue question is the $0.002 row of the table above;
 $0.03-0.04 at v0.1.0, before the 2,500-character window and the coverage gate): 4 to 12 LLM calls

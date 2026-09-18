@@ -153,7 +153,7 @@ def run_facts(repeat: int = 1) -> dict:
     manifest = repo / "corpus" / "manifest.yaml"
     corpus_sha = digest_of([manifest]) if manifest.exists() else "?"
     toc_sha = digest_of((repo / "corpus" / "toc").glob("*.json")) if (repo / "corpus" / "toc").exists() else "?"
-    from ask_your_library.config import DB_PATH, LLM_BACKEND, ORCHESTRATOR_MODEL, TABLES
+    from ask_your_library.config import DB_PATH, LLM_BACKEND, LLM_REASONING, ORCHESTRATOR_MODEL, TABLES
     stamps = []
     try:
         import lancedb
@@ -188,6 +188,8 @@ def run_facts(repeat: int = 1) -> dict:
         "toc_sha256_12": toc_sha,
         "model": ORCHESTRATOR_MODEL,
         "backend": LLM_BACKEND,
+        # hosted thinking switch; empty on the local backend, which ignores it
+        "reasoning": LLM_REASONING if LLM_BACKEND != "ollama" else "",
         "index": stamps,
         "strict_hit_id": bool(HIT_ID_STRICT),
         "clarify_pick": CLARIFY_PICK,
@@ -226,7 +228,8 @@ def render_fingerprint(f: dict) -> str:
     repeat = f["repeat"]
     return (f"code {f['code']} | golden {f['golden_name']}@{f['golden_sha256_12']} | "
             f"manifest@{f['manifest_sha256_12']} | "
-            f"toc@{f['toc_sha256_12']} | model {f['model']} via {f['backend']} | "
+            f"toc@{f['toc_sha256_12']} | model {f['model']} via {f['backend']}"
+            f"{' (reasoning ' + f['reasoning'] + ')' if f.get('reasoning') else ''} | "
             f"{' | '.join(f['index'])} | "
             f"strict_hit_id={'on' if f['strict_hit_id'] else 'off'} | "
             f"clarify_pick={f['clarify_pick'] or 'default'} | "
