@@ -103,7 +103,7 @@ def test_the_local_backend_asks_the_model_not_to_think_and_the_hosted_one_does_n
 
 def test_the_hosted_backend_turns_thinking_off_only_when_asked():
     """The hosted default was measured with its thinking off; with it on the
-    same family answered about five times slower. `LLM_REASONING=off` (the
+    same family answered about four times slower. `LLM_REASONING=off` (the
     default) sends OpenRouter's `reasoning: {"enabled": false}`, `provider`
     sends nothing, and the local backend never gets the hosted form."""
     code = ("import json; from ask_your_library import llm; "

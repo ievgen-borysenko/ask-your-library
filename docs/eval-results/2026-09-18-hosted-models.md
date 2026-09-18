@@ -61,10 +61,10 @@ No run produced an unattributed or broken quote; every model refused `c08` hones
 ## Decision
 
 Hosted default: `deepseek/deepseek-v4-flash-0731` with `LLM_REASONING=off` — the full behaviour
-score on both sets at about 1/70 of Sonnet 4.6's cost per research question and the same latency,
+score on both sets at about 1/70 to 1/75 of Sonnet 4.6's cost per research question and the same latency,
 confirmed on the branch itself. Documented backup: `google/gemini-3.8-flash` with
-`PRICE_IN_PER_MTOK=0.75` / `PRICE_OUT_PER_MTOK=3.75`, the cheapest candidate that ran with its
-provider's default settings. Open before the default is trusted further: a repeated run
+`PRICE_IN_PER_MTOK=0.75` / `PRICE_OUT_PER_MTOK=3.75` and `LLM_REASONING=provider` (it ran with its
+provider's default settings, which is what `provider` keeps). Open before the default is trusted further: a repeated run
 (`--repeat 3`), the extended set, and a reader's pass over the answers, which are short. The
 per-question reports of these runs are not committed; the table above is copied from their
 summary lines.

@@ -15,7 +15,10 @@
   baseline (11/11 core at $0.0456, 10/10 catalogue at $0.0164), the new default scored 11/11 at
   $0.0006 and 10/10 at $0.0002, Gemini 10/11 at $0.0202 and 10/10 at $0.0103. Single runs:
   [`eval-results/2026-09-18-hosted-models.md`](eval-results/2026-09-18-hosted-models.md), which also
-  carries the candidates that were not chosen. The README's results table and every earlier hosted
+  carries the candidates that were not chosen. **If you set your own `ORCHESTRATOR_MODEL`, set
+  `LLM_REASONING=provider`** to keep its previous behaviour: `off` is now sent to every hosted model,
+  and some refuse it while on others it changes the answers. The backup block in `.env.example`
+  carries `provider` for that reason. The README's results table and every earlier hosted
   figure stay labelled Sonnet 4.6, and the README now says they predate the change.
 
 - **A refused quote is told to the model that wrote it, the answer names the book, and a run of

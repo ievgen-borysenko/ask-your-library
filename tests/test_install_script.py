@@ -1546,6 +1546,11 @@ def test_hosted_mode_turns_the_local_example_back_into_a_hosted_env(sandbox):
     assert "\nORCHESTRATOR_MODEL=deepseek/deepseek-v4-flash-0731\n" in written
     assert "\nPRICE_IN_PER_MTOK=0.06\n" in written
     assert "\nPRICE_OUT_PER_MTOK=0.12\n" in written
+    # The backup ships as `## ` lines the installer must leave commented: one
+    # uncommented ORCHESTRATOR_MODEL too many and the later line wins.
+    assert written.count("\nORCHESTRATOR_MODEL=") == 1
+    assert "\n## ORCHESTRATOR_MODEL=google/gemini-3.8-flash\n" in written
+    assert "\n## LLM_REASONING=provider\n" in written
     # The hosted time budgets, not the longer local ones the example carries.
     assert "\nLLM_TIMEOUT_S=120\n" in written and "\nQUESTION_DEADLINE_S=300\n" in written
     # A key is never written by this script, in either mode.

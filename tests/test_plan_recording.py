@@ -584,3 +584,18 @@ def test_without_the_flag_nothing_is_recorded_and_no_observer_is_installed(monke
     with pytest.raises(SystemExit):        # the two errored items exit 1
         harness.main()
     assert not recordings.exists()
+
+
+def test_the_recording_header_names_the_hosted_thinking_switch():
+    """`reasoning` is what `llm.llm` sends as LLM_REASONING on the hosted
+    backend, and empty on the local one, which never gets that form."""
+    from conftest import fresh_output
+    code = ("import json, importlib.util, sys; sys.path.insert(0, %r)\n"
+            "spec = importlib.util.spec_from_file_location('plan_recording', %r)\n"
+            "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\n"
+            "print(json.dumps(m.model_knobs()['reasoning']))"
+            % (str(REPO / "eval"), str(REPO / "eval" / "plan_recording.py")))
+    assert json.loads(fresh_output(code, LLM_BACKEND="openrouter", OPENROUTER_API_KEY="sk-test")) == "off"
+    assert json.loads(fresh_output(code, LLM_BACKEND="openrouter", OPENROUTER_API_KEY="sk-test",
+                                   LLM_REASONING="provider")) == "provider"
+    assert json.loads(fresh_output(code, LLM_BACKEND="ollama")) == ""
