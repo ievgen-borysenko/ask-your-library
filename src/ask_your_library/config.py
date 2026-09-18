@@ -70,7 +70,7 @@ if LLM_BACKEND == "ollama":
     ORCHESTRATOR_MODEL = OLLAMA_LLM_MODEL
     LLM_BASE_URL = f"{OLLAMA_URL.rstrip('/')}/v1"
 else:
-    ORCHESTRATOR_MODEL = _env("ORCHESTRATOR_MODEL", "anthropic/claude-sonnet-4.6")
+    ORCHESTRATOR_MODEL = _env("ORCHESTRATOR_MODEL", "google/gemini-3.8-flash")
     LLM_BASE_URL = OPENROUTER_BASE_URL
 LLM_NEEDS_KEY = LLM_BACKEND != "ollama"
 # The key is also needed when the embeddings come from OpenRouter, whatever
@@ -192,8 +192,8 @@ if LLM_BACKEND == "ollama":
     PRICE_IN_PER_MTOK = float(_env("OLLAMA_PRICE_IN_PER_MTOK", "0"))
     PRICE_OUT_PER_MTOK = float(_env("OLLAMA_PRICE_OUT_PER_MTOK", "0"))
 else:
-    PRICE_IN_PER_MTOK = float(_env("PRICE_IN_PER_MTOK", "3.0"))
-    PRICE_OUT_PER_MTOK = float(_env("PRICE_OUT_PER_MTOK", "15.0"))
+    PRICE_IN_PER_MTOK = float(_env("PRICE_IN_PER_MTOK", "0.75"))
+    PRICE_OUT_PER_MTOK = float(_env("PRICE_OUT_PER_MTOK", "3.75"))
 
 # --- UI language -----------------------------------------------------------
 # "ua" is this project's code for Ukrainian (kept distinct from the UK country code).

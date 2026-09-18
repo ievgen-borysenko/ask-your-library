@@ -191,8 +191,9 @@ themselves are in [`docs/eval-results/`](docs/eval-results/).
   [`docs/privacy-and-threat-model.md`](docs/privacy-and-threat-model.md).
 - **Choose the hosted model and it does leave.** With `LLM_BACKEND=openrouter` the question **and
   the retrieved corpus fragments** go to that provider, and on to the model vendor.
-- A question on the default local model costs **nothing**. On the hosted one it costs roughly
-  **$0.04-0.05 on the demo set** at v0.2.0-rc1; `validate` is free in both, it is plain code.
+- A question on the default local model costs **nothing**. On the hosted default (Gemini 3.8 Flash
+  since 18.09) it costs about **$0.02 on the core set**, on Sonnet 4.6 it was **$0.04-0.05** at
+  v0.2.0-rc1 ([`docs/cost.md`](docs/cost.md)); `validate` is free in both, it is plain code.
 - Designed for **localhost, single user**, not for internet exposure — the full text, the four injection layers and their limits: [`docs/privacy-and-threat-model.md`](docs/privacy-and-threat-model.md), [`docs/cost.md`](docs/cost.md).
 
 ## Docs

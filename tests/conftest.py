@@ -50,9 +50,9 @@ DEFAULTS = {
     # pinned above these three are inert — and they are pinned anyway, because
     # CI runs this whole suite a second time with LLM_BACKEND=openrouter
     # exported, and that leg must not read the developer's own model or rates.
-    "ORCHESTRATOR_MODEL": "anthropic/claude-sonnet-4.6",
-    "PRICE_IN_PER_MTOK": "3.0",
-    "PRICE_OUT_PER_MTOK": "15.0",
+    "ORCHESTRATOR_MODEL": "google/gemini-3.8-flash",
+    "PRICE_IN_PER_MTOK": "0.75",
+    "PRICE_OUT_PER_MTOK": "3.75",
     "OLLAMA_PRICE_IN_PER_MTOK": "0",
     "OLLAMA_PRICE_OUT_PER_MTOK": "0",
     "MAX_OUTPUT_TOKENS": "2048",
