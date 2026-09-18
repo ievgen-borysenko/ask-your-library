@@ -41,6 +41,7 @@ FETCH_KINDS = {"html-chapters", "git-markdown", "git-html", "pdf", "arxiv-html",
 KINDS = {"book", "paper", "guide"}
 # The works whose licence forbids a derivative, and therefore a generated card.
 NO_CARD = {"sre-book", "sre-workbook", "swe-at-google"}
+CARDS_DIR = REPO / "corpus-tech" / "cards"
 
 
 def manifest() -> dict:
@@ -73,10 +74,18 @@ def test_every_work_carries_the_fields_a_build_and_a_reader_need():
             problems.append(f"  {where}: pin {work.get('pin')!r} is not one of "
                             f"{list(shelf.PIN_KINDS)} — it decides what the sha256 is "
                             f"taken of")
-        if not isinstance(work.get("cards"), bool):
-            problems.append(f"  {where}: cards must be true or false, not "
-                            f"{work.get('cards')!r} — it decides whether a derivative "
+        if work.get("cards") not in shelf.CARD_POLICIES:
+            problems.append(f"  {where}: cards must be one of {list(shelf.CARD_POLICIES)}, "
+                            f"not {work.get('cards')!r} — it decides whether a derivative "
                             f"may be distributed")
+        if work.get("cards") == "structure":
+            for field in shelf.STRUCTURE_FIELDS:
+                if not work.get(field):
+                    problems.append(f"  {where}: a structure card needs {field}")
+            if not URL.fullmatch(str(work.get("about_source", ""))):
+                problems.append(f"  {where}: about_source is not an https URL")
+            if not isinstance(work.get("about_checked"), date):
+                problems.append(f"  {where}: about_checked is not a date")
     assert not problems, "corpus-tech/manifest.yaml entries that cannot be built or judged:\n" \
                          + "\n".join(problems)
 
@@ -140,7 +149,7 @@ def test_ids_and_title_author_pairs_are_unique():
 # --- 2. no card for a NoDerivatives work -------------------------------------
 
 def test_the_no_derivatives_works_are_never_offered_to_a_card_stage():
-    """The whole point of `cards: false`. A book card is a summary written from
+    """The whole point of `cards: structure`. A book card is a summary written from
     the work, which is a derivative, and CC BY-NC-ND withholds the right to
     distribute one — so the three NC-ND works must not appear in the only list a
     card-generating stage is allowed to read."""
@@ -151,28 +160,111 @@ def test_the_no_derivatives_works_are_never_offered_to_a_card_stage():
         "every other work of the shelf may carry a card"
 
 
-def test_the_cards_flag_and_the_licence_agree():
-    """Read the other way round: a work that says ND in its licence may not say
-    `cards: true`, whoever adds it later and whatever they meant."""
+def test_the_cards_value_and_the_licence_agree():
+    """Read the other way round: a work that says ND in its licence is
+    `structure`, whoever adds it later and whatever they meant — not `shared`,
+    whose card is committed, and not `local` either: this shelf builds no
+    model-written card of a NoDerivatives work anywhere."""
     wrong = [work["id"] for work in works()
-             if "ND" in work["licence"].upper().split("-") and work["cards"]]
-    assert not wrong, f"NoDerivatives works marked as card-bearing: {wrong}"
+             if shelf.no_derivatives(work) and work["cards"] != "structure"]
+    assert not wrong, f"NoDerivatives works not marked `cards: structure`: {wrong}"
+    assert {work["id"] for work in works() if shelf.no_derivatives(work)} == NO_CARD
+
+
+def test_a_licence_nobody_confirmed_is_never_shared():
+    """A card committed to the repository is distributed by it. A work whose
+    licence could not be confirmed on the source may still be read and carded on
+    the reader's machine, but nothing of it goes into the tree on a guess."""
+    wrong = [work["id"] for work in works()
+             if work.get("licence_unverified") and work["cards"] != "local"]
+    assert not wrong, f"works with an unverified licence and a committed card: {wrong}"
+
+
+def committed_cards() -> dict[str, str]:
+    return {path.stem: path.read_text(encoding="utf-8") for path in CARDS_DIR.glob("*.md")}
 
 
 def test_every_committed_card_is_for_a_work_that_may_have_one():
     """The rule as it applies to what is actually in the repository. A card is
     the one file of this shelf that IS committed, so a summary of a NoDerivatives
     work would be distributed by this repository the moment it was added — this
-    test is what stands between that and a green suite."""
-    cards_dir = REPO / "corpus-tech" / "cards"
-    if not cards_dir.exists():
-        return
-    allowed = {work["id"] for work in shelf.card_targets(manifest())}
-    written = {path.stem for path in cards_dir.glob("*.md")}
-    assert not (written & NO_CARD), \
-        f"a card is committed for a NoDerivatives work: {sorted(written & NO_CARD)}"
-    assert written <= allowed, \
-        f"cards for works the manifest does not allow one for: {sorted(written - allowed)}"
+    test is what stands between that and a green suite. And a `local` work's
+    card never lands here at all: that folder is corpus-tech/cards-local/."""
+    by_policy = {work["id"]: work["cards"] for work in works()}
+    written = set(committed_cards())
+    assert written <= set(by_policy), \
+        f"cards for works the manifest does not know: {sorted(written - set(by_policy))}"
+    local = sorted(key for key in written if by_policy[key] == "local")
+    assert not local, f"a `local` card is committed: {local}"
+
+
+def test_a_no_derivatives_work_has_a_structure_card_and_nothing_model_written():
+    """The committed card of a NoDerivatives work is its structure card: the
+    three code-built sections, `card_model: none`, and none of the sections a
+    model writes — a summary committed here would be the derivative the licence
+    withholds."""
+    cards = committed_cards()
+    for key in sorted(NO_CARD):
+        assert key in cards, f"{key}: no structure card committed"
+        meta, body = chunking.parse_frontmatter(cards[key])
+        assert meta["card_kind"] == "structure" and meta["card_model"] == "none", key
+        assert re.findall(r"^## (.*)$", body, re.M) == list(shelf.STRUCTURE_SECTIONS), key
+        for model_section in shelf.CARD_MODEL_SECTIONS:
+            assert f"## {model_section}" not in body, f"{key}: has a {model_section}"
+
+
+def test_every_committed_structure_card_is_exactly_what_the_code_builds():
+    """"Built by code, with no model" as a fact about the files rather than a
+    promise: each committed structure card is byte-identical to what
+    `structure_card_text` makes from the manifest and the committed chapter
+    list. A hand edit — a helpful sentence of summary added later — fails here."""
+    cards = committed_cards()
+    for work in shelf.structure_targets(manifest()):
+        expected = shelf.structure_card_text(work, shelf.committed_chapters(work))
+        assert cards.get(work["id"]) == expected, \
+            (f"{work['id']}: the committed structure card is not what the code builds — "
+             f"run `uv run scripts/fetch_tech_shelf.py --stage structure-cards`")
+
+
+def test_a_structure_card_quotes_the_description_it_names_and_says_where_from():
+    """The About section is the manifest's `about`, verbatim, as a quotation,
+    followed by the page it was copied from: the reproduction is attributed, or
+    it is not the kind the licence grants."""
+    for work in shelf.structure_targets(manifest()):
+        text = shelf.structure_card_text(work, ["One", "Two"])
+        about = " ".join(work["about"].split())
+        assert f"> {about}\n" in text
+        assert f"<{work['about_source']}>" in text
+        assert f"<{work['licence_url']}>" in text
+
+
+def test_every_committed_model_card_carries_its_provenance_and_the_toc():
+    """The shared cards as committed: which model wrote each and when, the
+    manifest's book key as the H1, and a Structure section that is the
+    committed chapter list and not the model's."""
+    cards = committed_cards()
+    for work in shelf.card_targets(manifest()):
+        if work["cards"] != "shared" or work["id"] not in cards:
+            continue
+        meta, body = chunking.parse_frontmatter(cards[work["id"]])
+        where = work["id"]
+        assert meta.get("card_model") and meta["card_model"] != "none", where
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(meta.get("card_built", ""))), where
+        assert meta["source"] == f"{work['author']} — {work['title']}", where
+        assert re.findall(r"^# (.*)$", body, re.M) == [f"{work['title']} — {work['author']}"]
+        structure = shelf.card_sections(body)["Structure"]
+        titles = shelf.committed_chapters(work)
+        assert structure == "\n".join(f"- {i}. {title}" for i, title in enumerate(titles, 1)), \
+            f"{where}: Structure is not the committed chapter list"
+
+
+def test_the_local_card_folder_is_never_committed():
+    """`cards-local/` holds what the reader may build but the repository may not
+    share. A test cannot stop `git add -f`, but it can keep the ordinary path
+    closed: the folder is in .gitignore, and nothing is committed under it."""
+    ignored = (REPO / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert "corpus-tech/cards-local/" in ignored
+    assert shelf.CARDS_LOCAL_DIR == REPO / "corpus-tech" / "cards-local"
 
 
 # --- 2b. what a pin is taken of ----------------------------------------------
@@ -528,7 +620,7 @@ def test_a_table_in_the_middle_of_a_paper_does_not_capture_the_run():
 
 WORK = {"id": "demo-work", "title": "A Demo Work", "author": "A. Nonymous",
         "year": 2019, "kind": "guide",
-        "fetch": "git-markdown", "licence": "MIT", "cards": True}
+        "fetch": "git-markdown", "licence": "MIT", "cards": "shared"}
 
 
 @pytest.fixture
@@ -606,7 +698,7 @@ def test_a_markdown_work_keeps_its_own_subheadings(prepared):
 
 ND_WORK = {"id": "nd-work", "title": "A Work Nobody May Summarise", "author": "N. D. Author",
            "year": 2020, "kind": "book", "fetch": "html-chapters",
-           "licence": "CC-BY-NC-ND-4.0", "cards": False}
+           "licence": "CC-BY-NC-ND-4.0", "cards": "structure"}
 
 CARD_REPLY = """## Summary
 A demo work about configuration, in two chapters.
@@ -627,6 +719,7 @@ def card_shelf(prepared, monkeypatch):
     """The prepared demo work, a temporary cards directory, and a fake model
     whose last prompt the test can read."""
     monkeypatch.setattr(shelf, "CARDS_DIR", prepared / "cards")
+    monkeypatch.setattr(shelf, "CARDS_LOCAL_DIR", prepared / "cards-local")
     calls = []
 
     def fake_invoke(system, user, role):
@@ -634,7 +727,8 @@ def card_shelf(prepared, monkeypatch):
         return types.SimpleNamespace(content=CARD_REPLY)
 
     monkeypatch.setattr(llm, "llm_invoke", fake_invoke)
-    return types.SimpleNamespace(root=prepared, cards=prepared / "cards", calls=calls)
+    return types.SimpleNamespace(root=prepared, cards=prepared / "cards",
+                                 cards_local=prepared / "cards-local", calls=calls)
 
 
 def build(card_shelf, entries=(WORK,), works_in_manifest=None, force=False):
@@ -777,3 +871,113 @@ def test_a_work_that_was_never_prepared_is_named_rather_than_summarised_empty(ca
     absent = dict(WORK, id="never-prepared")
     with pytest.raises(FileNotFoundError, match="never-prepared"):
         build(card_shelf, entries=(absent,), works_in_manifest=(absent,))
+
+
+# --- 8. three kinds of card --------------------------------------------------
+
+def test_a_local_card_is_written_to_the_local_folder_and_never_the_committed_one(card_shelf):
+    """The generator cannot put a `local` card where it would be committed: the
+    folder is chosen from the work's `cards:` value in one place, `card_dir`."""
+    local = dict(WORK, cards="local")
+    build(card_shelf, entries=(local,), works_in_manifest=(local,))
+    assert (card_shelf.cards_local / "demo-work.md").exists()
+    assert not card_shelf.cards.exists() or not list(card_shelf.cards.glob("*.md"))
+
+
+def test_a_no_derivatives_work_never_reaches_a_model_whatever_its_cards_value_says(card_shelf):
+    """Belt and braces: the licence is read as well as `cards:`, so a
+    NoDerivatives work mislabelled `shared` or `local` is still skipped before
+    any model call, and no card of it is written to either folder."""
+    for value in ("shared", "local"):
+        mislabelled = dict(ND_WORK, cards=value)
+        build(card_shelf, entries=(mislabelled,), works_in_manifest=(mislabelled,))
+    assert not card_shelf.calls, "a NoDerivatives work reached the model"
+    for folder in (card_shelf.cards, card_shelf.cards_local):
+        assert not folder.exists() or not list(folder.glob("*.md"))
+
+
+def test_a_structure_work_is_skipped_by_the_model_stage(card_shelf):
+    structure = dict(WORK, cards="structure")
+    build(card_shelf, entries=(structure,), works_in_manifest=(structure,))
+    assert not card_shelf.calls
+
+
+def test_a_work_with_no_cards_value_is_local_and_an_unknown_value_is_refused():
+    """No value means the conservative one: built where it is read, never
+    committed. A value outside the three is a typo, not a fourth kind."""
+    assert shelf.card_policy({"id": "x"}) == "local"
+    with pytest.raises(ValueError, match="not one of"):
+        shelf.card_policy({"id": "x", "cards": True})
+    with pytest.raises(ValueError, match="not written by a model"):
+        shelf.card_dir({"id": "x", "cards": "structure"})
+
+
+STRUCTURE_WORK = dict(ND_WORK, licence_url="https://creativecommons.org/licenses/by-nc-nd/4.0/",
+                      licence_statement="https://example.invalid/licence",
+                      source="https://example.invalid/toc",
+                      about="The publisher's own words,\n  folded over two lines.",
+                      about_source="https://example.invalid/about",
+                      about_checked=date(2026, 9, 19))
+
+
+@pytest.fixture
+def structure_shelf(tmp_path, monkeypatch):
+    toc = tmp_path / "toc"
+    toc.mkdir()
+    (toc / "nd-work.json").write_text(json.dumps(["Preface", "1. Toil"]), encoding="utf-8")
+    monkeypatch.setattr(shelf, "TOC_DIR", toc)
+    monkeypatch.setattr(shelf, "CARDS_DIR", tmp_path / "cards")
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("a structure card called a model")
+
+    monkeypatch.setattr(llm, "llm_invoke", refuse)
+    shelf.build_structure_cards([STRUCTURE_WORK, WORK], {"works": [STRUCTURE_WORK, WORK]})
+    return tmp_path / "cards"
+
+
+def test_a_structure_card_is_built_by_code_for_structure_works_only(structure_shelf):
+    assert sorted(path.name for path in structure_shelf.glob("*.md")) == ["nd-work.md"]
+
+
+def test_a_structure_card_has_about_structure_and_facts_and_nothing_else(structure_shelf):
+    text = (structure_shelf / "nd-work.md").read_text(encoding="utf-8")
+    meta, body = chunking.parse_frontmatter(text)
+    assert meta["card_kind"] == "structure" and meta["card_model"] == "none"
+    assert "card_built" not in meta, "a build date would make the card differ run to run"
+    assert meta["source"] == "N. D. Author — A Work Nobody May Summarise"
+    assert re.findall(r"^# .*$", body, re.M) == ["# A Work Nobody May Summarise — N. D. Author"]
+    assert re.findall(r"^## (.*)$", body, re.M) == ["About", "Structure", "Facts"]
+    assert "> The publisher's own words, folded over two lines.\n" in body
+    assert shelf.card_sections(body)["Structure"] == "- 1. Preface\n- 2. 1. Toil"
+
+
+def test_a_structure_card_is_cut_into_chunks_under_the_books_key(structure_shelf):
+    chunks = chunking.chunk_card(structure_shelf / "nd-work.md")
+    assert {chunk.section for chunk in chunks} == {"About", "Structure", "Facts"}
+    assert {chunk.book for chunk in chunks} == {"A Work Nobody May Summarise — N. D. Author"}
+
+
+def test_a_structure_card_without_the_description_is_refused():
+    with pytest.raises(ValueError, match="about_source"):
+        shelf.structure_card_text(dict(STRUCTURE_WORK, about_source=""), ["One"])
+
+
+def test_the_cards_table_reads_the_committed_and_the_local_folder_together(tmp_path):
+    """`ingest_demo_corpus.py --stage cards --cards-dir A --cards-dir B`: the
+    local folder may not exist, and one book carded in both is refused rather
+    than indexed twice under one chunk id."""
+    ingest_spec = importlib.util.spec_from_file_location(
+        "ingest_demo_corpus_cards", REPO / "scripts" / "ingest_demo_corpus.py")
+    ingest = importlib.util.module_from_spec(ingest_spec)
+    ingest_spec.loader.exec_module(ingest)
+    shared, local = tmp_path / "cards", tmp_path / "cards-local"
+    shared.mkdir()
+    (shared / "a.md").write_text("# A\n", encoding="utf-8")
+    assert [p.name for p in ingest.card_files([shared, local])] == ["a.md"]
+    local.mkdir()
+    (local / "b.md").write_text("# B\n", encoding="utf-8")
+    assert [p.name for p in ingest.card_files([shared, local])] == ["a.md", "b.md"]
+    (local / "a.md").write_text("# A again\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match="a.md"):
+        ingest.card_files([shared, local])

@@ -15,13 +15,17 @@ file that was fetched to build it — taken per the work's `pin:`, which is
 off the web, because two of these publishers do not serve the same bytes twice
 (see `digest_of`). Three of the works are CC BY-NC-ND: they are
 fetched as text and never get a generated book card, because a card is a
-derivative work and ND forbids distributing one (`cards: false` in the manifest,
-and `card_targets` below is the only list a card-generating stage may read).
+derivative work and ND forbids distributing one. They get a structure card
+instead — title, chapter list and the publisher's own description, reproduced
+verbatim and built by code (`cards: structure` in the manifest) — and
+`card_targets` below, which never returns a NoDerivatives work, is the only list
+a model-card stage may read.
 
 Stages (all cached in corpus-tech/raw/, safe to re-run):
   uv run scripts/fetch_tech_shelf.py --stage fetch      # download, nothing else
   uv run scripts/fetch_tech_shelf.py --stage prepare    # raw -> prepared/<id>.md
   uv run scripts/fetch_tech_shelf.py --stage toc        # prepared -> toc/<id>.json
+  uv run scripts/fetch_tech_shelf.py --stage structure-cards  # manifest + toc -> cards/<id>.md, no model
   uv run scripts/fetch_tech_shelf.py --stage checksums  # pin the fetched files
   uv run scripts/fetch_tech_shelf.py --stage verify     # re-hash them against the pins
   uv run scripts/fetch_tech_shelf.py --work sre         # substring filter on the title
@@ -33,7 +37,8 @@ and never runs as part of `--stage all`:
   uv run scripts/fetch_tech_shelf.py --stage cards --work twelve   # one of them
   uv run scripts/fetch_tech_shelf.py --stage cards --force         # rebuild cards already written
 
-It writes corpus-tech/cards/<id>.md through the repository's own client
+It writes corpus-tech/cards/<id>.md for a `shared` work and the gitignored
+corpus-tech/cards-local/<id>.md for a `local` one, through the repository's own client
 (`ask_your_library.llm.llm_invoke`), so LLM_BACKEND=ollama|openrouter picks the
 backend and the egress and observer rules of ADR-017 apply unchanged, and it
 records in each card which backend and model wrote it. The cards are indexed
@@ -116,16 +121,47 @@ def works(manifest: dict) -> list[dict]:
     return manifest["works"]
 
 
+# What `cards:` in the manifest may say, and nothing else (see its header).
+CARD_POLICIES = ("shared", "structure", "local")
+# The policies whose card a model writes. `structure` is not one of them.
+MODEL_CARD_POLICIES = ("shared", "local")
+
+
+def card_policy(work: dict) -> str:
+    """The work's `cards:` value. A work that names none is `local`: a card
+    nobody decided may be shared is built where it is read and never committed.
+    A value that is not one of the three is a mistake in the manifest, not a
+    fourth kind of card, and is refused rather than guessed at."""
+    policy = work.get("cards", "local")
+    if policy not in CARD_POLICIES:
+        raise ValueError(f"{work['id']}: cards is {policy!r}, not one of "
+                         f"{', '.join(CARD_POLICIES)}")
+    return policy
+
+
+def no_derivatives(work: dict) -> bool:
+    """Whether the work's licence withholds adaptations (CC ...-ND-...)."""
+    return "ND" in str(work.get("licence", "")).upper().split("-")
+
+
 def card_targets(manifest: dict) -> list[dict]:
-    """The works a card MAY be generated for, and the only list a card stage is
-    allowed to read.
+    """The works a MODEL may write a card for, and the only list the model-card
+    stage is allowed to read.
 
     A book card is a summary written from the work — a derivative — so for a
     CC BY-NC-ND work distributing one is exactly what the licence withholds.
-    Those works are indexed as text and answer quote questions; they are absent
-    from the catalogue's card side, which is the price the shelf pays for
-    carrying the titles its audience knows (#58)."""
-    return [work for work in works(manifest) if work.get("cards") is True]
+    Those works get a structure card instead, which a model never touches
+    (`structure_targets`). The licence is checked here as well as the manifest
+    value, so a NoDerivatives work mislabelled `shared` or `local` still never
+    reaches a model (#58)."""
+    return [work for work in works(manifest)
+            if card_policy(work) in MODEL_CARD_POLICIES and not no_derivatives(work)]
+
+
+def structure_targets(manifest: dict) -> list[dict]:
+    """The works whose card is built by code from the manifest and the chapter
+    list: `cards: structure`."""
+    return [work for work in works(manifest) if card_policy(work) == "structure"]
 
 
 def sha256_of(path: Path) -> str:
@@ -861,7 +897,7 @@ def prepare(entries: list[dict]) -> None:
             # work rather than leave a file nobody notices is absent or wrong.
             unprepared.append(f"  {work['id']}: {error}")
             continue
-        card = "card allowed" if work.get("cards") else f"no card ({work['licence']})"
+        card = f"{card_policy(work)} card"
         print(f"  {work['id']}: {chapters} chapters, {size:,} characters, {card}")
     if unprepared:
         print("\nnot prepared:\n" + "\n".join(unprepared))
@@ -891,11 +927,15 @@ def write_toc(entries: list[dict]) -> None:
 
 # --- book cards --------------------------------------------------------------
 
-# Cards ARE committed, unlike the text they are written from: a card is this
-# project's own file, it holds no passage of the work, and it is what the
-# catalogue and the identify questions read. Only the works `card_targets`
-# returns may have one.
+# Three kinds of card, by the work's `cards:` value (see the manifest header):
+# a `shared` card, written by a model and committed here; a `structure` card,
+# built by code from the manifest and the chapter list and committed here; and a
+# `local` card, written by a model into CARDS_LOCAL_DIR, which is gitignored and
+# never committed — the reader may build a card for themself that the repository
+# may not share. `card_dir` is the one place that decides which folder a card is
+# written to, and it cannot send a `local` card here.
 CARDS_DIR = SHELF / "cards"
+CARDS_LOCAL_DIR = SHELF / "cards-local"
 
 # How much of a work the model is shown. Never the whole book: the shelf is 5 MB
 # of prepared text and the largest single work is over a megabyte, which no
@@ -1044,15 +1084,29 @@ def card_text(work: dict, sections: dict[str, str], chapters: list[tuple[str, st
     return "\n".join(lines).rstrip() + "\n"
 
 
+def card_dir(work: dict) -> Path:
+    """The folder a model-written card of this work goes to: the committed one
+    for `shared`, the gitignored one for `local`. Anything else has no
+    model-written card, and asking is a bug in the caller."""
+    policy = card_policy(work)
+    if policy == "shared":
+        return CARDS_DIR
+    if policy == "local":
+        return CARDS_LOCAL_DIR
+    raise ValueError(f"{work['id']}: a {policy} card is not written by a model")
+
+
 def build_cards(entries: list[dict], manifest: dict, force: bool = False) -> None:
-    """Write corpus-tech/cards/<id>.md for the works that may have one.
+    """Write the model-written cards: corpus-tech/cards/<id>.md for a `shared`
+    work, corpus-tech/cards-local/<id>.md for a `local` one.
 
     The NoDerivatives rule is enforced here and not only documented: the list
     this loop runs over is `card_targets`, intersected with whatever `--work`
     selected, and a work that is not in it is reported and skipped. A card for a
     CC BY-NC-ND work is a derivative this project has no right to distribute, so
     the check is an assertion in the code and a test, not a convention
-    (`tests/test_tech_shelf.py`)."""
+    (`tests/test_tech_shelf.py`). Those works' structure cards are built by
+    `build_structure_cards`, which calls no model."""
     # Imported here rather than at the top of the file so that `fetch`,
     # `prepare`, `toc`, `checksums` and `verify` keep needing no model, no key
     # and no database — which is what lets the weekly CI job run this script at
@@ -1063,13 +1117,15 @@ def build_cards(entries: list[dict], manifest: dict, force: bool = False) -> Non
     allowed = {work["id"] for work in card_targets(manifest)}
     model = f"{config.LLM_BACKEND}/{config.ORCHESTRATOR_MODEL}"
     built = date.today().isoformat()
-    CARDS_DIR.mkdir(parents=True, exist_ok=True)
     problems = []
     for work in entries:
         if work["id"] not in allowed:
-            print(f"  {work['id']}: no card ({work['licence']}), skipped")
+            print(f"  {work['id']}: no model-written card ({work['licence']}, "
+                  f"cards: {card_policy(work)}), skipped")
             continue
-        path = CARDS_DIR / f"{work['id']}.md"
+        folder = card_dir(work)
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"{work['id']}.md"
         if path.exists() and not force:
             print(f"  {work['id']}: card already written, kept (--force to rebuild)")
             continue
@@ -1085,11 +1141,103 @@ def build_cards(entries: list[dict], manifest: dict, force: bool = False) -> Non
             problems.append(f"  {work['id']}: the reply has no {', '.join(missing)}")
             continue
         path.write_text(card_text(work, sections, chapters, model, built), encoding="utf-8")
-        print(f"  {work['id']}: {len(chapters)} chapters -> {path.name}, "
+        print(f"  {work['id']}: {len(chapters)} chapters -> {folder.name}/{path.name}, "
               f"{len(reply):,} characters from {model} in "
               f"{(time.monotonic() - started) / 60:.1f} min")
     if problems:
         sys.exit("cards not written:\n" + "\n".join(problems))
+
+
+# --- structure cards ---------------------------------------------------------
+
+# The sections of a structure card, in order. None of them is written by a
+# model, and none of them says anything about the work in this project's words:
+# `About` is the publisher's own description, quoted; `Structure` is the chapter
+# list; `Facts` is the manifest. What makes the card shareable under CC BY-NC-ND
+# is exactly that — it reproduces parts of the work and its publisher's page
+# verbatim and attributed, which the licence grants, and adapts nothing, which
+# it withholds. A summary, a paraphrase or a list of key ideas is an adaptation
+# and belongs in a `local` card, never in this one.
+STRUCTURE_SECTIONS = ("About", "Structure", "Facts")
+STRUCTURE_FIELDS = ("about", "about_source", "about_checked")
+
+
+def committed_chapters(work: dict) -> list[str]:
+    """The work's chapter titles from the committed corpus-tech/toc/<id>.json —
+    the same list the prepared text is cut on, readable without fetching."""
+    path = TOC_DIR / f"{work['id']}.json"
+    if not path.exists():
+        raise FileNotFoundError(f"{path} is missing — run --stage toc first")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def structure_card_text(work: dict, titles: list[str]) -> str:
+    """A structure card: front matter and H1 as every other card (so
+    `chunk_card` keys it to the same book), then About, Structure and Facts.
+
+    Deterministic by construction — no build date, nothing from the clock — so
+    a committed structure card can be compared byte for byte with what this
+    function builds, which is how a test proves nobody edited one by hand."""
+    missing = [field for field in STRUCTURE_FIELDS if not work.get(field)]
+    if missing:
+        raise ValueError(f"{work['id']}: a structure card needs {', '.join(missing)} "
+                         f"in the manifest")
+    about = " ".join(str(work["about"]).split())
+    checked = str(work["about_checked"])
+    lines = ["---",
+             f"date: {checked}",
+             "tags: [book, tech-shelf]",
+             "type: book-card",
+             f"source: \"{work['author']} — {work['title']}\"",
+             "card_kind: structure",
+             "card_model: none",
+             "---",
+             f"# {work['title']} — {work['author']}",
+             "",
+             "## About",
+             "",
+             f"> {about}",
+             "",
+             f"The description of the work on the site that publishes it online, "
+             f"quoted verbatim from <{work['about_source']}> (read {checked}).",
+             "",
+             "## Structure",
+             "",
+             "\n".join(f"- {index}. {title}" for index, title in enumerate(titles, 1)),
+             "",
+             "## Facts",
+             "",
+             f"- Title: {work['title']}",
+             f"- Authors: {work['author']}",
+             f"- Year: {work['year']}",
+             f"- Kind: {work['kind']}",
+             f"- Edition: the online edition at <{work['source']}>, as pinned in "
+             f"corpus-tech/manifest.yaml",
+             f"- Licence: {work['licence']} <{work['licence_url']}>, as stated at "
+             f"<{work['licence_statement']}>",
+             f"- Chapters: {len(titles)}",
+             "- This card: the title, the chapter list and the publishing site's description, "
+             "reproduced verbatim and attributed; no summary of the work, because its "
+             "licence withholds the right to share one",
+             ]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def build_structure_cards(entries: list[dict], manifest: dict) -> None:
+    """Write corpus-tech/cards/<id>.md for every selected `structure` work.
+
+    No model, no key, no fetch: the card is the manifest and the committed
+    chapter list, so this stage is part of `--stage all` and a rebuild that
+    changes a committed card means the manifest or the chapter list changed."""
+    allowed = {work["id"] for work in structure_targets(manifest)}
+    CARDS_DIR.mkdir(parents=True, exist_ok=True)
+    for work in entries:
+        if work["id"] not in allowed:
+            continue
+        titles = committed_chapters(work)
+        path = CARDS_DIR / f"{work['id']}.md"
+        path.write_text(structure_card_text(work, titles), encoding="utf-8")
+        print(f"  {work['id']}: {len(titles)} chapters -> {path.name} (structure card)")
 
 
 # --- pins --------------------------------------------------------------------
@@ -1226,7 +1374,9 @@ def verify(entries: list[dict]) -> None:
 # `checksums`: it is the only stage that calls a model, and a plain run of this
 # script — which is what a machine does to check its pins — must not quietly
 # spend ten model calls.
-STAGES = ("fetch", "prepare", "toc", "cards", "checksums", "verify")
+# `structure-cards` IS part of it: it calls no model and reads only committed
+# files, like `toc`, and what it writes is committed.
+STAGES = ("fetch", "prepare", "toc", "structure-cards", "cards", "checksums", "verify")
 
 
 def main() -> None:
@@ -1261,6 +1411,9 @@ def main() -> None:
     if args.stage in ("all", "toc"):
         print("== table of contents ==")
         write_toc(entries)
+    if args.stage in ("all", "structure-cards"):
+        print("== structure cards ==")
+        build_structure_cards(entries, manifest)
     if args.stage == "cards":
         print("== book cards ==")
         build_cards(entries, manifest, force=args.force)

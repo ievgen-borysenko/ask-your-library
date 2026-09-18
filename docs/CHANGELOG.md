@@ -85,10 +85,21 @@
   and Terms in place of Plot and Characters. The model is shown the chapter list and the opening of
   each chapter within a budget, never the whole work, and `## Structure` is copied from the prepared
   text rather than generated, so the section that answers "which chapter covers X" cannot rename or
-  invent a chapter. **A card is never written for a CC BY-NC-ND work**: the stage may read only
-  `card_targets()`, asserted in the code and in two tests — the rule, and the absence of a committed
-  card for any of the three. Each card records `card_model` and `card_built`, because a card written
-  on the local model and one written on a hosted model are otherwise the same file.
+  invent a chapter. **No model ever writes a card of a CC BY-NC-ND work**: the stage may read only
+  `card_targets()`, which checks the licence as well as the manifest, asserted in the code and in
+  tests. Each model-written card records `card_model` and `card_built`, because a card written
+  on the local model and one written on a hosted model are otherwise the same file. The ten
+  licence-clean works carry cards written on the hosted model.
+
+  `cards:` in the manifest is three-valued — `shared` (a model-written card, committed),
+  `structure` (a card built by code with no model, committed) and `local` (a model-written card
+  written to the gitignored `corpus-tech/cards-local/`, never committed; also what a work that names
+  no value gets). The three NoDerivatives works are `structure`: title, chapter list and the
+  publishing site's own description, reproduced verbatim and attributed, and nothing paraphrased —
+  a reproduction in part, which the licence grants, not an adaptation, which it withholds. A test
+  rebuilds each committed structure card and compares it byte for byte. `--stage structure-cards`
+  builds them and is part of the plain run, and `ingest_demo_corpus.py --cards-dir` is repeatable
+  so the local cards join the same cards table.
 
   `scripts/ingest_demo_corpus.py --stage cards` takes `--cards-dir`, so the cards table of any index
   is written by the one implementation; the shelf's index is an ordinary `ayl-add` folder ingest at

@@ -11,10 +11,31 @@
 #     instead of a guess.
 #   fetch     the shape of the source, one of: html-chapters, git-markdown,
 #             git-html, pdf, arxiv-html, arxiv-pdf (see the script's docstring).
-#   cards     whether a book card may be generated from this work. False for
-#             the three CC BY-NC-ND works: a card is a summary written from the
-#             book — a derivative — and ND withholds exactly the right to
-#             distribute one. They are fetched as text and never summarised.
+#   cards     what kind of book card this work gets, and where it may live —
+#             one of three values, with no fourth:
+#               shared     a full card, written by a model at `--stage cards`
+#                          and committed to corpus-tech/cards/. For the works
+#                          whose licence allows a derivative to be shared.
+#               structure  a facts-only card, built by code with no model at
+#                          `--stage structure-cards` and committed to
+#                          corpus-tech/cards/: the title, the chapter list and
+#                          the publisher's own description (`about`), all
+#                          reproduced verbatim and attributed. A reproduction
+#                          in part, which is what CC BY-NC-ND grants, and never
+#                          a summary, which is the derivative it withholds. The
+#                          three CC BY-NC-ND works are `structure`.
+#               local      a full card, written by a model at `--stage cards`
+#                          into the gitignored corpus-tech/cards-local/ and
+#                          never committed: a card the reader may build for
+#                          themself but the repository may not share. A work
+#                          that names no value is treated as `local`.
+#             Whatever this says, a work whose licence is NoDerivatives never
+#             reaches a model (`card_targets` in the script).
+#   about / about_source / about_checked
+#             `structure` works only: the publisher's own one-paragraph
+#             description of the work, copied character for character (only
+#             the line breaks of the page are folded), the page it was copied
+#             from, and the day that page was read.
 #   pin       what the sha256 under `sources` is taken of: `bytes` for the file
 #             as fetched, `text` for the text the HTML reader extracts from it.
 #             Two of these publishers do not serve the same bytes twice —
@@ -57,7 +78,13 @@ works:
     # keeps the first, so the page order is the book's order.
     page_pattern: "^/sre-book/(?!table-of-contents/)[^/]+/$"
     container: "div#content"
-    cards: false
+    cards: structure
+    about: >-
+      Members of the SRE team explain how their engagement with the entire
+      software lifecycle has enabled Google to build, deploy, monitor, and
+      maintain some of the largest software systems in the world.
+    about_source: "https://sre.google/books/"
+    about_checked: 2026-09-19
     note: >-
       The book the audience knows by name, and half of the demo's clarify pair:
       its chapter 5 is called "Eliminating Toil" and so is the Workbook's
@@ -128,7 +155,17 @@ works:
     pin: text
     page_pattern: "^/workbook/(?!table-of-contents/)[^/]+/$"
     container: "div#content"
-    cards: false
+    cards: structure
+    about: >-
+      The Site Reliability Workbook is the hands-on companion to the bestselling
+      Site Reliability Engineering book and uses concrete examples to show how
+      to put SRE principles and practices to work. This book contains practical
+      examples from Google’s experiences and case studies from Google’s Cloud
+      Platform customers. Evernote, The Home Depot, The New York Times, and
+      other companies outline hard-won experiences of what worked for them and
+      what didn’t.
+    about_source: "https://sre.google/books/"
+    about_checked: 2026-09-19
     note: >-
       The other half of the toil pair, and the shelf's worked examples: the
       error budget policy and the SLO documents are here rather than in the SRE
@@ -186,7 +223,14 @@ works:
     # the index (ix.html) is a list of page numbers and is left out.
     page_pattern: "^(?:foreword|pr01|part[0-9]|ch[0-9]{2})\\.html$"
     container: "section"
-    cards: false
+    cards: structure
+    about: >-
+      The Software Engineering at Google book (“SWE Book”) is not about
+      programming, per se, but about the engineering practices utilized at
+      Google to make their codebase sustainable and healthy. (These practices
+      are paramount for common infrastructural code such as Abseil.)
+    about_source: "https://abseil.io/resources/swe-book"
+    about_checked: 2026-09-19
     note: >-
       The third title an engineer recognises on sight, and the one that answers
       "how does a big company actually review code": text only, like the two SRE
@@ -250,7 +294,7 @@ works:
     # listed in atlas.json but are not in the repository at all.
     skip_files: [cover.html, praise.html, titlepage.html, copyright.html,
                  dedication.html, toc.html, ix.html, colo.html]
-    cards: true
+    cards: shared
     note: >-
       The CC BY book of the same house as the two SRE ones: a full-rights work
       that can carry a card, and the shelf's answer on security-reliability
@@ -323,7 +367,7 @@ works:
       - content/en/dev-prod-parity.md
       - content/en/logs.md
       - content/en/admin-processes.md
-    cards: true
+    cards: shared
     note: >-
       Short, universally read, and the shelf's cleanest "which one was it
       again": twelve numbered factors of which exactly one is about config.
@@ -364,7 +408,7 @@ works:
     # year every other heading carries.
     chapter_regex: "^LLM\\d{2}(?::2025)?:? .+$"
     lead_section: "Front matter"
-    cards: true
+    cards: shared
     note: >-
       The shelf's own subject matter: the risks of the kind of application this
       repository is. ShareAlike, so anything derived from it (a card, a quote
@@ -388,7 +432,7 @@ works:
     # the forty-three numbered rules sit inside them as `<h4>`s.
     container: "div.devsite-article-body"
     lead_section: "Front matter"
-    cards: true
+    cards: shared
     note: >-
       Forty-three numbered rules, one of which ("keep the first model simple")
       every ML engineer half-remembers — a quote question with a definite
@@ -420,7 +464,7 @@ works:
     arxiv_id: "2210.03629"
     container: "article.ltx_document"
     lead_section: "Abstract"
-    cards: true
+    cards: shared
     note: >-
       The paper the demo's second clarify pair is built on, against Reflexion:
       "a thought, then a tool call, then the result, in a loop" describes both.
@@ -446,7 +490,7 @@ works:
     arxiv_id: "2201.11903"
     container: "article.ltx_document"
     lead_section: "Abstract"
-    cards: true
+    cards: shared
     note: >-
       The other paper everybody cites and nobody re-reads; on the shelf as the
       neighbour that makes a retrieval mistake on ReAct visible.
@@ -468,7 +512,7 @@ works:
     arxiv_id: "2310.11511"
     container: "article.ltx_document"
     lead_section: "Abstract"
-    cards: true
+    cards: shared
     note: >-
       Retrieval that decides whether to retrieve at all — the behaviour this
       project's own planner argues about, and the first half of the
@@ -491,7 +535,7 @@ works:
     arxiv_id: "2402.03216"
     container: "article.ltx_document"
     lead_section: "Abstract"
-    cards: true
+    cards: shared
     note: >-
       The model this repository embeds with, on the shelf it embeds: a question
       about its three retrieval modes is one a reader can check against the
@@ -514,7 +558,7 @@ works:
     arxiv_id: "2303.11366"
     container: "article.ltx_document"
     lead_section: "Abstract"
-    cards: true
+    cards: shared
     note: >-
       ReAct's neighbour: also a loop, also thought and action, and the reason
       t04 has to be asked back rather than answered.
@@ -536,7 +580,7 @@ works:
     arxiv_id: "2404.16130"
     container: "article.ltx_document"
     lead_section: "Abstract"
-    cards: true
+    cards: shared
     note: >-
       Community summaries over a graph: the other answer to "retrieval that
       decides what to read", and the second half of the Self-RAG pair.

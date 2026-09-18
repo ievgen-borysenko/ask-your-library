@@ -16,6 +16,8 @@ Stages (all cached in data/, safe to re-run):
   uv run scripts/ingest_demo_corpus.py --stage ingest      # transcripts table
   uv run scripts/ingest_demo_corpus.py --stage cards       # cards table
   uv run scripts/ingest_demo_corpus.py --stage cards --cards-dir corpus-tech/cards
+  uv run scripts/ingest_demo_corpus.py --stage cards --cards-dir corpus-tech/cards \
+      --cards-dir corpus-tech/cards-local   # plus the cards built only on this machine
   uv run scripts/ingest_demo_corpus.py --book alice        # filter by substring
   uv run scripts/ingest_demo_corpus.py --stage stamp-meta  # fingerprint pre-existing tables
   uv run scripts/ingest_demo_corpus.py --stage checksums   # pin source sha256 into the manifest
@@ -555,17 +557,38 @@ def ingest_transcripts_table(backend: str, book_filter: str | None, entry_ids: l
           f"(FTS rebuild {fts_seconds:.1f}s)")
 
 
-def ingest_cards_table(backend: str, cards_dir: Path = CARDS_DIR) -> None:
-    """Rebuild this index's cards table from a folder of `*.md` cards.
+def card_files(cards_dirs: list[Path]) -> list[Path]:
+    """Every `*.md` card under the given folders, refusing one book carded twice.
 
-    The folder is a parameter because the engineer's shelf (#58) is a second
+    More than one folder because the engineer's shelf keeps its committed cards
+    in corpus-tech/cards/ and the ones a reader may only build for themself in
+    the gitignored corpus-tech/cards-local/ (#58); a folder that does not exist
+    holds no cards, which is the ordinary state of cards-local/. The same file
+    name in two folders would be two cards with one `note` and one chunk id, so
+    it is a failure rather than a silent overwrite."""
+    cards, seen = [], {}
+    for folder in cards_dirs:
+        for path in sorted(folder.glob("*.md")):
+            if path.name in seen:
+                sys.exit(f"{path.name} is a card in both {seen[path.name]} and {folder}")
+            seen[path.name] = folder
+            cards.append(path)
+    return cards
+
+
+def ingest_cards_table(backend: str, cards_dirs: list[Path] | None = None) -> None:
+    """Rebuild this index's cards table from folders of `*.md` cards.
+
+    The folders are a parameter because the engineer's shelf (#58) is a second
     index with cards of its own: `--cards-dir corpus-tech/cards` together with
     LIBRARY_DB_PATH pointing at that index writes the shelf's `cards_<backend>`
     table through this same code, so both shelves' cards are cut, embedded and
     stamped by one implementation rather than two."""
-    cards = sorted(cards_dir.glob("*.md"))
+    cards_dirs = cards_dirs or [CARDS_DIR]
+    where = ", ".join(str(folder) for folder in cards_dirs)
+    cards = card_files(cards_dirs)
     if not cards:
-        sys.exit(f"no cards in {cards_dir} — generate them first")
+        sys.exit(f"no cards in {where} — generate them first")
     embedder = get_embedder(backend)
     db = lancedb.connect(DB_PATH)
     name = f"cards_{backend}"
@@ -589,7 +612,7 @@ def ingest_cards_table(backend: str, cards_dir: Path = CARDS_DIR) -> None:
     # touch cards.
     write_index_meta(db, name, backend, embedder.model, embedder.dims,
                      chunker=CARD_CHUNKER_VERSION)
-    print(f"cards done: {len(cards)} cards from {cards_dir} -> {table.count_rows()} chunks")
+    print(f"cards done: {len(cards)} cards from {where} -> {table.count_rows()} chunks")
 
 
 def stamp_existing_tables(backend: str, chunker: str | None = None) -> None:
@@ -652,10 +675,12 @@ def main() -> None:
                          "when such a backup is already there)")
     ap.add_argument("--retranscribe", action="store_true",
                     help="ignore shipped audio transcripts and run Whisper (macOS)")
-    ap.add_argument("--cards-dir", type=Path, default=CARDS_DIR, metavar="DIR",
-                    help="--stage cards only: the folder of *.md cards to index "
+    ap.add_argument("--cards-dir", type=Path, action="append", metavar="DIR",
+                    help="--stage cards only: a folder of *.md cards to index, repeatable "
                          f"(default {CARDS_DIR.relative_to(REPO)}; the engineer's shelf "
-                         "passes corpus-tech/cards together with its own LIBRARY_DB_PATH)")
+                         "passes corpus-tech/cards, and corpus-tech/cards-local for the "
+                         "cards built only on this machine, together with its own "
+                         "LIBRARY_DB_PATH)")
     args = ap.parse_args()
     if args.chunker and args.stage != "stamp-meta":
         # Silently ignoring it would let somebody believe they had asserted a
