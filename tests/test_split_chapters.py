@@ -64,7 +64,9 @@ def test_a_part_without_chapters_is_its_own_section():
     assert list(chapters) == ["THE BORGIAS — CHAPTER I", "THE BORGIAS — CHAPTER II",
                               "THE CENCI—1598", "MARY STUART — CHAPTER I"]
     assert chapters["THE BORGIAS — CHAPTER II"] == BODY.strip()
-    assert chapters["THE CENCI—1598"] == cenci.strip()
+    # the next part's bare heading line trails the essay, as a part heading
+    # without text of its own always trailed the chapter before it
+    assert chapters["THE CENCI—1598"] == cenci + "\n\n*MARY STUART*"
 
 
 def test_a_parts_lead_in_before_its_first_chapter_is_its_own_section():
@@ -92,10 +94,11 @@ def test_contents_page_part_lines_do_not_open_sections():
 
 def test_a_part_heading_matched_mid_line_keeps_the_rest_of_its_line_out_of_the_body():
     intro = "Lemuel Gulliver sets out from Bristol on the Antelope. " * 6
-    text = ("PART I. A VOYAGE TO LILLIPUT.\n\n" + intro + "\nCHAPTER I.\n" + BODY + "\n")
+    text = ("PART I. A VOYAGE TO LILLIPUT.\n\nCHAPTER I.\n" + BODY + "\n"
+            "PART II. A VOYAGE TO BROBDINGNAG.\n\n" + intro + "\nCHAPTER I.\n" + BODY + "\n")
     chapters = dict(ingest.split_chapters(text, r"^CHAPTER [IVX]+\.$",
                                           r"^(PART [IV]+)\. A VOYAGE TO"))
-    assert chapters["PART I"] == intro.strip()
+    assert chapters["PART II"] == intro.strip()
 
 
 # --- the --book partial re-ingest guard ---------------------------------------
@@ -141,3 +144,32 @@ def test_partial_reingest_into_a_matching_table_is_allowed(tmp_path):
     write_index_meta(db, "transcripts_ollama", "ollama", "fake-embed", 4)
     assert ingest.refuse_unsafe_partial_reingest(db, "transcripts_ollama",
                                                  FakeEmbedder()) is None
+
+
+def test_two_real_parts_with_the_same_name_lose_no_chapter():
+    """Two plays in one file, each with an ACT I: every scene survives."""
+    chorus = "CHORUS. Two households, both alike in dignity. " * 6
+    text = ("ACT I\nSCENE I. a\n" + BODY + "\nACT II\n" + chorus + "\nSCENE I. b\n" + BODY
+            + "\nACT I\n" + chorus + "\nSCENE I. c\n" + BODY + "\n")
+    chapters = ingest.split_chapters(text, r"^SCENE [IVX]+\..*$", r"^(ACT [IV]+)$")
+    assert [t for t, _ in chapters] == [
+        "ACT I — SCENE I. a", "ACT II", "ACT II — SCENE I. b", "ACT I", "ACT I — SCENE I. c"]
+
+
+def test_a_short_part_lead_in_stays_in_the_previous_chapter():
+    """An epigraph under a part heading is too short to be a section; it stays
+    where it always was instead of vanishing."""
+    text = ("PART I\n\nCHAPTER I\n" + BODY + "\nPART II\n\n'All is vanity.'\n\n"
+            "CHAPTER I\n" + BODY + "\n")
+    chapters = dict(ingest.split_chapters(text, r"^CHAPTER [IVX]+$", r"^(PART [IV]+)$"))
+    assert list(chapters) == ["PART I — CHAPTER I", "PART II — CHAPTER I"]
+    assert chapters["PART I — CHAPTER I"].endswith("PART II\n\n'All is vanity.'")
+
+
+def test_a_part_lead_in_before_the_first_chapter_does_not_shield_a_contents_leftover():
+    lead_in = "The first part opens with a long lead-in of its own. " * 6
+    front = "Front matter of the edition, a dedication and a preface. " * 6
+    text = ("PART ONE\n" + lead_in + "\nCHAPTER II. The End\n" + front
+            + "\nCHAPTER I.\n" + BODY + "\nCHAPTER II.\n" + BODY + "\n")
+    chapters = ingest.split_chapters(text, r"^CHAPTER [IVX]+\..*$", r"^(PART [A-Z]+)$")
+    assert [t for t, _ in chapters] == ["PART ONE — CHAPTER I.", "PART ONE — CHAPTER II."]

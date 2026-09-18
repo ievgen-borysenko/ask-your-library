@@ -7,9 +7,11 @@
   prefixed chapter titles, so a part without CHAPTER headings ran on inside the previous part's last
   chapter: the whole Cenci essay sat in "THE BORGIAS — CHAPTER XVI" (90k characters), and
   "ALI PACHA — CHAPTER XI" carried six more essays (585k). Retrieval filtered to the book never
-  reached them and a chapter read by title could not find them. A part's own text is now a section
-  named after the part ("THE CENCI—1598"), and a part name that recurs later is read as a contents
-  line and opens nothing. Three books change: celebrated-crimes (75 → 88 sections), senecas-morals
+  reached them and a chapter read by title could not find them. A part heading after the first
+  chapter heading whose own text passes the chapter size filter now opens a section named after the
+  part ("THE CENCI—1598"); a shorter one (an epigraph) and anything before the first chapter
+  heading (title page, contents) stay where they were. Three books change, each only by moving the
+  run-on text into its own sections: celebrated-crimes (75 → 86 sections), senecas-morals
   (+ "OF CLEMENCY", previously inside "OF ANGER — CHAPTER XII.") and romeo-and-juliet (+ the Act II
   chorus). Re-prepare and re-ingest those three with `--book`; `corpus/toc/` and the book-identity
   fixture are regenerated. The generic `ayl-add` path does not use parts and is unchanged.
