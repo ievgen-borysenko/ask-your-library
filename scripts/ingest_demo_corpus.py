@@ -687,6 +687,12 @@ def main() -> None:
         # chunker over an index that was never stamped with one.
         ap.error("--chunker belongs to --stage stamp-meta; every other stage stamps the "
                  "chunker it actually used")
+    if args.cards_dir and args.stage != "cards":
+        # `--stage all --cards-dir corpus-tech/cards` would write the shelf's
+        # cards into whichever index the classics' transcripts just went to, and
+        # every other stage would ignore the flag without saying so.
+        ap.error("--cards-dir belongs to --stage cards; no other stage reads a folder "
+                 "of cards")
     global VERIFY_CHECKSUMS
     VERIFY_CHECKSUMS = not args.no_verify
 

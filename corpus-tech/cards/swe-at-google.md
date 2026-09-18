@@ -16,39 +16,39 @@ The description of the work on the site that publishes it online, quoted verbati
 
 ## Structure
 
-- 1. Foreword
-- 2. Preface
-- 3. Thesis
-- 4. What Is Software Engineering?
-- 5. Culture
-- 6. How to Work Well on Teams
-- 7. Knowledge Sharing
-- 8. Engineering for Equity
-- 9. How to Lead a Team
-- 10. Leading at Scale
-- 11. Measuring Engineering Productivity
-- 12. Processes
-- 13. Style Guides and Rules
-- 14. Code Review
-- 15. Documentation
-- 16. Testing Overview
-- 17. Unit Testing
-- 18. Test Doubles
-- 19. Larger Testing
-- 20. Deprecation
-- 21. Tools
-- 22. Version Control and Branch Management
-- 23. Code Search
-- 24. Build Systems and Build Philosophy
-- 25. Critique: Google’s Code Review Tool
-- 26. Static Analysis
-- 27. Dependency Management
-- 28. Large-Scale Changes
-- 29. Continuous Integration
-- 30. Continuous Delivery
-- 31. Compute as a Service
-- 32. Conclusion
-- 33. Afterword
+- Foreword
+- Preface
+- Thesis
+- What Is Software Engineering?
+- Culture
+- How to Work Well on Teams
+- Knowledge Sharing
+- Engineering for Equity
+- How to Lead a Team
+- Leading at Scale
+- Measuring Engineering Productivity
+- Processes
+- Style Guides and Rules
+- Code Review
+- Documentation
+- Testing Overview
+- Unit Testing
+- Test Doubles
+- Larger Testing
+- Deprecation
+- Tools
+- Version Control and Branch Management
+- Code Search
+- Build Systems and Build Philosophy
+- Critique: Google’s Code Review Tool
+- Static Analysis
+- Dependency Management
+- Large-Scale Changes
+- Continuous Integration
+- Continuous Delivery
+- Compute as a Service
+- Conclusion
+- Afterword
 
 ## Facts
 

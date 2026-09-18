@@ -16,6 +16,8 @@ of the claim corpus-tech/README.md makes on the repository's behalf.
 import importlib.util
 import json
 import re
+import subprocess
+import sys
 import types
 from datetime import date
 from pathlib import Path
@@ -102,6 +104,9 @@ def test_every_licence_claim_says_what_where_and_when():
         where = work["id"]
         if not work.get("licence"):
             problems.append(f"  {where}: no licence")
+        elif not shelf.LICENCE_ID.fullmatch(str(work["licence"])):
+            problems.append(f"  {where}: licence {work['licence']!r} is not an SPDX-style "
+                            f"identifier (CC-BY-NC-ND-4.0, not CC BY-NC-ND 4.0)")
         for field in ("licence_url", "licence_statement"):
             value = work.get(field)
             if work.get("licence_unverified") and field == "licence_statement":
@@ -165,10 +170,32 @@ def test_the_cards_value_and_the_licence_agree():
     `structure`, whoever adds it later and whatever they meant — not `shared`,
     whose card is committed, and not `local` either: this shelf builds no
     model-written card of a NoDerivatives work anywhere."""
-    wrong = [work["id"] for work in works()
-             if shelf.no_derivatives(work) and work["cards"] != "structure"]
+    # Read off the licence string here, independently of the script's helper
+    # and of NO_CARD, so a new ND work is caught the day it is added.
+    nd = {work["id"] for work in works()
+          if "ND" in re.split(r"[-\s_]+", work["licence"].upper())}
+    wrong = sorted(key for key in nd
+                   if next(w for w in works() if w["id"] == key)["cards"] != "structure")
     assert not wrong, f"NoDerivatives works not marked `cards: structure`: {wrong}"
-    assert {work["id"] for work in works() if shelf.no_derivatives(work)} == NO_CARD
+    assert nd == {work["id"] for work in works() if shelf.no_derivatives(work)}
+
+
+@pytest.mark.parametrize("licence", ["CC-BY-NC-ND-4.0", "CC BY-NC-ND 4.0", "CC BY-ND 4.0",
+                                     "cc-by-nd-4.0", "CC BY NC ND 4.0", ""])
+def test_a_no_derivatives_licence_is_recognised_in_any_spelling(licence):
+    """The check fails closed: a spaced or lower-case form is still ND, and a
+    work with no licence at all is treated as one."""
+    assert shelf.no_derivatives({"licence": licence})
+
+
+@pytest.mark.parametrize("licence", ["CC-BY-4.0", "CC BY-SA 4.0", "MIT", "Apache-2.0"])
+def test_a_licence_that_allows_adaptation_is_not_read_as_no_derivatives(licence):
+    assert not shelf.no_derivatives({"licence": licence})
+
+
+def test_a_spaced_no_derivatives_work_never_reaches_a_model():
+    spaced = {"id": "spaced", "licence": "CC BY-NC-ND 4.0", "cards": "shared"}
+    assert shelf.card_targets({"works": [spaced]}) == []
 
 
 def test_a_licence_nobody_confirmed_is_never_shared():
@@ -243,9 +270,10 @@ def test_every_committed_model_card_carries_its_provenance_and_the_toc():
     manifest's book key as the H1, and a Structure section that is the
     committed chapter list and not the model's."""
     cards = committed_cards()
-    for work in shelf.card_targets(manifest()):
-        if work["cards"] != "shared" or work["id"] not in cards:
-            continue
+    shared = [work for work in shelf.card_targets(manifest()) if work["cards"] == "shared"]
+    missing = sorted(work["id"] for work in shared if work["id"] not in cards)
+    assert not missing, f"`shared` works with no committed card: {missing}"
+    for work in shared:
         meta, body = chunking.parse_frontmatter(cards[work["id"]])
         where = work["id"]
         assert meta.get("card_model") and meta["card_model"] != "none", where
@@ -254,8 +282,39 @@ def test_every_committed_model_card_carries_its_provenance_and_the_toc():
         assert re.findall(r"^# (.*)$", body, re.M) == [f"{work['title']} — {work['author']}"]
         structure = shelf.card_sections(body)["Structure"]
         titles = shelf.committed_chapters(work)
-        assert structure == "\n".join(f"- {i}. {title}" for i, title in enumerate(titles, 1)), \
+        assert structure == "\n".join(f"- {title}" for title in titles), \
             f"{where}: Structure is not the committed chapter list"
+        assert meta["card_kind"] == "shared", where
+        assert meta["licence"] == work["licence"] and meta["licence_url"] == work["licence_url"]
+        assert meta["adapted"].startswith("a model-written summary"), where
+        assert ("card_licence" in meta) == shelf.share_alike(work), where
+
+
+def test_every_committed_model_card_is_its_own_restamp():
+    """The front matter and the chapter list of a model-written card are derived
+    by code (`restamp_card`); a committed card that differs from its own restamp
+    was edited by hand there, or restamped against an older manifest."""
+    cards = committed_cards()
+    for work in shelf.card_targets(manifest()):
+        if work["id"] in cards:
+            assert shelf.restamp_card(cards[work["id"]], work, shelf.committed_chapters(work)) \
+                == cards[work["id"]], \
+                f"{work['id']}: run `uv run scripts/fetch_tech_shelf.py --stage restamp-cards`"
+
+
+def test_the_owasp_card_says_it_is_share_alike():
+    meta, _ = chunking.parse_frontmatter(committed_cards()["owasp-llm-top-10-2025"])
+    assert meta["card_licence"] == "CC-BY-SA-4.0"
+
+
+def test_a_restamp_touches_no_model_written_section(card_shelf):
+    card = (build(card_shelf) / "demo-work.md").read_text(encoding="utf-8")
+    old = card.replace("- Introduction\n- III. Config", "- 1. Introduction\n- 2. III. Config")
+    old = old.replace("card_kind: shared\n", "")
+    new = shelf.restamp_card(old, WORK, ["Introduction", "III. Config"])
+    assert new == card
+    sections = shelf.card_sections(new.split("\n---\n", 1)[1])
+    assert sections["Summary"] == "A demo work about configuration, in two chapters."
 
 
 def test_the_local_card_folder_is_never_committed():
@@ -264,6 +323,10 @@ def test_the_local_card_folder_is_never_committed():
     closed: the folder is in .gitignore, and nothing is committed under it."""
     ignored = (REPO / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert "corpus-tech/cards-local/" in ignored
+    if (REPO / ".git").exists():
+        tracked = subprocess.run(["git", "ls-files", "corpus-tech/cards-local"], cwd=REPO,
+                                 capture_output=True, text=True, check=True).stdout
+        assert tracked == "", f"committed under cards-local/: {tracked}"
     assert shelf.CARDS_LOCAL_DIR == REPO / "corpus-tech" / "cards-local"
 
 
@@ -620,7 +683,8 @@ def test_a_table_in_the_middle_of_a_paper_does_not_capture_the_run():
 
 WORK = {"id": "demo-work", "title": "A Demo Work", "author": "A. Nonymous",
         "year": 2019, "kind": "guide",
-        "fetch": "git-markdown", "licence": "MIT", "cards": "shared"}
+        "fetch": "git-markdown", "licence": "MIT", "cards": "shared",
+        "licence_url": "https://opensource.org/license/mit", "source": "https://example.invalid/"}
 
 
 @pytest.fixture
@@ -787,7 +851,7 @@ def test_the_structure_section_is_the_prepared_texts_own_chapter_list(card_shelf
     spelling, so a chapter can never be renamed or invented here."""
     text = (build(card_shelf) / "demo-work.md").read_text(encoding="utf-8")
     structure = shelf.card_sections(text)["Structure"]
-    assert structure == "- 1. Introduction\n- 2. III. Config"
+    assert structure == "- Introduction\n- III. Config"
 
 
 def test_the_card_is_cut_into_chunks_by_the_same_code_as_a_classics_card(card_shelf):
@@ -809,7 +873,7 @@ def test_the_model_is_shown_the_chapter_list_whole_and_the_openings_only(card_sh
     monkeypatched = card_shelf
     build(monkeypatched)
     user = monkeypatched.calls[0]["user"]
-    assert "1. Introduction" in user and "2. III. Config" in user
+    assert "- Introduction" in user and "- III. Config" in user
     assert "An app's config is everything that varies." in user
 
 
@@ -949,7 +1013,7 @@ def test_a_structure_card_has_about_structure_and_facts_and_nothing_else(structu
     assert re.findall(r"^# .*$", body, re.M) == ["# A Work Nobody May Summarise — N. D. Author"]
     assert re.findall(r"^## (.*)$", body, re.M) == ["About", "Structure", "Facts"]
     assert "> The publisher's own words, folded over two lines.\n" in body
-    assert shelf.card_sections(body)["Structure"] == "- 1. Preface\n- 2. 1. Toil"
+    assert shelf.card_sections(body)["Structure"] == "- Preface\n- 1. Toil"
 
 
 def test_a_structure_card_is_cut_into_chunks_under_the_books_key(structure_shelf):
@@ -981,3 +1045,34 @@ def test_the_cards_table_reads_the_committed_and_the_local_folder_together(tmp_p
     (local / "a.md").write_text("# A again\n", encoding="utf-8")
     with pytest.raises(SystemExit, match="a.md"):
         ingest.card_files([shared, local])
+
+
+def test_cards_dir_belongs_to_the_cards_stage(monkeypatch, capsys):
+    """Like `--chunker`: a flag another stage would ignore is refused, not
+    silently dropped."""
+    ingest_spec = importlib.util.spec_from_file_location(
+        "ingest_demo_corpus_flags", REPO / "scripts" / "ingest_demo_corpus.py")
+    ingest = importlib.util.module_from_spec(ingest_spec)
+    ingest_spec.loader.exec_module(ingest)
+    monkeypatch.setattr(sys, "argv", ["ingest_demo_corpus.py", "--stage", "all",
+                                      "--cards-dir", "corpus-tech/cards"])
+    with pytest.raises(SystemExit) as raised:
+        ingest.main()
+    assert raised.value.code == 2
+    assert "--cards-dir belongs to --stage cards" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("toc_title, page_title", [
+    ("5. Eliminating Toil", "Eliminating Toil"),
+    ("III. Config", "Config"),
+    ("Appendix B. A Collection of Best Practices", "A Collection of Best Practices"),
+    ("Chapter 2. Culture", "Culture"),
+])
+def test_same_heading_ignores_the_numbering_the_contents_adds(toc_title, page_title):
+    assert shelf.same_heading(toc_title, page_title)
+
+
+def test_same_heading_does_not_eat_a_title_that_starts_with_a_capital_letter():
+    """"Eliminating" is not appendix E, and "A Collection" is not appendix A."""
+    assert not shelf.same_heading("Eliminating Toil", "liminating Toil")
+    assert not shelf.same_heading("A Collection", "Collection")

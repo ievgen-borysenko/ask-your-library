@@ -16,40 +16,40 @@ The description of the work on the site that publishes it online, quoted verbati
 
 ## Structure
 
-- 1. Foreword I
-- 2. Foreword II
-- 3. Preface
-- 4. 1. How SRE Relates to DevOps
-- 5. Part I - Foundations
-- 6. 2. Implementing SLOs
-- 7. 3. SLO Engineering Case Studies
-- 8. 4. Monitoring
-- 9. 5. Alerting on SLOs
-- 10. 6. Eliminating Toil
-- 11. 7. Simplicity
-- 12. Part II - Practices
-- 13. 8. On-Call
-- 14. 9. Incident Response
-- 15. 10. Postmortem Culture: Learning from Failure
-- 16. 11. Managing Load
-- 17. 12. Introducing Non-Abstract Large System Design
-- 18. 13. Data Processing Pipelines
-- 19. 14. Configuration Design and Best Practices
-- 20. 15. Configuration Specifics
-- 21. 16. Canarying Releases
-- 22. Part III - Processes
-- 23. 17. Identifying and Recovering from Overload
-- 24. 18. SRE Engagement Model
-- 25. 19. SRE: Reaching Beyond Your Walls
-- 26. 20. SRE Team Lifecycles
-- 27. 21. Organizational Change Management in SRE
-- 28. Conclusion
-- 29. Appendix A. Example SLO Document
-- 30. Appendix B. Example Error Budget Policy
-- 31. Appendix C. Results of Postmortem Analysis
-- 32. Index
-- 33. About the Editors
-- 34. Colophon
+- Foreword I
+- Foreword II
+- Preface
+- 1. How SRE Relates to DevOps
+- Part I - Foundations
+- 2. Implementing SLOs
+- 3. SLO Engineering Case Studies
+- 4. Monitoring
+- 5. Alerting on SLOs
+- 6. Eliminating Toil
+- 7. Simplicity
+- Part II - Practices
+- 8. On-Call
+- 9. Incident Response
+- 10. Postmortem Culture: Learning from Failure
+- 11. Managing Load
+- 12. Introducing Non-Abstract Large System Design
+- 13. Data Processing Pipelines
+- 14. Configuration Design and Best Practices
+- 15. Configuration Specifics
+- 16. Canarying Releases
+- Part III - Processes
+- 17. Identifying and Recovering from Overload
+- 18. SRE Engagement Model
+- 19. SRE: Reaching Beyond Your Walls
+- 20. SRE Team Lifecycles
+- 21. Organizational Change Management in SRE
+- Conclusion
+- Appendix A. Example SLO Document
+- Appendix B. Example Error Budget Policy
+- Appendix C. Results of Postmortem Analysis
+- Index
+- About the Editors
+- Colophon
 
 ## Facts
 

@@ -136,9 +136,28 @@ answers "which chapter covers X" cannot rename or invent a chapter.
 a hosted model are otherwise the same file:
 
 ```yaml
-card_model: ollama/qwen2.5:14b
+card_kind: shared
+card_model: openrouter/anthropic/claude-sonnet-4.6
 card_built: 2026-09-18
+licence: CC-BY-4.0
+licence_url: https://creativecommons.org/licenses/by/4.0/
+work_url: https://github.com/google/building-secure-and-reliable-systems
+adapted: "a model-written summary of the work, not the work itself"
 ```
+
+The ten committed cards were written through OpenRouter with the model named in each card's
+`card_model`, before `LLM_REASONING` existed — so the settings that reproduce them are
+`LLM_BACKEND=openrouter ORCHESTRATOR_MODEL=anthropic/claude-sonnet-4.6 LLM_REASONING=provider`, not
+the hosted defaults of today. A model's reply is not byte-reproducible anyway; what those settings
+reproduce is the same model under the same prompt.
+
+The licence lines are the notice a shared adaptation owes the work (CC BY 4.0 §3(a)): its licence,
+where it is, and that the card is a model-written summary rather than the work. A card of a
+ShareAlike work adds `card_licence`, because the card itself is under the work's licence — today
+that is the OWASP card, under CC BY-SA 4.0. The front matter and the `## Structure` section of a
+model-written card are derived rather than generated, so `--stage restamp-cards` rebuilds both from
+the manifest and the chapter list without calling a model, and a test holds every committed card to
+exactly that.
 
 `--force` is what rebuilds one; without it an existing card is left alone, so re-running the stage
 over a shelf with one card missing costs one model call.
@@ -174,7 +193,10 @@ construction cannot report the edit it exists to catch in the other 174 files. T
 move, so hashing the reader's output pins exactly what the shelf is built from. A changed
 paragraph, or a heading that disappears, still changes the digest
 (`tests/test_tech_shelf.py`). A PDF and a file served out of a git repository are byte-stable and
-keep the stronger rule.
+keep the stronger rule. The other side of the trade: a `text` pin is taken of the reader's output,
+so a change to the reader itself — a tag it now keeps or drops, a different whitespace rule — moves
+every text pin with no upstream change at all, and has to be followed by `--stage checksums` in the
+same commit.
 
 The pages index the fetch writes beside them (_pages.json) is hashed as bytes whatever a work's
 `pin` says: it is this script's record of which pages the publisher's table of contents listed and
@@ -240,4 +262,7 @@ The project's own files in this directory (this README, the manifest, the chapte
 script) are under the repository's Apache-2.0 license to the extent the project holds rights in
 them. The underlying works keep the licences named above, which this project can neither extend nor
 restrict, and each work's attribution is its entry in `manifest.yaml`: title, authors, year, source
-URL and licence.
+URL and licence. A card in `cards/` is not the project's alone: a model-written card is an
+adaptation of its work and carries that work's licence, link and an adaptation notice in its front
+matter (the OWASP card is itself CC BY-SA 4.0), and a structure card reproduces the work's title,
+chapter list and its publishing site's description under the work's own licence, stated in the card.

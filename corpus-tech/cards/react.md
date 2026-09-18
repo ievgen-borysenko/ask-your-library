@@ -3,8 +3,13 @@ date: 2026-09-18
 tags: [book, tech-shelf]
 type: book-card
 source: "Shunyu Yao, Jeffrey Zhao, Dian Yu, Nan Du, Izhak Shafran, Karthik Narasimhan, Yuan Cao — ReAct: Synergizing Reasoning and Acting in Language Models"
+card_kind: shared
 card_model: openrouter/anthropic/claude-sonnet-4.6
 card_built: 2026-09-18
+licence: CC-BY-4.0
+licence_url: https://creativecommons.org/licenses/by/4.0/
+work_url: https://arxiv.org/html/2210.03629
+adapted: "a model-written summary of the work, not the work itself"
 ---
 # ReAct: Synergizing Reasoning and Acting in Language Models — Shunyu Yao, Jeffrey Zhao, Dian Yu, Nan Du, Izhak Shafran, Karthik Narasimhan, Yuan Cao
 
@@ -25,19 +30,19 @@ ReAct: Synergizing Reasoning and Acting in Language Models is a 2022 research pa
 
 ## Structure
 
-- 1. Abstract
-- 2. 1 Introduction
-- 3. 2 ReAct: Synergizing Reasoning + Acting
-- 4. 3 Knowledge-Intensive Reasoning Tasks
-- 5. 4 Decision Making Tasks
-- 6. 5 Related Work
-- 7. 6 Conclusion
-- 8. References
-- 9. Appendix A Additional Results
-- 10. Appendix B Experiment Details
-- 11. Appendix C Prompts
-- 12. Appendix D Trajectories
-- 13. Appendix E More Analysis
+- Abstract
+- 1 Introduction
+- 2 ReAct: Synergizing Reasoning + Acting
+- 3 Knowledge-Intensive Reasoning Tasks
+- 4 Decision Making Tasks
+- 5 Related Work
+- 6 Conclusion
+- References
+- Appendix A Additional Results
+- Appendix B Experiment Details
+- Appendix C Prompts
+- Appendix D Trajectories
+- Appendix E More Analysis
 
 ## Terms
 

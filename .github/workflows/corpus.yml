@@ -70,21 +70,6 @@ jobs:
         # downloaded. Without this stage the two canary toc files were the only
         # ones the diff below could never have anything to say about.
         run: uv run scripts/ingest_demo_corpus.py --stage prepare-canaries
-      - name: Re-fetch the engineer's shelf and verify every pinned file
-        # One step, not a job of its own: the required checks are named after
-        # jobs, and a new job would have to be added to the branch protection
-        # before it could ever block anything. The two stages are the whole
-        # check — fetch (cached per run, so this downloads each file once) and
-        # verify, which re-hashes every file against corpus-tech/manifest.yaml
-        # and exits 1 on the first page a publisher has edited.
-        #
-        # `prepare` is deliberately NOT run here: it reads the PDF works through
-        # pdftotext, which is not part of this image's contract, and it would
-        # add nothing — a changed page fails the pins above before any text is
-        # built from it.
-        run: |
-          uv run scripts/fetch_tech_shelf.py --stage fetch
-          uv run scripts/fetch_tech_shelf.py --stage verify
       - name: The chapter split still matches the committed tables of contents
         # The stages above rewrite corpus/toc/*.json from the sources they just
         # read. A re-pin makes the checksums green by construction; this is what
@@ -99,3 +84,19 @@ jobs:
         run: |
           git add -A -- corpus/toc
           git diff --cached --exit-code -- corpus/toc
+      - name: Re-fetch the engineer's shelf and verify every pinned file
+        # Last in the job, so a red shelf never skips the classics' toc diff
+        # above. One step, not a job of its own: the required checks are named after
+        # jobs, and a new job would have to be added to the branch protection
+        # before it could ever block anything. The two stages are the whole
+        # check — fetch (cached per run, so this downloads each file once) and
+        # verify, which re-hashes every file against corpus-tech/manifest.yaml
+        # and exits 1 on the first page a publisher has edited.
+        #
+        # `prepare` is deliberately NOT run here: it reads the PDF works through
+        # pdftotext, which is not part of this image's contract, and it would
+        # add nothing — a changed page fails the pins above before any text is
+        # built from it.
+        run: |
+          uv run scripts/fetch_tech_shelf.py --stage fetch
+          uv run scripts/fetch_tech_shelf.py --stage verify

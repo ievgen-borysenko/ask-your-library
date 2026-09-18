@@ -3,8 +3,15 @@ date: 2026-09-18
 tags: [book, tech-shelf]
 type: book-card
 source: "OWASP Top 10 for LLM Applications Team — OWASP Top 10 for LLM Applications 2025"
+card_kind: shared
 card_model: openrouter/anthropic/claude-sonnet-4.6
 card_built: 2026-09-18
+licence: CC-BY-SA-4.0
+licence_url: https://creativecommons.org/licenses/by-sa/4.0/legalcode
+work_url: https://genai.owasp.org/download/43299/
+adapted: "a model-written summary of the work, not the work itself"
+card_licence: CC-BY-SA-4.0
+card_licence_url: https://creativecommons.org/licenses/by-sa/4.0/legalcode
 ---
 # OWASP Top 10 for LLM Applications 2025 — OWASP Top 10 for LLM Applications Team
 
@@ -27,17 +34,17 @@ The OWASP Top 10 for LLM Applications 2025, published in November 2024 by the OW
 
 ## Structure
 
-- 1. Front matter
-- 2. LLM01:2025 Prompt Injection
-- 3. LLM02:2025 Sensitive Information Disclosure
-- 4. LLM03:2025 Supply Chain
-- 5. LLM04: Data and Model Poisoning
-- 6. LLM05:2025 Improper Output Handling
-- 7. LLM06:2025 Excessive Agency
-- 8. LLM07:2025 System Prompt Leakage
-- 9. LLM08:2025 Vector and Embedding Weaknesses
-- 10. LLM09:2025 Misinformation
-- 11. LLM10:2025 Unbounded Consumption
+- Front matter
+- LLM01:2025 Prompt Injection
+- LLM02:2025 Sensitive Information Disclosure
+- LLM03:2025 Supply Chain
+- LLM04: Data and Model Poisoning
+- LLM05:2025 Improper Output Handling
+- LLM06:2025 Excessive Agency
+- LLM07:2025 System Prompt Leakage
+- LLM08:2025 Vector and Embedding Weaknesses
+- LLM09:2025 Misinformation
+- LLM10:2025 Unbounded Consumption
 
 ## Terms
 

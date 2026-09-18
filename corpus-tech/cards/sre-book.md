@@ -16,54 +16,54 @@ The description of the work on the site that publishes it online, quoted verbati
 
 ## Structure
 
-- 1. Foreword
-- 2. Preface
-- 3. Part I - Introduction
-- 4. 1. Introduction
-- 5. 2. The Production Environment at Google, from the Viewpoint of an SRE
-- 6. Part II - Principles
-- 7. 3. Embracing Risk
-- 8. 4. Service Level Objectives
-- 9. 5. Eliminating Toil
-- 10. 6. Monitoring Distributed Systems
-- 11. 7. The Evolution of Automation at Google
-- 12. 8. Release Engineering
-- 13. 9. Simplicity
-- 14. Part III - Practices
-- 15. 10. Practical Alerting
-- 16. 11. Being On-Call
-- 17. 12. Effective Troubleshooting
-- 18. 13. Emergency Response
-- 19. 14. Managing Incidents
-- 20. 15. Postmortem Culture: Learning from Failure
-- 21. 16. Tracking Outages
-- 22. 17. Testing for Reliability
-- 23. 18. Software Engineering in SRE
-- 24. 19. Load Balancing at the Frontend
-- 25. 20. Load Balancing in the Datacenter
-- 26. 21. Handling Overload
-- 27. 22. Addressing Cascading Failures
-- 28. 23. Managing Critical State: Distributed Consensus for Reliability
-- 29. 24. Distributed Periodic Scheduling with Cron
-- 30. 25. Data Processing Pipelines
-- 31. 26. Data Integrity: What You Read Is What You Wrote
-- 32. 27. Reliable Product Launches at Scale
-- 33. Part IV - Management
-- 34. 28. Accelerating SREs to On-Call and Beyond
-- 35. 29. Dealing with Interrupts
-- 36. 30. Embedding an SRE to Recover from Operational Overload
-- 37. 31. Communication and Collaboration in SRE
-- 38. 32. The Evolving SRE Engagement Model
-- 39. Part V - Conclusions
-- 40. 33. Lessons Learned from Other Industries
-- 41. 34. Conclusion
-- 42. Appendix A. Availability Table
-- 43. Appendix B. A Collection of Best Practices for Production Services
-- 44. Appendix C. Example Incident State Document
-- 45. Appendix D. Example Postmortem
-- 46. Appendix E. Launch Coordination Checklist
-- 47. Appendix F. Example Production Meeting Minutes
-- 48. Bibliography
+- Foreword
+- Preface
+- Part I - Introduction
+- 1. Introduction
+- 2. The Production Environment at Google, from the Viewpoint of an SRE
+- Part II - Principles
+- 3. Embracing Risk
+- 4. Service Level Objectives
+- 5. Eliminating Toil
+- 6. Monitoring Distributed Systems
+- 7. The Evolution of Automation at Google
+- 8. Release Engineering
+- 9. Simplicity
+- Part III - Practices
+- 10. Practical Alerting
+- 11. Being On-Call
+- 12. Effective Troubleshooting
+- 13. Emergency Response
+- 14. Managing Incidents
+- 15. Postmortem Culture: Learning from Failure
+- 16. Tracking Outages
+- 17. Testing for Reliability
+- 18. Software Engineering in SRE
+- 19. Load Balancing at the Frontend
+- 20. Load Balancing in the Datacenter
+- 21. Handling Overload
+- 22. Addressing Cascading Failures
+- 23. Managing Critical State: Distributed Consensus for Reliability
+- 24. Distributed Periodic Scheduling with Cron
+- 25. Data Processing Pipelines
+- 26. Data Integrity: What You Read Is What You Wrote
+- 27. Reliable Product Launches at Scale
+- Part IV - Management
+- 28. Accelerating SREs to On-Call and Beyond
+- 29. Dealing with Interrupts
+- 30. Embedding an SRE to Recover from Operational Overload
+- 31. Communication and Collaboration in SRE
+- 32. The Evolving SRE Engagement Model
+- Part V - Conclusions
+- 33. Lessons Learned from Other Industries
+- 34. Conclusion
+- Appendix A. Availability Table
+- Appendix B. A Collection of Best Practices for Production Services
+- Appendix C. Example Incident State Document
+- Appendix D. Example Postmortem
+- Appendix E. Launch Coordination Checklist
+- Appendix F. Example Production Meeting Minutes
+- Bibliography
 
 ## Facts
 

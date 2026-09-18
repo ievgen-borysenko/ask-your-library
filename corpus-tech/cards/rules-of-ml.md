@@ -3,8 +3,13 @@ date: 2026-09-18
 tags: [book, tech-shelf]
 type: book-card
 source: "Martin Zinkevich — Rules of Machine Learning"
+card_kind: shared
 card_model: openrouter/anthropic/claude-sonnet-4.6
 card_built: 2026-09-18
+licence: CC-BY-4.0
+licence_url: https://creativecommons.org/licenses/by/4.0/
+work_url: https://developers.google.com/machine-learning/guides/rules-of-ml
+adapted: "a model-written summary of the work, not the work itself"
 ---
 # Rules of Machine Learning — Martin Zinkevich
 
@@ -25,16 +30,16 @@ card_built: 2026-09-18
 
 ## Structure
 
-- 1. Page Summary
-- 2. Terminology
-- 3. Overview
-- 4. Before Machine Learning
-- 5. ML Phase I: Your First Pipeline
-- 6. ML Phase II: Feature Engineering
-- 7. ML Phase III: Slowed Growth, Optimization Refinement, and Complex Models
-- 8. Related Work
-- 9. Acknowledgements
-- 10. Appendix
+- Page Summary
+- Terminology
+- Overview
+- Before Machine Learning
+- ML Phase I: Your First Pipeline
+- ML Phase II: Feature Engineering
+- ML Phase III: Slowed Growth, Optimization Refinement, and Complex Models
+- Related Work
+- Acknowledgements
+- Appendix
 
 ## Terms
 

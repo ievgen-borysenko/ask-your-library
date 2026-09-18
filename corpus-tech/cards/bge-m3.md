@@ -3,8 +3,13 @@ date: 2026-09-18
 tags: [book, tech-shelf]
 type: book-card
 source: "Jianlv Chen, Shitao Xiao, Peitian Zhang, Kun Luo, Defu Lian, Zheng Liu — M3-Embedding: Multi-Linguality, Multi-Functionality, Multi-Granularity Text Embeddings Through Self-Knowledge Distillation"
+card_kind: shared
 card_model: openrouter/anthropic/claude-sonnet-4.6
 card_built: 2026-09-18
+licence: CC-BY-4.0
+licence_url: https://creativecommons.org/licenses/by/4.0/
+work_url: https://arxiv.org/html/2402.03216
+adapted: "a model-written summary of the work, not the work itself"
 ---
 # M3-Embedding: Multi-Linguality, Multi-Functionality, Multi-Granularity Text Embeddings Through Self-Knowledge Distillation — Jianlv Chen, Shitao Xiao, Peitian Zhang, Kun Luo, Defu Lian, Zheng Liu
 
@@ -26,19 +31,19 @@ M3-Embedding, introduced by Jianlv Chen, Shitao Xiao, Peitian Zhang, Kun Luo, De
 
 ## Structure
 
-- 1. Abstract
-- 2. 1 Introduction
-- 3. 2 Related Work
-- 4. 3 M3-Embedding
-- 5. 4 Experiment
-- 6. 5 Conclusion
-- 7. Limitations
-- 8. Ethics Consideration
-- 9. Acknowledgements
-- 10. References
-- 11. Appendix A Details of Datasets
-- 12. Appendix B Implementation Details
-- 13. Appendix C More Results
+- Abstract
+- 1 Introduction
+- 2 Related Work
+- 3 M3-Embedding
+- 4 Experiment
+- 5 Conclusion
+- Limitations
+- Ethics Consideration
+- Acknowledgements
+- References
+- Appendix A Details of Datasets
+- Appendix B Implementation Details
+- Appendix C More Results
 
 ## Terms
 

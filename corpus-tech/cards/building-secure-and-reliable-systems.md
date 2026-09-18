@@ -3,8 +3,13 @@ date: 2026-09-18
 tags: [book, tech-shelf]
 type: book-card
 source: "Heather Adkins, Betsy Beyer, Paul Blankinship, Piotr Lewandowski, Ana Oprea, Adam Stubblefield — Building Secure and Reliable Systems"
+card_kind: shared
 card_model: openrouter/anthropic/claude-sonnet-4.6
 card_built: 2026-09-18
+licence: CC-BY-4.0
+licence_url: https://creativecommons.org/licenses/by/4.0/
+work_url: https://github.com/google/building-secure-and-reliable-systems
+adapted: "a model-written summary of the work, not the work itself"
 ---
 # Building Secure and Reliable Systems — Heather Adkins, Betsy Beyer, Paul Blankinship, Piotr Lewandowski, Ana Oprea, Adam Stubblefield
 
@@ -29,45 +34,45 @@ card_built: 2026-09-18
 
 ## Structure
 
-- 1. Foreword by Royal Hansen
-- 2. Foreword by Michael Wildpaner
-- 3. Preface
-- 4. Introductory Material
-- 5. The Intersection of Security and Reliability
-- 6. Understanding Adversaries
-- 7. Designing Systems
-- 8. Case Study: Safe Proxies
-- 9. Design Tradeoffs
-- 10. Design for Least Privilege
-- 11. Design for Understandability
-- 12. Design for a Changing Landscape
-- 13. Design for Resilience
-- 14. Design for Recovery
-- 15. Mitigating Denial-of-Service Attacks
-- 16. Implementing Systems
-- 17. Case Study: Designing, Implementing, and Maintaining a Publicly Trusted CA
-- 18. Writing Code
-- 19. Testing Code
-- 20. Deploying Code
-- 21. Investigating Systems
-- 22. Maintaining Systems
-- 23. Disaster Planning
-- 24. Crisis Management
-- 25. Recovery and Aftermath
-- 26. Organization and Culture
-- 27. Case Study: Chrome Security Team
-- 28. Understanding Roles and Responsibilities
-- 29. Building a Culture of Security and Reliability
-- 30. Conclusion
-- 31. A Disaster Risk Assessment Matrix
-- 32. About the Editors
+- Foreword by Royal Hansen
+- Foreword by Michael Wildpaner
+- Preface
+- Introductory Material
+- The Intersection of Security and Reliability
+- Understanding Adversaries
+- Designing Systems
+- Case Study: Safe Proxies
+- Design Tradeoffs
+- Design for Least Privilege
+- Design for Understandability
+- Design for a Changing Landscape
+- Design for Resilience
+- Design for Recovery
+- Mitigating Denial-of-Service Attacks
+- Implementing Systems
+- Case Study: Designing, Implementing, and Maintaining a Publicly Trusted CA
+- Writing Code
+- Testing Code
+- Deploying Code
+- Investigating Systems
+- Maintaining Systems
+- Disaster Planning
+- Crisis Management
+- Recovery and Aftermath
+- Organization and Culture
+- Case Study: Chrome Security Team
+- Understanding Roles and Responsibilities
+- Building a Culture of Security and Reliability
+- Conclusion
+- A Disaster Risk Assessment Matrix
+- About the Editors
 
 ## Terms
 
 - **Safe proxy** — A framework that routes privileged administrative commands through a controlled intermediary that audits, approves, and rate-limits operations, preventing direct access to production systems.
 - **Zero Touch Prod** — A Google project aimed at eliminating direct human access to production systems by requiring all changes to flow through automated, audited safe-proxy mechanisms.
 - **Software supply chain** — The full sequence of writing, building, testing, and deploying a software system, each step of which must offer verifiable proof of correct execution to prevent adversarial bypass.
-- **Understandability** — The extent to which a person with relevant technical background can accurately and confidently reason about both the operational behaviour of a system and its invariants, including security and availability properties.
+- **Understandability** — in the book's words, "the extent to which a person with relevant technical background can accurately and confidently reason about both" the operational behaviour of a system and its invariants, including security and availability properties (Design for Understandability).
 - **Resilience** — A system's designed ability to hold out against, delay, or withstand major malfunctions or disruptions, keeping services running (possibly in degraded mode) without requiring human intervention.
 - **Incident Management at Google (IMAG)** — Google's unified incident-response framework, applied to both reliability outages and security incidents, that structures how teams collaborate and communicate during a crisis.
 - **Least privilege** — A design principle requiring that every person, credential, or component be granted only the minimum access needed for its function, so that mistakes or compromises cause the smallest possible harm.

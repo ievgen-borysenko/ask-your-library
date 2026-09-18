@@ -139,9 +139,28 @@ def card_policy(work: dict) -> str:
     return policy
 
 
+# The shape of a licence identifier in the manifest: SPDX-style, one token, no
+# spaces ("CC-BY-NC-ND-4.0", not "CC BY-NC-ND 4.0"). The manifest test refuses
+# anything else, so the checks below never meet a form they were not written for.
+LICENCE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9.+-]*")
+
+
+def licence_terms(work: dict) -> list[str]:
+    """The licence identifier cut into its terms, on hyphens AND whitespace, so a
+    spaced form still yields its "ND" or "SA" rather than failing open."""
+    return [term for term in re.split(r"[-\s_]+", str(work.get("licence", "")).upper()) if term]
+
+
 def no_derivatives(work: dict) -> bool:
-    """Whether the work's licence withholds adaptations (CC ...-ND-...)."""
-    return "ND" in str(work.get("licence", "")).upper().split("-")
+    """Whether the work's licence withholds adaptations (CC ...-ND-...). A work
+    with no licence at all counts as one: nobody may adapt what nobody licensed."""
+    terms = licence_terms(work)
+    return not terms or "ND" in terms
+
+
+def share_alike(work: dict) -> bool:
+    """Whether an adaptation of the work must carry the work's own licence."""
+    return "SA" in licence_terms(work)
 
 
 def card_targets(manifest: dict) -> list[dict]:
@@ -413,8 +432,12 @@ def same_heading(one: str, other: str) -> bool:
     """Whether two headings name the same chapter, ignoring the numbering the
     table of contents adds ("5. Eliminating Toil" is "Eliminating Toil")."""
     def bare(text: str) -> str:
-        return re.sub(r"^(?:chapter|part|appendix)?\s*[0-9IVXA-F]*[.\-)]?\s*", "",
-                      text.strip().lower())
+        # The number is matched before anything is lowercased: a roman numeral
+        # or an appendix letter is a capital, and one followed by punctuation,
+        # so "III. Config" loses "III. " while "A Collection" keeps its "A".
+        return re.sub(r"^(?:(?i:chapter|part|appendix)\s+)?"
+                      r"(?:\d+(?:\.\d+)*[.\-):]?\s+|[IVXLC]+[.\-):]\s*|[A-F][.\-):]\s*)?",
+                      "", text.strip()).lower()
     return bare(one) == bare(other)
 
 
@@ -504,7 +527,7 @@ def pdf_text(path: Path) -> str:
     if shutil.which("pdftotext") is None:
         raise FileNotFoundError(
             "pdftotext (poppler) is not installed — it is what reads the PDF works of "
-            "the shelf (OWASP, ReAct, Chain-of-Thought). `brew install poppler` on "
+            "the shelf (today only OWASP; `arxiv-pdf` would be the other). `brew install poppler` on "
             "macOS, `apt-get install poppler-utils` on Debian/Ubuntu.")
     done = subprocess.run(["pdftotext", "-q", str(path), "-"],
                           capture_output=True, text=True, check=True)
@@ -911,8 +934,10 @@ def write_toc(entries: list[dict]) -> None:
 
     Same file shape as the classics' corpus/toc/, and the same purpose: the text
     is not in the repository, so this is what a reviewer reads to see which
-    chapters a golden question was written against, and what the weekly job
-    diffs when a publisher changes a book under its own URL."""
+    chapters a golden question was written against, and what a reviewer diffs
+    after re-fetching a work whose pins went red (corpus-tech/README.md). The
+    weekly job does not regenerate these: it verifies the pins, which is what
+    catches the change in the first place."""
     TOC_DIR.mkdir(parents=True, exist_ok=True)
     for work in entries:
         prepared = PREPARED_DIR / f"{work['id']}.md"
@@ -1024,7 +1049,7 @@ def card_user(work: dict, chapters: list[tuple[str, str]]) -> str:
     instruction, whatever it says about itself (ADR-017)."""
     from ask_your_library.llm import data_block
 
-    listing = "\n".join(f"{index}. {title}" for index, (title, _) in enumerate(chapters, 1))
+    listing = "\n".join(f"- {title}" for title, _ in chapters)
     excerpts, read = card_excerpts(chapters)
     return "\n".join([
         data_block("work", "\n".join([f"title: {work['title']}",
@@ -1047,10 +1072,38 @@ def card_sections(reply: str) -> dict[str, str]:
     return sections
 
 
-def structure_section(chapters: list[tuple[str, str]]) -> str:
-    """The chapter list as the card's `## Structure`, in the work's own order and
-    the work's own spelling."""
-    return "\n".join(f"- {index}. {title}" for index, (title, _) in enumerate(chapters, 1))
+def structure_section(titles: list[str]) -> str:
+    """The chapter list as a card's `## Structure`, in the work's own order and
+    the work's own spelling — one plain bullet per chapter and no number of our
+    own, because most titles carry the book's number already ("5. Eliminating
+    Toil") and a list position beside it would contradict it wherever the book
+    has front matter or parts."""
+    return "\n".join(f"- {title}" for title in titles)
+
+
+def model_card_front_matter(work: dict, model: str, built: str) -> list[str]:
+    """The front matter of a model-written card, and the H1 below it.
+
+    The licence lines are what CC BY 4.0 section 3(a) asks of a shared
+    adaptation: the licence and a link to it, where the work is, and that the
+    card is an adaptation. For a ShareAlike work the card itself is under the
+    work's licence (BY-SA section 3(b)), and says so."""
+    lines = ["---",
+             f"date: {built}",
+             "tags: [book, tech-shelf]",
+             "type: book-card",
+             f"source: \"{work['author']} — {work['title']}\"",
+             f"card_kind: {card_policy(work)}",
+             f"card_model: {model}",
+             f"card_built: {built}",
+             f"licence: {work['licence']}",
+             f"licence_url: {work['licence_url']}",
+             f"work_url: {work['source']}",
+             "adapted: \"a model-written summary of the work, not the work itself\""]
+    if share_alike(work):
+        lines += [f"card_licence: {work['licence']}",
+                  f"card_licence_url: {work['licence_url']}"]
+    return lines + ["---", f"# {work['title']} — {work['author']}", ""]
 
 
 def card_text(work: dict, sections: dict[str, str], chapters: list[tuple[str, str]],
@@ -1066,22 +1119,59 @@ def card_text(work: dict, sections: dict[str, str], chapters: list[tuple[str, st
     have: this shelf's cards are generated rather than written, and a card built
     on the local 14b model and one built on the hosted model are otherwise
     indistinguishable on disk (#58)."""
-    lines = ["---",
-             f"date: {built}",
-             "tags: [book, tech-shelf]",
-             "type: book-card",
-             f"source: \"{work['author']} — {work['title']}\"",
-             f"card_model: {model}",
-             f"card_built: {built}",
-             "---",
-             f"# {work['title']} — {work['author']}",
-             ""]
+    lines = model_card_front_matter(work, model, built)
     for name in ("Summary", "Key ideas"):
         lines += [f"## {name}", "", sections[name], ""]
-    lines += ["## Structure", "", structure_section(chapters), ""]
+    lines += ["## Structure", "", structure_section([title for title, _ in chapters]), ""]
     for name in ("Terms", "Themes"):
         lines += [f"## {name}", "", sections[name], ""]
     return "\n".join(lines).rstrip() + "\n"
+
+
+def restamp_card(text: str, work: dict, titles: list[str]) -> str:
+    """A model-written card with its front matter and `## Structure` rebuilt by
+    code, and every model-written section left exactly as it was.
+
+    Both parts are derived, never generated: the front matter from the manifest
+    plus the card's own `card_model` and `card_built`, the Structure from the
+    committed chapter list. So a change to how either is written — a licence
+    line, the shape of the chapter list — is applied to cards already built
+    without calling a model again, and a test can hold every committed card to
+    `restamp_card(card) == card`."""
+    if not text.startswith("---\n"):
+        raise ValueError(f"{work['id']}: the card has no front matter")
+    front, _, body = text[4:].partition("\n---\n")
+    fields = dict(line.split(": ", 1) for line in front.splitlines() if ": " in line)
+    for field in ("card_model", "card_built"):
+        if not fields.get(field):
+            raise ValueError(f"{work['id']}: the card has no {field}")
+    heading, _, rest = body.partition("\n")
+    if not heading.startswith("# "):
+        raise ValueError(f"{work['id']}: the card's first line after the front matter is not its H1")
+    new_rest, replaced = re.subn(r"(?ms)^## Structure\n.*?(?=^## |\Z)",
+                                 lambda _: f"## Structure\n\n{structure_section(titles)}\n\n",
+                                 rest)
+    if replaced != 1:
+        raise ValueError(f"{work['id']}: the card has {replaced} Structure sections, not one")
+    lines = model_card_front_matter(work, fields["card_model"], fields["card_built"])
+    return ("\n".join(lines) + new_rest).rstrip() + "\n"
+
+
+def restamp_cards(entries: list[dict], manifest: dict) -> None:
+    """Rebuild the front matter and Structure of every model-written card already
+    on disk (see `restamp_card`). No model is called and a card not yet written
+    stays unwritten."""
+    allowed = {work["id"] for work in card_targets(manifest)}
+    for work in entries:
+        if work["id"] not in allowed:
+            continue
+        path = card_dir(work) / f"{work['id']}.md"
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        new = restamp_card(text, work, committed_chapters(work))
+        path.write_text(new, encoding="utf-8")
+        print(f"  {work['id']}: {'restamped' if new != text else 'unchanged'}")
 
 
 def card_dir(work: dict) -> Path:
@@ -1203,7 +1293,7 @@ def structure_card_text(work: dict, titles: list[str]) -> str:
              "",
              "## Structure",
              "",
-             "\n".join(f"- {index}. {title}" for index, title in enumerate(titles, 1)),
+             structure_section(titles),
              "",
              "## Facts",
              "",
@@ -1376,7 +1466,10 @@ def verify(entries: list[dict]) -> None:
 # spend ten model calls.
 # `structure-cards` IS part of it: it calls no model and reads only committed
 # files, like `toc`, and what it writes is committed.
-STAGES = ("fetch", "prepare", "toc", "structure-cards", "cards", "checksums", "verify")
+# `restamp-cards` is by name too: it rewrites files a model wrote (their front
+# matter and chapter list only), which a plain run should not touch.
+STAGES = ("fetch", "prepare", "toc", "structure-cards", "cards", "restamp-cards",
+          "checksums", "verify")
 
 
 def main() -> None:
@@ -1417,6 +1510,9 @@ def main() -> None:
     if args.stage == "cards":
         print("== book cards ==")
         build_cards(entries, manifest, force=args.force)
+    if args.stage == "restamp-cards":
+        print("== restamp model-written cards (no model) ==")
+        restamp_cards(entries, manifest)
     if args.stage == "checksums":
         print("== pin the fetched sources into the manifest ==")
         write_checksums(entries)

@@ -3,8 +3,13 @@ date: 2026-09-18
 tags: [book, tech-shelf]
 type: book-card
 source: "Adam Wiggins — The Twelve-Factor App"
+card_kind: shared
 card_model: openrouter/anthropic/claude-sonnet-4.6
 card_built: 2026-09-18
+licence: MIT
+licence_url: https://opensource.org/license/mit
+work_url: https://github.com/heroku/12factor
+adapted: "a model-written summary of the work, not the work itself"
 ---
 # The Twelve-Factor App — Adam Wiggins
 
@@ -29,21 +34,21 @@ The Twelve-Factor App is a methodology guide written by Adam Wiggins, drawing on
 
 ## Structure
 
-- 1. Introduction
-- 2. Background
-- 3. Who should read this document?
-- 4. I. Codebase
-- 5. II. Dependencies
-- 6. III. Config
-- 7. IV. Backing services
-- 8. V. Build, release, run
-- 9. VI. Processes
-- 10. VII. Port binding
-- 11. VIII. Concurrency
-- 12. IX. Disposability
-- 13. X. Dev/prod parity
-- 14. XI. Logs
-- 15. XII. Admin processes
+- Introduction
+- Background
+- Who should read this document?
+- I. Codebase
+- II. Dependencies
+- III. Config
+- IV. Backing services
+- V. Build, release, run
+- VI. Processes
+- VII. Port binding
+- VIII. Concurrency
+- IX. Disposability
+- X. Dev/prod parity
+- XI. Logs
+- XII. Admin processes
 
 ## Terms
 

@@ -3,8 +3,13 @@ date: 2026-09-18
 tags: [book, tech-shelf]
 type: book-card
 source: "Noah Shinn, Federico Cassano, Edward Berman, Ashwin Gopinath, Karthik Narasimhan, Shunyu Yao — Reflexion: Language Agents with Verbal Reinforcement Learning"
+card_kind: shared
 card_model: openrouter/anthropic/claude-sonnet-4.6
 card_built: 2026-09-18
+licence: CC-BY-4.0
+licence_url: https://creativecommons.org/licenses/by/4.0/
+work_url: https://arxiv.org/html/2303.11366
+adapted: "a model-written summary of the work, not the work itself"
 ---
 # Reflexion: Language Agents with Verbal Reinforcement Learning — Noah Shinn, Federico Cassano, Edward Berman, Ashwin Gopinath, Karthik Narasimhan, Shunyu Yao
 
@@ -26,20 +31,20 @@ Reflexion, by Noah Shinn, Federico Cassano, Edward Berman, Ashwin Gopinath, Kart
 
 ## Structure
 
-- 1. Abstract
-- 2. 1 Introduction
-- 3. 2 Related work
-- 4. 3 Reflexion: reinforcement via verbal reflection
-- 5. 4 Experiments
-- 6. 5 Limitations
-- 7. 6 Broader impact
-- 8. 7 Conclusion
-- 9. 8 Reproducibility
-- 10. References
-- 11. Appendix A Evaluation with additional models
-- 12. Appendix B Decision-making
-- 13. Appendix C Programming
-- 14. Appendix D Reasoning
+- Abstract
+- 1 Introduction
+- 2 Related work
+- 3 Reflexion: reinforcement via verbal reflection
+- 4 Experiments
+- 5 Limitations
+- 6 Broader impact
+- 7 Conclusion
+- 8 Reproducibility
+- References
+- Appendix A Evaluation with additional models
+- Appendix B Decision-making
+- Appendix C Programming
+- Appendix D Reasoning
 
 ## Terms
 

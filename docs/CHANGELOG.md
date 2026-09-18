@@ -104,7 +104,10 @@
   `card_targets()`, which checks the licence as well as the manifest, asserted in the code and in
   tests. Each model-written card records `card_model` and `card_built`, because a card written
   on the local model and one written on a hosted model are otherwise the same file. The ten
-  licence-clean works carry cards written on the hosted model.
+  licence-clean works carry cards written through OpenRouter, with the model in each card's
+  `card_model`; each also carries its work's licence, a link to it and an adaptation notice, and the
+  OWASP card states that it is itself CC BY-SA 4.0. `## Structure` is one plain bullet per chapter,
+  without a list number of its own beside the book's.
 
   `cards:` in the manifest is three-valued — `shared` (a model-written card, committed),
   `structure` (a card built by code with no model, committed) and `local` (a model-written card
@@ -131,8 +134,8 @@
   a line that would be read as a chapter heading. The committed chapter lists did not change; the
   section count did, from 296 to the 275 chapters the shelf has.
 
-  **And the weekly pin check now means something.** It had been red on every run since the shelf
-  landed, always on the same two files, and not because anything upstream changed: those pages are
+  **And the weekly pin check means something.** Run against this branch, it was red every time,
+  always on the same two files, and not because anything upstream changed: those pages are
   not byte-stable. developers.google.com stamps every response with a CSP nonce and an analytics
   blob whose keys come out in a random order; abseil.io is behind Cloudflare's email obfuscation,
   which rewrites the book's "Email … to comment" link per response. A job red by construction on

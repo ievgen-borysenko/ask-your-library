@@ -3,8 +3,13 @@ date: 2026-09-18
 tags: [book, tech-shelf]
 type: book-card
 source: "Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma, Brian Ichter, Fei Xia, Ed H. Chi, Quoc V. Le, Denny Zhou — Chain-of-Thought Prompting Elicits Reasoning in Large Language Models"
+card_kind: shared
 card_model: openrouter/anthropic/claude-sonnet-4.6
 card_built: 2026-09-18
+licence: CC-BY-4.0
+licence_url: https://creativecommons.org/licenses/by/4.0/
+work_url: https://arxiv.org/html/2201.11903
+adapted: "a model-written summary of the work, not the work itself"
 ---
 # Chain-of-Thought Prompting Elicits Reasoning in Large Language Models — Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma, Brian Ichter, Fei Xia, Ed H. Chi, Quoc V. Le, Denny Zhou
 
@@ -25,27 +30,27 @@ This 2022 paper by Jason Wei, Xuezhi Wang, Dale Schuurmans, and colleagues at Go
 
 ## Structure
 
-- 1. Abstract
-- 2. 1 Introduction
-- 3. 2 Chain-of-Thought Prompting
-- 4. 3 Arithmetic Reasoning
-- 5. 4 Commonsense Reasoning
-- 6. 5 Symbolic Reasoning
-- 7. 6 Discussion
-- 8. 7 Related Work
-- 9. 8 Conclusions
-- 10. Acknowledgements
-- 11. References
-- 12. Checklist
-- 13. Appendix A Frequently Asked Questions
-- 14. Appendix B All Experimental Results
-- 15. Appendix C Extended Related Work
-- 16. Appendix D Appendix: Additional Analysis
-- 17. Appendix E Additional Details
-- 18. Version Control
-- 19. Appendix F Appendix: Input/Output Examples
-- 20. Appendix G Appendix: Full Prompts
-- 21. Appendix H Appendix: Alternate Annotators for MWP
+- Abstract
+- 1 Introduction
+- 2 Chain-of-Thought Prompting
+- 3 Arithmetic Reasoning
+- 4 Commonsense Reasoning
+- 5 Symbolic Reasoning
+- 6 Discussion
+- 7 Related Work
+- 8 Conclusions
+- Acknowledgements
+- References
+- Checklist
+- Appendix A Frequently Asked Questions
+- Appendix B All Experimental Results
+- Appendix C Extended Related Work
+- Appendix D Appendix: Additional Analysis
+- Appendix E Additional Details
+- Version Control
+- Appendix F Appendix: Input/Output Examples
+- Appendix G Appendix: Full Prompts
+- Appendix H Appendix: Alternate Annotators for MWP
 
 ## Terms
 

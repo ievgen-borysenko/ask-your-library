@@ -3,8 +3,13 @@ date: 2026-09-18
 tags: [book, tech-shelf]
 type: book-card
 source: "Darren Edge, Ha Trinh, Newman Cheng, Joshua Bradley, Alex Chao, Apurva Mody, Steven Truitt, Jonathan Larson — From Local to Global: A Graph RAG Approach to Query-Focused Summarization"
+card_kind: shared
 card_model: openrouter/anthropic/claude-sonnet-4.6
 card_built: 2026-09-18
+licence: CC-BY-4.0
+licence_url: https://creativecommons.org/licenses/by/4.0/
+work_url: https://arxiv.org/html/2404.16130
+adapted: "a model-written summary of the work, not the work itself"
 ---
 # From Local to Global: A Graph RAG Approach to Query-Focused Summarization — Darren Edge, Ha Trinh, Newman Cheng, Joshua Bradley, Alex Chao, Apurva Mody, Steven Truitt, Jonathan Larson
 
@@ -27,23 +32,23 @@ This paper, by Darren Edge and colleagues at Microsoft, proposes GraphRAG, a met
 
 ## Structure
 
-- 1. Abstract
-- 2. 1 Introduction
-- 3. 2 Background
-- 4. 3 Methods
-- 5. 4 Analysis
-- 6. 5 Results
-- 7. 6 Discussion
-- 8. 7 Conclusion
-- 9. Acknowledgements
-- 10. References
-- 11. Appendix A Entity and Relationship Extraction Approach
-- 12. Appendix B Example Community Detection
-- 13. Appendix C Context Window Selection
-- 14. Appendix D Example Answer Comparison
-- 15. Appendix E System Prompts
-- 16. Appendix F Evaluation Prompts
-- 17. Appendix G Statistical Analysis
+- Abstract
+- 1 Introduction
+- 2 Background
+- 3 Methods
+- 4 Analysis
+- 5 Results
+- 6 Discussion
+- 7 Conclusion
+- Acknowledgements
+- References
+- Appendix A Entity and Relationship Extraction Approach
+- Appendix B Example Community Detection
+- Appendix C Context Window Selection
+- Appendix D Example Answer Comparison
+- Appendix E System Prompts
+- Appendix F Evaluation Prompts
+- Appendix G Statistical Analysis
 
 ## Terms
 

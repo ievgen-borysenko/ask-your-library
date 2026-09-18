@@ -3,8 +3,13 @@ date: 2026-09-18
 tags: [book, tech-shelf]
 type: book-card
 source: "Akari Asai, Zeqiu Wu, Yizhong Wang, Avirup Sil, Hannaneh Hajishirzi — Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection"
+card_kind: shared
 card_model: openrouter/anthropic/claude-sonnet-4.6
 card_built: 2026-09-18
+licence: CC-BY-4.0
+licence_url: https://creativecommons.org/licenses/by/4.0/
+work_url: https://arxiv.org/html/2310.11511
+adapted: "a model-written summary of the work, not the work itself"
 ---
 # Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection — Akari Asai, Zeqiu Wu, Yizhong Wang, Avirup Sil, Hannaneh Hajishirzi
 
@@ -25,20 +30,20 @@ Self-RAG, authored by Akari Asai, Zeqiu Wu, Yizhong Wang, Avirup Sil, and Hannan
 
 ## Structure
 
-- 1. Abstract
-- 2. 1 Introduction
-- 3. 2 Related Work
-- 4. 3 Self-Rag: Learning to Retrieve, Generate and Critique
-- 5. 4 Experiments
-- 6. 5 Results and Analysis
-- 7. 6 Conclusion
-- 8. Ethical Concerns
-- 9. References
-- 10. Appendix
-- 11. Appendix A Self-Rag Details
-- 12. Appendix B Experimental Details
-- 13. Appendix C Results
-- 14. Appendix D Full List of Instructions and Demonstrations for GPT-4
+- Abstract
+- 1 Introduction
+- 2 Related Work
+- 3 Self-Rag: Learning to Retrieve, Generate and Critique
+- 4 Experiments
+- 5 Results and Analysis
+- 6 Conclusion
+- Ethical Concerns
+- References
+- Appendix
+- Appendix A Self-Rag Details
+- Appendix B Experimental Details
+- Appendix C Results
+- Appendix D Full List of Instructions and Demonstrations for GPT-4
 
 ## Terms
 
