@@ -87,6 +87,15 @@ def split_chapters(text: str, heading_re: str, part_re: str | None = None,
     drop_toc_leftovers=False` — nothing is dropped, the preamble comes back as
     the leading untitled section — while the demo pipeline keeps the defaults
     and the behaviour it always had.
+
+    With `part_re`, a part heading after the first real chapter heading (the
+    first one the size filter and the contents-leftover test keep) also ends
+    the section before it when the part has text of its own (at least
+    `min_chapter_chars`: a chapterless essay in an anthology, an act's
+    chorus): that text becomes a section named after the part. Everything
+    else about parts is as it was — a part heading with little or no text
+    of its own stays inside the preceding chapter, and text before the first
+    real chapter heading (title page, contents) stays where it was.
     """
     pattern = re.compile(heading_re, re.M)
     matches = list(pattern.finditer(text))
@@ -96,14 +105,11 @@ def split_chapters(text: str, heading_re: str, part_re: str | None = None,
     def title_of(m: re.Match) -> str:
         return re.sub(r"\s+", " ", m.group(0)).strip(" ]").strip()
 
-    kept = []
-    starts: list[int] = []        # heading offset per kept chapter, for with_parts
-    for i, m in enumerate(matches):
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        body = text[m.end():end].strip()
-        if len(body) >= min_chapter_chars:
-            kept.append((title_of(m), body))
-            starts.append(m.start())
+    def line_end(m: re.Match) -> int:
+        # part_re need not match the whole line ("PART I. A VOYAGE TO" ...);
+        # the rest of the heading line is title, not body
+        nl = text.find("\n", m.end())
+        return len(text) if nl < 0 else nl
 
     def is_toc_leftover(first: str, later: str) -> bool:
         """The last contents line repeats a real heading with a subtitle
@@ -114,18 +120,70 @@ def split_chapters(text: str, heading_re: str, part_re: str | None = None,
         return (len(first) > len(later) and first.startswith(later)
                 and not first[len(later)].isalnum())
 
-    # Parts first: the contents-leftover heuristic below compares titles, and
-    # "PART TWO — CHAPTER I." must not look like a repeat of "PART ONE — CHAPTER I.".
-    if part_re:
-        kept = with_parts(text, kept, part_re, starts)
+    def split(parts: list[re.Match]) -> list[tuple[str, str, int]]:
+        """(title, body, heading offset) per section; `parts` are the part
+        headings that open a section of their own."""
+        bounds = sorted([(m.start(), m.end(), m, False) for m in matches]
+                        + [(m.start(), line_end(m), m, True) for m in parts],
+                        key=lambda b: b[0])
+        sections = []             # (title, body, heading offset, is_part)
+        for i, (start, body_start, m, is_part) in enumerate(bounds):
+            end = bounds[i + 1][0] if i + 1 < len(bounds) else len(text)
+            body = text[body_start:end].strip()
+            if len(body) >= min_chapter_chars:
+                sections.append((part_title(m) if is_part else title_of(m), body, start, is_part))
+        # Parts first: the contents-leftover heuristic below compares titles, and
+        # "PART TWO — CHAPTER I." must not look like a repeat of "PART ONE — CHAPTER I.".
+        # Only chapter titles get the prefix; a part section already is the part.
+        chapters = [(t, b) for t, b, _, is_part in sections if not is_part]
+        if part_re:
+            chapters = with_parts(text, chapters, part_re,
+                                  [pos for _, _, pos, is_part in sections if not is_part])
+        named = iter(chapters)
+        return [(t, b, pos) if is_part else (*next(named), pos)
+                for t, b, pos, is_part in sections]
+
+    # Chapters alone first, exactly as without part sections: the size filter
+    # and the contents-leftover heuristic decide which chapter headings are
+    # contents lines, and the first heading that survives both is the first
+    # real chapter.
+    kept = split([])
     while drop_toc_leftovers and len(kept) > 1 and (
-            any(is_toc_leftover(kept[0][0], t) for t, _ in kept[1:])
+            any(is_toc_leftover(kept[0][0], t) for t, _, _ in kept[1:])
             # a contents line identical to a real heading survives only as the
             # book's LAST heading duplicated up front (e.g. "CHAPTER 135."
             # before "CHAPTER 1.") — ascending repeats (Seneca's treatises
             # restarting at CHAPTER I.) never trip this
             or kept[0][0] == kept[-1][0]):
         kept.pop(0)
+
+    # A part heading is a section boundary too, not only a title prefix: an
+    # anthology part with no chapter headings of its own (Dumas's "*THE
+    # CENCI—1598*" essay) otherwise runs on inside the previous part's last
+    # chapter, where neither retrieval nor a chapter read by title finds it.
+    # Only a part with enough text of its own opens a section. A short one (an
+    # epigraph, a wrapped heading line) stays in the preceding chapter as it
+    # always did, so no text is lost; so does every part heading before the
+    # first real chapter, where title pages and contents pages live (Romeo and
+    # Juliet lists "ACT II" above an indented scene list long enough to pass the
+    # size test, and a contents page may itself open with a line the chapter
+    # regex matches).
+    if part_re and kept:
+        first_real = kept[0][2]
+        chapter_starts = {m.start() for m in matches}
+        candidates = [m for m in re.finditer(part_re, text, re.M)
+                      if m.start() > first_real and m.start() not in chapter_starts]
+        stops = sorted(chapter_starts | {m.start() for m in candidates})
+        parts = []
+        for m in candidates:
+            nxt = next((s for s in stops if s > m.start()), len(text))
+            if len(text[line_end(m):nxt].strip()) >= min_chapter_chars:
+                parts.append(m)
+        if parts:
+            # Everything before the first real chapter was settled above; a
+            # part section only ever splits text after it.
+            kept = [sec for sec in split(parts) if sec[2] >= first_real]
+    kept = [(t, b) for t, b, _ in kept]
     if not kept:
         return [("", text)]
     # The preamble is prepended AFTER with_parts and the contents heuristics,
@@ -133,6 +191,11 @@ def split_chapters(text: str, heading_re: str, part_re: str | None = None,
     # and can never be a contents leftover.
     preamble = text[:matches[0].start()].strip() if keep_preamble else ""
     return ([("", preamble)] if preamble else []) + kept
+
+
+def part_title(m: re.Match) -> str:
+    """A part heading's name: its capture group if part_re has one, else the line."""
+    return (m.group(1) if m.groups() else m.group(0)).strip(" .*")
 
 
 def with_parts(text: str, chapters: list[tuple[str, str]], part_re: str,
@@ -144,8 +207,7 @@ def with_parts(text: str, chapters: list[tuple[str, str]], part_re: str,
     the chapter's heading offset; a capture group selects the title text,
     otherwise the whole line is used. Contents-page part lines never own a
     chapter body, so they fall away naturally."""
-    parts = [(m.start(), (m.group(1) if m.groups() else m.group(0)).strip(" .*"))
-             for m in re.finditer(part_re, text, re.M)]
+    parts = [(m.start(), part_title(m)) for m in re.finditer(part_re, text, re.M)]
     if not parts:
         return chapters
     out = []
