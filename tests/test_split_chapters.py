@@ -92,6 +92,23 @@ def test_contents_page_part_lines_do_not_open_sections():
         "ACT I — SCENE I. A public place.", "ACT II", "ACT II — SCENE I. A garden."]
 
 
+def test_contents_part_entries_after_an_uppercase_contents_heading_open_no_section():
+    """A contents page whose first line matches the chapter regex is not the
+    first real chapter: the long part entries under it are contents too."""
+    synopsis = "     In which the travellers cross the mountains, a long synopsis.\n" * 5
+    lead_in = "The second part opens with a long lead-in of its own. " * 6
+    book = ("PART ONE\n\nCHAPTER I.\n" + BODY + "\nPART TWO\n\n" + lead_in
+            + "\nCHAPTER II.\n" + BODY + "\nPART THREE\n\nCHAPTER III.\n" + BODY + "\n")
+    contents = ("Contents\n\nPART ONE\nCHAPTER I. The Voyage Out\n\n"
+                "PART TWO\n" + synopsis + "\nPART THREE\n" + synopsis + "\n\n")
+    split = lambda text: ingest.split_chapters(text, r"^CHAPTER [IVX]+\..*$",
+                                               r"^(PART [A-Z]+)$")
+    assert split(contents + book) == split(book)
+    assert [t for t, _ in split(book)] == [
+        "PART ONE — CHAPTER I.", "PART TWO", "PART TWO — CHAPTER II.",
+        "PART THREE — CHAPTER III."]
+
+
 def test_a_part_heading_matched_mid_line_keeps_the_rest_of_its_line_out_of_the_body():
     intro = "Lemuel Gulliver sets out from Bristol on the Antelope. " * 6
     text = ("PART I. A VOYAGE TO LILLIPUT.\n\nCHAPTER I.\n" + BODY + "\n"
