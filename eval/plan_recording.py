@@ -528,11 +528,13 @@ class PlanRecorder:
 def model_knobs() -> dict:
     """Every knob of the planner's own call that could change the reply, read
     off the configuration the run is using. `reasoning_effort` is sent on the
-    local backend only (see `llm.llm`), so it is recorded as it was sent."""
-    from ask_your_library.config import (LLM_BACKEND, LLM_BASE_URL, LLM_TIMEOUT_S,
-                                         MAX_OUTPUT_TOKENS)
+    local backend only (see `llm.llm`), so it is recorded as it was sent;
+    `reasoning` is the hosted switch (`LLM_REASONING`), empty on the local one."""
+    from ask_your_library.config import (LLM_BACKEND, LLM_BASE_URL, LLM_REASONING,
+                                         LLM_TIMEOUT_S, MAX_OUTPUT_TOKENS)
     return {"temperature": 0, "max_tokens": MAX_OUTPUT_TOKENS,
             "reasoning_effort": "none" if LLM_BACKEND == "ollama" else "",
+            "reasoning": LLM_REASONING if LLM_BACKEND != "ollama" else "",
             "llm_timeout_s": LLM_TIMEOUT_S,
             # the endpoint's SHAPE, not the endpoint: a local base URL carries a
             # port a reader may have changed, and nothing else about it matters

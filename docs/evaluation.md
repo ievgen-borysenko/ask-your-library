@@ -19,7 +19,7 @@ the facts row and the card-only split on real numbers, and to commit their plann
 which continues that page on the **re-chunked** index — the paired `#28` measurement on
 `qwen2.5:14b` and the `#29` branch runs on both local models. None of the four feeds the table
 below. The rule that separates the two kinds at a glance is the
-cost line: a hosted run carries the configured rates `$3.0/M in, $15.0/M out`, a local one `$0.0/M
+cost line: a hosted run carries its model's configured rates (`$3.0/M in, $15.0/M out` on every Sonnet 4.6 run here), a local one `$0.0/M
 in, $0.0/M out`. From this release the harness fingerprint also names the backend outright — `model
 <name> via <backend>` — but every report committed before it prints `model <name>` alone, so for
 those the backend is read from the report's provenance header, not from the fingerprint.

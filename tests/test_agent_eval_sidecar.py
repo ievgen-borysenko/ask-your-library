@@ -639,6 +639,21 @@ def test_the_fingerprint_says_single_run_at_one_attempt_and_names_n_above_it():
     assert harness.render_fingerprint({**facts, "repeat": 5}).endswith("| 5 attempts per item")
 
 
+def test_the_fingerprint_names_the_hosted_thinking_switch_and_only_when_set():
+    facts = {"code": "abc1234", "golden_name": "en-demo.yaml", "golden_sha256_12": "aaaa",
+             "manifest_sha256_12": "bbbb", "toc_sha256_12": "cccc", "model": "m",
+             "backend": "openrouter", "index": ["cards=x"], "strict_hit_id": True,
+             "clarify_pick": None, "search_hit_chars": 2500, "chapter_hit_chars": 6000,
+             "chapter_scan_chars": 60000, "max_steps": 4, "max_empty_streak": 2,
+             "max_dropped_streak": 2, "max_clarify_candidates": 5, "question_deadline_s": 300,
+             "repeat": 1}
+    assert "| model m via openrouter (reasoning off) |" in harness.render_fingerprint(
+        {**facts, "reasoning": "off"})
+    # local runs record "", and every sidecar written before the switch has no key
+    assert "| model m via openrouter |" in harness.render_fingerprint({**facts, "reasoning": ""})
+    assert "| model m via openrouter |" in harness.render_fingerprint(facts)
+
+
 # ---------------------------------------------------------------- argparse
 def test_the_old_flags_parse_to_what_they_always_meant():
     """Every flag the hand-rolled sys.argv slicing understood, in the orders it

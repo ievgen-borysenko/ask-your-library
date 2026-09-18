@@ -174,8 +174,9 @@ lists every section that would be indexed.
 exception): chunking is local, embeddings are computed by your local Ollama (`bge-m3`), and the
 LanceDB is written on your machine. Asking questions is free too in the shipped default, which
 answers on that same local Ollama. Only `LLM_BACKEND=openrouter` costs money — the orchestrator
-LLM, roughly $0.04-0.05 per question on the demo set at `v0.2.0-rc1`, the figure and the run
-[`cost.md`](cost.md) works through. (An earlier `v0.1.0` measurement, before the 2,500-character
+LLM: under $0.001 per research question on the demo core set with the hosted default since
+2026-09-18, and roughly $0.04-0.05 on Sonnet 4.6, the hosted default before, at `v0.2.0-rc1` — the
+figures and the runs [`cost.md`](cost.md) works through. (An earlier `v0.1.0` measurement, before the 2,500-character
 window and the coverage gate, read $0.03-0.04; this page used to quote that one.)
 `EMBED_BACKEND=openrouter` would send your book text to the embedding API too; the default does
 not.
