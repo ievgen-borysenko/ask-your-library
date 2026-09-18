@@ -482,7 +482,7 @@ PAGE = """
     <h1 class="heading">Eliminating Toil</h1>
     <p>Toil is <em>manual</em>, repetitive work.<sup><a href="#f1">19</a></sup></p>
     <h2>Toil Defined</h2>
-    <blockquote><p class="quote">If a human operator needs to touch your system.</p></blockquote>
+    <blockquote><p class="quote">A quoted line of the demo page stays a quote.</p></blockquote>
     <ul><li>Manual</li><li>Repetitive</li></ul>
     <p>Not every task has all of these attributes.</p>
     <figure class="ltx_figure"><object data="diagram.svg"></object>
@@ -505,7 +505,7 @@ def test_the_reader_keeps_the_headings_and_the_paragraphs():
     assert ("heading", 2, "Toil Defined") in blocks
     text = [block[1] for block in blocks if block[0] == "text"]
     assert "Toil is manual, repetitive work." in text
-    assert "> If a human operator needs to touch your system." in text
+    assert "> A quoted line of the demo page stays a quote." in text
     assert "- Manual" in text and "- Repetitive" in text
 
 
@@ -1076,3 +1076,135 @@ def test_same_heading_does_not_eat_a_title_that_starts_with_a_capital_letter():
     """"Eliminating" is not appendix E, and "A Collection" is not appendix A."""
     assert not shelf.same_heading("Eliminating Toil", "liminating Toil")
     assert not shelf.same_heading("A Collection", "Collection")
+
+
+# --- 9. no text of a work where the repository would share it ----------------
+# These read corpus-tech/prepared/, which is gitignored: on a machine that has
+# built the shelf they run, and in CI — where nothing is prepared — they skip
+# and say why. The shelf's builder is who they are for: they are what stands
+# between a note written with the book open and a passage committed by mistake.
+
+PREPARED = REPO / "corpus-tech" / "prepared"
+WORD = re.compile(r"[\w'’]+")
+
+
+def word_list(text: str) -> list[str]:
+    return WORD.findall(text.lower())
+
+
+def verbatim_runs(text: str, source_grams: set, size: int, allowed) -> list[str]:
+    """Every maximal run of `size`+ words of `text` that also stands in the
+    source, minus the runs `allowed` accepts (names, titles, chapter titles)."""
+    words, runs, i = word_list(text), [], 0
+    while i <= len(words) - size:
+        if tuple(words[i:i + size]) in source_grams:
+            j = i + size
+            while j < len(words) and tuple(words[j - size + 1:j + 1]) in source_grams:
+                j += 1
+            run = words[i:j]
+            if not allowed(run):
+                runs.append(" ".join(run))
+            i = j
+        else:
+            i += 1
+    return runs
+
+
+def grams_of(words: list[str], size: int) -> set:
+    return {tuple(words[i:i + size]) for i in range(len(words) - size + 1)}
+
+
+def name_and_title_filter(work_ids: list[str]):
+    """A run is a name or a title, not a passage, when every word of it belongs
+    to the manifest's titles and author lists, or it sits inside one chapter
+    title of the work."""
+    vocabulary = {"and", "eds", "title", "author"}  # + the prepared front matter keys
+    for work in works():
+        vocabulary |= set(word_list(f"{work['title']} {work['author']}"))
+    titles = [" ".join(word_list(title))
+              for work_id in work_ids for title in json.loads(
+                  (TOC_DIR / f"{work_id}.json").read_text(encoding="utf-8"))]
+
+    def allowed(run: list[str]) -> bool:
+        joined = " ".join(run)
+        return set(run) <= vocabulary or any(joined in title for title in titles)
+    return allowed
+
+
+def tracked_text_files() -> list[Path]:
+    listed = subprocess.run(["git", "ls-files", "-z"], cwd=REPO, capture_output=True,
+                            text=True, check=True).stdout.split("\0")
+    files = []
+    for name in filter(None, listed):
+        path = REPO / name
+        try:
+            path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, IsADirectoryError, FileNotFoundError):
+            continue
+        files.append(path)
+    return files
+
+
+ND_RUN_WORDS = 8
+SHARED_RUN_WORDS = 12
+
+
+def test_no_tracked_file_holds_a_passage_of_a_no_derivatives_work():
+    """No run of 8 or more words of a CC BY-NC-ND work's text, in any tracked
+    file, except its own structure card and the chapter lists — the two places
+    that reproduce it on purpose, attributed, and in part."""
+    nd_ids = [work["id"] for work in works() if shelf.no_derivatives(work)]
+    absent = [work_id for work_id in nd_ids if not (PREPARED / f"{work_id}.md").exists()]
+    if absent:
+        pytest.skip(f"corpus-tech/prepared/ has no text of {absent} (gitignored; run "
+                    f"`uv run scripts/fetch_tech_shelf.py` to build it) — nothing to compare")
+    if not (REPO / ".git").exists():
+        pytest.skip("not a git checkout: no list of tracked files")
+    files = tracked_text_files()
+    problems = []
+    for work_id in nd_ids:
+        source = grams_of(word_list((PREPARED / f"{work_id}.md").read_text(encoding="utf-8")),
+                          ND_RUN_WORDS)
+        allowed = name_and_title_filter([work_id])
+        for path in files:
+            relative = path.relative_to(REPO).as_posix()
+            if relative.startswith("corpus-tech/toc/") or \
+                    relative == f"corpus-tech/cards/{work_id}.md":
+                continue
+            for run in verbatim_runs(path.read_text(encoding="utf-8"), source,
+                                     ND_RUN_WORDS, allowed):
+                problems.append(f"  {relative}: {work_id}: \"{run[:120]}\"")
+    assert not problems, ("passages of a NoDerivatives work in tracked files — state the "
+                          "fact in your own words and name the chapter:\n" + "\n".join(problems))
+
+
+def test_no_shared_card_copies_a_passage_of_its_work():
+    """A shared card is a paraphrase. A run of 12 or more words of the work's own
+    text, outside names, titles and chapter titles, is an excerpt that slipped
+    through the prompt, and is reworded by hand with an `edited:` line."""
+    shared = [work for work in works() if work["cards"] == "shared"]
+    absent = [work["id"] for work in shared if not (PREPARED / f"{work['id']}.md").exists()]
+    if absent:
+        pytest.skip(f"corpus-tech/prepared/ has no text of {absent} (gitignored) — "
+                    f"nothing to compare the cards with")
+    problems = []
+    for work in shared:
+        card = (CARDS_DIR / f"{work['id']}.md").read_text(encoding="utf-8")
+        _, body = chunking.parse_frontmatter(card)
+        body = re.sub(r"(?ms)^## Structure\n.*?(?=^## |\Z)", "", body.split("\n", 2)[-1])
+        source = grams_of(word_list((PREPARED / f"{work['id']}.md").read_text(encoding="utf-8")),
+                          SHARED_RUN_WORDS)
+        for run in verbatim_runs(body, source, SHARED_RUN_WORDS,
+                                 name_and_title_filter([work["id"]])):
+            problems.append(f"  {work['id']}: \"{run[:120]}\"")
+    assert not problems, "shared cards that copy their work:\n" + "\n".join(problems)
+
+
+def test_the_verbatim_check_finds_a_copied_run_and_passes_a_name():
+    source = grams_of(word_list("one two three four five six seven eight nine ten"), 8)
+    assert verbatim_runs("x one two three four five six seven eight y", source, 8,
+                         lambda run: False) == ["one two three four five six seven eight"]
+    assert verbatim_runs("x one two three four five six seven eight y", source, 8,
+                         lambda run: True) == []
+    assert verbatim_runs("one two three four five six seven", source, 8,
+                         lambda run: False) == []

@@ -113,6 +113,11 @@ DOWNLOAD_BACKOFF_S = 5   # then doubled: 5s, 10s
 DOWNLOAD_PAUSE_S = 1     # between two requests, so a work is not a burst
 
 
+# The fetch kinds whose text comes out of `pdftotext` (poppler), the one
+# external tool: a machine without it leaves these out with --skip-pdf.
+PDF_FETCH_KINDS = ("pdf", "arxiv-pdf")
+
+
 def load_manifest() -> dict:
     return yaml.safe_load(MANIFEST.read_text(encoding="utf-8"))
 
@@ -984,7 +989,9 @@ CARD_MODEL_SECTIONS = ("Summary", "Key ideas", "Terms", "Themes")
 
 CARD_SYSTEM = """You write a reference card for one technical work: the page a reader consults to decide whether this work answers their question, and which of its chapters to open.
 
-Write ONLY from the text you are given. Add nothing you know about this work from anywhere else. Do not invent chapters, numbers, figures or quotations, and claim nothing the given text does not support. Where you name a chapter, spell it EXACTLY as it stands in the chapter list you are given.
+Write ONLY from the text you are given. Add nothing you know about this work from anywhere else. Do not invent chapters, numbers, figures or quotations, and claim nothing the given text does not support.
+
+Write every sentence in your own words. Never copy a sentence, a definition or any run of more than a few words from the text you are given, and do not quote it: this card is a paraphrase of the work, never an excerpt of it. Names, titles, chapter titles and the work's own coined terms are the only things you copy. Where you name a chapter, spell it EXACTLY as it stands in the chapter list you are given.
 
 Reply with exactly these sections, in this order, and with nothing else — no preamble, no closing remark, no code fence, no title line above them:
 
@@ -1081,13 +1088,17 @@ def structure_section(titles: list[str]) -> str:
     return "\n".join(f"- {title}" for title in titles)
 
 
-def model_card_front_matter(work: dict, model: str, built: str) -> list[str]:
+def model_card_front_matter(work: dict, model: str, built: str,
+                            edited: str | None = None) -> list[str]:
     """The front matter of a model-written card, and the H1 below it.
 
     The licence lines are what CC BY 4.0 section 3(a) asks of a shared
     adaptation: the licence and a link to it, where the work is, and that the
     card is an adaptation. For a ShareAlike work the card itself is under the
-    work's licence (BY-SA section 3(b)), and says so."""
+    work's licence (BY-SA section 3(b)), and says so.
+
+    `edited` is the record of a hand edit to a model-written section, kept so
+    that `card_model` stays a truthful account of who wrote the rest."""
     lines = ["---",
              f"date: {built}",
              "tags: [book, tech-shelf]",
@@ -1103,6 +1114,8 @@ def model_card_front_matter(work: dict, model: str, built: str) -> list[str]:
     if share_alike(work):
         lines += [f"card_licence: {work['licence']}",
                   f"card_licence_url: {work['licence_url']}"]
+    if edited:
+        lines.append(f"edited: {edited}")
     return lines + ["---", f"# {work['title']} — {work['author']}", ""]
 
 
@@ -1153,7 +1166,8 @@ def restamp_card(text: str, work: dict, titles: list[str]) -> str:
                                  rest)
     if replaced != 1:
         raise ValueError(f"{work['id']}: the card has {replaced} Structure sections, not one")
-    lines = model_card_front_matter(work, fields["card_model"], fields["card_built"])
+    lines = model_card_front_matter(work, fields["card_model"], fields["card_built"],
+                                    fields.get("edited"))
     return ("\n".join(lines) + new_rest).rstrip() + "\n"
 
 
@@ -1480,6 +1494,9 @@ def main() -> None:
                     help="download again even when the file is cached")
     ap.add_argument("--force", action="store_true",
                     help="--stage cards only: rebuild a card that is already written")
+    ap.add_argument("--skip-pdf", action="store_true",
+                    help="leave out the works read through pdftotext (fetch: pdf, arxiv-pdf) — "
+                         "for a machine without poppler, such as the weekly CI job")
     args = ap.parse_args()
     if args.force and args.stage != "cards":
         ap.error("--force belongs to --stage cards; no other stage overwrites anything "
@@ -1493,6 +1510,8 @@ def main() -> None:
                    if needle in work["title"].lower() or needle in work["id"]]
         if not entries:
             sys.exit(f"no work of corpus-tech/manifest.yaml matches {args.work!r}")
+    if args.skip_pdf:
+        entries = [work for work in entries if work["fetch"] not in PDF_FETCH_KINDS]
 
     if args.stage in ("all", "fetch"):
         print("== fetch ==")

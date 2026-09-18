@@ -232,15 +232,24 @@ where it used to need an OpenRouter key. The hosted path is unchanged and opt-in
 and the open gaps in [`docs/backlog.md`](docs/backlog.md).
 
 The code and the project's own files are under Apache-2.0 (`LICENSE`, attribution in
-[`NOTICE`](NOTICE)); one file in the tree is somebody else's — Chainlit's own
+[`NOTICE`](NOTICE)). Two kinds of file in the tree are not the project's alone: Chainlit's own
 `.chainlit/translations/en-US.json`, Apache-2.0, copied here with four strings changed, which
 [`NOTICE`](NOTICE) and [`.chainlit/translations/README.md`](.chainlit/translations/README.md)
-record.
+record; and the book cards and chapter lists of the engineer's shelf, below.
 
 The demo corpus is built from Project Gutenberg texts and LibriVox recordings, public domain in the
 United States by their sources' own statements; what that means for a given edition or translation
 in your country, and what exactly is committed here (machine transcripts, book cards, tables of
 contents, two synthetic canaries), is in [`corpus/README.md`](corpus/README.md).
+
+The engineer's shelf, the second demo corpus, commits no text of its thirteen works: they are
+fetched from their publishers at build time. What it does commit carries the works' own licences,
+not Apache-2.0 alone: the chapter list of every work (`corpus-tech/toc/`); a structure card for
+each of the three CC BY-NC-ND works — title, chapter list and the publishing site's own
+description, reproduced verbatim and attributed, with no summary; and a model-written card for each
+of the other ten, an adaptation under that work's licence (CC BY 4.0, MIT, and CC BY-SA 4.0 for
+the OWASP card), which each card states in its front matter. The licence of every work, where it
+states it and what is committed of it are in [`corpus-tech/README.md`](corpus-tech/README.md).
 
 If this project helps your work, please credit
 [Ievgen Borysenko](https://www.linkedin.com/in/ievgen-borysenko) and link to this repository.

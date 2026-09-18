@@ -41,3 +41,26 @@ distribution carries none: it ships neither a LICENSE nor a NOTICE file, and
 its package metadata declares only "License: Apache-2.0" and "Author: Willy
 Douhard, Dan Andre Constantini". The same provenance is recorded beside the
 file, in .chainlit/translations/README.md.
+
+--------------------------------------------------------------------------------
+
+The engineer's shelf (corpus-tech/) includes material derived from thirteen
+third-party works, each under its own licence. No text of any of them is
+committed; corpus-tech/manifest.yaml names every work with its authors, source
+URL, licence and the page where the work states it.
+
+    corpus-tech/toc/*.json      the chapter titles of each work, as published
+    corpus-tech/cards/sre-book.md, sre-workbook.md, swe-at-google.md
+                                structure cards of the three CC BY-NC-ND 4.0
+                                works: title, chapter list and the description
+                                on the site that publishes the work online,
+                                reproduced verbatim and attributed, unmodified
+    corpus-tech/cards/*.md (the other ten)
+                                book cards written by a language model from the
+                                work: adaptations, each under its work's licence
+                                (CC BY 4.0 or MIT; the OWASP Top 10 for LLM
+                                Applications card is CC BY-SA 4.0), stated with a
+                                link and an adaptation notice in its front matter
+
+The per-work licences and what may be done with each are in
+corpus-tech/README.md.

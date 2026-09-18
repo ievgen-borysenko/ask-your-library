@@ -10,6 +10,7 @@ licence: CC-BY-4.0
 licence_url: https://creativecommons.org/licenses/by/4.0/
 work_url: https://arxiv.org/html/2201.11903
 adapted: "a model-written summary of the work, not the work itself"
+edited: "one Key ideas line (Arithmetic reasoning gains) reworded by hand to drop a verbatim phrase of the paper, 2026-09-19"
 ---
 # Chain-of-Thought Prompting Elicits Reasoning in Large Language Models — Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma, Brian Ichter, Fei Xia, Ed H. Chi, Quoc V. Le, Denny Zhou
 
@@ -21,7 +22,7 @@ This 2022 paper by Jason Wei, Xuezhi Wang, Dale Schuurmans, and colleagues at Go
 
 - **Chain-of-thought prompting** — Providing a few input–output exemplars that include intermediate reasoning steps in the prompt significantly improves LLM performance on complex reasoning tasks without any finetuning. (2 Chain-of-Thought Prompting)
 - **Emergent property of scale** — Chain-of-thought reasoning only reliably improves performance in models above roughly 10B parameters; it hurts smaller models, making it an emergent capability. (6 Discussion)
-- **Arithmetic reasoning gains** — PaLM 540B with eight chain-of-thought exemplars achieves state-of-the-art accuracy on GSM8K, surpassing finetuned GPT-3 with a verifier. (3 Arithmetic Reasoning)
+- **Arithmetic reasoning gains** — given only eight worked chain-of-thought examples, PaLM 540B sets a new best result on GSM8K and beats a finetuned GPT-3 that uses a verifier. (3 Arithmetic Reasoning)
 - **Commonsense reasoning applicability** — The linguistic nature of chain-of-thought reasoning makes it broadly applicable to commonsense tasks, including multi-hop strategy questions and robot action planning. (4 Commonsense Reasoning)
 - **Out-of-domain length generalisation** — Chain-of-thought prompting enables models to generalise to symbolic reasoning problems with more steps than those seen in the few-shot exemplars. (5 Symbolic Reasoning)
 - **External calculator augmentation** — Appending a Python-based external calculator to evaluate equations in generated chains of thought further boosts arithmetic accuracy on most benchmarks. (Appendix B All Experimental Results)

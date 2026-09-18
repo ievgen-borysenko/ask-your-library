@@ -100,3 +100,22 @@ jobs:
         run: |
           uv run scripts/fetch_tech_shelf.py --stage fetch
           uv run scripts/fetch_tech_shelf.py --stage verify
+      - name: The shelf's chapter lists and structure cards are what the code builds
+        # The toc and the structure cards are committed, and both are written by
+        # code from what was just fetched — so a change to the reader or the
+        # chapter splitter that moves a chapter title shows up here, on the
+        # change itself, rather than as a silent drift between the committed
+        # files and what any fresh build produces. `git status` rather than
+        # `git diff` so that a file the build writes and the tree lacks fails
+        # too. --skip-pdf leaves out OWASP, the one work read through pdftotext:
+        # poppler is not part of this image, and a distro poppler that lays the
+        # text out differently from the one the toc was built with would make
+        # this step red over a tool version rather than over the code. OWASP's
+        # chapter list is therefore the one this step does not re-check.
+        run: |
+          uv run scripts/fetch_tech_shelf.py --stage prepare --skip-pdf
+          uv run scripts/fetch_tech_shelf.py --stage toc --skip-pdf
+          uv run scripts/fetch_tech_shelf.py --stage structure-cards
+          git status --porcelain -- corpus-tech/toc corpus-tech/cards
+          git diff --exit-code -- corpus-tech/toc corpus-tech/cards
+          test -z "$(git status --porcelain -- corpus-tech/toc corpus-tech/cards)"

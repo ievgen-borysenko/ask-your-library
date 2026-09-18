@@ -7,11 +7,22 @@
 #   Reader-verified = the golden author has read the work and checked the notes.
 #   Text-verified   = checked against the prepared text by an AI session, no reader.
 #   PROPOSED        = awaiting the reader's verdict; the item is kept for its scenario.
-# EVERY item here is PROPOSED: the shelf has never been indexed or run, so no
-# behaviour below has been observed — only the facts have been checked, against
-# corpus-tech/prepared/<id>.md and the committed chapter lists in corpus-tech/toc/.
-# The quotes and chapter titles in the notes are what a reader needs to judge the
-# first run; the verdicts come after it.
+# EVERY item here is PROPOSED: the facts were checked against
+# corpus-tech/prepared/<id>.md and the committed chapter lists in corpus-tech/toc/,
+# and one local pre-run (2026-09-18, recorded in the items' notes) was read to find
+# items that were wrong as written. No verdict is recorded yet; those come from the
+# reader, after a run over the index this shelf is meant to be measured on.
+#
+# That index: the full text of all thirteen works, the ten `shared` cards
+# (model-written, committed in corpus-tech/cards/), and a structure card for each
+# of the three CC BY-NC-ND works — title, chapter list and the publishing site's
+# own description, no summary. The pre-run had one card on the shelf, not these.
+#
+# Nothing of the three CC BY-NC-ND works is quoted in this file: their licence
+# grants reproduction but this repository keeps its own files free of their text
+# (a test enforces it). For those items the notes name the chapter and state the
+# fact in this file's own words; the prepared text is where a reader checks it.
+# The other ten works are quoted where a quote is what makes a note checkable.
 questions:
 - id: t01-sre-error-budget-formula
   question: How do you actually work out a service's error budget once the availability
@@ -23,11 +34,10 @@ questions:
   expected_facts:
   - minus
   notes: 'PROPOSED 2026-09-17, needs the reader''s verdict; facts text-verified against
-    corpus-tech/prepared/sre-book.md. Chapter "3. Embracing Risk": "Once that target is
-    established, the error budget is one minus the availability target. A service that''s
-    99.99% available is 0.01% unavailable." The Workbook restates it, in its own numbers,
-    in "Appendix B. Example Error Budget Policy": "An error budget is 1 minus the SLO of
-    the service. A 99.9% SLO service has a 0.1% error budget."
+    corpus-tech/prepared/sre-book.md. In chapter "3. Embracing Risk" the budget is the
+    availability target subtracted from one, illustrated with a four-nines service. The
+    Workbook gives the same subtraction, with a three-nines SLO as its example, in
+    "Appendix B. Example Error Budget Policy".
 
     CORRECTED after the first local run of 2026-09-18, which answered it from the Workbook
     and was scored FAIL. The item was wrong, not the answer: this note always said that
@@ -38,7 +48,7 @@ questions:
     different examples (99.99%/0.01% in the 2016 book, 99.9%/0.1% in the Workbook), so a
     numeric fact would score which book was retrieved rather than whether the formula was
     given. What is left is the subtraction itself, which both books state and which no
-    non-answer contains; the numbers are above, for the reader''s manual check.'
+    non-answer contains; the numbers are in this note, for the reader''s manual check.'
 
 - id: t02-toil-clarify
   question: I'm after the one about toil — the chapter that defines what counts as toil
@@ -56,9 +66,11 @@ questions:
     corpus-tech/toc/sre-workbook.json has "6. Eliminating Toil". Picking one without asking
     is a fail however good the answer is; the pass is a question naming both candidates
     ("the 2016 book or the Workbook?"). expected_facts is empty on purpose: the two
-    candidates would contradict each other. Neither book has a card (CC BY-NC-ND), so the
-    clarify has to be built from the text hits alone — which is exactly the case this item
-    exists to measure.
+    candidates would contradict each other. Neither book has a model-written card (CC
+    BY-NC-ND); each has a structure card whose chapter list carries its "Eliminating Toil",
+    so the card side can now surface both candidates without anything having been summarised.
+    What this item measures is whether the clarify is built from that pair: two books with
+    the same chapter title, found through the text hits and the two chapter lists.
 
     First local run 2026-09-18 (qwen2.5:14b, text-only index, one card on the shelf): no
     clarify, and NOT because the clarify was declined — `clarify_candidates` was EMPTY.
@@ -68,7 +80,7 @@ questions:
     one book, so nothing in the run ever held two books to ask about. The item is left
     exactly as written — there is nothing here to fix in the question, and the measurement
     is about the shelf''s retrieval and the missing cards, which is what it was written to
-    measure.'
+    measure. That run had no structure cards; the next one does, and is the one to read.'
 
 - id: t03-twelve-factor-config
   question: Which of the twelve factors is the one about configuration, and what does it
@@ -100,7 +112,7 @@ questions:
     writing verbal self-reflection into memory before the next attempt — and it is built on
     ReAct, so the description fits both. The pass is a question that separates them
     (something like "within one attempt, or learning between attempts?"); a confident single
-    pick is a fail. Both papers have cards, unlike t02, so this pair also says whether the
+    pick is a fail. Both papers have model-written cards, unlike t02, so this pair also says whether the
     clarify path behaves differently when cards are there.
 
     First local run 2026-09-18: no clarify and no answer. The run stopped after one step on
@@ -221,8 +233,10 @@ questions:
     corpus-tech/toc/sre-workbook.json — and the 2018 Workbook deliberately revisits the 2016
     book, which is what makes "do they say different things" answerable rather than a
     rhetorical question. Software Engineering at Google is the acceptable third name; a
-    paper named here is a failure. Both expected books are CC BY-NC-ND and cardless, so this
-    is the aggregation case measured over text hits alone.'
+    paper named here is a failure. Both expected books are CC BY-NC-ND: their cards are
+    structure cards, which list the on-call chapters but say nothing about them, so what the
+    two books SAY has to come from the text hits — this is the aggregation case with the
+    card side reduced to chapter lists.'
 
 - id: t12-catalog-by-betsy-beyer
   question: Do I have anything by Betsy Beyer on this shelf?
@@ -263,10 +277,11 @@ questions:
   - Beyoncé Rule
   - CI
   notes: 'PROPOSED 2026-09-17; facts text-verified against corpus-tech/prepared/swe-at-google.md,
-    chapter "Testing Overview": "If you liked it, you should have put a CI test on it," which
-    we call "The Beyoncé Rule." The meaning is the half that matters: a test that is not
-    triggered by the common CI system does not count. Third of the three cardless CC BY-NC-ND
-    works, and the item that says whether a quote question works over text alone.
+    chapter "Testing Overview", which names the rule after the song and states it as: anything
+    you want kept working needs a test in continuous integration. The meaning is the half that
+    matters: a behaviour no CI test covers is not protected, whatever else checks it. Third of
+    the three CC BY-NC-ND works, whose structure card lists "Testing Overview" and nothing of
+    what it says, so this is the item that says whether a quote question works over text.
 
     First local run 2026-09-18: refused in one second, with no search at all — the planner''s
     out-of-scope gate (#70) read it as a request the library cannot supply and routed it to

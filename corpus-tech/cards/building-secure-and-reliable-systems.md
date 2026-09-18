@@ -10,6 +10,7 @@ licence: CC-BY-4.0
 licence_url: https://creativecommons.org/licenses/by/4.0/
 work_url: https://github.com/google/building-secure-and-reliable-systems
 adapted: "a model-written summary of the work, not the work itself"
+edited: "one Terms line (Understandability) reworded by hand to drop a verbatim phrase of the book, 2026-09-19"
 ---
 # Building Secure and Reliable Systems — Heather Adkins, Betsy Beyer, Paul Blankinship, Piotr Lewandowski, Ana Oprea, Adam Stubblefield
 
@@ -72,7 +73,7 @@ adapted: "a model-written summary of the work, not the work itself"
 - **Safe proxy** — A framework that routes privileged administrative commands through a controlled intermediary that audits, approves, and rate-limits operations, preventing direct access to production systems.
 - **Zero Touch Prod** — A Google project aimed at eliminating direct human access to production systems by requiring all changes to flow through automated, audited safe-proxy mechanisms.
 - **Software supply chain** — The full sequence of writing, building, testing, and deploying a software system, each step of which must offer verifiable proof of correct execution to prevent adversarial bypass.
-- **Understandability** — in the book's words, "the extent to which a person with relevant technical background can accurately and confidently reason about both" the operational behaviour of a system and its invariants, including security and availability properties (Design for Understandability).
+- **Understandability** — how well someone with the right technical grounding can reason, correctly and with confidence, about how a system behaves in operation and about the invariants it keeps, security and availability among them (Design for Understandability).
 - **Resilience** — A system's designed ability to hold out against, delay, or withstand major malfunctions or disruptions, keeping services running (possibly in degraded mode) without requiring human intervention.
 - **Incident Management at Google (IMAG)** — Google's unified incident-response framework, applied to both reliability outages and security incidents, that structures how teams collaborate and communicate during a crisis.
 - **Least privilege** — A design principle requiring that every person, credential, or component be granted only the minimum access needed for its function, so that mistakes or compromises cause the smallest possible harm.
