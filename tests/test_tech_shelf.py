@@ -17,6 +17,7 @@ import contextlib
 import inspect
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -1050,7 +1051,7 @@ def test_the_prompt_allows_attributed_quotes_except_for_a_no_derivatives_work(ca
     build(card_shelf, entries=(ND_LOCAL,), works_in_manifest=(ND_LOCAL,), force=True)
     shared_prompt, nd_prompt = (call["system"] for call in card_shelf.calls)
     assert "You may quote the text sparingly" in shared_prompt
-    assert "followed at once by the chapter it comes from" in shared_prompt
+    assert "followed at once by its chapter title" in shared_prompt
     assert "do not quote it" not in shared_prompt
     assert "do not quote it" in nd_prompt and "You may quote" not in nd_prompt
     for prompt in (shared_prompt, nd_prompt):
@@ -1130,6 +1131,85 @@ def test_a_restamp_refuses_a_bad_ayl_home_before_touching_any_card(card_shelf, m
     with pytest.raises(RuntimeError, match="inside the git work tree"):
         shelf.restamp_cards([WORK, other], {"works": [WORK, other]})
     assert shared_card.read_text(encoding="utf-8") == before
+
+
+def quoting_reply(quotes: int) -> str:
+    quoted = " ".join(['"a short line" (III. Config)'] * quotes)
+    return CARD_REPLY.replace("lives outside the codebase (III. Config)",
+                              f"lives outside the codebase {quoted}")
+
+
+def test_a_reply_that_breaks_the_quotation_rule_is_not_written(card_shelf, monkeypatch):
+    """Checked before the card is written, with the same code the corpus test
+    uses: a fourth quotation, or any attributed quotation in a NoDerivatives
+    work's paraphrase-only card, is refused with the reason and leaves no file."""
+    monkeypatch.setattr(llm, "llm_invoke", lambda system, user, role:
+                        types.SimpleNamespace(content=quoting_reply(QUOTES_PER_CARD + 1)))
+    with pytest.raises(SystemExit, match="breaks the quotation rule: 4 attributed quotations"):
+        build(card_shelf)
+    assert not card_shelf.cards.exists() or not list(card_shelf.cards.glob("*.md"))
+    monkeypatch.setattr(llm, "llm_invoke", lambda system, user, role:
+                        types.SimpleNamespace(content=quoting_reply(1)))
+    with pytest.raises(SystemExit, match="1 attributed quotations, more than 0"):
+        build(card_shelf, entries=(ND_LOCAL,), works_in_manifest=(ND_LOCAL,))
+    assert not card_shelf.cards_local.exists() or not list(card_shelf.cards_local.glob("*"))
+    monkeypatch.setattr(llm, "llm_invoke", lambda system, user, role:
+                        types.SimpleNamespace(content=quoting_reply(QUOTES_PER_CARD)))
+    assert '"a short line" (III. Config)' in (build(card_shelf) / "demo-work.md").read_text(
+        encoding="utf-8")
+
+
+def test_a_hard_link_to_a_tracked_file_is_never_written_through(card_shelf, tmp_path):
+    """A hard link at $AYL_HOME/cards/tech/<id>.md sharing its inode with a file
+    tracked in a checkout: the card is a fresh file renamed over the name, so
+    the tracked file keeps its bytes — on a forced build and on a restamp."""
+    repo = tmp_path / "a-checkout"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    tracked = repo / "tracked.md"
+    tracked.write_text("tracked\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "tracked.md"], check=True)
+    card_shelf.cards_local.mkdir(parents=True)
+    card = card_shelf.cards_local / "demo-work.md"
+    os.link(tracked, card)
+    build(card_shelf, entries=(ND_LOCAL,), works_in_manifest=(ND_LOCAL,), force=True)
+    assert tracked.read_text(encoding="utf-8") == "tracked\n"
+    assert "## Summary" in card.read_text(encoding="utf-8")
+    assert card.stat().st_ino != tracked.stat().st_ino
+    # the restamp: a valid card in the tracked file, hard-linked at the card's name
+    built = card.read_text(encoding="utf-8").replace("card_kind: local\n", "")
+    tracked.write_text(built, encoding="utf-8")
+    card.unlink()
+    os.link(tracked, card)
+    shelf.write_toc([ND_LOCAL])
+    shelf.restamp_cards([ND_LOCAL], {"works": [ND_LOCAL]})
+    assert tracked.read_text(encoding="utf-8") == built
+    assert "card_kind: local" in card.read_text(encoding="utf-8")
+    assert card.stat().st_ino != tracked.stat().st_ino
+
+
+def test_a_folder_swapped_for_a_symlink_before_the_rename_is_refused(card_shelf, tmp_path,
+                                                                      monkeypatch):
+    """The race: the folder checked is replaced by a link into a checkout after
+    the check and before the rename. The folder is checked again right before
+    the rename, the write is refused, and no temporary file is left behind."""
+    from ask_your_library import home
+
+    repo = tmp_path / "a-checkout"
+    (repo / ".git").mkdir(parents=True)
+    (repo / "inside").mkdir()
+    folder = card_shelf.cards_local
+    folder.mkdir(parents=True)
+    moved_away = folder.with_name("tech-moved")
+
+    def swap(path):
+        folder.rename(moved_away)
+        folder.symlink_to(repo / "inside")
+    monkeypatch.setattr(home, "_before_replace", swap)
+    with pytest.raises(RuntimeError, match="changed while"):
+        build(card_shelf, entries=(ND_LOCAL,), works_in_manifest=(ND_LOCAL,))
+    assert list((repo / "inside").iterdir()) == []
+    assert list(moved_away.iterdir()) == [], "the temporary file was left behind"
 
 
 def test_local_card_belongs_beside_structure_and_is_a_boolean():
@@ -1362,57 +1442,11 @@ def test_no_tracked_file_holds_a_passage_of_a_no_derivatives_work():
                           "fact in your own words and name the chapter:\n" + "\n".join(problems))
 
 
-# A quotation a shared card may carry: text in double quotation marks, straight
-# or curly, followed at once (after at most a comma or a full stop) by the
-# chapter it comes from in parentheses — at most QUOTE_MAX_WORDS words inside,
-# and at most QUOTES_PER_CARD of them per card, the promise the prompt makes.
-#
-# Quotation marks are PAIRED first, left to right, and only then is a pair asked
-# whether a chapter follows it. Matching "quote + chapter" in one pattern would
-# let the engine start at a stray closing mark — `the "SLO" term; <copied run>"
-# (Ch)` — and exempt the copied run between two quotations that are not one. A
-# card whose straight quotation marks do not pair, or whose curly ones do not
-# balance, is reported rather than read.
-QUOTE_PAIR = re.compile(r'"([^"]*)"|“([^“”]*)”')
-ATTRIBUTION = re.compile(r"[,.]?[ \t]*\(([^()\n]+)\)")
-QUOTE_MAX_WORDS = 25
-QUOTES_PER_CARD = 3
-# What an accepted quotation is replaced with before the verbatim check: a word
-# no text holds, so the words either side of the quote cannot join into a run.
-QUOTE_GAP = " qqquotationqqq "
-
-
-def outside_attributed_quotes(text: str, titles: list[str]) -> tuple[str, list[str]]:
-    """`text` with every attributed quotation cut out, and what is wrong with the
-    card's quotation marks.
-
-    Cut: a paired quotation of at most QUOTE_MAX_WORDS words, on one line, whose
-    parenthesis right after it is a chapter title of the work. Anything else —
-    no chapter after it, something else in the parenthesis, a longer quote —
-    stays in the text and is held to the verbatim rule. Reported: straight marks
-    that do not pair, curly ones that do not balance, and more than
-    QUOTES_PER_CARD attributed quotations."""
-    chapters = {" ".join(word_list(title)) for title in titles}
-    problems = []
-    if text.count('"') % 2:
-        problems.append(f'an odd number of straight quotation marks ({text.count(chr(34))})')
-    if text.count("“") != text.count("”"):
-        problems.append(f"{text.count('“')} opening and {text.count('”')} closing curly "
-                        f"quotation marks")
-    pieces, last, exempt = [], 0, 0
-    for pair in QUOTE_PAIR.finditer(text):
-        quoted = pair.group(1) if pair.group(1) is not None else pair.group(2)
-        attribution = ATTRIBUTION.match(text, pair.end())
-        if (attribution and "\n" not in quoted
-                and len(word_list(quoted)) <= QUOTE_MAX_WORDS
-                and " ".join(word_list(attribution.group(1))) in chapters):
-            exempt += 1
-            pieces += [text[last:pair.start()], QUOTE_GAP]
-            last = attribution.end()
-    pieces.append(text[last:])
-    if exempt > QUOTES_PER_CARD:
-        problems.append(f"{exempt} attributed quotations, more than {QUOTES_PER_CARD}")
-    return "".join(pieces), problems
+# The quotation rule lives in the script (`attributed_quotes`), because the card
+# stage checks a model's reply with it before writing; the names are kept here.
+QUOTE_MAX_WORDS = shelf.QUOTE_MAX_WORDS
+QUOTES_PER_CARD = shelf.QUOTES_PER_CARD
+outside_attributed_quotes = shelf.attributed_quotes
 
 
 def test_no_shared_card_copies_a_passage_of_its_work():
@@ -1483,16 +1517,25 @@ CHAPTERS = ["1. Introduction", "3. Embracing Risk"]
 LONG_SOURCE = " ".join(f"word{i}" for i in range(60))
 
 
-def test_a_quotation_longer_than_the_cap_is_not_exempt():
-    """The prompt promises under 25 words; a 40-word, many-sentence passage in
-    quotation marks with a chapter after it is still a copied passage."""
+def test_a_quotation_of_at_most_25_words_is_exempt_and_26_is_not():
+    """"At most 25 words" in the prompt, the README and the check alike: 25 is
+    exempt, 26 is not, and the longer one is reported as well as left in the
+    text for the verbatim rule — so is a 40-word, many-sentence passage."""
     source = grams_of(word_list(LONG_SOURCE), SHARED_RUN_WORDS)
-    long_quote = ". ".join(" ".join(f"word{i}" for i in range(k, k + 10)) for k in (0, 10, 20, 30))
-    body, _ = outside_attributed_quotes(f'- **X** — "{long_quote}" (3. Embracing Risk)', CHAPTERS)
-    assert verbatim_runs(body, source, SHARED_RUN_WORDS, lambda run: False)
-    at_cap = " ".join(f"word{i}" for i in range(QUOTE_MAX_WORDS))
-    body, _ = outside_attributed_quotes(f'"{at_cap}" (3. Embracing Risk)', CHAPTERS)
-    assert not verbatim_runs(body, source, SHARED_RUN_WORDS, lambda run: False)
+
+    def check(words: int, joiner: str = " "):
+        quote = joiner.join(f"word{i}" for i in range(words))
+        body, problems = outside_attributed_quotes(f'- **X** — "{quote}" (3. Embracing Risk)',
+                                                   CHAPTERS)
+        return verbatim_runs(body, source, SHARED_RUN_WORDS, lambda run: False), problems
+    assert QUOTE_MAX_WORDS == 25
+    assert check(25) == ([], [])
+    runs, problems = check(26)
+    assert runs and problems == ["an attributed quotation of 26 words, more than 25"]
+    runs, problems = check(40, joiner=". ")
+    assert runs and problems == ["an attributed quotation of 40 words, more than 25"]
+    assert "each at most 25 words" in shelf.CARD_QUOTES
+    assert "at most three quotations" in shelf.CARD_QUOTES
 
 
 def test_more_quotations_than_the_cap_per_card_are_reported():
@@ -1512,7 +1555,26 @@ def test_a_stray_closing_quotation_mark_does_not_exempt_a_copied_run():
     assert verbatim_runs(body, source, SHARED_RUN_WORDS, lambda run: False)
     assert problems == ["an odd number of straight quotation marks (3)"]
     _, problems = outside_attributed_quotes(f"“{PASSAGE} (3. Embracing Risk)", CHAPTERS)
-    assert problems == ["1 opening and 0 closing curly quotation marks"]
+    assert problems == [CURLY]
+
+
+CURLY = "curly quotation marks out of order (reversed, nested or unbalanced)"
+
+
+@pytest.mark.parametrize("card", [
+    f"- reversed ”{PASSAGE}“ (3. Embracing Risk)",
+    f"- nested “one “{PASSAGE}” (3. Embracing Risk) two”",
+    f"- interleaved “a” ” “{PASSAGE}” (3. Embracing Risk) “",
+])
+def test_reversed_or_interleaved_curly_quotes_are_reported(card):
+    _, problems = outside_attributed_quotes(card, CHAPTERS)
+    assert CURLY in problems
+
+
+def test_balanced_curly_quotes_in_turn_are_accepted():
+    body, problems = outside_attributed_quotes(
+        f"“the term” and “{PASSAGE}” (3. Embracing Risk)", CHAPTERS)
+    assert problems == [] and PASSAGE not in body
 
 
 def test_the_nd_check_exempts_no_quotation():

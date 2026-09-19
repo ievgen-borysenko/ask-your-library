@@ -1048,7 +1048,7 @@ CARD_MODEL_SECTIONS = ("Summary", "Key ideas", "Terms", "Themes")
 # short quotation the way any review does, marked and attributed, and the rest is
 # paraphrase. A card of a NoDerivatives work is never shared, and is paraphrase
 # only, so nothing of the work's text is copied into a card at all.
-CARD_QUOTES = """Write every sentence in your own words. You may quote the text sparingly: a quotation is at most one sentence of under 25 words, stands inside double quotation marks, and is followed at once by the chapter it comes from in parentheses, spelled exactly as in the chapter list — "a quoted sentence" (III. Config). Never copy a sentence, a definition or any run of more than a few words without marking it that way. Names, titles, chapter titles and the work's own coined terms may be used as they are."""
+CARD_QUOTES = """Write every sentence in your own words. You may quote the text sparingly: at most three quotations in the whole card, each at most 25 words, each inside double quotation marks and followed at once by its chapter title in parentheses, spelled exactly as in the chapter list — "a quoted sentence" (III. Config). Never copy a sentence, a definition or any run of more than a few words without marking it that way. Names, titles, chapter titles and the work's own coined terms may be used as they are."""
 
 CARD_PARAPHRASE_ONLY = """Write every sentence in your own words. Never copy a sentence, a definition or any run of more than a few words from the text you are given, and do not quote it: this card is a paraphrase of the work, never an excerpt of it. Names, titles, chapter titles and the work's own coined terms are the only things you copy."""
 
@@ -1075,6 +1075,93 @@ Five to twelve bullets, the vocabulary this work uses in its own way — words i
 ## Themes
 Four to eight bullets, the concerns that run across chapters rather than sitting in one, each in the form
 - **<theme>** — <one sentence>"""
+
+
+# The quotation rule of a card, as code: the reply of a model is checked with it
+# before a card is written, and tests/test_tech_shelf.py holds every committed
+# card to it. A quotation is text in double quotation marks, straight or curly,
+# followed at once (after at most a comma or a full stop) by the chapter it comes
+# from in parentheses: at most QUOTE_MAX_WORDS words inside, and at most
+# QUOTES_PER_CARD per card — none in a NoDerivatives work's card, which is
+# paraphrase only.
+#
+# Quotation marks are PAIRED first, left to right, and only then is a pair asked
+# whether a chapter follows it. Matching "quote + chapter" in one pattern would
+# let the engine start at a stray closing mark — `the "SLO" term; <copied run>"
+# (Ch)` — and exempt the copied run between two quotations that are not one. A
+# card whose straight marks do not pair, or whose curly ones are unbalanced,
+# reversed or nested, is reported rather than read.
+QUOTE_PAIR = re.compile(r'"([^"]*)"|“([^“”]*)”')
+QUOTE_ATTRIBUTION = re.compile(r"[,.]?[ \t]*\(([^()\n]+)\)")
+QUOTE_WORD = re.compile(r"[\w'’]+")
+QUOTE_MAX_WORDS = 25
+QUOTES_PER_CARD = 3
+# What an accepted quotation is replaced with before a verbatim check: a word no
+# text holds, so the words either side of the quote cannot join into a run.
+QUOTE_GAP = " qqquotationqqq "
+
+
+def _words(text: str) -> list[str]:
+    return QUOTE_WORD.findall(text.lower())
+
+
+def curly_order_problem(text: str) -> str | None:
+    """Curly marks must open and close in turn: “ ” “ ”. A reversed pair
+    (”…“), a nested one (“a “b” c”) or one left open is a problem."""
+    depth = 0
+    for mark in re.findall("[“”]", text):
+        depth += 1 if mark == "“" else -1
+        if depth not in (0, 1):
+            return "curly quotation marks out of order (reversed, nested or unbalanced)"
+    return "curly quotation marks out of order (reversed, nested or unbalanced)" if depth else None
+
+
+def attributed_quotes(text: str, titles: list[str],
+                      allowed: int = QUOTES_PER_CARD) -> tuple[str, list[str]]:
+    """`text` with every attributed quotation cut out, and what is wrong with the
+    card's quotations.
+
+    Cut: a paired quotation of at most QUOTE_MAX_WORDS words, on one line, whose
+    parenthesis right after it is a chapter title of the work. Anything else —
+    no chapter after it, something else in the parenthesis, a longer quote —
+    stays in the text for the verbatim rule. Reported: straight marks that do
+    not pair, curly ones out of order, an attributed quotation over the word
+    cap, and more than `allowed` attributed quotations."""
+    chapters = {" ".join(_words(title)) for title in titles}
+    problems = []
+    if text.count('"') % 2:
+        problems.append(f'an odd number of straight quotation marks ({text.count(chr(34))})')
+    curly = curly_order_problem(text)
+    if curly:
+        problems.append(curly)
+    pieces, last, exempt = [], 0, 0
+    for pair in QUOTE_PAIR.finditer(text):
+        quoted = pair.group(1) if pair.group(1) is not None else pair.group(2)
+        attribution = QUOTE_ATTRIBUTION.match(text, pair.end())
+        if not (attribution and "\n" not in quoted
+                and " ".join(_words(attribution.group(1))) in chapters):
+            continue
+        if len(_words(quoted)) > QUOTE_MAX_WORDS:
+            problems.append(f"an attributed quotation of {len(_words(quoted))} words, more "
+                            f"than {QUOTE_MAX_WORDS}")
+            continue
+        exempt += 1
+        pieces += [text[last:pair.start()], QUOTE_GAP]
+        last = attribution.end()
+    pieces.append(text[last:])
+    if exempt > allowed:
+        problems.append(f"{exempt} attributed quotations, more than {allowed}")
+    return "".join(pieces), problems
+
+
+def reply_quote_problems(work: dict, sections: dict[str, str],
+                         titles: list[str]) -> list[str]:
+    """The quotation rule applied to a model's reply before it is written: at
+    most QUOTES_PER_CARD attributed quotations, none for a NoDerivatives work."""
+    body = "\n\n".join(sections.get(name, "") for name in CARD_MODEL_SECTIONS)
+    _, problems = attributed_quotes(body, titles,
+                                    allowed=0 if no_derivatives(work) else QUOTES_PER_CARD)
+    return problems
 
 
 def card_system(work: dict) -> str:
@@ -1259,7 +1346,7 @@ def restamp_cards(entries: list[dict], manifest: dict) -> None:
             continue
         text = path.read_text(encoding="utf-8")
         new = restamp_card(text, work, committed_chapters(work))
-        path.write_text(new, encoding="utf-8")
+        write_card(work, path, new)
         print(f"  {work['id']}: {'restamped' if new != text else 'unchanged'}")
 
 
@@ -1292,6 +1379,19 @@ def card_path(work: dict) -> Path:
             raise RuntimeError(f"{work['id']}: a local card may not be written inside "
                                f"the repository ({path})")
     return path
+
+
+def write_card(work: dict, path: Path, text: str) -> None:
+    """A committed card is an ordinary write into the checkout. A local one goes
+    through `ask_your_library.home.write_private`: a fresh file renamed over the
+    name, so a hard link or a symlink planted there is never written through,
+    with the folder checked again right before the rename."""
+    if model_card_is_local(work):
+        from ask_your_library.home import write_private
+
+        write_private(path, text)
+    else:
+        path.write_text(text, encoding="utf-8")
 
 
 def build_cards(entries: list[dict], manifest: dict, force: bool = False) -> None:
@@ -1340,7 +1440,14 @@ def build_cards(entries: list[dict], manifest: dict, force: bool = False) -> Non
             # says which work to re-run once the prompt or the model is changed.
             problems.append(f"  {work['id']}: the reply has no {', '.join(missing)}")
             continue
-        path.write_text(card_text(work, sections, chapters, model, built), encoding="utf-8")
+        quoting = reply_quote_problems(work, sections, [title for title, _ in chapters])
+        if quoting:
+            # Refused here rather than written and failed later by the corpus
+            # test: a card that breaks the quotation rule is not a card.
+            problems.append(f"  {work['id']}: the reply breaks the quotation rule: "
+                            f"{'; '.join(quoting)}")
+            continue
+        write_card(work, path, card_text(work, sections, chapters, model, built))
         where = path.relative_to(REPO) if path.is_relative_to(REPO) else path
         print(f"  {work['id']}: {len(chapters)} chapters -> {where}, "
               f"{len(reply):,} characters from {model} in "

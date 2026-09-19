@@ -415,3 +415,39 @@ def test_the_doctor_output_matches_the_example_in_the_upgrading_page(index, tmp_
     page = (Path(__file__).resolve().parents[1] / "docs" / "upgrading.md").read_text()
     assert f"chunker {CARD_CHUNKER_VERSION}, row schema 1" in page
     assert f"chunker {add_folder.CHUNKER_VERSION}, row schema 2" in page
+
+
+def cards_table_stamped(tmp_path, chunker: str):
+    db = lancedb.connect(tmp_path / "db")
+    db.create_table("cards_ollama", [{"chunk_id": "c#One", "note": "c", "book": "A — B",
+                                      "source": "card", "section": "One", "text": "t",
+                                      "vector": [0.0] * 4}])
+    index_meta.write_index_meta(db, "cards_ollama", "ollama", "fake-embed", 4, chunker=chunker)
+    return db
+
+
+def test_a_cards_table_stamped_card_sections_1_is_stale_and_names_the_cards_stage(tmp_path):
+    """#58 moved a local card's row key to `<file>@local`, so the card chunker is
+    `card-sections-2` and a table stamped `card-sections-1` is reported: on read
+    (warning, preflight notice), by the doctor, and on write — each naming the
+    quick cards stage rather than a full `ayl-add --rebuild`."""
+    from ask_your_library.ingest.chunking import CARD_CHUNKER_VERSION
+
+    assert CARD_CHUNKER_VERSION == "card-sections-2"
+    db = cards_table_stamped(tmp_path, "card-sections-1")
+    detail = index_meta.version_mismatch(db, "cards_ollama")
+    assert detail and "'card-sections-1'" in detail and "'card-sections-2'" in detail
+    index_meta._warned.clear()
+    warning = index_meta.warn_version_mismatch(db, "cards_ollama")
+    refusal = index_meta.refuse_version_mismatch(db, "cards_ollama")
+    for line in (warning, refusal):
+        assert "scripts/ingest_demo_corpus.py --stage cards" in line
+        assert "--cards-dir corpus-tech/cards" in line
+        assert "ayl-add <folder> --rebuild" not in line
+    report = check_ledger(db, ["cards_ollama"])
+    assert report.version_mismatches
+    printed = "\n".join(report.lines())
+    assert "VERSION MISMATCH" in printed and "--stage cards" in printed
+    assert index_meta.version_mismatch(cards_table_stamped(tmp_path / "new",
+                                                           CARD_CHUNKER_VERSION),
+                                       "cards_ollama") is None

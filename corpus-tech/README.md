@@ -163,7 +163,9 @@ defaults to `~/AskYourLibrary`, outside any checkout, and a local card of this s
 may set it. **It is never a folder inside the repository**: `.gitignore` is not a boundary — a
 `git add -f` walks through it — so the script checks the resolved path instead, and refuses to write
 a local card when `AYL_HOME` is inside any git work tree, this checkout or another, and refuses a
-card file that is a symlink. What it detects is a `.git` in the path or above it: a bare-repository
+card file that is a symlink. The card is written as a fresh file renamed over the name, so a hard
+link planted there is replaced, not written through, and the folder is checked again right before
+the rename. What it detects is a `.git` in the path or above it: a bare-repository
 dotfiles setup (`git --git-dir=~/.dotfiles --work-tree=~`) leaves none in the home directory and is
 not detected, so with one, point `AYL_HOME` at a folder it does not track. `AYL_HOME` is
 also where the private shelf of the reader's own books, their cards and their index will live
@@ -180,7 +182,8 @@ LIBRARY_DB_PATH=~/ayl-tech uv run scripts/ingest_demo_corpus.py --stage cards \
 
 The structure card and the local card of one work share a file name and a book key: they stay one
 book in the catalogue, and the local card's rows carry the key `<id>@local`, so the two never share
-a chunk id.
+a chunk id. That key is why the card chunker is `card-sections-2`: an index whose cards table was built
+before it reads with a warning until its cards stage is run again ([upgrading](../docs/upgrading.md#a-cards-table-is-rebuilt-on-its-own)).
 
 This stage is the only one that calls a model, so it is asked for by name and is never part of
 `--stage all`. The call goes through the project's own client, so `LLM_BACKEND=ollama` writes the
@@ -219,14 +222,18 @@ the manifest and the chapter list without calling a model, and a test holds ever
 exactly that.
 
 **A shared card is a paraphrase with at most short, attributed quotations, and a hand edit says
-so.** The prompt lets a card of a work that allows adaptations quote sparingly — one sentence at
-most, in double quotation marks, followed at once by the chapter it comes from in parentheses,
-`"…" (3. Embracing Risk)` — and asks for everything else in the card's own words; for a
-NoDerivatives work's local card it forbids quoting at all. On the builder's machine a test compares
-each shared card with its work's prepared text and fails on any run of twelve words or more that is
-not a name, a title, a chapter title or inside such an attributed quotation — the same words outside
-the quotation marks, or quoted with no chapter after them, still fail. The NoDerivatives rule is not
-relaxed by this: the eight-word test over every tracked file exempts no quotation. Where a line
+so.** The prompt lets a card of a work that allows adaptations quote sparingly — at most three
+quotations, each at most 25 words, each in double quotation marks and followed at once by its
+chapter title in parentheses, `"…" (3. Embracing Risk)` — and asks for everything else in the
+card's own words; for a NoDerivatives work's local card it forbids quoting at all. The card stage
+checks a model's reply against that rule (`attributed_quotes()` in the script) and refuses one that
+breaks it, leaving no file. On the builder's machine a test compares each shared card with its
+work's prepared text and fails on any run of twelve words or more that is not a name, a title, a
+chapter title or inside such an attributed quotation — the same words outside the quotation marks,
+quoted with no chapter after them, or in a quotation over 25 words, still fail; quotation marks are
+paired left to right, and unpaired straight marks or reversed, nested or unbalanced curly ones fail
+the card. The NoDerivatives rule is not relaxed by this: the eight-word test over every tracked file
+exempts no quotation. Where a line
 slipped through anyway it is reworded by hand, never regenerated silently, and the card records it
 in its front matter, so that `card_model` stays a true account of who wrote the rest:
 

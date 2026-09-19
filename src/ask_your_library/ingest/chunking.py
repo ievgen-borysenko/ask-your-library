@@ -43,7 +43,15 @@ CHUNKER_VERSION = "sentence-pack-2"
 # from refusing every card write for a reason that is not true of cards. The
 # policy picks the one that belongs to the table it is checking
 # (`index_meta.expected_chunker`).
-CARD_CHUNKER_VERSION = "card-sections-1"
+#
+# `card-sections-2` (#58) keys a card that says `card_kind: local` as
+# `<file>@local` (`card_note`), so its rows do not share chunk ids with the
+# committed card of the same book. `card-sections-1` keyed every card by its
+# file name alone. The sections are cut the same way; only the keys moved, which
+# is still a change in what a re-ingest writes, so a cards table stamped with
+# the old version reads with a warning and is rebuilt with
+# `ingest_demo_corpus.py --stage cards` (`index_meta.rebuild_hint`).
+CARD_CHUNKER_VERSION = "card-sections-2"
 
 # Card sections longer than MAX are split on bullet boundaries, packing up to TARGET.
 MAX_CHUNK_CHARS = 2000

@@ -25,12 +25,28 @@
   without sharing a chunk id; `ingest_demo_corpus.py --cards-dir` expands `~` and refuses only two
   cards with one row key.
 
+  A local card is written atomically: a fresh file in the checked folder, fsynced and renamed over
+  the name, so a symlink or a hard link planted at `$AYL_HOME/cards/tech/<id>.md` is replaced rather
+  than written through, and the folder is checked again right before the rename.
+
+  **Rebuild the cards table of an existing index.** The new row key is a change in what the card
+  chunker writes, so `CARD_CHUNKER_VERSION` is now `card-sections-2`, and a cards table stamped
+  `card-sections-1` reads with a warning (the preflight notice, `ayl-add --doctor`) until it is
+  rebuilt. That is the quick cards stage, which leaves the full text alone:
+  `uv run scripts/ingest_demo_corpus.py --stage cards` for the demo index, and for the engineer's
+  shelf the same with its `LIBRARY_DB_PATH` and `--cards-dir corpus-tech/cards --cards-dir
+  "${AYL_HOME:-$HOME/AskYourLibrary}/cards/tech"` ([upgrading](upgrading.md)). The warning, the
+  refusal and the doctor name that command for a cards table instead of `ayl-add --rebuild`.
+
   **Quotations in committed cards.** The card prompt now lets a card of a work that allows
-  adaptations quote sparingly — one sentence at most, in quotation marks, followed by its chapter in
-  parentheses — and asks a NoDerivatives work's local card for paraphrase only. The shared-card test
-  follows: a verbatim run of twelve words or more passes only inside quotation marks followed by one
-  of the work's chapter titles, and fails outside them. The eight-word test over every tracked file
-  for the NoDerivatives works is unchanged and exempts no quotation.
+  adaptations quote sparingly — at most three quotations, each at most 25 words, each in quotation
+  marks and followed by its chapter title in parentheses — and asks a NoDerivatives work's local card
+  for paraphrase only. The card stage checks a model's reply against that rule before writing it and
+  refuses a reply that breaks it, leaving no file. The shared-card test follows: a verbatim run of
+  twelve words or more passes only inside such a quotation, and fails outside one; quotation marks
+  are paired left to right, and unpaired straight marks or reversed, nested or unbalanced curly ones
+  are reported. The eight-word test over every tracked file for the NoDerivatives works is unchanged
+  and exempts no quotation.
 
 - **Three golden items are scored by the owner's verdicts of 2026-09-19; reports made before this
   change scored them more strictly.** `c09-shipwreck-first-person` (Robinson Crusoe or Gulliver's
