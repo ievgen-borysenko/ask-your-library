@@ -941,8 +941,9 @@ def write_toc(entries: list[dict]) -> None:
     is not in the repository, so this is what a reviewer reads to see which
     chapters a golden question was written against, and what a reviewer diffs
     after re-fetching a work whose pins went red (corpus-tech/README.md). The
-    weekly job does not regenerate these: it verifies the pins, which is what
-    catches the change in the first place."""
+    weekly job regenerates them too, for every work but the PDF ones
+    (`--skip-pdf`), and fails when the result differs from what is committed:
+    a change to the reader or the splitter that moves a title shows up there."""
     TOC_DIR.mkdir(parents=True, exist_ok=True)
     for work in entries:
         prepared = PREPARED_DIR / f"{work['id']}.md"

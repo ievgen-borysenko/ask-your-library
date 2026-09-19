@@ -38,8 +38,12 @@ it) processes passages of the reader's own copy on the reader's behalf — no wo
 adaptation of one, is shared with anybody by that. So the NoDerivatives works are indexed and
 answered from like every other book, on either backend, and the only thing the code enforces
 about them is what can leave the reader's machine *as a file*: no model-written card of one is
-ever produced (`card_targets()`), and no passage of one is committed (a test scans every tracked
-file). Choosing a hosted backend sends retrieved passages to that provider, for this shelf as for
+ever produced (`card_targets()`), and no passage of one is committed. That last one is a check
+on the builder's machine, not in CI: a test compares every tracked file, the chapter lists and
+cards included, with the prepared text of the three works and fails on any run of eight words or
+more that is not a name, a title or a chapter title — and it can only run where that text has been
+built, so in CI, which never builds it, it skips and says so. Choosing a hosted backend sends
+retrieved passages to that provider, for this shelf as for
 any other: [`docs/privacy-and-threat-model.md`](../docs/privacy-and-threat-model.md).
 
 ## The shelf
@@ -170,6 +174,19 @@ model-written card are derived rather than generated, so `--stage restamp-cards`
 the manifest and the chapter list without calling a model, and a test holds every committed card to
 exactly that.
 
+**A shared card is a paraphrase, and a hand edit says so.** The prompt forbids copying the work,
+and on the builder's machine a test compares each shared card with its work's prepared text and
+fails on any run of twelve words or more that is not a name, a title or a chapter title. Where a
+line slipped through anyway it is reworded by hand, never regenerated silently, and the card
+records it in its front matter, so that `card_model` stays a true account of who wrote the rest:
+
+```yaml
+edited: "one Terms line (Understandability) reworded by hand to drop a verbatim phrase of the book, 2026-09-19"
+```
+
+Two cards carry one today, Building Secure and Reliable Systems and Chain-of-Thought, and
+`--stage restamp-cards` keeps the field.
+
 `--force` is what rebuilds one; without it an existing card is left alone, so re-running the stage
 over a shelf with one card missing costs one model call.
 
@@ -208,6 +225,13 @@ keep the stronger rule. The other side of the trade: a `text` pin is taken of th
 so a change to the reader itself — a tag it now keeps or drops, a different whitespace rule — moves
 every text pin with no upstream change at all, and has to be followed by `--stage checksums` in the
 same commit.
+
+The weekly job also rebuilds what is built from those pins and committed: after the fetch it runs
+`prepare --skip-pdf`, `toc --skip-pdf` and `structure-cards`, and fails if `toc/` or `cards/` then
+differ from the tree, new files included. So a change to the reader or the chapter splitter that
+moves a chapter title is red on the change itself. `--skip-pdf` leaves out OWASP, the one work read
+through `pdftotext`, which the CI image does not carry; its chapter list is the one this does not
+re-check.
 
 The pages index the fetch writes beside them (_pages.json) is hashed as bytes whatever a work's
 `pin` says: it is this script's record of which pages the publisher's table of contents listed and

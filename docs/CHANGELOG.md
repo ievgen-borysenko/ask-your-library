@@ -119,6 +119,20 @@
   builds them and is part of the plain run, and `ingest_demo_corpus.py --cards-dir` is repeatable
   so the local cards join the same cards table.
 
+  **The boundary is the repository, not the model** (the owner's decision of 2026-09-19): building
+  and querying the shelf is the reader's own use of their own copy, so the NoDerivatives works are
+  indexed and answered from on either backend, and what the code enforces is what can leave the
+  machine as a file. No passage of them is committed: the golden notes that quoted them now name
+  the chapter and state the fact in their own words, and a test fails on any run of eight words or
+  more of their prepared text in any tracked file, cards and chapter lists included, outside names
+  and titles. A shared card is a paraphrase — the card prompt forbids copying, and a second test
+  fails on a run of twelve words or more of a card's own work. Both run where the text has been
+  built and skip in CI, which never builds it. The two lines they caught, in the Building Secure
+  and Reliable Systems and Chain-of-Thought cards, were reworded by hand and each card records it in
+  an `edited:` field, so `card_model` stays true for the rest. The weekly `pins` job now also
+  rebuilds the shelf's chapter lists and structure cards from the fresh fetch and fails on any
+  difference; `--skip-pdf` leaves out OWASP, whose `pdftotext` the CI image does not carry.
+
   `scripts/ingest_demo_corpus.py --stage cards` takes `--cards-dir`, so the cards table of any index
   is written by the one implementation; the shelf's index is an ordinary `ayl-add` folder ingest at
   its own `LIBRARY_DB_PATH` — 13 books, 275 sections, 2,590 chunks, `sentence-pack-2`, 5.4 minutes

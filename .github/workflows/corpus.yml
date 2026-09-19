@@ -93,10 +93,10 @@ jobs:
         # verify, which re-hashes every file against corpus-tech/manifest.yaml
         # and exits 1 on the first page a publisher has edited.
         #
-        # `prepare` is deliberately NOT run here: it reads the PDF works through
-        # pdftotext, which is not part of this image's contract, and it would
-        # add nothing — a changed page fails the pins above before any text is
-        # built from it.
+        # `prepare` is not run in THIS step: a changed page fails the pins
+        # before any text is built from it. The next step runs it, without the
+        # PDF works (pdftotext is not part of this image's contract), to
+        # re-check the committed chapter lists and structure cards.
         run: |
           uv run scripts/fetch_tech_shelf.py --stage fetch
           uv run scripts/fetch_tech_shelf.py --stage verify

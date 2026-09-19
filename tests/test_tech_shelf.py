@@ -1150,9 +1150,10 @@ SHARED_RUN_WORDS = 12
 
 
 def test_no_tracked_file_holds_a_passage_of_a_no_derivatives_work():
-    """No run of 8 or more words of a CC BY-NC-ND work's text, in any tracked
-    file, except its own structure card and the chapter lists — the two places
-    that reproduce it on purpose, attributed, and in part."""
+    """No run of 8 or more words of a CC BY-NC-ND work's text in any tracked
+    file. No file is exempt: the chapter lists and the structure cards pass
+    because what they reproduce is names, titles and chapter titles, which the
+    filter accepts — and an exemption would hide whatever else got into them."""
     nd_ids = [work["id"] for work in works() if shelf.no_derivatives(work)]
     absent = [work_id for work_id in nd_ids if not (PREPARED / f"{work_id}.md").exists()]
     if absent:
@@ -1168,9 +1169,6 @@ def test_no_tracked_file_holds_a_passage_of_a_no_derivatives_work():
         allowed = name_and_title_filter([work_id])
         for path in files:
             relative = path.relative_to(REPO).as_posix()
-            if relative.startswith("corpus-tech/toc/") or \
-                    relative == f"corpus-tech/cards/{work_id}.md":
-                continue
             for run in verbatim_runs(path.read_text(encoding="utf-8"), source,
                                      ND_RUN_WORDS, allowed):
                 problems.append(f"  {relative}: {work_id}: \"{run[:120]}\"")
