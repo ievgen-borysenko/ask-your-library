@@ -55,6 +55,10 @@ class AgentState(TypedDict):
     # counters above are the record
     dropped_quotes: list[dict]
     read_chapters: list[str]  # chapter reads attempted: "book|section|status", status = complete | partial | empty
+    # where each chapter read's window sat in its section (#81): {step, book, section, start, end,
+    # section_chars, scanned_chars, looking_for}; append-reduced, written only by a step that read
+    # text, and read by no node — a log for the report, never a prompt
+    chapter_windows: Annotated[list[dict], operator.add]
     clarification: str     # the user's reply to a clarifying question
     clarify_candidates: list[str]  # book keys the clarify question offered, in the order shown
     clarify_unresolved: bool       # the reply matched no candidate: evidence kept for all, reported

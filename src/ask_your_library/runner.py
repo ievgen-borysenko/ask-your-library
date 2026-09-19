@@ -91,7 +91,7 @@ def initial_state(question: str, history: list[str], scratchpad: Path) -> dict:
         "clarification": "", "clarify_asked": False, "coverage_probed": False,
         "plan_fallback": False, "catalog_fallback": "",
         "clarify_candidates": [], "clarify_unresolved": False, "clarify_chosen": "",
-        "read_chapters": [],
+        "read_chapters": [], "chapter_windows": [],
         "catalog_request": {}, "catalog": {}, "book_filter": "", "book_unresolved": "",
         "scratchpad_path": str(scratchpad),
         "call_timed_out": False,
@@ -182,6 +182,8 @@ class RunResult:
     steps_taken: int = 0
     evidence: list = field(default_factory=list)
     read_chapters: list = field(default_factory=list)
+    # where each chapter read's window sat in its section (#81), one dict per read
+    chapter_windows: list = field(default_factory=list)
     # what the provenance gate spent on this question (#29): every quote it
     # refused, the same number split by the rule that refused it, and the quotes
     # re-pinned to another passage of their own book. They are also inside
@@ -253,6 +255,7 @@ def _result(question: str, state: dict, usage: dict, seconds: float,
         steps_taken=state.get("steps_taken", 0),
         evidence=state.get("evidence") or [],
         read_chapters=state.get("read_chapters") or [],
+        chapter_windows=state.get("chapter_windows") or [],
         dropped_unverified=int(state.get("dropped_unverified") or 0),
         dropped_by_reason=dict(state.get("dropped_by_reason") or {}),
         repinned=int(state.get("repinned") or 0),
