@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **The hosted default graded by hand, and its limit written down**
+  ([`eval-results/2026-09-19-hosted-default-quality.md`](eval-results/2026-09-19-hosted-default-quality.md)).
+  `deepseek/deepseek-v4-flash-0731` with thinking off, core and extended sets at `--repeat 3`, is
+  fully correct on about 6 of 11 core questions per attempt against 9 for
+  `anthropic/claude-sonnet-4.6` and `google/gemini-3.8-flash` on one attempt, at about 1/65 of
+  Sonnet 4.6's cost. Thinking on (5.0 correct, 2.8× slower) and an unmerged prompt change (4.3, and
+  the `c09` clarify lost) did not help; four other DeepSeek models did not beat it by more than the
+  spread between attempts, so the default stays. The report records the shared failure class — an
+  answer that calls a detail missing that the retrieved passages hold (#81) — and
+  [Known limits](known-limits.md) gains the entry, with the backup settings for readers who need
+  depth. Documentation only; manual, single-grader grades on the index before #80.
+
 - **Local cards live in `AYL_HOME`, outside the checkout, and the three NoDerivatives works get
   one** (#58, [`corpus-tech/README.md`](../corpus-tech/README.md#local-cards-and-ayl_home)). A new
   setting, `AYL_HOME` (default `~/AskYourLibrary`), is the reader's own folder for what is built on
