@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- **Three golden items are scored by the owner's verdicts of 2026-09-19; reports made before this
+  change scored them more strictly.** `c09-shipwreck-first-person` (Robinson Crusoe or Gulliver's
+  Travels, "I might be mixing two of them up") moves from `clarify` to the existing
+  `clarify_or_answer`: asking back passes, and so does an answer that names both books; naming one
+  book with confidence fails. That the answer also tells the two apart is left to the
+  manual-correctness checkbox. The same rule applies to `h22-gothic-chase-ambiguous` (Frankenstein
+  or Dracula, "i keep mixing two of them up"); `q06`, with no such framing, stays `clarify`. `q16-refusal-casino-royale` now passes when the catalogue answers
+  `No book titled "Casino Royale" is in your library.`: in `score()` a `refusal` item answered by a
+  catalogue "has" that resolved to nothing, listed nothing and says so in words is a pass, not
+  `catalog_misroute`. Every other catalogue result on a non-catalogue item, including a "has" that
+  confirmed some other book, is still a misroute. The phrase is not added to the general refusal
+  markers, because the research loop puts the same wording in front of answers that go on to
+  answer. `eval/run_plan_eval.py` accepts the same route (`mode_ok` for a refusal item sent to
+  "has"). The checksums moved: `en-demo.yaml` `edc15194` → `2c43defa`, `en-demo-extended.yaml`
+  `836d3870` → `338002f3`. **Old runs are not re-scored automatically**: a committed report that
+  shows c09, h22 or q16 as FAIL for these reasons keeps that verdict until the run is scored again.
+
 - **A part heading now ends the section before it: Dumas's Celebrated Crimes gains the eleven
   essays that had no chapters of their own.** With a manifest `part_regex`, part headings only
   prefixed chapter titles, so a part without CHAPTER headings ran on inside the previous part's last

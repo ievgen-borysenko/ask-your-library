@@ -61,6 +61,10 @@ questions:
     not in this public-domain corpus, but The Secret Adversary is a genuinely similar espionage/conspiracy
     story that could tempt the agent into a false-positive match. The agent should say Casino Royale itself
     isn't available rather than substitute The Secret Adversary without flagging the difference.
+    Owner's verdict 2026-09-19 - a correct not-in-library answer from the catalogue ("No book titled
+    'Casino Royale' is in your library.") is a PASS, not a misroute. The catalogue path passes only as a
+    "has" that resolved to nothing, listed nothing and says so; confirming another book fails. The
+    research path is scored as before (an explicit refusal).
 - id: h01-sea-monster-vessel
   question: What was that adventure where three men go overboard while hunting what they think is a sea
     monster, and then find out the monster is actually some kind of vessel?
@@ -261,9 +265,13 @@ questions:
   - Frankenstein
   - Dracula
   expected_facts: []
-  expected_behavior: clarify
-  notes: 'Reworded twice 2026-09-05: "a small group chases" pointed at Dracula (Victor hunts alone), and
+  expected_behavior: clarify_or_answer
+  notes: 'Reader''s verdict 2026-09-19 (the c09 rule, applied here): asking back is fine when the
+    agent is not sure, and answering straight away is fine when it is right. PASS = a clarify
+    question, or an answer without asking that names BOTH books; FAIL = one book named with
+    confidence. That the answer tells them apart is read on the manual-correctness checkbox.
+    Reworded twice 2026-09-05: "a small group chases" pointed at Dracula (Victor hunts alone), and
     "finally destroyed" pointed at Dracula again (the creatures death is announced, not shown). Now both
-    fit; the pass is a question (one hunter or a party? Arctic ice or a castle?). Passed with clarify
+    fit; a good clarify question is (one hunter or a party? Arctic ice or a castle?). Passed with clarify
     in the 05.09 run under the old wording. Frankenstein: Victor pursues the creature across Europe to
     the Arctic; Dracula: Van Helsing''s party pursues the Count from London back to Transylvania.'
