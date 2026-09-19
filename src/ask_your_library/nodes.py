@@ -486,9 +486,10 @@ def act(state: AgentState) -> dict:
                 f"{strip_control_chars(empty_read_note)}")
         if window is not None:
             looking_for = f'"{window["looking_for"]}"' if window["looking_for"] else "(none: head of the chapter)"
-            f.write(f"[chapter window: {window['book']} | {window['section']} | characters "
-                    f"{window['start']}-{window['end']} of {window['section_chars']} "
-                    f"(scanned {window['scanned_chars']}) | looking_for {looking_for}]\n")
+            _best_effort(state["scratchpad_path"], lambda: f.write(_encodable(
+                f"[chapter window: {window['book']} | {window['section']} | characters "
+                f"{window['start']}-{window['end']} of {window['section_chars']} "
+                f"(scanned {window['scanned_chars']}) | looking_for {looking_for}]\n")))
         for h in hits:
             # score = RRF, distance only exists on hits from the vector list.
             f.write(f"<<<hit>>> {h['hit_id']} | {h['book']} | {h['section']} | {h['corpus']} | "
@@ -505,6 +506,31 @@ def act(state: AgentState) -> dict:
 
 
 # ---------------------------------------------------------------- observe
+# Scratchpads whose #81 log could not be written, so the warning is said once
+# per file and not once per step.
+_LOG_FAILED: set[str] = set()
+
+
+def _encodable(text: str) -> str:
+    """`text` as UTF-8 can hold it: a lone surrogate (model output can carry
+    one) becomes "?" instead of a UnicodeEncodeError halfway through a line."""
+    return text.encode("utf-8", "replace").decode("utf-8")
+
+
+def _best_effort(path: str, write) -> None:
+    """Run one write of the #81 log, which must never cost the step it
+    describes: a scratch directory that vanished or went read-only, or text the
+    file cannot encode, is a warning in the server log, said once per file, and
+    the node returns exactly what it would have returned without the log."""
+    try:
+        write()
+    except (OSError, UnicodeError) as error:
+        if path not in _LOG_FAILED:
+            _LOG_FAILED.add(path)
+            log.warning("scratchpad log not written (%s: %s); the run goes on without it",
+                        type(error).__name__, error)
+
+
 def _log_observed(state: AgentState, kept: list[dict], dropped=(), filtered=(),
                   note: str = "") -> None:
     """What `observe` made of this step, appended to the scratchpad under the
@@ -533,8 +559,12 @@ def _log_observed(state: AgentState, kept: list[dict], dropped=(), filtered=(),
     for e in filtered:
         lines += [f"<<<filtered>>> {s(e.get('hit_id', ''))} | {s(e['book'])} | not the book the reader chose",
                   f"quote: \"{s(e['quote'])}\""]
-    with open(path, "a", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
+    text = _encodable("\n".join(lines) + "\n")
+
+    def write() -> None:
+        with open(path, "a", encoding="utf-8", errors="replace") as f:
+            f.write(text)
+    _best_effort(path, write)
 
 
 def observe(state: AgentState) -> dict:

@@ -424,9 +424,43 @@ def test_the_scratchpad_logs_what_observe_kept_dropped_and_where_a_chapter_windo
                                            "scanned_chars": visible, "looking_for": ""}]
     # observe's event contract is untouched: nothing of the log travels in it
     assert set(by_name(events, "observe")[0]) == {"evidence", "empty_streak"}
+    assert_no_log_marker_reached_the_model(model)
+
+
+# Every marker the #81 log writes into the scratchpad; none may reach a prompt.
+LOG_MARKERS = ("### observe", "<<<kept>>>", "<<<dropped>>>", "<<<filtered>>>", "[chapter window:")
+
+
+def assert_no_log_marker_reached_the_model(model: "ScriptedModel") -> None:
     for call in model.calls:
-        assert "<<<kept>>>" not in call["user"] and "chapter window" not in call["user"]
-        assert "### observe" not in call["user"]
+        for marker in LOG_MARKERS:
+            assert marker not in call["system"] and marker not in call["user"], (call["role"], marker)
+
+
+def test_evidence_the_clarify_filter_takes_off_is_logged_as_filtered(run, tmp_path):
+    """After the reader chose Gulliver, a chapter read of Moby Dick still yields
+    a quote; the filter keeps it out of the evidence, and the scratchpad says so
+    instead of it vanishing between the kept and the dropped."""
+    model = ScriptedModel(
+        plan=[{"mode": "identify", "queries": ["stranded traveller strange land"]},
+              {"mode": "identify", "queries": ["Lilliput tiny people"]}],
+        observe=[{"evidence": [evidence(MOBY, "cards", "s1h1"), evidence(GULLIVER, "cards", "s1h3")]},
+                 {"evidence": [evidence(GULLIVER, "transcripts", "s2h2")]},
+                 {"evidence": [evidence(MOBY, "transcripts", "s3h1")]}],
+        reflect=[{"decision": "clarify", "clarify_question": "Which one do you mean?"},
+                 {"decision": "read_chapter", "book": MOBY, "section": "Chapter 1"},
+                 {"decision": "enough"}],
+        synthesize=["Gulliver's Travels [Gulliver's Travels, Chapter 1]."],
+    )
+    _, events, _ = run(model, FakeLibrary(), "A man stranded in a strange land, which book?",
+                       reply_to_clarify="the second one")
+
+    assert by_name(events, "observe")[2]["evidence"] == by_name(events, "observe")[1]["evidence"]
+    scratch = next(Path(tmp_path).glob("run-*.md")).read_text()
+    assert "### observe, step 3: kept 0, dropped 0, filtered 1" in scratch
+    assert (f"<<<filtered>>> s3h1 | {MOBY} | not the book the reader chose\n"
+            f"quote: \"Call me Ishmael.\"") in scratch
+    assert_no_log_marker_reached_the_model(model)
 
 
 def test_an_empty_chapter_read_is_a_dry_step_not_a_hit(run):
