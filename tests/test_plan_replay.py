@@ -333,6 +333,23 @@ def test_a_content_item_fails_when_the_planner_sent_it_to_the_catalogue():
     assert misrouted["mode_ok"] is False and misrouted["plan_ok"] is False
 
 
+def test_a_refusal_item_may_take_the_catalogues_has_and_nothing_else_there():
+    """q16 ("Do you have Casino Royale?"): the catalogue's "not in your library"
+    is a correct answer (owner's verdict 2026-09-19), so routing a refusal item
+    to "has" is a correct route, the same exception `score()` makes. A listing
+    is still a misroute, and so is "has" on any other type."""
+    catalogue = dict(mode="catalog", queries=[], current_query="")
+    has = replay.score_plan(item("refusal"), update(**catalogue, catalog_request={"op": "has"}),
+                            "catalog")
+    assert has["mode_ok"] is True and has["plan_ok"] is True
+    listed = replay.score_plan(item("refusal"), update(**catalogue, catalog_request={"op": "list"}),
+                               "catalog")
+    assert listed["mode_ok"] is False
+    content = replay.score_plan(item("answer"), update(**catalogue, catalog_request={"op": "has"}),
+                                "catalog")
+    assert content["mode_ok"] is False
+
+
 def test_a_research_control_must_be_routed_by_the_planner_and_not_rescued_by_code():
     """`expected_behavior: research` is the one place the golden set asks for
     more than the route: a catalogue fallback means code rescued a misroute, and

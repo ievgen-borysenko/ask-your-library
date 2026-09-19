@@ -718,3 +718,117 @@ def test_the_hybrid_filter_must_be_the_expected_book():
     assert not harness.score(item, wrong)["behavior_ok"]
     assert not harness.score(item, {**good, "book_filter": ""})["behavior_ok"]
 
+
+# --- owner's verdicts of 2026-09-19 -----------------------------------------
+# c09: two books fit and the reader says they may be mixing them up. Asking back
+# passes; answering straight away passes only when BOTH books are named; one
+# book named with confidence fails. Encoded with the existing
+# `clarify_or_answer` (clarify, or every expected title in the answer).
+C09 = {"type": "identify", "expected_behavior": "clarify_or_answer",
+       "expected_books": ["Robinson Crusoe", "Gulliver's Travels"]}
+
+
+def test_c09_passes_when_the_agent_asks_back():
+    assert harness.score(C09, run("", clarify=True))["behavior_ok"] is True
+
+
+def test_c09_passes_when_the_answer_names_both_books_without_asking():
+    both = ("You may be thinking of two books. Robinson Crusoe is the one about surviving alone "
+            "on an island; Gulliver's Travels is the one about getting along with strange "
+            "societies, starting in Lilliput.")
+    verdict = harness.score(C09, run(both))
+    assert verdict["behavior_ok"] is True and verdict["titles_mentioned"] == 2
+
+
+def test_c09_fails_when_the_answer_confidently_names_one_book():
+    for one in ("It was Robinson Crusoe: he survives alone on his island for 28 years.",
+                "That is Gulliver's Travels, the voyage to Lilliput."):
+        assert harness.score(C09, run(one))["behavior_ok"] is False, one
+
+
+H22 = {"type": "identify", "expected_behavior": "clarify_or_answer",
+       "expected_books": ["Frankenstein", "Dracula"]}
+
+
+def test_h22_follows_the_same_rule_as_c09():
+    assert harness.score(H22, run("", clarify=True))["behavior_ok"] is True
+    both = ("Two books fit: in Frankenstein Victor hunts his creature alone to the Arctic; "
+            "in Dracula Van Helsing's party chases the Count back to Transylvania.")
+    assert harness.score(H22, run(both))["behavior_ok"] is True
+    assert harness.score(H22, run("That is Dracula, hunted back to his castle."))["behavior_ok"] is False
+
+
+def test_the_golden_files_carry_the_owners_verdicts():
+    import yaml
+    golden = Path(__file__).resolve().parents[1] / "eval" / "golden"
+    items = {q["id"]: q for f in ("en-demo.yaml", "en-demo-extended.yaml")
+             for q in yaml.safe_load((golden / f).read_text(encoding="utf-8"))["questions"]}
+    for key in ("c09-shipwreck-first-person", "h22-gothic-chase-ambiguous"):
+        assert items[key]["expected_behavior"] == "clarify_or_answer", key
+    assert items["q06-verne-guaranteed-clarify"]["expected_behavior"] == "clarify"
+
+
+# q16: "Do you have Casino Royale?" answered by the catalogue with "no such book"
+# is a PASS (owner's verdict), not a misroute. Only a "has" that resolved to
+# nothing, listed nothing and says so.
+Q16 = {"type": "refusal", "expected_books": [], "expected_facts": []}
+ABSENT = {"op": "has", "count": 0, "total": 33, "books": [], "query": "Casino Royale",
+          "resolved": False, "suggestions": []}
+
+
+def rendered_absent(**over) -> str:
+    """The answer exactly as the catalogue path renders it, so the scorer's
+    marker cannot drift from the template (i18n `catalog_has_no`)."""
+    from ask_your_library.catalog import CatalogResult, render_catalog
+    fields = {"op": "has", "books": [], "total": 33, "query": "Casino Royale",
+              "resolved": False, "suggestions": [], **over}
+    return render_catalog(CatalogResult(**fields))
+
+
+def test_q16_a_catalogue_not_in_library_answer_passes():
+    verdict = harness.score(Q16, {**run(rendered_absent()), "catalog": ABSENT})
+    assert verdict["behavior_ok"] is True and verdict["catalog_absent"] is True
+    assert "catalog_misroute" not in verdict
+    # a labelled "Closest titles" suggestion is not a substitute
+    closest = ["The Secret Adversary — Agatha Christie"]
+    suggested = {**run(rendered_absent(suggestions=closest)),
+                 "catalog": {**ABSENT, "suggestions": closest}}
+    assert harness.score(Q16, suggested)["behavior_ok"] is True
+
+
+def test_q16_a_catalogue_answer_that_confirms_another_book_fails():
+    found = {"op": "has", "count": 1, "total": 33, "books": ["The Secret Adversary — Agatha Christie"],
+             "query": "Casino Royale", "resolved": True, "suggestions": []}
+    verdict = harness.score(Q16, {**run("Yes, in your library:\n- The Secret Adversary — Agatha Christie"),
+                                  "catalog": found})
+    assert verdict["behavior_ok"] is False and verdict["catalog_misroute"] is True
+
+
+def test_q16_the_catalogue_path_must_be_a_has_that_says_so_in_words():
+    # a listing on a refusal item is still a misroute
+    listing = {"op": "list", "count": 33, "total": 33, "books": [], "resolved": True}
+    verdict = harness.score(Q16, {**run("33 books in your library"), "catalog": listing})
+    assert verdict["behavior_ok"] is False and verdict["catalog_misroute"] is True
+    # the structure says absent but the text does not
+    assert harness.score(Q16, {**run("Here is a spy thriller."), "catalog": ABSENT})["behavior_ok"] is False
+
+
+def test_the_misroute_check_still_fails_content_questions_the_catalogue_swallowed():
+    """The exception is for refusal items only: a content question answered by
+    the catalogue's "no such book" is still the wrong kind of answer."""
+    item = {"type": "answer", "expected_books": ["Dracula"]}
+    verdict = harness.score(item, {**run(rendered_absent(query="Dracula")),
+                                   "catalog": {**ABSENT, "query": "Dracula"}})
+    assert verdict["behavior_ok"] is False and verdict["catalog_misroute"] is True
+
+
+def test_the_research_loops_not_in_catalogue_note_is_not_a_refusal_marker():
+    """The research loop prefixes "No book titled ... is in the library catalogue"
+    to answers that go on to answer; only the catalogue path may use the phrase."""
+    from ask_your_library.i18n import t
+    substituted = (t("book_not_in_catalog", q="Casino Royale") + "\n\n"
+                   + "The Secret Adversary is the spy thriller you want: Tommy and Tuppence "
+                     "hunt Mr Brown.")
+    assert harness.score(Q16, run(substituted, checked=1))["behavior_ok"] is False
+    # and the research path's explicit refusal passes as before
+    assert harness.score(Q16, run("Casino Royale is not in the library.", checked=0))["behavior_ok"]

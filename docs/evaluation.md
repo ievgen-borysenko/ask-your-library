@@ -37,14 +37,15 @@ through the whole graph (clarify interrupts are auto-answered, so the run is non
 scored on: expected titles mentioned in the answer (accent-folded substring, not a citation
 check), refusal questions answering with an explicit refusal (an evidence-free answer told from
 model knowledge fails), `expected_behavior: clarify` questions actually triggering a clarify
-interrupt, `expects_chapter_read` questions actually drilling into a chapter of an expected
-book, and `catalog` questions on their structured result (the set of books the code listed must
+interrupt (`clarify_or_answer`: a clarify, or an answer that names every expected book),
+`expects_chapter_read` questions actually drilling into a chapter of an expected book, and `catalog` questions on their structured result (the set of books the code listed must
 equal the expected set of index keys, "Title — Author", so the right title under a wrong author
 fails; the count must be the length of that list, the operation must be the one
 the item names, and the catalogue as a whole must hold the `expected_total` the item was written
 for, or a run of two or three items could certify a partial index; a research question answered
-by the catalogue path fails, and so does a research control the planner did not route itself,
-where a planner or catalogue fallback searched instead). Quote provenance totals come from
+by the catalogue path fails, except a `refusal` item the catalogue answers with a "has" that found
+nothing and says the book is not in the library (q16, owner's verdict 2026-09-19), and so does a
+research control the planner did not route itself, where a planner or catalogue fallback searched instead). Quote provenance totals come from
 `validate`.
 
 **Since 2026-09-16 the triple is a proof, not a measurement (#29).** The quote check runs at the

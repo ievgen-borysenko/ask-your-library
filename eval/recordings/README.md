@@ -46,6 +46,9 @@ input the 16.09 replay numbers were produced from, and a replay of them still
 measures what it always measured — `plan()`'s post-processing under the prompt
 that was in the tree on 16.09. What they cannot do any more is say anything
 about how a model reads the new rule; that needs a new recording from a new run.
+The three `en-demo.*` recordings are stale on the golden side too since 2026-09-19:
+c09 moved to `clarify_or_answer` (the owner's verdict), so `en-demo.yaml` went from
+`edc151948a58` to `2c43defa8bc7`. They were not re-stamped, for the same reason.
 
 A `*.jsonl.partial` beside a recording is a run that did not finish. The calls in
 it were paid for all the same; rename it by hand if you want to keep them, after

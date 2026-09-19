@@ -110,7 +110,13 @@ QUERIES_MIN, QUERIES_MAX = 2, 4
 #                           just as hard, from the other side: the main harness
 #                           fails any non-catalogue item whose run produced a
 #                           catalogue result (`catalog_misroute`), whatever it
-#                           listed.
+#                           listed. One exception, the same one `score()`
+#                           makes: a `refusal` item routed to the catalogue's
+#                           "has" ("Do you have Casino Royale?", q16) is a
+#                           correct route, since "not in your library" from the
+#                           catalogue is a correct answer (owner's verdict
+#                           2026-09-19). Whether the book then resolved to
+#                           nothing is the run's result, scored by `score()`.
 #   expected_behavior:
 #     research           -> the research loop AND reached by the planner's own
 #                           reading: no `catalog_fallback`, because a rescue by
@@ -233,7 +239,7 @@ def score_plan(item: dict, update: dict, route: str) -> dict:
         if "expected_op" in item:
             out["op_ok"] = request.get("op") == item["expected_op"]
     else:
-        out["mode_ok"] = not took_catalog
+        out["mode_ok"] = not took_catalog or (kind == "refusal" and request.get("op") == "has")
         if item.get("expected_behavior") == "research":
             # the research controls: routed there by the planner's own reading,
             # not rescued by the catalogue gate (the `research` branch of score())
