@@ -746,6 +746,28 @@ def test_c09_fails_when_the_answer_confidently_names_one_book():
         assert harness.score(C09, run(one))["behavior_ok"] is False, one
 
 
+H22 = {"type": "identify", "expected_behavior": "clarify_or_answer",
+       "expected_books": ["Frankenstein", "Dracula"]}
+
+
+def test_h22_follows_the_same_rule_as_c09():
+    assert harness.score(H22, run("", clarify=True))["behavior_ok"] is True
+    both = ("Two books fit: in Frankenstein Victor hunts his creature alone to the Arctic; "
+            "in Dracula Van Helsing's party chases the Count back to Transylvania.")
+    assert harness.score(H22, run(both))["behavior_ok"] is True
+    assert harness.score(H22, run("That is Dracula, hunted back to his castle."))["behavior_ok"] is False
+
+
+def test_the_golden_files_carry_the_owners_verdicts():
+    import yaml
+    golden = Path(__file__).resolve().parents[1] / "eval" / "golden"
+    items = {q["id"]: q for f in ("en-demo.yaml", "en-demo-extended.yaml")
+             for q in yaml.safe_load((golden / f).read_text(encoding="utf-8"))["questions"]}
+    for key in ("c09-shipwreck-first-person", "h22-gothic-chase-ambiguous"):
+        assert items[key]["expected_behavior"] == "clarify_or_answer", key
+    assert items["q06-verne-guaranteed-clarify"]["expected_behavior"] == "clarify"
+
+
 # q16: "Do you have Casino Royale?" answered by the catalogue with "no such book"
 # is a PASS (owner's verdict), not a misroute. Only a "has" that resolved to
 # nothing, listed nothing and says so.

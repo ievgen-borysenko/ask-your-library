@@ -265,9 +265,13 @@ questions:
   - Frankenstein
   - Dracula
   expected_facts: []
-  expected_behavior: clarify
-  notes: 'Reworded twice 2026-09-05: "a small group chases" pointed at Dracula (Victor hunts alone), and
+  expected_behavior: clarify_or_answer
+  notes: 'Reader''s verdict 2026-09-19 (the c09 rule, applied here): asking back is fine when the
+    agent is not sure, and answering straight away is fine when it is right. PASS = a clarify
+    question, or an answer without asking that names BOTH books; FAIL = one book named with
+    confidence. That the answer tells them apart is read on the manual-correctness checkbox.
+    Reworded twice 2026-09-05: "a small group chases" pointed at Dracula (Victor hunts alone), and
     "finally destroyed" pointed at Dracula again (the creatures death is announced, not shown). Now both
-    fit; the pass is a question (one hunter or a party? Arctic ice or a castle?). Passed with clarify
+    fit; a good clarify question is (one hunter or a party? Arctic ice or a castle?). Passed with clarify
     in the 05.09 run under the old wording. Frankenstein: Victor pursues the creature across Europe to
     the Arctic; Dracula: Van Helsing''s party pursues the Count from London back to Transylvania.'
