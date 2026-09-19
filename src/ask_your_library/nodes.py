@@ -481,20 +481,25 @@ def act(state: AgentState) -> dict:
         # model's `looking_for` stripped like every other word of its own.
         window = {"step": step, "book": hits[0]["book"], "section": hits[0]["section"],
                   **window, "looking_for": strip_control_chars(window["looking_for"])}
-    with open(state["scratchpad_path"], "a", encoding="utf-8") as f:
-        f.write(f"\n## step {step}: {strip_control_chars(state['current_query'])}\n"
-                f"{strip_control_chars(empty_read_note)}")
-        if window is not None:
-            looking_for = f'"{window["looking_for"]}"' if window["looking_for"] else "(none: head of the chapter)"
-            _best_effort(state["scratchpad_path"], lambda: f.write(_encodable(
-                f"[chapter window: {window['book']} | {window['section']} | characters "
-                f"{window['start']}-{window['end']} of {window['section_chars']} "
-                f"(scanned {window['scanned_chars']}) | looking_for {looking_for}]\n")))
-        for h in hits:
-            # score = RRF, distance only exists on hits from the vector list.
-            f.write(f"<<<hit>>> {h['hit_id']} | {h['book']} | {h['section']} | {h['corpus']} | "
-                    f"rrf {h.get('score', '?')} | dist {h.get('distance', '-')}\n")
-            f.write(f"{h['text'][:limit]}\n")
+    # Best-effort, like observe's log (#81): a scratch directory that vanished,
+    # or a lone surrogate in the model's query or `looking_for`, is a warning
+    # and not a failed step — the log is for humans, the step is the run's.
+    def write_scratch() -> None:
+        with open(state["scratchpad_path"], "a", encoding="utf-8", errors="replace") as f:
+            f.write(f"\n## step {step}: {strip_control_chars(state['current_query'])}\n"
+                    f"{strip_control_chars(empty_read_note)}")
+            if window is not None:
+                looking_for = (f'"{window["looking_for"]}"' if window["looking_for"]
+                               else "(none: head of the chapter)")
+                f.write(f"[chapter window: {window['book']} | {window['section']} | characters "
+                        f"{window['start']}-{window['end']} of {window['section_chars']} "
+                        f"(scanned {window['scanned_chars']}) | looking_for {looking_for}]\n")
+            for h in hits:
+                # score = RRF, distance only exists on hits from the vector list.
+                f.write(f"<<<hit>>> {h['hit_id']} | {h['book']} | {h['section']} | {h['corpus']} | "
+                        f"rrf {h.get('score', '?')} | dist {h.get('distance', '-')}\n")
+                f.write(f"{h['text'][:limit]}\n")
+    _best_effort(state["scratchpad_path"], write_scratch)
 
     update = {"hits": hits, "hits_log": new_log, "steps_taken": step,
               "read_chapters": read_chapters}

@@ -528,6 +528,28 @@ def test_an_unaimed_read_logs_the_head_window(monkeypatch, tmp_path):
     assert result["hits"][0]["text"].startswith(text[:window["end"]])
 
 
+def test_a_lone_surrogate_in_looking_for_does_not_fail_the_read(monkeypatch, tmp_path):
+    """The model's `looking_for` reaches the scratchpad twice (the step header
+    and the window line). A lone surrogate in it used to raise
+    UnicodeEncodeError in `act`'s write and fail the run; the log is
+    best-effort now, and the step returns what the same read without it would."""
+    nodes._LOG_FAILED.clear()
+    text = long_chapter()
+    odd = chapter_marker("Some Book", "Chapter 3", "drowned lamp \ud800 stair")
+    plain = chapter_marker("Some Book", "Chapter 3", "drowned lamp ? stair")
+
+    result, scratchpad = act_on_chapter(monkeypatch, tmp_path, odd, text)
+    (tmp_path / "plain").mkdir()
+    expected, _ = act_on_chapter(monkeypatch, tmp_path / "plain", plain, text)
+
+    assert result["hits"] == expected["hits"] and result["read_chapters"] == expected["read_chapters"]
+    assert result["chapter_windows"][0]["looking_for"] == "drowned lamp \ud800 stair"
+    written = scratchpad.read_text(encoding="utf-8")
+    assert '## step 2: __chapter_q__|drowned lamp ? stair|' in written
+    assert 'looking_for "drowned lamp ? stair"]' in written
+    assert not nodes._LOG_FAILED
+
+
 def test_a_pipe_in_the_read_query_cannot_eat_the_book_or_the_section():
     marker = chapter_marker("A Book", "Chapter 3", "the lamp | the stair")
     action, query = split_read_query(marker)
