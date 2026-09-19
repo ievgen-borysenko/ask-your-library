@@ -1084,6 +1084,54 @@ def test_a_work_with_no_cards_value_is_local_and_an_unknown_value_is_refused():
         shelf.card_dir({"id": "x", "cards": "structure"})
 
 
+def test_local_card_beside_shared_or_local_is_refused_by_the_script_itself(card_shelf):
+    """Not only the manifest test: the functions the card stage runs through
+    refuse `local_card` beside anything but `structure`, before any model call."""
+    for value in ("shared", "local"):
+        work = dict(WORK, cards=value, local_card=True)
+        for call in (lambda: shelf.card_targets({"works": [work]}),
+                     lambda: shelf.card_dir(work),
+                     lambda: build(card_shelf, entries=(work,), works_in_manifest=(work,))):
+            with pytest.raises(ValueError, match="belongs beside cards: structure"):
+                call()
+    assert not card_shelf.calls
+
+
+def test_a_symlink_at_the_local_card_path_is_not_written_through(card_shelf, tmp_path):
+    """The folder is outside any checkout, but the card's own name is a link
+    into one: `write_text` would follow it, so the file is checked too — at
+    build and at restamp."""
+    repo = tmp_path / "a-checkout"
+    (repo / ".git").mkdir(parents=True)
+    target = repo / "leaked.md"
+    target.write_text("untouched\n", encoding="utf-8")
+    card_shelf.cards_local.mkdir(parents=True)
+    (card_shelf.cards_local / "demo-work.md").symlink_to(target)
+    with pytest.raises(RuntimeError, match="symlink"):
+        build(card_shelf, entries=(ND_LOCAL,), works_in_manifest=(ND_LOCAL,), force=True)
+    with pytest.raises(RuntimeError, match="symlink"):
+        shelf.restamp_cards([ND_LOCAL], {"works": [ND_LOCAL]})
+    assert not card_shelf.calls
+    assert target.read_text(encoding="utf-8") == "untouched\n"
+
+
+def test_a_restamp_refuses_a_bad_ayl_home_before_touching_any_card(card_shelf, monkeypatch):
+    """Checked once, before the loop: a shared card listed first is not
+    restamped and then the run stopped half way."""
+    build(card_shelf)
+    shared_card = card_shelf.cards / "demo-work.md"
+    shared_card.write_text(shared_card.read_text(encoding="utf-8").replace(
+        "card_kind: shared\n", ""), encoding="utf-8")
+    before = shared_card.read_text(encoding="utf-8")
+    repo = card_shelf.root / "repo"
+    (repo / ".git").mkdir(parents=True)
+    monkeypatch.setattr(config, "AYL_HOME", repo / "ayl")
+    other = dict(ND_LOCAL, id="nd-other")
+    with pytest.raises(RuntimeError, match="inside the git work tree"):
+        shelf.restamp_cards([WORK, other], {"works": [WORK, other]})
+    assert shared_card.read_text(encoding="utf-8") == before
+
+
 def test_local_card_belongs_beside_structure_and_is_a_boolean():
     assert shelf.local_card({"id": "x", "cards": "structure", "local_card": True})
     assert not shelf.local_card({"id": "x", "cards": "structure"})
@@ -1316,24 +1364,55 @@ def test_no_tracked_file_holds_a_passage_of_a_no_derivatives_work():
 
 # A quotation a shared card may carry: text in double quotation marks, straight
 # or curly, followed at once (after at most a comma or a full stop) by the
-# chapter it comes from in parentheses. `attributed_quotes` checks that the
-# parenthesis names one of the work's own chapter titles.
-QUOTATION = re.compile(r'(?:"([^"\n]+)"|“([^”\n]+)”)[,.]?\s*\(([^()\n]+)\)')
+# chapter it comes from in parentheses — at most QUOTE_MAX_WORDS words inside,
+# and at most QUOTES_PER_CARD of them per card, the promise the prompt makes.
+#
+# Quotation marks are PAIRED first, left to right, and only then is a pair asked
+# whether a chapter follows it. Matching "quote + chapter" in one pattern would
+# let the engine start at a stray closing mark — `the "SLO" term; <copied run>"
+# (Ch)` — and exempt the copied run between two quotations that are not one. A
+# card whose straight quotation marks do not pair, or whose curly ones do not
+# balance, is reported rather than read.
+QUOTE_PAIR = re.compile(r'"([^"]*)"|“([^“”]*)”')
+ATTRIBUTION = re.compile(r"[,.]?[ \t]*\(([^()\n]+)\)")
+QUOTE_MAX_WORDS = 25
+QUOTES_PER_CARD = 3
 # What an accepted quotation is replaced with before the verbatim check: a word
 # no text holds, so the words either side of the quote cannot join into a run.
 QUOTE_GAP = " qqquotationqqq "
 
 
-def outside_attributed_quotes(text: str, titles: list[str]) -> str:
-    """`text` with every attributed quotation cut out: a quotation whose
-    parenthesis is a chapter title of the work. A quotation with no chapter
-    after it, or with something else in the parenthesis, stays in, and so does
-    anything outside the quotation marks — those are still held to the rule."""
-    chapters = {" ".join(word_list(title)) for title in titles}
+def outside_attributed_quotes(text: str, titles: list[str]) -> tuple[str, list[str]]:
+    """`text` with every attributed quotation cut out, and what is wrong with the
+    card's quotation marks.
 
-    def cut(match: re.Match) -> str:
-        return QUOTE_GAP if " ".join(word_list(match.group(3))) in chapters else match.group(0)
-    return QUOTATION.sub(cut, text)
+    Cut: a paired quotation of at most QUOTE_MAX_WORDS words, on one line, whose
+    parenthesis right after it is a chapter title of the work. Anything else —
+    no chapter after it, something else in the parenthesis, a longer quote —
+    stays in the text and is held to the verbatim rule. Reported: straight marks
+    that do not pair, curly ones that do not balance, and more than
+    QUOTES_PER_CARD attributed quotations."""
+    chapters = {" ".join(word_list(title)) for title in titles}
+    problems = []
+    if text.count('"') % 2:
+        problems.append(f'an odd number of straight quotation marks ({text.count(chr(34))})')
+    if text.count("“") != text.count("”"):
+        problems.append(f"{text.count('“')} opening and {text.count('”')} closing curly "
+                        f"quotation marks")
+    pieces, last, exempt = [], 0, 0
+    for pair in QUOTE_PAIR.finditer(text):
+        quoted = pair.group(1) if pair.group(1) is not None else pair.group(2)
+        attribution = ATTRIBUTION.match(text, pair.end())
+        if (attribution and "\n" not in quoted
+                and len(word_list(quoted)) <= QUOTE_MAX_WORDS
+                and " ".join(word_list(attribution.group(1))) in chapters):
+            exempt += 1
+            pieces += [text[last:pair.start()], QUOTE_GAP]
+            last = attribution.end()
+    pieces.append(text[last:])
+    if exempt > QUOTES_PER_CARD:
+        problems.append(f"{exempt} attributed quotations, more than {QUOTES_PER_CARD}")
+    return "".join(pieces), problems
 
 
 def test_no_shared_card_copies_a_passage_of_its_work():
@@ -1354,7 +1433,8 @@ def test_no_shared_card_copies_a_passage_of_its_work():
         card = (CARDS_DIR / f"{work['id']}.md").read_text(encoding="utf-8")
         _, body = chunking.parse_frontmatter(card)
         body = re.sub(r"(?ms)^## Structure\n.*?(?=^## |\Z)", "", body.split("\n", 2)[-1])
-        body = outside_attributed_quotes(body, shelf.committed_chapters(work))
+        body, quote_problems = outside_attributed_quotes(body, shelf.committed_chapters(work))
+        problems += [f"  {work['id']}: {problem}" for problem in quote_problems]
         source = grams_of(word_list((PREPARED / f"{work['id']}.md").read_text(encoding="utf-8")),
                           SHARED_RUN_WORDS)
         for run in verbatim_runs(body, source, SHARED_RUN_WORDS,
@@ -1393,9 +1473,46 @@ PASSAGE = "the error budget is the amount of unreliability a service may spend"
 ])
 def test_a_verbatim_run_is_allowed_only_quoted_and_followed_by_its_chapter(card, flagged):
     source = grams_of(word_list(SOURCE_TEXT), SHARED_RUN_WORDS)
-    body = outside_attributed_quotes(card, ["1. Introduction", "3. Embracing Risk"])
+    body, problems = outside_attributed_quotes(card, CHAPTERS)
     runs = verbatim_runs(body, source, SHARED_RUN_WORDS, lambda run: False)
     assert bool(runs) == flagged, runs
+    assert not problems
+
+
+CHAPTERS = ["1. Introduction", "3. Embracing Risk"]
+LONG_SOURCE = " ".join(f"word{i}" for i in range(60))
+
+
+def test_a_quotation_longer_than_the_cap_is_not_exempt():
+    """The prompt promises under 25 words; a 40-word, many-sentence passage in
+    quotation marks with a chapter after it is still a copied passage."""
+    source = grams_of(word_list(LONG_SOURCE), SHARED_RUN_WORDS)
+    long_quote = ". ".join(" ".join(f"word{i}" for i in range(k, k + 10)) for k in (0, 10, 20, 30))
+    body, _ = outside_attributed_quotes(f'- **X** — "{long_quote}" (3. Embracing Risk)', CHAPTERS)
+    assert verbatim_runs(body, source, SHARED_RUN_WORDS, lambda run: False)
+    at_cap = " ".join(f"word{i}" for i in range(QUOTE_MAX_WORDS))
+    body, _ = outside_attributed_quotes(f'"{at_cap}" (3. Embracing Risk)', CHAPTERS)
+    assert not verbatim_runs(body, source, SHARED_RUN_WORDS, lambda run: False)
+
+
+def test_more_quotations_than_the_cap_per_card_are_reported():
+    quote = '"a short line" (3. Embracing Risk)'
+    _, problems = outside_attributed_quotes("\n".join([quote] * QUOTES_PER_CARD), CHAPTERS)
+    assert not problems
+    _, problems = outside_attributed_quotes("\n".join([quote] * (QUOTES_PER_CARD + 1)), CHAPTERS)
+    assert problems == [f"{QUOTES_PER_CARD + 1} attributed quotations, more than {QUOTES_PER_CARD}"]
+
+
+def test_a_stray_closing_quotation_mark_does_not_exempt_a_copied_run():
+    """`the "SLO" term; <copied run>" (Ch)`: the marks are paired left to right,
+    so the run is outside any quotation, and the odd mark is reported."""
+    source = grams_of(word_list(SOURCE_TEXT), SHARED_RUN_WORDS)
+    card = f'- the "SLO" term; {PASSAGE}" (3. Embracing Risk)'
+    body, problems = outside_attributed_quotes(card, CHAPTERS)
+    assert verbatim_runs(body, source, SHARED_RUN_WORDS, lambda run: False)
+    assert problems == ["an odd number of straight quotation marks (3)"]
+    _, problems = outside_attributed_quotes(f"“{PASSAGE} (3. Embracing Risk)", CHAPTERS)
+    assert problems == ["1 opening and 0 closing curly quotation marks"]
 
 
 def test_the_nd_check_exempts_no_quotation():

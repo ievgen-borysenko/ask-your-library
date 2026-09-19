@@ -86,3 +86,14 @@ def test_this_checkout_is_refused(monkeypatch):
     monkeypatch.setattr(config, "AYL_HOME", REPO / "private")
     with pytest.raises(RuntimeError, match="inside the git work tree"):
         home.private_dir("cards", "tech")
+
+
+def test_a_file_that_is_a_symlink_is_refused(tmp_path):
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    folder = tmp_path / "ayl"
+    folder.mkdir()
+    (folder / "card.md").symlink_to(repo / "card.md")
+    with pytest.raises(RuntimeError, match="symlink"):
+        home.private_file(folder / "card.md")
+    assert home.private_file(folder / "other.md") == folder / "other.md"

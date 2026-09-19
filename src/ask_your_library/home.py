@@ -11,7 +11,14 @@ committed by anyone.
 
 So the rule is a check, not a default: `private_dir` refuses a folder that
 resolves inside a git work tree — this repository's or any other — before
-anything is written to it.
+anything is written to it, and `private_file` does the same for the file itself,
+so a symlink planted at the file's name cannot carry the write into a checkout.
+
+What is detected is a `.git` directory or file in the path or above it. A
+bare-repository setup whose work tree is elsewhere — dotfiles kept with
+`git --git-dir=~/.dotfiles --work-tree=~` — leaves no `.git` in the home
+directory and is NOT detected: with one, point AYL_HOME at a folder that setup
+does not track.
 """
 from pathlib import Path
 
@@ -50,3 +57,18 @@ def private_dir(*parts: str) -> Path:
             f"`git add` would commit them. Set AYL_HOME to a folder outside any "
             f"repository (the default is ~/AskYourLibrary).")
     return folder
+
+
+def private_file(path: Path) -> Path:
+    """A file about to be written under `AYL_HOME`, refused when it is a symlink
+    or when its resolved target lies inside a git work tree. `write_text`
+    follows a symlink, so the folder's check alone does not cover the file."""
+    path = Path(path).expanduser()
+    if path.is_symlink():
+        raise RuntimeError(f"{path} is a symlink: a file that may never be shared is not "
+                           f"written through a link, which could point into a checkout")
+    tree = git_work_tree_of(path)
+    if tree is not None:
+        raise RuntimeError(f"{path} resolves inside the git work tree {tree}: files that may "
+                           f"never be shared are not written into a checkout")
+    return path

@@ -196,8 +196,11 @@ def share_alike(work: dict) -> bool:
 
 
 def wants_model_card(work: dict) -> bool:
-    """Whether the manifest asks for a model-written card of this work at all."""
-    return card_policy(work) in MODEL_CARD_POLICIES or local_card(work)
+    """Whether the manifest asks for a model-written card of this work at all.
+    `local_card` is validated first, so it is refused beside `shared` or
+    `local` here too and not only by the manifest test."""
+    wants_local = local_card(work)
+    return card_policy(work) in MODEL_CARD_POLICIES or wants_local
 
 
 def model_card_is_local(work: dict) -> bool:
@@ -1245,10 +1248,13 @@ def restamp_cards(entries: list[dict], manifest: dict) -> None:
     on disk (see `restamp_card`). No model is called and a card not yet written
     stays unwritten."""
     allowed = {work["id"] for work in card_targets(manifest)}
-    for work in entries:
-        if work["id"] not in allowed:
-            continue
-        path = card_dir(work) / f"{work['id']}.md"
+    selected = [work for work in entries if work["id"] in allowed]
+    if any(model_card_is_local(work) for work in selected):
+        # Once, before anything is rewritten: a refused AYL_HOME stops the run
+        # before the first card rather than after half of them.
+        local_cards_dir()
+    for work in selected:
+        path = card_path(work)
         if not path.exists():
             continue
         text = path.read_text(encoding="utf-8")
@@ -1268,6 +1274,24 @@ def card_dir(work: dict) -> Path:
     if model_card_is_local(work):
         return local_cards_dir()
     return CARDS_DIR
+
+
+def card_path(work: dict) -> Path:
+    """The file a model-written card of this work is written to, checked as a
+    FILE for a local card: `card_dir` checks the folder, and a symlink at
+    $AYL_HOME/cards/tech/<id>.md that points into a checkout would carry
+    `write_text` there (`ask_your_library.home.private_file`)."""
+    path = card_dir(work) / f"{work['id']}.md"
+    if model_card_is_local(work):
+        from ask_your_library.home import private_file
+
+        private_file(path)
+        if path.resolve().is_relative_to(REPO.resolve()):
+            # `private_file` has refused this already; the second check costs
+            # nothing and names the rule the code exists for.
+            raise RuntimeError(f"{work['id']}: a local card may not be written inside "
+                               f"the repository ({path})")
+    return path
 
 
 def build_cards(entries: list[dict], manifest: dict, force: bool = False) -> None:
@@ -1300,14 +1324,8 @@ def build_cards(entries: list[dict], manifest: dict, force: bool = False) -> Non
             print(f"  {work['id']}: no model-written card ({work['licence']}, "
                   f"cards: {card_policy(work)}), skipped")
             continue
-        folder = card_dir(work)
-        if model_card_is_local(work) and folder.resolve().is_relative_to(REPO.resolve()):
-            # `private_dir` has refused this already; the second check costs
-            # nothing and names the rule the code exists for.
-            raise RuntimeError(f"{work['id']}: a local card may not be written inside "
-                               f"the repository ({folder})")
-        folder.mkdir(parents=True, exist_ok=True)
-        path = folder / f"{work['id']}.md"
+        path = card_path(work)
+        path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists() and not force:
             print(f"  {work['id']}: card already written, kept (--force to rebuild)")
             continue

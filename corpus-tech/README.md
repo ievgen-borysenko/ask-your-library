@@ -162,7 +162,10 @@ defaults to `~/AskYourLibrary`, outside any checkout, and a local card of this s
 `$AYL_HOME/cards/tech/<id>.md`. It is an environment variable, like `LIBRARY_DB_PATH`, and `.env`
 may set it. **It is never a folder inside the repository**: `.gitignore` is not a boundary — a
 `git add -f` walks through it — so the script checks the resolved path instead, and refuses to write
-a local card when `AYL_HOME` is inside any git work tree, this checkout or another. `AYL_HOME` is
+a local card when `AYL_HOME` is inside any git work tree, this checkout or another, and refuses a
+card file that is a symlink. What it detects is a `.git` in the path or above it: a bare-repository
+dotfiles setup (`git --git-dir=~/.dotfiles --work-tree=~`) leaves none in the home directory and is
+not detected, so with one, point `AYL_HOME` at a folder it does not track. `AYL_HOME` is
 also where the private shelf of the reader's own books, their cards and their index will live
 (ADR-026, a later change); for now local cards are all it holds.
 
