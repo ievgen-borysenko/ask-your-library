@@ -13,6 +13,7 @@ import importlib.util
 import json
 import re
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -716,3 +717,52 @@ def test_min_pass_is_a_floor_on_every_attempt(monkeypatch, tmp_path):
     with pytest.raises(SystemExit) as exc:
         harness.main()
     assert exc.value.code == 1
+
+
+# ---------------------------------------------------------------- what observe kept (#81)
+class _FinalStateGraph:
+    """Enough of a compiled graph for `run_one`: one event, then a final state."""
+
+    def __init__(self, final: dict):
+        self.final = final
+
+    def stream(self, run_input, config):
+        yield {"act": {"steps_taken": 2}}
+
+    def get_state(self, config):
+        return types.SimpleNamespace(values=self.final)
+
+
+WINDOW = {"step": 2, "book": "Moby Dick — Herman Melville", "section": "Chapter 1", "start": 11800,
+          "end": 23750, "section_chars": 70000, "scanned_chars": 70000, "looking_for": "the purse"}
+
+
+def test_run_one_records_the_evidence_synthesize_received_and_the_chapter_windows(monkeypatch, tmp_path):
+    """Per attempt, the final evidence list — what `synthesize` was given — with
+    book, section, quote and hit id, and where each chapter read's window sat.
+    Added beside `evidence_items`, never in its place: the count stays."""
+    monkeypatch.setattr(harness, "RESULTS_DIR", tmp_path)
+    final = {"answer": "Moby Dick aboard the Pequod", "steps_taken": 2,
+             "read_chapters": ["Moby Dick — Herman Melville|Chapter 1|partial"],
+             "chapter_windows": [WINDOW],
+             "evidence": [{"hit_id": "s1h2", "book": "Moby Dick — Herman Melville",
+                           "section": "Chapter 1", "quote": "Call me Ishmael.", "why": "narrator"}]}
+    item = {"id": "q01-moby", "type": "answer", "question": "Which whale?",
+            "expected_books": ["Moby Dick"], "expected_facts": ["Pequod"]}
+
+    record = harness.run_one(_FinalStateGraph(final), item)
+
+    assert record["evidence_items"] == 1
+    assert record["evidence"] == [{"hit_id": "s1h2", "book": "Moby Dick — Herman Melville",
+                                   "section": "Chapter 1", "quote": "Call me Ishmael."}]
+    assert record["chapter_windows"] == [WINDOW]
+
+
+def test_the_evidence_and_the_windows_reach_the_sidecar_and_not_the_markdown(monkeypatch, tmp_path):
+    kept = [{"hit_id": "s1h2", "book": "Moby Dick", "section": "Chapter 1", "quote": "Call me Ishmael."}]
+    out = prepared(monkeypatch, tmp_path, [], lambda item, attempt: fake_result(
+        item, evidence=kept, chapter_windows=[WINDOW]))
+    attempt = json.loads(only(out, ".json").read_text(encoding="utf-8"))["questions"][0]["attempts"][0]
+    assert attempt["evidence"] == kept and attempt["chapter_windows"] == [WINDOW]
+    report = only(out, ".md").read_text(encoding="utf-8")
+    assert "Call me Ishmael" not in report and "the purse" not in report
