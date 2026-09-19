@@ -486,6 +486,70 @@ def test_the_coverage_probe_carries_a_piped_book_key_too(monkeypatch, tmp_path):
     assert searched == [book]
 
 
+@pytest.mark.parametrize("length", [900, 1300])
+def test_a_chapter_read_logs_where_its_window_sat_in_the_section(monkeypatch, tmp_path, length):
+    """#81 (h14): the window's offsets in the section, the section's length —
+    including what the scan budget never reached (1300 repetitions is over it) —
+    and what the read was aimed at, on the event and in the scratchpad. The
+    passage itself is what `window_around` chose; the log only says where."""
+    text = long_chapter(length=length)
+    marker = chapter_marker("Some Book", "Chapter 3", "drowned lamp seventh stair")
+
+    result, scratchpad = act_on_chapter(monkeypatch, tmp_path, marker, text)
+
+    (window,) = result["chapter_windows"]
+    assert window["step"] == 2 and window["section"] == "Chapter 3"
+    assert window["looking_for"] == "drowned lamp seventh stair"
+    assert window["section_chars"] == len(text)
+    assert (window["scanned_chars"] < len(text)) == (length == 1300)
+    needle_at = text.index(NEEDLE)
+    if length == 900:
+        assert window["start"] <= needle_at < needle_at + len(NEEDLE) <= window["end"]
+    else:
+        # the answer sits past the scan: the read falls back to the head, and
+        # the log is what shows the passage was out of reach, not skipped
+        assert window["start"] == 0 and needle_at >= window["scanned_chars"]
+    # the offsets name the very characters the model was shown
+    passage = result["hits"][0]["text"]
+    assert text[window["start"]:window["end"]] in passage
+    assert window["end"] - window["start"] <= config.CHAPTER_HIT_CHARS
+    assert (f"characters {window['start']}-{window['end']} of {len(text)} "
+            f"(scanned {window['scanned_chars']}) | looking_for \"drowned lamp seventh stair\"]"
+            in scratchpad.read_text())
+
+
+def test_an_unaimed_read_logs_the_head_window(monkeypatch, tmp_path):
+    text = long_chapter()
+    result, _ = act_on_chapter(monkeypatch, tmp_path,
+                               chapter_marker("Some Book", "Chapter 3", ""), text)
+    (window,) = result["chapter_windows"]
+    assert window["start"] == 0 and window["looking_for"] == ""
+    assert window["section_chars"] == len(text) and window["scanned_chars"] < len(text)
+    assert result["hits"][0]["text"].startswith(text[:window["end"]])
+
+
+def test_a_lone_surrogate_in_looking_for_does_not_fail_the_read(monkeypatch, tmp_path):
+    """The model's `looking_for` reaches the scratchpad twice (the step header
+    and the window line). A lone surrogate in it used to raise
+    UnicodeEncodeError in `act`'s write and fail the run; the log is
+    best-effort now, and the step returns what the same read without it would."""
+    nodes._LOG_FAILED.clear()
+    text = long_chapter()
+    odd = chapter_marker("Some Book", "Chapter 3", "drowned lamp \ud800 stair")
+    plain = chapter_marker("Some Book", "Chapter 3", "drowned lamp ? stair")
+
+    result, scratchpad = act_on_chapter(monkeypatch, tmp_path, odd, text)
+    (tmp_path / "plain").mkdir()
+    expected, _ = act_on_chapter(monkeypatch, tmp_path / "plain", plain, text)
+
+    assert result["hits"] == expected["hits"] and result["read_chapters"] == expected["read_chapters"]
+    assert result["chapter_windows"][0]["looking_for"] == "drowned lamp \ud800 stair"
+    written = scratchpad.read_text(encoding="utf-8")
+    assert '## step 2: __chapter_q__|drowned lamp ? stair|' in written
+    assert 'looking_for "drowned lamp ? stair"]' in written
+    assert not nodes._LOG_FAILED
+
+
 def test_a_pipe_in_the_read_query_cannot_eat_the_book_or_the_section():
     marker = chapter_marker("A Book", "Chapter 3", "the lamp | the stair")
     action, query = split_read_query(marker)

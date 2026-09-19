@@ -37,7 +37,8 @@ from .library import (HEAD_MARKER_PREFIX, BookEntry, chapter_is_cut, list_books,
                       read_chapter, search_both)
 from .llm import data_block
 from .prompts import OBSERVE_RULES, PLAN_RULES, REFLECT_RULES, SYNTHESIZE_RULES
-from .provenance import _valid_evidence, validate, window_around  # noqa: F401  (validate is wired by graph.py)
+from .provenance import (_valid_evidence, validate, window_around,  # noqa: F401  (validate is wired by graph.py)
+                         window_span)
 from .sanitize import sanitize_context, strip_control_chars
 from .state import AgentState, is_loop_marker
 
@@ -353,6 +354,9 @@ def act(state: AgentState) -> dict:
     # (`bookkey.split_read_query`).
     action, read_query = split_read_query(state["current_query"])
     marker_parts = action.split("|", 2) if is_loop_marker(action) else []
+    # Where a chapter read's window sits in its section (#81): logged, never read
+    # back by any node — the passage below is chosen exactly as it always was.
+    window = None
     if marker_parts and len(marker_parts) != 3:
         # A malformed marker (fewer than three parts) is nothing to act on: no
         # hits, a note in the scratchpad, and the loop's CRAG gate counts the
@@ -377,8 +381,11 @@ def act(state: AgentState) -> dict:
         chapter_text, found_book, resolution = read_chapter(
             asked_book, section,
             max_chars=CHAPTER_SCAN_CHARS if read_query else CHAPTER_HIT_CHARS)
+        scanned = chapter_text
         if read_query and chapter_text:
             chapter_text = window_around(chapter_text, read_query, CHAPTER_HIT_CHARS)
+        if chapter_text:
+            window = {**window_span(chapter_text, scanned), "looking_for": read_query}
         # Three counts, so a report can say whether this path did anything
         # (#28): reads, reads that named what they were looking for, and reads
         # whose window actually moved off the head of the chapter. "Moved" is
@@ -469,20 +476,102 @@ def act(state: AgentState) -> dict:
     # The step header and the note are the model's own words (the query it
     # wrote, the chapter it asked for), so they are stripped like the hits:
     # `cat` on this file must not repaint the terminal reading it either.
-    with open(state["scratchpad_path"], "a", encoding="utf-8") as f:
-        f.write(f"\n## step {step}: {strip_control_chars(state['current_query'])}\n"
-                f"{strip_control_chars(empty_read_note)}")
-        for h in hits:
-            # score = RRF, distance only exists on hits from the vector list.
-            f.write(f"<<<hit>>> {h['hit_id']} | {h['book']} | {h['section']} | {h['corpus']} | "
-                    f"rrf {h.get('score', '?')} | dist {h.get('distance', '-')}\n")
-            f.write(f"{h['text'][:limit]}\n")
+    if window is not None:
+        # Book and section as the hit carries them (stripped above), the
+        # model's `looking_for` stripped like every other word of its own.
+        window = {"step": step, "book": hits[0]["book"], "section": hits[0]["section"],
+                  **window, "looking_for": strip_control_chars(window["looking_for"])}
+    # Best-effort, like observe's log (#81): a scratch directory that vanished,
+    # or a lone surrogate in the model's query or `looking_for`, is a warning
+    # and not a failed step — the log is for humans, the step is the run's.
+    def write_scratch() -> None:
+        with open(state["scratchpad_path"], "a", encoding="utf-8", errors="replace") as f:
+            f.write(f"\n## step {step}: {strip_control_chars(state['current_query'])}\n"
+                    f"{strip_control_chars(empty_read_note)}")
+            if window is not None:
+                looking_for = (f'"{window["looking_for"]}"' if window["looking_for"]
+                               else "(none: head of the chapter)")
+                f.write(f"[chapter window: {window['book']} | {window['section']} | characters "
+                        f"{window['start']}-{window['end']} of {window['section_chars']} "
+                        f"(scanned {window['scanned_chars']}) | looking_for {looking_for}]\n")
+            for h in hits:
+                # score = RRF, distance only exists on hits from the vector list.
+                f.write(f"<<<hit>>> {h['hit_id']} | {h['book']} | {h['section']} | {h['corpus']} | "
+                        f"rrf {h.get('score', '?')} | dist {h.get('distance', '-')}\n")
+                f.write(f"{h['text'][:limit]}\n")
+    _best_effort(state["scratchpad_path"], write_scratch)
 
-    return {"hits": hits, "hits_log": new_log, "steps_taken": step,
-            "read_chapters": read_chapters}
+    update = {"hits": hits, "hits_log": new_log, "steps_taken": step,
+              "read_chapters": read_chapters}
+    if window is not None:
+        # Only on a step that read a chapter, so every other step emits the
+        # event it has always emitted.
+        update["chapter_windows"] = [window]
+    return update
 
 
 # ---------------------------------------------------------------- observe
+# Scratchpads whose #81 log could not be written, so the warning is said once
+# per file and not once per step.
+_LOG_FAILED: set[str] = set()
+
+
+def _encodable(text: str) -> str:
+    """`text` as UTF-8 can hold it: a lone surrogate (model output can carry
+    one) becomes "?" instead of a UnicodeEncodeError halfway through a line."""
+    return text.encode("utf-8", "replace").decode("utf-8")
+
+
+def _best_effort(path: str, write) -> None:
+    """Run one write of the #81 log, which must never cost the step it
+    describes: a scratch directory that vanished or went read-only, or text the
+    file cannot encode, is a warning in the server log, said once per file, and
+    the node returns exactly what it would have returned without the log."""
+    try:
+        write()
+    except (OSError, UnicodeError) as error:
+        if path not in _LOG_FAILED:
+            _LOG_FAILED.add(path)
+            log.warning("scratchpad log not written (%s: %s); the run goes on without it",
+                        type(error).__name__, error)
+
+
+def _log_observed(state: AgentState, kept: list[dict], dropped=(), filtered=(),
+                  note: str = "") -> None:
+    """What `observe` made of this step, appended to the scratchpad under the
+    passages `act` wrote there (#81): the evidence it kept, the quotes the
+    provenance gate refused and why, and anything the clarify filter took off.
+
+    A human log like the rest of the file: no node reads it back, and nothing
+    written here reaches a prompt. Every string is either a copy of a passage
+    that was already sanitized in `act` or the model's own words, and both are
+    stripped of control characters like the step header is. A state with no
+    scratchpad (a unit test calling the node directly) logs nothing."""
+    path = state.get("scratchpad_path")
+    if not path:
+        return
+    s = strip_control_chars
+    step = state.get("steps_taken", 0)
+    lines = [f"### observe, step {step}: " + (note or
+             f"kept {len(kept)}, dropped {len(dropped)}"
+             + (f", filtered {len(filtered)}" if filtered else ""))]
+    for e in kept:
+        lines += [f"<<<kept>>> {s(e.get('hit_id', ''))} | {s(e['book'])} | {s(e['section'])}",
+                  f"quote: \"{s(e['quote'])}\"", f"why: {s(e.get('why', ''))}"]
+    for d in dropped:
+        lines += [f"<<<dropped>>> {s(d.get('reason', ''))} | cited: {s(d.get('book', ''))}",
+                  f"quote: \"{s(d.get('quote', ''))}\""]
+    for e in filtered:
+        lines += [f"<<<filtered>>> {s(e.get('hit_id', ''))} | {s(e['book'])} | not the book the reader chose",
+                  f"quote: \"{s(e['quote'])}\""]
+    text = _encodable("\n".join(lines) + "\n")
+
+    def write() -> None:
+        with open(path, "a", encoding="utf-8", errors="replace") as f:
+            f.write(text)
+    _best_effort(path, write)
+
+
 def observe(state: AgentState) -> dict:
     limit = per_hit_limit(len(state["hits"]))
     results = "\n".join(
@@ -519,9 +608,11 @@ def observe(state: AgentState) -> dict:
                  "comparison — and must carry that result's hit_id. "
                  "Return ONLY the JSON described in the rules.")
     user = "\n".join(lines)
+    no_json = False
     try:
         distilled = llm.ask_json(OBSERVE_RULES, user, role="observe")
     except llm.CallTimeout:
+        _log_observed(state, [], note="the call timed out, nothing kept")
         # This step's passages are lost, but every earlier step's evidence
         # stands. `observe` has no exit of its own — the edge to `reflect` is
         # unconditional — so the flag is what stops the loop there, before
@@ -543,6 +634,7 @@ def observe(state: AgentState) -> dict:
     except ValueError:
         # Distillation failed: count the step as dry and let the loop decide
         distilled = {"evidence": []}
+        no_json = True
 
     # The provenance gate (#29): every quote is checked against the passage it
     # cites BEFORE it becomes evidence, with the same normalization `validate`
@@ -559,6 +651,9 @@ def observe(state: AgentState) -> dict:
         # After a resolved clarify, evidence about the rejected candidates
         # must not creep back in through later searches.
         new_evidence = [e for e in new_evidence if e["book"] == state["clarify_chosen"]]
+    _log_observed(state, new_evidence, gate.dropped,
+                  [e for e in gate.evidence if e not in new_evidence],
+                  note="no usable JSON, nothing kept" if no_json else "")
     llm._usage().evidence_distilled += len(new_evidence)
     # CRAG gate, and the one place #29 could have cost behaviour instead of
     # buying provenance (system-design review 16.09 §3(a); the owner's decision

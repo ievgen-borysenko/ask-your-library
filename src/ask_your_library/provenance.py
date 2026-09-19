@@ -720,6 +720,29 @@ def window_around(text: str, query: str, budget: int) -> str:
            f"{cut_marker(hidden_after) if hidden_after else ''}"
 
 
+def window_span(window: str, scanned: str) -> dict:
+    """Where a chapter read's window sits in its section, for the log (#81).
+
+    Read back off the text `act` already built, never by choosing the window a
+    second time: `scanned` is the chapter as `read_chapter` returned it (before
+    any window), `window` is the passage the model was shown. The offsets are
+    in the section as the index joins it (chunk joiners included), which is
+    the text `window_around` counts in:
+
+      start, end      the window's characters, [start, end)
+      section_chars   the whole section, including what the scan never reached
+      scanned_chars   how much of it the read could choose a window from
+
+    Nothing here feeds a prompt or a decision; it only says where the reader
+    was looking."""
+    body, hidden_beyond = _body_and_tail(scanned)
+    head = HEAD_MARKER_RE.match(window)
+    start = int(re.search(r"\d+", head.group()).group()) if head else 0
+    visible = CUT_MARKER_RE.sub("", window[head.end():] if head else window)
+    return {"start": start, "end": start + len(visible),
+            "section_chars": len(body) + hidden_beyond, "scanned_chars": len(body)}
+
+
 def _head_cut(body: str, budget: int, hidden_beyond: int = 0) -> str:
     """The head of a chapter at `budget` characters — `library.join_chapter`'s
     own arithmetic, reproduced here so that a windowed read that lands on the

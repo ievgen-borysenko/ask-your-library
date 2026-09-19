@@ -371,6 +371,13 @@ def run_one(graph, item: dict, attempt: int = 1) -> dict:
         "steps_taken": result.steps_taken,
         "read_chapters": result.read_chapters,
         "evidence_items": len(result.evidence),
+        # what `synthesize` was given (#81): the final evidence list, so a
+        # detail the answer missed can be told apart as never kept or kept and
+        # not used; per chapter read, where the window sat in its section
+        "evidence": [{"hit_id": e.get("hit_id", ""), "book": e.get("book", ""),
+                      "section": e.get("section", ""), "quote": e.get("quote", "")}
+                     for e in result.evidence],
+        "chapter_windows": result.chapter_windows,
         # the observe gate (#29): quotes that never reached the answer because
         # no retrieved passage of their step held them, and quotes re-pinned to
         # the passage that did. A question that ends with no evidence at all

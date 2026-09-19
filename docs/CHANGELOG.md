@@ -14,6 +14,17 @@
   [Known limits](known-limits.md) gains the entry, with the backup settings for readers who need
   depth. Documentation only; manual, single-grader grades on the index before #80.
 
+- **What `observe` kept is logged at every step, and where a chapter read looked** (#81, step 1).
+  Under each step's passages the scratchpad now lists the evidence `observe` kept (hit id, book,
+  section, quote, why), the quotes the provenance gate refused with their reason, and any item the
+  clarify filter took off; a chapter read adds one line with the characters of its section the window
+  covered, the section's length, how much of it the scan reached, and the `looking_for` it was aimed
+  with. The agent eval's `answers-*.json` gains two fields per attempt beside `evidence_items`:
+  `evidence` (the list `synthesize` was given: hit id, book, section, quote) and `chapter_windows`
+  (the same window record as the scratchpad line). The Markdown report is unchanged and the sidecar
+  keeps `schema_version` 1: fields are added, none renamed. Logging only: no prompt, decision or event
+  of an existing step changes; a step that reads a chapter carries one new key, `chapter_windows`.
+
 - **Local cards live in `AYL_HOME`, outside the checkout, and the three NoDerivatives works get
   one** (#58, [`corpus-tech/README.md`](../corpus-tech/README.md#local-cards-and-ayl_home)). A new
   setting, `AYL_HOME` (default `~/AskYourLibrary`), is the reader's own folder for what is built on

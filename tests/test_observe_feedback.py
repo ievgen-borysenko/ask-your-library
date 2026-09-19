@@ -15,6 +15,8 @@ import importlib.util
 import json
 from pathlib import Path
 
+import httpx
+
 from ask_your_library import config, llm, nodes, prompts, provenance
 from ask_your_library.llm import data_block
 from ask_your_library.provenance import DROPPED_QUOTE_CHARS, _valid_evidence
@@ -303,3 +305,57 @@ def test_the_planner_prompt_is_not_touched_by_any_of_this():
     header = json.loads((Path(__file__).resolve().parents[1] / "tests" / "fixtures"
                          / "plan-replay-recording.jsonl").read_text(encoding="utf-8").splitlines()[0])
     assert plan_recording.sha12(prompts.PLAN_RULES) == header["plan_rules_sha256_12"]
+
+
+# --- the #81 log is best-effort: it never costs the step it describes --------
+
+def _observe_with(monkeypatch, ask_json, **over):
+    monkeypatch.setattr(llm, "ask_json", ask_json)
+    monkeypatch.setattr(provenance, "HIT_ID_STRICT", True)
+    llm.reset_usage()
+    return nodes.observe(observe_state(**over))
+
+
+def _distil(evidence):
+    return lambda system, user, role: {"evidence": evidence}
+
+
+def _time_out(system, user, role):
+    raise httpx.TimeoutException("slow")
+
+
+KEPT = [{"hit_id": "s1h1", "book": "Moby Dick", "quote": "Call me Ishmael.", "why": "narrator"},
+        {"hit_id": "s1h1", "book": "Moby Dick", "quote": "Not in the passage at all, anywhere."}]
+
+
+def test_an_unwritable_scratchpad_does_not_change_what_observe_returns(monkeypatch, tmp_path, caplog):
+    nodes._LOG_FAILED.clear()
+    clean = _observe_with(monkeypatch, _distil(KEPT))
+    broken = tmp_path / "gone" / "scratch.md"            # its directory does not exist: OSError
+    with caplog.at_level("WARNING", logger=nodes.__name__):
+        failed = _observe_with(monkeypatch, _distil(KEPT), scratchpad_path=str(broken))
+        again = _observe_with(monkeypatch, _distil(KEPT), scratchpad_path=str(broken))
+    assert failed == clean == again
+    warned = [r for r in caplog.records if "scratchpad log not written" in r.getMessage()]
+    assert len(warned) == 1                              # once per file, not once per step
+
+
+def test_an_unwritable_scratchpad_does_not_mask_a_timed_out_observe(monkeypatch, tmp_path):
+    nodes._LOG_FAILED.clear()
+    clean = _observe_with(monkeypatch, _time_out)
+    failed = _observe_with(monkeypatch, _time_out,
+                           scratchpad_path=str(tmp_path / "gone" / "scratch.md"))
+    assert failed == clean and failed["call_timed_out"] is True
+
+
+def test_a_lone_surrogate_in_the_models_words_is_logged_as_a_replacement(monkeypatch, tmp_path):
+    nodes._LOG_FAILED.clear()
+    evidence = [{"hit_id": "s1h1", "book": "Moby Dick", "quote": "Call me Ishmael.",
+                 "why": "the narrator \ud800 names himself"}]
+    clean = _observe_with(monkeypatch, _distil(evidence))
+    scratchpad = tmp_path / "scratch.md"
+    scratchpad.write_text("")
+    logged = _observe_with(monkeypatch, _distil(evidence), scratchpad_path=str(scratchpad))
+    assert logged == clean
+    assert "why: the narrator ? names himself" in scratchpad.read_text(encoding="utf-8")
+    assert not nodes._LOG_FAILED
