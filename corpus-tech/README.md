@@ -31,6 +31,17 @@ a work's licence lets anybody share is committed; anything it lets a reader make
 themself — its text, and a summary of a NoDerivatives work — is built on the reader's machine from
 `manifest.yaml`, and is never in the tree.
 
+**Using the text is the reader's own use, wherever the model runs.** The boundary is the
+repository, not the model. A reader who builds this shelf indexes and queries it for themself, and
+a hosted backend (`EMBED_BACKEND=openrouter` to embed it, `LLM_BACKEND=openrouter` to answer from
+it) processes passages of the reader's own copy on the reader's behalf — no work, and no
+adaptation of one, is shared with anybody by that. So the NoDerivatives works are indexed and
+answered from like every other book, on either backend, and the only thing the code enforces
+about them is what can leave the reader's machine *as a file*: no model-written card of one is
+ever produced (`card_targets()`), and no passage of one is committed (a test scans every tracked
+file). Choosing a hosted backend sends retrieved passages to that provider, for this shelf as for
+any other: [`docs/privacy-and-threat-model.md`](../docs/privacy-and-threat-model.md).
+
 ## The shelf
 
 | Work | Licence | Text | Card (`cards:`) |
