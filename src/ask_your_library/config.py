@@ -81,8 +81,8 @@ LLM_NEEDS_KEY = LLM_BACKEND != "ollama"
 # Thinking on the hosted backend. `off` sends OpenRouter's
 # `reasoning: {"enabled": false}`, which turns a hybrid model's thinking off;
 # the default hosted model was measured that way, and the same family with its
-# thinking on answered about four times slower
-# (docs/eval-results/2026-09-18-hosted-models.md). `provider` sends nothing and
+# thinking on answered about three times slower (2.8x on the core set,
+# docs/eval-results/2026-09-19-hosted-default-quality.md). `provider` sends nothing and
 # leaves the model's own default. Not applied to the local backend, which has
 # its own switch in llm.py. Anything else refuses to start.
 LLM_REASONING = _env("LLM_REASONING", "off")

@@ -144,7 +144,10 @@ Sonnet 4.6), which is what the cost row prices. **It was measured before the hos
 changed:** on 2026-09-18 the hosted default moved from Sonnet 4.6 to
 `deepseek/deepseek-v4-flash-0731` with its thinking off, chosen on the core and catalogue sets in
 [`docs/eval-results/2026-09-18-hosted-models.md`](docs/eval-results/2026-09-18-hosted-models.md);
-this table has not been re-run on it yet. The **default configuration is local and free** —
+this table has not been re-run on it yet. Graded by hand, the new hosted default is correct on
+about 6 of 11 core questions per attempt against 9 for Sonnet 4.6
+([`docs/eval-results/2026-09-19-hosted-default-quality.md`](docs/eval-results/2026-09-19-hosted-default-quality.md),
+[`docs/known-limits.md`](docs/known-limits.md)). The **default configuration is local and free** —
 a different answering model, so a different system, and none of these numbers describes it.
 Measure your own model before trusting it: `uv run eval/run_agent_eval.py` names the backend it
 ran with in every report's fingerprint.

@@ -83,6 +83,20 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   `qwen2.5:14b` throughout and the catalogue half of both combined rows describe the prompt as it
   stood in Runs 1-6. Measure your own model before trusting it:
   `LLM_BACKEND=ollama uv run eval/run_agent_eval.py`.
+- **The hosted default answers correctly but thinly.** `deepseek/deepseek-v4-flash-0731` with
+  `LLM_REASONING=off` passes the behaviour heuristic on every attempt of the core set, and a
+  reader grading its answers found about **6 of 11 fully correct** per attempt (6.0 over three
+  attempts; almost all the rest *incomplete*), against **9 of 11 for `anthropic/claude-sonnet-4.6`
+  and for `google/gemini-3.8-flash`** on one attempt each — at about 1/65 of Sonnet 4.6's cost per
+  question ($0.0007 against $0.0456 at the rates of the runs). Its typical miss: the answer says a
+  detail is not in the evidence while the passages it retrieved hold it (`c06`'s "to-day is
+  Saturday", `c04`'s "judge and executioner"), or retrieval never reached it. Every model tried
+  shows the same class, thinking on did not help, and a prompt change made it worse; the fix is
+  tracked in #81. Manual, single-grader, one index build that predates #80:
+  [`eval-results/2026-09-19-hosted-default-quality.md`](eval-results/2026-09-19-hosted-default-quality.md).
+  If you need depth more than price, the documented backup (already in `.env.example`) is
+  `ORCHESTRATOR_MODEL=google/gemini-3.8-flash` with `PRICE_IN_PER_MTOK=0.75`,
+  `PRICE_OUT_PER_MTOK=3.75` and `LLM_REASONING=provider`, at about $0.02 a research question.
 - **A local model's context window is Ollama's business, and a large default is a trap.** This
   project cannot set `num_ctx`: the local backend uses Ollama's OpenAI-compatible `/v1` endpoint,
   where an `options` block is accepted and ignored, and Ollama 0.34 picks the window adaptively from
