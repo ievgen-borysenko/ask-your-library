@@ -19,7 +19,7 @@ The catalogue is deliberately not consulted: it answers from the index tables
 import logging
 from dataclasses import dataclass, field
 
-from ..index_meta import read_index_meta, version_mismatch
+from ..index_meta import CARDS_PREFIX, CARDS_REBUILD_HINT, read_index_meta, version_mismatch
 from .ledger import INDEXED, TABLE, open_ledger
 
 log = logging.getLogger(__name__)
@@ -72,6 +72,11 @@ class LedgerReport:
         for stamp in self.stamps:
             out.append(f"  stamp: {stamp}")
         for line in self.version_mismatches:
+            if line.endswith(CARDS_REBUILD_HINT):
+                # a cards table: reads with a warning, and its rebuild is the
+                # cards stage, named in the line itself
+                out.append(f"  VERSION MISMATCH    {line}")
+                continue
             out.append(f"  VERSION MISMATCH    {line} — reads with a warning, refuses to be "
                        f"written to; back up (`ayl-add --backup <dir>`) and rebuild")
         for note in self.notes:
@@ -128,6 +133,8 @@ def _read_stamps(db, report: LedgerReport) -> None:
             f"stamped {meta.get('created') or '(no date recorded)'}")
         detail = version_mismatch(db, name)
         if detail:
+            if name.startswith(CARDS_PREFIX):
+                detail = f"{detail} — reads with a warning. {CARDS_REBUILD_HINT}"
             report.version_mismatches.append(detail)
 
 

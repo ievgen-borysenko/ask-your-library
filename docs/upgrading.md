@@ -124,6 +124,21 @@ folder does **not** (another folder's, or the demo corpus's) lose their rows wit
 table: they are put back to `requested` and named at the end of the run, so you know to
 re-run `ayl-add` over their folders too. `--rebuild --force` goes ahead without a backup.
 
+### A cards table is rebuilt on its own
+
+A cards table has its own chunker version (`card-sections-2` since #58, which gave a card built on
+your own machine — `card_kind: local` — row keys of its own). A cards table stamped with an older one
+reads with a warning, and the warning, the refusal and `--doctor` name the quick way out, which
+rebuilds only the cards from the card files and leaves the full text alone:
+
+```bash
+uv run scripts/ingest_demo_corpus.py --stage cards
+LIBRARY_DB_PATH=~/ayl-tech uv run scripts/ingest_demo_corpus.py --stage cards \
+    --cards-dir corpus-tech/cards --cards-dir "${AYL_HOME:-$HOME/AskYourLibrary}/cards/tech"
+```
+
+The first is the demo corpus; the second is the engineer's shelf, with its own index.
+
 ### Checking before you upgrade
 
 `--doctor` reads every stamp out, agreeing or not, and exits non-zero on a mismatch:
@@ -136,7 +151,7 @@ uv run ayl-add --doctor --db ~/ayl-index
 index /Users/…/ayl-index
 ledger: 33 book(s); index (transcripts_ollama, cards_ollama): 33 book key(s)
   stamp: transcripts_ollama: bge-m3 / 1024d, chunker sentence-pack-2, row schema 2, stamped 2026-09-17T05:12:44
-  stamp: cards_ollama: bge-m3 / 1024d, chunker card-sections-1, row schema 1, stamped 2026-09-17T05:19:02
+  stamp: cards_ollama: bge-m3 / 1024d, chunker card-sections-2, row schema 1, stamped 2026-09-17T05:19:02
   no drift: every indexed book has its rows, and every row its book
 ```
 

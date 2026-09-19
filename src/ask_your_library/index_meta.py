@@ -226,6 +226,22 @@ REBUILD_HINT = ("The way out is a rebuild, which replaces every row: "
 CARDS_PREFIX = "cards"
 
 
+# A cards table is rebuilt on its own, from the card files, without touching the
+# full text: `ayl-add` does not write cards, so its `--rebuild` is not the way
+# out for one, and naming it would send a reader to re-embed every book.
+CARDS_REBUILD_HINT = ("The way out for a cards table is rebuilding it from the card files, a "
+                      "quick stage that leaves the full text alone: "
+                      "`uv run scripts/ingest_demo_corpus.py --stage cards` for the demo "
+                      "corpus; for the engineer's shelf the same, with "
+                      "its `LIBRARY_DB_PATH` and `--cards-dir corpus-tech/cards --cards-dir "
+                      "\"${AYL_HOME:-$HOME/AskYourLibrary}/cards/tech\"`.")
+
+
+def rebuild_hint(table: str) -> str:
+    """The command that gets past a mismatch on THIS table."""
+    return CARDS_REBUILD_HINT if table.startswith(CARDS_PREFIX) else REBUILD_HINT
+
+
 def expected_chunker(table: str) -> str:
     """The chunker version THIS code would stamp on `table`."""
     return CARD_CHUNKER_VERSION if table.startswith(CARDS_PREFIX) else CHUNKER_VERSION
@@ -300,7 +316,8 @@ def warn_version_mismatch(db, table: str, chunker: str | None = None,
     detail = version_mismatch(db, table, chunker, schema_version)
     if detail is None:
         return None
-    line = f"{detail}. The index still answers, from the chunks it already holds. {REBUILD_HINT}"
+    line = (f"{detail}. The index still answers, from the chunks it already holds. "
+            f"{rebuild_hint(table)}")
     key = (str(getattr(db, "uri", "") or ""), table, detail)
     if key not in _warned:
         _warned.add(key)
@@ -321,4 +338,4 @@ def refuse_version_mismatch(db, table: str, chunker: str | None = None,
     return (f"refusing to write {table}: {detail}. A write would leave one table holding rows "
             f"from two chunkers, and nothing afterwards can tell which rows came from which — "
             f"unlike a read, that cannot be undone except by rebuilding the whole table.\n"
-            f"{REBUILD_HINT}")
+            f"{rebuild_hint(table)}")

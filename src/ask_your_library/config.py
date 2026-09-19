@@ -16,6 +16,11 @@ load_dotenv()
 # --- storage ---------------------------------------------------------------
 # Relative default resolves against the working directory (repo root under `uv run`).
 DB_PATH = Path(os.environ.get("LIBRARY_DB_PATH", "data/lancedb"))
+# The reader's own folder, OUTSIDE any checkout: what a reader may build for
+# themself and never share (today the engineer's shelf's local cards, later the
+# private shelf of ADR-026). `ask_your_library.home` refuses to write there when
+# it resolves inside a git work tree — .gitignore is not a boundary.
+AYL_HOME = Path(os.environ.get("AYL_HOME") or "~/AskYourLibrary").expanduser()
 
 # --- embeddings ------------------------------------------------------------
 # Backend selects both the embedder and the table suffix, so query and document
