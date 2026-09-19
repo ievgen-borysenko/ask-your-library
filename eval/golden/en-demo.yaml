@@ -129,15 +129,21 @@ questions:
     about surviving on his own or about getting along in a strange society. Which one was it?
     I might be mixing two of them up.
   type: identify
-  expected_behavior: clarify
+  expected_behavior: clarify_or_answer
   expected_books:
   - Robinson Crusoe
   - Gulliver's Travels
   expected_facts: []
-  notes: 'PROPOSED 2026-09-05, needs the reader''s verdict. Reworded 2026-09-05 (two AI sessions, reader to confirm): the first wording ("has to work out how to live there") leaned to Crusoe; this one names the two readings without naming a book. Both fit: Crusoe (island,
-    first-person journal) and Gulliver (shipwrecked in Lilliput, first-person travel account).
-    A single pick without asking is a fail; the pass is a question such as "alone on an
-    island, or among tiny people?". 05.09 core run: clarify asked (PASS), but the question offered only Crusoe as a candidate and asked for more details; Gulliver was in the retrieval window and not surfaced.'
+  notes: 'Reader''s verdict 2026-09-19: asking back is fine when the agent is not sure, and
+    answering straight away is fine when it is right. PASS = a clarify question (such as "alone
+    on an island, or among tiny people?"), or an answer without asking that names BOTH books;
+    FAIL = one book named with confidence. The scorer checks that both titles are named; that
+    the answer also tells them apart is read on the manual-correctness checkbox. Reworded
+    2026-09-05: the first wording ("has to work out how to live there") leaned to Crusoe; this
+    one names the two readings without naming a book. Both fit: Crusoe (island, first-person
+    journal) and Gulliver (shipwrecked in Lilliput, first-person travel account). 05.09 core
+    run: clarify asked (PASS), but the question offered only Crusoe as a candidate and asked
+    for more details; Gulliver was in the retrieval window and not surfaced.'
 
 - id: c10-chivalry-two-books
   question: There are two books in my library about knights and chivalry. One seems to take

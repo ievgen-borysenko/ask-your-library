@@ -16,7 +16,9 @@ Scored per question (no LLM judge; heuristics, not proof):
             ("not in the library", "cannot answer", "не знаю", ...) AND ends
             there, at most REFUSAL_TAIL_WORDS words after it; an answer
             without evidence that still tells a story from model knowledge FAILS,
-            and so does one that declines and then narrates anyway;
+            and so does one that declines and then narrates anyway; a refusal
+            item answered by the catalogue path passes only as a "has" that
+            found nothing and says the book is not in the library (q16);
             expected_behavior "clarify" -> a clarify interrupt happened;
             "clarify_or_answer" -> clarify OR all titles mentioned;
             otherwise -> all titles mentioned
@@ -488,6 +490,25 @@ def is_refusal(answer: str) -> bool:
     return len(tail.split()) <= REFUSAL_TAIL_WORDS
 
 
+# The catalogue's own "not in the library" sentence (i18n `catalog_has_no`, both
+# languages). Deliberately NOT in REFUSAL_MARKERS: the research loop prefixes
+# `book_not_in_catalog` ("No book titled ... is in the library catalogue; the
+# whole library was searched instead.") to answers that go on to answer, so the
+# phrase is a refusal only when the catalogue path produced it.
+CATALOG_ABSENT_MARKERS = ("no book titled", "в бібліотеці немає")
+
+
+def catalog_says_absent(listing: dict, answer: str) -> bool:
+    """Did the catalogue path answer a refusal item with "that book is not in
+    your library", and only that? Read off the structured result first: a "has"
+    that resolved to nothing and listed nothing, so no other book stands in for
+    the one asked about ("Closest titles: ..." is a labelled suggestion, not a
+    substitute). Then the (folded) answer must say so in words."""
+    return (listing.get("op") == "has" and not listing.get("resolved")
+            and not listing.get("books") and not listing.get("count")
+            and any(m in answer for m in CATALOG_ABSENT_MARKERS))
+
+
 def fold(text: str) -> str:
     """Lower-case, accent-stripped text: 'Arsène' and 'Arsene' must match."""
     return "".join(c for c in unicodedata.normalize("NFKD", text.lower())
@@ -703,10 +724,18 @@ def score(item: dict, r: dict) -> dict:
                                   for c in read if counts(c) for b in expected)
         ok = ok and out["drilldown_ok"]
     if r.get("catalog"):
-        # A content question sent down the catalogue path is the wrong kind of
-        # answer whatever it lists (a full listing names every expected title).
-        ok = False
-        out["catalog_misroute"] = True
+        if item["type"] == "refusal" and catalog_says_absent(r["catalog"], answer):
+            # "Do you have Casino Royale?" answered by the catalogue with "no
+            # such book" is the right answer by the shortest route (owner's
+            # verdict 2026-09-19, q16): not a misroute, and a pass.
+            ok = True
+            out["catalog_absent"] = True
+        else:
+            # A content question sent down the catalogue path is the wrong kind
+            # of answer whatever it lists (a full listing names every expected
+            # title), and so is a "has" that confirmed some other book.
+            ok = False
+            out["catalog_misroute"] = True
     if item.get("expected_book_filter"):
         # The hybrid: the named book must have been resolved to exactly that
         # book's key and retrieval limited to it (a wrong single resolve is the
