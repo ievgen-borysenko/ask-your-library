@@ -1,0 +1,588 @@
+# The engineer's shelf — the single source of truth for the second demo corpus.
+# scripts/fetch_tech_shelf.py builds it from this file; nothing of the text is
+# committed, so this manifest and corpus-tech/toc/ are the whole record of what
+# the shelf is.
+#
+# Per work:
+#   licence / licence_url / licence_statement / licence_checked
+#     the SPDX-like identifier, the licence text it names, the page or file
+#     where this work states it, and the day that page was read. A claim that
+#     could not be confirmed on the source itself carries `licence_unverified`
+#     instead of a guess.
+#   fetch     the shape of the source, one of: html-chapters, git-markdown,
+#             git-html, pdf, arxiv-html, arxiv-pdf (see the script's docstring).
+#   cards     what kind of book card this work gets, and where it may live —
+#             one of three values, with no fourth:
+#               shared     a full card, written by a model at `--stage cards`
+#                          and committed to corpus-tech/cards/. For the works
+#                          whose licence allows a derivative to be shared.
+#               structure  a facts-only card, built by code with no model at
+#                          `--stage structure-cards` and committed to
+#                          corpus-tech/cards/: the title, the chapter list and
+#                          the publisher's own description (`about`), all
+#                          reproduced verbatim and attributed. A reproduction
+#                          in part, which is what CC BY-NC-ND grants, and never
+#                          a summary, which is the derivative it withholds. The
+#                          three CC BY-NC-ND works are `structure`.
+#               local      a full card, written by a model at `--stage cards`
+#                          into the gitignored corpus-tech/cards-local/ and
+#                          never committed: a card the reader may build for
+#                          themself but the repository may not share. A work
+#                          that names no value is treated as `local`.
+#             Whatever this says, a work whose licence is NoDerivatives never
+#             reaches a model (`card_targets` in the script).
+#   about / about_source / about_checked
+#             `structure` works only: the publisher's own one-paragraph
+#             description of the work, copied character for character (only
+#             the line breaks of the page are folded), the page it was copied
+#             from, and the day that page was read.
+#   pin       what the sha256 under `sources` is taken of: `bytes` for the file
+#             as fetched, `text` for the text the HTML reader extracts from it.
+#             Two of these publishers do not serve the same bytes twice —
+#             developers.google.com stamps every response with a CSP nonce and
+#             an analytics blob whose keys come out in a random order, and
+#             abseil.io is behind Cloudflare's email obfuscation, which rewrites
+#             the book's "Email ... to comment" link per response — so a
+#             byte pin on those was red on every run and could never report a
+#             real edit. None of that noise is text of the book. There is no
+#             default: a work added without a rule here is a failure.
+#   sources   sha256 of every file fetched to build the work, taken per the
+#             work's `pin`, written by `--stage checksums` and re-checked by
+#             `--stage verify`. Per file, not per work: these books are dozens
+#             of separately published pages, and a red weekly job has to say
+#             WHICH chapter changed. `_pages.json` is the page order the fetch
+#             stage worked out from the publisher's own table of contents,
+#             pinned with the pages so that a renamed or re-ordered chapter is a
+#             failure and not a silent change of edition — and hashed as bytes
+#             whatever the work's `pin` says, because it is not a page to read.
+#   note      why the work is on the shelf.
+#
+# `id` is the primary key: file names under prepared/ and toc/, and the key the
+# golden set's expected_books resolve against (tests/test_tech_shelf.py).
+
+works:
+  - id: sre-book
+    title: "Site Reliability Engineering"
+    author: "Betsy Beyer, Chris Jones, Jennifer Petoff, Niall Richard Murphy (eds.)"
+    year: 2016
+    kind: book
+    licence: "CC-BY-NC-ND-4.0"
+    licence_url: "https://creativecommons.org/licenses/by-nc-nd/4.0/"
+    licence_statement: "https://sre.google/sre-book/table-of-contents/"
+    licence_checked: 2026-09-17
+    source: "https://sre.google/sre-book/table-of-contents/"
+    fetch: html-chapters
+    pin: text
+    # Every chapter of the book is a page of its own under /sre-book/; the table
+    # of contents lists each twice (side navigation and body) and the fetch
+    # keeps the first, so the page order is the book's order.
+    page_pattern: "^/sre-book/(?!table-of-contents/)[^/]+/$"
+    container: "div#content"
+    cards: structure
+    about: >-
+      Members of the SRE team explain how their engagement with the entire
+      software lifecycle has enabled Google to build, deploy, monitor, and
+      maintain some of the largest software systems in the world.
+    about_source: "https://sre.google/books/"
+    about_checked: 2026-09-19
+    note: >-
+      The book the audience knows by name, and half of the demo's clarify pair:
+      its chapter 5 is called "Eliminating Toil" and so is the Workbook's
+      chapter 6, which is what makes t02 ("the one about toil") an honest
+      question to ask back on.
+    sources:
+      _pages.json: a19025e0ea4136030d7aa74d1c816db904d21dd6c0d01660b0228e39900e628e
+      accelerating-sre-on-call.html: 2ac2b40c9330f0437e3021e3b7fc183cc08b6cf789deb6e544c31bce6c569821
+      addressing-cascading-failures.html: 7a271c370e3b11d8a410bbc921f87ed7508b5c8d2c206b641871f6f2deb0abb2
+      automation-at-google.html: 1b824aead513dd4a002c49e510490606cf8b93490043b4f03a7201d460433f6c
+      availability-table.html: f93bd52f80ee2ea7bf56801405033788b90d8f708782ae5372c66b1ce07ac078
+      being-on-call.html: 6cc23c89a4cf4fcd43db7c21053f0b124f9f309998c2eb6b1db07d85e032a0bc
+      bibliography.html: 8ab958f69ad7609b6142ebccc4d2c9e81d82a91c4f97977b8404246d3e1ec4e2
+      communication-and-collaboration.html: 7d8c3e3568e6f83be2d8b1332e61fb7a916f18a8cb5d0f7cadcfd103b1939d11
+      conclusion.html: a394f87f9dc780cb86bbdcad185211942ca31bc6e81c3f772ef0c2f54c95e668
+      data-integrity.html: b45000b7b63a9581470a604b6dd3c129641e634de8e66188ba27641441fa2180
+      data-processing-pipelines.html: b143b9a2aaecf21437ae2e30fcd6ff36729605f53a42b1c7f1dac02c4a1d115f
+      dealing-with-interrupts.html: 65a9079f61f9769678589a913e0aa6d9679daedefd130abd86774cf734930ebc
+      distributed-periodic-scheduling.html: 430c3508633e689d9d68ae465f1d1f3971b857b874a3387b6d8a48aab90cfe7a
+      effective-troubleshooting.html: 063477064db5f9455c2d1a50b4b77323a33af871fe39b40287439da59fcb88ac
+      eliminating-toil.html: 9aba34c2cee7be3c9e7f893b0295cfcf734c62276a518eb1f1729daf55411f20
+      embracing-risk.html: d7c5b6d38501ed89514b39bb0064eab5e6ea1610a4021b3ba4cb1677ad64c1f1
+      emergency-response.html: 4652beeb06d07db9c05d5335f21f65b36728c89e3bc5b8b437442cc0a859d920
+      evolving-sre-engagement-model.html: 0380b9451493a87b234cda4f7222d5a6a90db02b3f1d6ee9af340370c9faff33
+      example-postmortem.html: 6ecef711ece7ed16f4f61e1a77c642a4f7b0a493dfc6be08ae019cae26cb53f8
+      foreword.html: 3c8269dfd485e6aa10d59e229821e92f328f009330159ea3b186eb4afb7c1f96
+      handling-overload.html: e7b62911ab9314d2385839841159c6abffe813ded51e1ac254b8e57ef3888494
+      incident-document.html: f9d36f8bd1487e3c1dc91c2aa9b0aed54625b0271eba88063beb72cd099b3258
+      introduction.html: 241dd42a485215d97a233297bb54a4239c8843449e16e9773a2b5fd6f7c9b8a4
+      launch-checklist.html: 2af7d85d7823c2f7dcfdfc7eec74ad90405e8c80b0a8cf9291964abc86ee7923
+      lessons-learned.html: 2412396fe2c12471ff74a398859d7d267955c3cb59ea9bccc5ce57832dde93d7
+      load-balancing-datacenter.html: ed4a8a906126800a562c9b90e0748ad70743aaff029dff91c8240b0a5779e456
+      load-balancing-frontend.html: b0fa847dd830b052756738e0162526dccade3679eeaa3e4fefae7b90490f468d
+      managing-critical-state.html: 8cf971733026d58b1b6fd8bdf6d52ef7a02cc80b0dee8e3088dfb24ce292b086
+      managing-incidents.html: 2b12822f237714e41c467b492214d299793a4e41fb33692e592d0ddf78e7fff5
+      monitoring-distributed-systems.html: 6ad78fa10dd1448ec3bb9bcecec22f93119033dd99c2d02cf6f36cbc5142d851
+      operational-overload.html: 9f1b2f32dcd2b03596874dfbd97f1f9db81819a0ec01d028d8490ee5d18306e7
+      part-I-introduction.html: 5ad52de9da0a1ae100fcd1ba04d9aeb6951ac967d3c71a76363ffb4f669e901d
+      part-II-principles.html: 28d0fe80c170d0632aa6f436244ba691a9f3173368c356fb5adc9331ea3bec44
+      part-III-practices.html: 6a16f62536dee4e9d91298e1adfdb4731a7a4c5a99f2c7da4a4d73753e9e5856
+      part-IV-management.html: e8d82eab0f889917eeb991d9248cb187bc96a525e07848d9d80c2b874bd3a9e6
+      part-V-conclusions.html: 675bb5a5fe707c32a9930605d972b6c8c857854b622a6ff2cb7d682ce4579060
+      postmortem-culture.html: bff334323a7c06c21f88c1e4f7a69b6684e29de93c14f1a21b8871dbd1bca90f
+      practical-alerting.html: 907eabeb6b9cfce6c7a4b4321ee8df53a74ee0d985ea8c83f215cddd67030277
+      preface.html: 2e408d06b28d68b6df1a73a501cae538ad4fb0d2ad575c29fd06c5c5114346f8
+      production-environment.html: 3c3aea46655e82010eb0a05c115153fe31e5ff40ffa4d6283ac2c67ca7113d09
+      production-meeting.html: c6eb88e7a5d0a50718fd25adea1fa1960c0cac99789e8002a09f986b73fb97dc
+      release-engineering.html: 9c39872ec6d6abd9c7faaabc6aa2e8908aa4fc89f46e815335cf4d1ca9358139
+      reliable-product-launches.html: 0f6fdc100101c3c6c6f7a26c3317d950dfe36824ec501c4149e475712f57e905
+      service-best-practices.html: c00919560c1982054feaac00fd4918f7685112585837ac2ed25998757f8da9ae
+      service-level-objectives.html: c6b2683b289fddb8fd1237d69d1f9a6e51d8a85d09947f177c039985f7067fdf
+      simplicity.html: 999081db9b30894111943fba9e77141a581a8ca365fa9c6a508752a37d857cde
+      software-engineering-in-sre.html: f4af6a0619355819f6b55dcf28957ceecd81845a2fa845651b6410fdac5f3738
+      testing-reliability.html: b9b855252dd4079023673a30e259dda028244db8642c96f2c14171a4fc4119a9
+      tracking-outages.html: e1dd72c902ea59390cce79a26f8635e6f27279f4e71e356139fd9c15a932b2d7
+
+  - id: sre-workbook
+    title: "The Site Reliability Workbook"
+    author: "Betsy Beyer, Niall Richard Murphy, David K. Rensin, Kent Kawahara, Stephen Thorne (eds.)"
+    year: 2018
+    kind: book
+    licence: "CC-BY-NC-ND-4.0"
+    licence_url: "https://creativecommons.org/licenses/by-nc-nd/4.0/"
+    licence_statement: "https://sre.google/workbook/table-of-contents/"
+    licence_checked: 2026-09-17
+    source: "https://sre.google/workbook/table-of-contents/"
+    fetch: html-chapters
+    pin: text
+    page_pattern: "^/workbook/(?!table-of-contents/)[^/]+/$"
+    container: "div#content"
+    cards: structure
+    about: >-
+      The Site Reliability Workbook is the hands-on companion to the bestselling
+      Site Reliability Engineering book and uses concrete examples to show how
+      to put SRE principles and practices to work. This book contains practical
+      examples from Google’s experiences and case studies from Google’s Cloud
+      Platform customers. Evernote, The Home Depot, The New York Times, and
+      other companies outline hard-won experiences of what worked for them and
+      what didn’t.
+    about_source: "https://sre.google/books/"
+    about_checked: 2026-09-19
+    note: >-
+      The other half of the toil pair, and the shelf's worked examples: the
+      error budget policy and the SLO documents are here rather than in the SRE
+      book.
+    sources:
+      _pages.json: 8a198600d0196e14740c9f823152cfbda3229394675da5bc4e7e49cf0b42c652
+      alerting-on-slos.html: 5d099ccd7e2b62679e097433c52eda94dde65d6046bd0f28ec798d716ce2542b
+      canarying-releases.html: 644da078c1d1a5b06ca6f778c51a5e6a9556a489636baed2f630e4443353325f
+      colophon.html: 80cbc2a16d0873a83f5cafec212446c24e39f340c34906eb25f7c0427e9ba4a1
+      conclusion.html: d85508911bdc473fa08f5561992c768a58d8603e9738acb858de2593084c5be9
+      configuration-design.html: 99f7e62ab2abed77c24bc5d77e170f081d3a3312c036d8697629a8847777e666
+      configuration-specifics.html: b5f71e86f8550816944ed594bdf58d86549c2938430884cf74f711c876699a58
+      data-processing.html: 74d2e5d52960251de6f52117bf5d1a7ee00796bd89de5641826b6fad4049da4e
+      editors.html: 9f7a13e09c299f194ba926beb07bbdd4d456548ea2fcc34e3498e13dcae063bc
+      eliminating-toil.html: e446ead9271f53ab429275ec787c2ca6a8453ffc24c9e658b631e4ffd324e559
+      engagement-model.html: d62929f1273968c825bab46b580cc19f39da64fb0202c1c42b60d4c4f22204f9
+      error-budget-policy.html: ba0a9190c8782068508daa0bc963ab557cb366d6121673e182a5a4d3d406a53b
+      foreword-I.html: 58a9071f67bcdc0f73244ee10313968277c9d0e02a246dd7055e185631249154
+      foreword-II.html: c6a73465651134ef9494dd849573f1d0b74b6e1338b1e991547861700a2bd7c4
+      how-sre-relates.html: 9892a2caac16a38e11288484476bf3fce4505e190aac226508236e0ed2f08466
+      implementing-slos.html: 5c5ff5d01e2a8128d6587a31a4b9455aeaa52262039c9db20049b742c37f3107
+      incident-response.html: ec3346a6bac5bed5ecc5a3f085b68143b064f0c95adbc52b539eedb2e9e7b332
+      index.html: 6c9447f6df83e38e72b49cac7b3bdf644386999afc4fdc5f99a63f7da91d560f
+      managing-load.html: 19832c1976ac680dec69703b6f4911f314fa0208c442e41f3912e1acc6e54fde
+      monitoring.html: fb5b853b6f3c7bb02ded36bfab8a78283a20a16a4f0116bff8d9592300a96b73
+      non-abstract-design.html: 94b9e0143a2e206d3debfe475461eadf6bb5b9b1868c0bcda5118ca007af584d
+      on-call.html: d9d3485b200486d60bc81faae26480d13a352b6048523fd05fdd7f4e6353ee70
+      organizational-change.html: 07ae580add596fe8f89daf4b9585f8222d6e07b9e16a06ec8778d128f06ebee9
+      overload.html: 4b4b66ad59b7d9787e38c9c61c8c844fa0679a68413be5b6644de651ff1bca17
+      part-I-foundations.html: 8ce88a79db06f17ddb445550100fa181a0d5bd13711531b9addc58357f4ddb9d
+      part-II-practices.html: 8b2c7a6b682d9c167987a7605cdc3c63f80644dae5cf2adae349d54926b8a71e
+      part-III-processes.html: d9d6734acd764b83dfcdfadf4c59f9b69d01320ea565343fd519433586401f42
+      postmortem-analysis.html: cd2e49c4ccde39f433932d3c115968b890f3c44529620eb4d814c71c119cab32
+      postmortem-culture.html: af69f0011df7c2b7a38e59bc654fe74e98838a37eb7d89bab2cb1973ead13973
+      preface.html: 354b8c424b6dd4f6bbffc4f60f41d0bda72a923eaac8298c184e1127ac61e8d3
+      reaching-beyond.html: 6d554d328e69c13b0e34ce06d01488f22be1996bc96e9c84f71c381249c6b06d
+      simplicity.html: 46e7c33054d5e2aa5b6e7882394f62f6afefbe02fbc3e5a502bf147f373afbe3
+      slo-document.html: 3716a7b2687e4570db1d6831ef87efd754395b18127fe552ec808e27ae52ceb0
+      slo-engineering-case-studies.html: 51ae6dc1474082ea06960e886a5fb0ff8da582698f7edbef18deab38999a2e13
+      team-lifecycles.html: 0c4f7c1e8f19614538db17f20258f4fe49dbd02bcff61db1d097b7674b3f97f2
+
+  - id: swe-at-google
+    title: "Software Engineering at Google"
+    author: "Titus Winters, Tom Manshreck, Hyrum Wright (eds.)"
+    year: 2020
+    kind: book
+    licence: "CC-BY-NC-ND-4.0"
+    licence_url: "https://creativecommons.org/licenses/by-nc-nd/4.0/legalcode"
+    licence_statement: "https://abseil.io/resources/swe-book"
+    licence_checked: 2026-09-17
+    source: "https://abseil.io/resources/swe-book/html/toc.html"
+    fetch: html-chapters
+    pin: text
+    # The published HTML is one file per front-matter piece, part and chapter;
+    # the index (ix.html) is a list of page numbers and is left out.
+    page_pattern: "^(?:foreword|pr01|part[0-9]|ch[0-9]{2})\\.html$"
+    container: "section"
+    cards: structure
+    about: >-
+      The Software Engineering at Google book (“SWE Book”) is not about
+      programming, per se, but about the engineering practices utilized at
+      Google to make their codebase sustainable and healthy. (These practices
+      are paramount for common infrastructural code such as Abseil.)
+    about_source: "https://abseil.io/resources/swe-book"
+    about_checked: 2026-09-19
+    note: >-
+      The third title an engineer recognises on sight, and the one that answers
+      "how does a big company actually review code": text only, like the two SRE
+      books.
+    sources:
+      _pages.json: c10695e57d850c490eed5c0f90095d41f15270514fb4e5545a6f11a6c1e29d5b
+      ch01.html: aed79eb42f72cdb42276b4605315975f71e9d4248339fb3ef85fc40e759fec98
+      ch02.html: 6c59ea0b7edd1786ebcc30222873d7055f5781bc715646bf5a6196b953859987
+      ch03.html: bf375a39ccacdac2240fc7bc018bae048bec7f1fe26b7d5ad9a8cf54edce3c10
+      ch04.html: 9883a7bd746c3b1adcaf94cb80267df44e015c5cd2dfacb87924c9b1a67c2a4e
+      ch05.html: 6f8236db0e8a7f26871935d936a060a9006335f767843c8ad36256b117fbc0e5
+      ch06.html: 2ab88758dbf2db3e8f3eb79bd5b76cc19ed675562163ec4c85ceffd54e53cf92
+      ch07.html: 16f7d002c6b9a07c71d06f4e99d0ecd716ef06edb00f3dd527c06f4a799b9062
+      ch08.html: 45c9fff5116a4eae5c4d147e52b02448fb727fd311e95b38f79163f0e7f23b5d
+      ch09.html: 31f2742d97e43380dc5958eb1d1c6983025411fb4b3e69a32fe56989b879d9de
+      ch10.html: bc62ab04d5d6610ca18e66429548f3c7a667dd8d6522357458c465e98a1807c5
+      ch11.html: c0267698e1c82dfb898a6468a433a4465a2c0f4e1c574b56d09f78a05b54179e
+      ch12.html: 5859c7d5a6195376090add0d3dcadd4c1997a044b1b63b49f30a643f454ee19d
+      ch13.html: daaf6a53635fb01471d38c72e53d7300fee339f20ab619876c6452c7ab6b6cc5
+      ch14.html: 44b15d845ae75beba8b5aa78e8b7b9a563ad245cb94e1e659072c9d492959815
+      ch15.html: 70d96ea82796ce1335f039469cbf252f1ce15311997b3535582da70b40fdbf37
+      ch16.html: 14d1d29dda424de06aac9d3eb61be3a89651a07ff415aac40f4d5f9d6ae0a5f2
+      ch17.html: fc4b8b017f3863a2c7dae2d205cec256dbc2b967ac29ada6d309d04d3186ad31
+      ch18.html: 9aed349b1347f383b9ad8b7841fb49aa3ece25a3d50a0df7313ed34a7ff5b670
+      ch19.html: 021800d482d05461a8fc345ab9b302e8d13dc43c8c773bf3a20cb9211317fb04
+      ch20.html: 386963261842f23e391190ec6cdea677e2862431d5c1db1a38ebb90906eb8778
+      ch21.html: d1da011133fe477313fe3245c7885c3b94ee6912b802a7d4a94233be28837609
+      ch22.html: 6baf38b965aff3d2596622e4ae06adc4564824728c83bb5fd42ccb64dcf55978
+      ch23.html: 924b0dab267e9291eaa1ae92c8b20a78c4bae10dff8898ebe21c7a5c8770e90d
+      ch24.html: c469a2d0914c06d48b2c5e3b75dd604a402b658cd6524b38a70e25ccab2836bf
+      ch25.html: 7cf1e6d3e798282c25a5b59128fe5610713ccc4766e9a0728a4f0d3ff8c4d2e6
+      ch26.html: 6cd7d37d185a79691a8879422c1cc203daf64d15ac10962c57e06653c48c2058
+      foreword.html: eb348e2919b0d307bedad8a3479e87f8bc2d15d6f3f7dc520cb762f3c2b32f80
+      part1.html: de06070a9d5fa5eb64163a41ee3e2b152c8368698b08141659b74a7cce8c7f93
+      part2.html: de06070a9d5fa5eb64163a41ee3e2b152c8368698b08141659b74a7cce8c7f93
+      part3.html: de06070a9d5fa5eb64163a41ee3e2b152c8368698b08141659b74a7cce8c7f93
+      part4.html: de06070a9d5fa5eb64163a41ee3e2b152c8368698b08141659b74a7cce8c7f93
+      part5.html: de06070a9d5fa5eb64163a41ee3e2b152c8368698b08141659b74a7cce8c7f93
+      pr01.html: c516b28251fa475108a36914c77e32c932ca5fa36662cca76aed67ba49c6f0c7
+
+  - id: building-secure-and-reliable-systems
+    title: "Building Secure and Reliable Systems"
+    author: "Heather Adkins, Betsy Beyer, Paul Blankinship, Piotr Lewandowski, Ana Oprea, Adam Stubblefield"
+    year: 2020
+    kind: book
+    licence: "CC-BY-4.0"
+    licence_url: "https://creativecommons.org/licenses/by/4.0/"
+    licence_statement: "https://github.com/google/building-secure-and-reliable-systems/blob/main/LICENSE"
+    licence_checked: 2026-09-17
+    source: "https://github.com/google/building-secure-and-reliable-systems"
+    fetch: git-html
+    pin: bytes
+    repo: google/building-secure-and-reliable-systems
+    ref: main
+    # The repository ships the book as the publisher's own HTML, not as
+    # Markdown, and raw/atlas.json is the build manifest that lists the files in
+    # reading order — the publisher's order, which stays right when a file moves.
+    order_file: raw/atlas.json
+    # Everything that is not the book: covers, the copyright page, the table of
+    # contents, and the index of page numbers. cover.html and colo.html are
+    # listed in atlas.json but are not in the repository at all.
+    skip_files: [cover.html, praise.html, titlepage.html, copyright.html,
+                 dedication.html, toc.html, ix.html, colo.html]
+    cards: shared
+    note: >-
+      The CC BY book of the same house as the two SRE ones: a full-rights work
+      that can carry a card, and the shelf's answer on security-reliability
+      trade-offs.
+    sources:
+      _pages.json: 0563373e6a56280e55216b79dfd9e76ab5d71bd7755541a8b669891ca9050891
+      appa.html: 71f636d2f350c9a35644783bd48a5f138e5ad04d594e6f6e5a0f4c3c2573da92
+      author_bio.html: 7d87cfe984fb9c373b8148338f2d8314f0b70c224cd73b7d79460d201c5f5364
+      ch01.html: 284d086a37fd04099162c2df6fefffbf5c6bb472acedbdc8273dcf0f4736e327
+      ch02.html: 7b3ac759c14b5b79cda16bca719fdb51567e2f1153de29d4470314f4ea1b5756
+      ch03.html: 71bb009bdf89c341b465ea7012b80a38e2375c777f3e0cd6a7dc410b0e3f4e84
+      ch04.html: 3b507935647eb60f8a3831e12961e2714bbcb28bb5fb66a34915193f59af0b9c
+      ch05.html: 36c699874a3510f1d9382ca06b3dc663016cb2c144fd0ad56a50571d820afd0f
+      ch06.html: df55378025b757bc785c28dad9113143431b8485f9bfc99fe16d3769c4f70c15
+      ch07.html: 21ab85197d659741a6e36759012f0a51ee396f155605c2c2470256a13ab20450
+      ch08.html: 33cd5c6448e91e9dd1f6d47f79d8e988bf133bf8ea7efa43a173f06786938f01
+      ch09.html: 7834c3616a9e792f1749540b094346d8f0e06b9bdee0ffafc7285d43a3f6a295
+      ch10.html: 7d9ded110d2cf0fc36ef7c218fb3df0b983b887a464e4b9644229394ca39d576
+      ch11.html: 6034f8927e994ad80e2d3d15a09505df2c8bdaca425f31739d60a3591430070c
+      ch12.html: 1337d9ee7101bba9510e519660fb95e00f254ce98e24f91c768c36895da27c52
+      ch13.html: 454f80eba04f01270ac01a2435e6f7faca14d8cbfcf2e00b1d99d907617ef334
+      ch14.html: 530688c79f1bd4075b3e0b664f1fab82562524c56cf08dffcc20ca5d403dd825
+      ch15.html: ee181aa2a898eb72ac8a71c9d6af094caf444c07f33cfda6cf56fb8da6769083
+      ch16.html: 289a50179d841c326291259c6dbcc7aca3a71340d0969f6358b10e5da3d394c9
+      ch17.html: 40084d0bb972f67ad8e0948543f38ecaea1887ea53578dcb76ffe675c6a8b832
+      ch18.html: e396dbe1dd551bb59eb5a23c7c764384540b405b55ce437d963c0cb0755c3de3
+      ch19.html: b78f61bed5e412dbbe3aeb2bde0f6e090b5e1ebab13ebd8eacb881ee4e6bde9b
+      ch20.html: ffae17a3be6854aca64a2acca2715a5ac069bc9b2b2150bab1e7e77a6eda00cb
+      ch21.html: aa0bba03073c4a44f073ee53a91ec6694dfd3d677a7a4c2c8304a5a9e9581c3d
+      ch22.html: dc38090c03396e60eb169e8c820dc082db74a38b53d400e8af1d4271403c8de0
+      foreword01.html: a063d03dc69fa6ff83b91a93d822b8178ce29f7685d9c6f9814021b3ba5c1693
+      foreword02.html: 837299e3f885e6ff8bf7d9bc7c994ae887a168f3f4cb0c66f15ea9163542c188
+      part1.html: db449c7b8e15c309d7b16116694172dfa9ab3da6039ae9408fbb66236f3b2cda
+      part2.html: fff03f207365dccf766de8a23c31e2c8cbd060cf0c33458fe4eb0e33bfbcfdf9
+      part3.html: 92bc0c492098844ebb2d681ae1210608a0a94d42c16ffdd7b466e6bba9909e37
+      part4.html: be18ba7d526a0c59adefad20f80589c6366a351438428ecb7e1796efe150104b
+      part5.html: ad183559335c7602d3cc2de932e0dad79205ae90117287743eac5e80f3a61d8f
+      pr01.html: 3974771513588297c24d1796632885ee7eba7daab0280491c8021c7cd7768f93
+
+  - id: twelve-factor-app
+    title: "The Twelve-Factor App"
+    author: "Adam Wiggins"
+    year: 2011
+    kind: guide
+    licence: "MIT"
+    licence_url: "https://opensource.org/license/mit"
+    licence_statement: "https://github.com/heroku/12factor/blob/main/LICENSE"
+    licence_checked: 2026-09-17
+    source: "https://github.com/heroku/12factor"
+    fetch: git-markdown
+    pin: bytes
+    repo: heroku/12factor
+    ref: main
+    # The English content in reading order: the introduction, the background,
+    # who should read it, then the twelve factors. content/en/toc.md is a list
+    # of links to these same files and adds no text.
+    paths:
+      - content/en/intro.md
+      - content/en/background.md
+      - content/en/who.md
+      - content/en/codebase.md
+      - content/en/dependencies.md
+      - content/en/config.md
+      - content/en/backing-services.md
+      - content/en/build-release-run.md
+      - content/en/processes.md
+      - content/en/port-binding.md
+      - content/en/concurrency.md
+      - content/en/disposability.md
+      - content/en/dev-prod-parity.md
+      - content/en/logs.md
+      - content/en/admin-processes.md
+    cards: shared
+    note: >-
+      Short, universally read, and the shelf's cleanest "which one was it
+      again": twelve numbered factors of which exactly one is about config.
+    sources:
+      _pages.json: 81e976e7041d6387786266713a0fb0b9871593cad9596d9d2e8a2a52eb6fab69
+      admin-processes.md: fc496eaf191463a22fa4a04e4eca2bab35889f966688e024959ea320c310a7cd
+      background.md: be4ea69343efe10323b04edaaca8158be20ef04a5c82484a7d078e045569b527
+      backing-services.md: 092e74d60e59001d0f70e39024c6bbac67188907f677431c1081b80f20b37695
+      build-release-run.md: f5eababf567dfe7a3ea7740d32372aeffb22fb660c4e296c8c4701b179bb517b
+      codebase.md: aafead6b0d15bd56a80521bd783094d5bf2d7381cf4dec2c15716ea8f2798e9a
+      concurrency.md: d4a22e2db87f45c04f78bcec5fe3dd69075359e9a76d724039ce110b0acfc996
+      config.md: eb1dd6799ee8a82ca0074727432138234f40841952392406aa05c76fb35fcd27
+      dependencies.md: 636df45c364d8abc3fa2418be2e913dda1c97eca62c199048827bac2d91a8c87
+      dev-prod-parity.md: 0964d7249df65f78f7a50fa066f80f99ca1125c3e64a25d07582905292a20e6d
+      disposability.md: 8ee1f8a0acb60b75f1d2c761ba14234fd578d66c5c64a59347d48680bc09ee53
+      intro.md: 21a1fc883d6fa0a6bfb577d63047294bb7cfe64921824d233c9dbdf2416713e3
+      logs.md: 7dcb48b93385aca9fb8a8087ba592f3c588bb3937ffee7ac1514ecb377932146
+      port-binding.md: 21aba4d1b47a5cf15dfdb90ec6ef8473193dbbd7d84a563d5998e70cf90ff7ed
+      processes.md: 77f8721bde123f9f63e86f6ebb953ce77705582cce76b8d2e64272788ad429b7
+      who.md: d6605812d19d8093d932873c1326dd534c37cddb246b27a96548120ce0b1c61a
+
+  - id: owasp-llm-top-10-2025
+    title: "OWASP Top 10 for LLM Applications 2025"
+    author: "OWASP Top 10 for LLM Applications Team"
+    year: 2024
+    kind: guide
+    licence: "CC-BY-SA-4.0"
+    licence_url: "https://creativecommons.org/licenses/by-sa/4.0/legalcode"
+    # The document states its own licence on its second page, which is the
+    # statement that matters for a PDF that is served from a download redirect.
+    licence_statement: "https://genai.owasp.org/resource/owasp-top-10-for-llm-applications-2025/"
+    licence_checked: 2026-09-17
+    source: "https://genai.owasp.org/download/43299/"
+    fetch: pdf
+    pin: bytes
+    # Each of the ten entries opens with its own identifier line. The fourth
+    # one is the odd one out: "LLM04: Data and Model Poisoning", without the
+    # year every other heading carries.
+    chapter_regex: "^LLM\\d{2}(?::2025)?:? .+$"
+    lead_section: "Front matter"
+    cards: shared
+    note: >-
+      The shelf's own subject matter: the risks of the kind of application this
+      repository is. ShareAlike, so anything derived from it (a card, a quote
+      table) carries BY-SA rather than the repository's own licence.
+    sources:
+      owasp-llm-top-10-2025.pdf: eee39216f0e6750fe08f11d17beb1b7e132557db3ed87dcd389cd3d035c4a4c1
+
+  - id: rules-of-ml
+    title: "Rules of Machine Learning"
+    author: "Martin Zinkevich"
+    year: 2017
+    kind: guide
+    licence: "CC-BY-4.0"
+    licence_url: "https://creativecommons.org/licenses/by/4.0/"
+    licence_statement: "https://developers.google.com/machine-learning/guides/rules-of-ml"
+    licence_checked: 2026-09-17
+    source: "https://developers.google.com/machine-learning/guides/rules-of-ml"
+    fetch: html-chapters
+    pin: text
+    # One long page with no page_pattern: its own `<h2>`s are the chapters, and
+    # the forty-three numbered rules sit inside them as `<h4>`s.
+    container: "div.devsite-article-body"
+    lead_section: "Front matter"
+    cards: shared
+    note: >-
+      Forty-three numbered rules, one of which ("keep the first model simple")
+      every ML engineer half-remembers — a quote question with a definite
+      answer.
+    sources:
+      _pages.json: 3588e89aa6e31376be4c361a4bae564543d3b88a0d8b8bd254a2047ab5e0a1e2
+      index.html: f9cd641d27a9a112a0b40b71f33bdc2c4cefc140bb902bac0473eb3430a540a9
+
+  - id: react
+    title: "ReAct: Synergizing Reasoning and Acting in Language Models"
+    author: "Shunyu Yao, Jeffrey Zhao, Dian Yu, Nan Du, Izhak Shafran, Karthik Narasimhan, Yuan Cao"
+    year: 2022
+    kind: paper
+    licence: "CC-BY-4.0"
+    licence_url: "https://creativecommons.org/licenses/by/4.0/"
+    licence_statement: "https://arxiv.org/abs/2210.03629"
+    licence_checked: 2026-09-17
+    source: "https://arxiv.org/html/2210.03629"
+    # HTML, not PDF. #58 planned a PDF for this paper and for Chain-of-Thought
+    # on the rule that arXiv renders HTML only for submissions from December
+    # 2023 on; arXiv has since rendered both, and the HTML carries the section
+    # structure the PDF loses — the PDF text layer breaks ICLR's small-caps
+    # headings letter by letter ("R E A C T : S YNERGIZING"), which no repair
+    # puts back together properly. The PDF path stays in the script and is
+    # exercised by the OWASP document, which is published as a PDF and only
+    # as a PDF.
+    fetch: arxiv-html
+    pin: text
+    arxiv_id: "2210.03629"
+    container: "article.ltx_document"
+    lead_section: "Abstract"
+    cards: shared
+    note: >-
+      The paper the demo's second clarify pair is built on, against Reflexion:
+      "a thought, then a tool call, then the result, in a loop" describes both.
+    sources:
+      2210.03629.html: d0bed20c2cf51cdd24d04020432c729ea6182a4a9f40580e45e83c32e373ee6e
+
+  - id: chain-of-thought
+    title: "Chain-of-Thought Prompting Elicits Reasoning in Large Language Models"
+    author: "Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma, Brian Ichter, Fei Xia, Ed H. Chi, Quoc V. Le, Denny Zhou"
+    year: 2022
+    kind: paper
+    licence: "CC-BY-4.0"
+    licence_url: "https://creativecommons.org/licenses/by/4.0/"
+    licence_statement: "https://arxiv.org/abs/2201.11903"
+    licence_checked: 2026-09-17
+    source: "https://arxiv.org/html/2201.11903"
+    # HTML for the same reason as ReAct above, and with more to gain: the two
+    # columns of the PDF swallowed this paper's own "1 Introduction" and
+    # "5 Symbolic Reasoning" headings at a page break, so the text arrived
+    # whole but two of its eight sections were unnamed.
+    fetch: arxiv-html
+    pin: text
+    arxiv_id: "2201.11903"
+    container: "article.ltx_document"
+    lead_section: "Abstract"
+    cards: shared
+    note: >-
+      The other paper everybody cites and nobody re-reads; on the shelf as the
+      neighbour that makes a retrieval mistake on ReAct visible.
+    sources:
+      2201.11903.html: d75bf2727fd2dce060428b5010a1b7d0c65e247d38344e035064aa1a18f08a2f
+
+  - id: self-rag
+    title: "Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection"
+    author: "Akari Asai, Zeqiu Wu, Yizhong Wang, Avirup Sil, Hannaneh Hajishirzi"
+    year: 2023
+    kind: paper
+    licence: "CC-BY-4.0"
+    licence_url: "https://creativecommons.org/licenses/by/4.0/"
+    licence_statement: "https://arxiv.org/abs/2310.11511"
+    licence_checked: 2026-09-17
+    source: "https://arxiv.org/html/2310.11511"
+    fetch: arxiv-html
+    pin: text
+    arxiv_id: "2310.11511"
+    container: "article.ltx_document"
+    lead_section: "Abstract"
+    cards: shared
+    note: >-
+      Retrieval that decides whether to retrieve at all — the behaviour this
+      project's own planner argues about, and the first half of the
+      Self-RAG/GraphRAG pair.
+    sources:
+      2310.11511.html: 6cd2e7453e9183707b9b6879eeb931790f99da858d5d52f3a33aff2da131f374
+
+  - id: bge-m3
+    title: "M3-Embedding: Multi-Linguality, Multi-Functionality, Multi-Granularity Text Embeddings Through Self-Knowledge Distillation"
+    author: "Jianlv Chen, Shitao Xiao, Peitian Zhang, Kun Luo, Defu Lian, Zheng Liu"
+    year: 2024
+    kind: paper
+    licence: "CC-BY-4.0"
+    licence_url: "https://creativecommons.org/licenses/by/4.0/"
+    licence_statement: "https://arxiv.org/abs/2402.03216"
+    licence_checked: 2026-09-17
+    source: "https://arxiv.org/html/2402.03216"
+    fetch: arxiv-html
+    pin: text
+    arxiv_id: "2402.03216"
+    container: "article.ltx_document"
+    lead_section: "Abstract"
+    cards: shared
+    note: >-
+      The model this repository embeds with, on the shelf it embeds: a question
+      about its three retrieval modes is one a reader can check against the
+      running system.
+    sources:
+      2402.03216.html: 092201403f5fccd3635853857bb7290bda59d2af00296df0dd636ba1bb0745fa
+
+  - id: reflexion
+    title: "Reflexion: Language Agents with Verbal Reinforcement Learning"
+    author: "Noah Shinn, Federico Cassano, Edward Berman, Ashwin Gopinath, Karthik Narasimhan, Shunyu Yao"
+    year: 2023
+    kind: paper
+    licence: "CC-BY-4.0"
+    licence_url: "https://creativecommons.org/licenses/by/4.0/"
+    licence_statement: "https://arxiv.org/abs/2303.11366"
+    licence_checked: 2026-09-17
+    source: "https://arxiv.org/html/2303.11366"
+    fetch: arxiv-html
+    pin: text
+    arxiv_id: "2303.11366"
+    container: "article.ltx_document"
+    lead_section: "Abstract"
+    cards: shared
+    note: >-
+      ReAct's neighbour: also a loop, also thought and action, and the reason
+      t04 has to be asked back rather than answered.
+    sources:
+      2303.11366.html: a538c8771c08af1048017f0b1d0f0a2da3f8d67e9aa0f3a3de5c727814bd7bd3
+
+  - id: graphrag
+    title: "From Local to Global: A Graph RAG Approach to Query-Focused Summarization"
+    author: "Darren Edge, Ha Trinh, Newman Cheng, Joshua Bradley, Alex Chao, Apurva Mody, Steven Truitt, Jonathan Larson"
+    year: 2024
+    kind: paper
+    licence: "CC-BY-4.0"
+    licence_url: "https://creativecommons.org/licenses/by/4.0/"
+    licence_statement: "https://arxiv.org/abs/2404.16130"
+    licence_checked: 2026-09-17
+    source: "https://arxiv.org/html/2404.16130"
+    fetch: arxiv-html
+    pin: text
+    arxiv_id: "2404.16130"
+    container: "article.ltx_document"
+    lead_section: "Abstract"
+    cards: shared
+    note: >-
+      Community summaries over a graph: the other answer to "retrieval that
+      decides what to read", and the second half of the Self-RAG pair.
+    sources:
+      2404.16130.html: 9b55458b5adc0e699787b3e8de8e3d9c7b69d4a53c97c9dd70cb0d693211f418

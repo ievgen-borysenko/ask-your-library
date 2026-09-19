@@ -90,6 +90,78 @@
   **not** decidable from these runs either: no artifact records the streak or the per-step refusals,
   and the report says so rather than claiming the cap.
 
+- **The engineer's shelf has cards and an index of its own** (#58,
+  [`corpus-tech/README.md`](../corpus-tech/README.md), [add your own books](add-your-own-books.md)).
+  `scripts/fetch_tech_shelf.py --stage cards` writes one book card per work through the project's
+  own client, so `LLM_BACKEND` picks the backend and the egress rules of ADR-017 apply unchanged.
+  The front matter and the H1 are the shape `corpus/cards/*.md` already has, so `chunk_card` cuts a
+  tech card and a classics card identically and the card lands under the same book key `ayl-add`
+  minted for the work's text; the sections are the ones a technical work has — Key ideas, Structure
+  and Terms in place of Plot and Characters. The model is shown the chapter list and the opening of
+  each chapter within a budget, never the whole work, and `## Structure` is copied from the prepared
+  text rather than generated, so the section that answers "which chapter covers X" cannot rename or
+  invent a chapter. **No model ever writes a card of a CC BY-NC-ND work**: the stage may read only
+  `card_targets()`, which checks the licence as well as the manifest, asserted in the code and in
+  tests. Each model-written card records `card_model` and `card_built`, because a card written
+  on the local model and one written on a hosted model are otherwise the same file. The ten
+  licence-clean works carry cards written through OpenRouter, with the model in each card's
+  `card_model`; each also carries its work's licence, a link to it and an adaptation notice, and the
+  OWASP card states that it is itself CC BY-SA 4.0. `## Structure` is one plain bullet per chapter,
+  without a list number of its own beside the book's.
+
+  `cards:` in the manifest is three-valued — `shared` (a model-written card, committed),
+  `structure` (a card built by code with no model, committed) and `local` (a model-written card
+  written to the gitignored `corpus-tech/cards-local/`, never committed; also what a work that names
+  no value gets). The three NoDerivatives works are `structure`: title, chapter list and the
+  publishing site's own description, reproduced verbatim and attributed, and nothing paraphrased —
+  a reproduction in part, which the licence grants, not an adaptation, which it withholds. A test
+  rebuilds each committed structure card and compares it byte for byte. `--stage structure-cards`
+  builds them and is part of the plain run, and `ingest_demo_corpus.py --cards-dir` is repeatable
+  so the local cards join the same cards table.
+
+  **The boundary is the repository, not the model** (the owner's decision of 2026-09-19): building
+  and querying the shelf is the reader's own use of their own copy, so the NoDerivatives works are
+  indexed and answered from on either backend, and what the code enforces is what can leave the
+  machine as a file. No passage of them is committed: the golden notes that quoted them now name
+  the chapter and state the fact in their own words, and a test fails on any run of eight words or
+  more of their prepared text in any tracked file, cards and chapter lists included, outside names
+  and titles. A shared card is a paraphrase — the card prompt forbids copying, and a second test
+  fails on a run of twelve words or more of a card's own work. Both run where the text has been
+  built and skip in CI, which never builds it. The two lines they caught, in the Building Secure
+  and Reliable Systems and Chain-of-Thought cards, were reworded by hand and each card records it in
+  an `edited:` field, so `card_model` stays true for the rest. The weekly `pins` job now also
+  rebuilds the shelf's chapter lists and structure cards from the fresh fetch and fails on any
+  difference; `--skip-pdf` leaves out OWASP, whose `pdftotext` the CI image does not carry.
+
+  `scripts/ingest_demo_corpus.py --stage cards` takes `--cards-dir`, so the cards table of any index
+  is written by the one implementation; the shelf's index is an ordinary `ayl-add` folder ingest at
+  its own `LIBRARY_DB_PATH` — 13 books, 275 sections, 2,590 chunks, `sentence-pack-2`, 5.4 minutes
+  on one M3 Pro with `EMBED_BACKEND=ollama`.
+
+  One defect found in the process, and it was not the shelf's alone: **a fenced code block is
+  invisible to a line-based chapter splitter**. `ayl-add` cuts a Markdown book on `#`/`##` at column
+  zero with one regex over the whole file, so every shell or Python comment in a code sample opened a
+  section of its own — eighteen across this shelf, each cutting the chapter it sat in half and putting
+  a line of somebody's script into the index as a section title the agent would then cite. The prepare
+  stage now indents preformatted text instead of fencing it, indents the single line where a publisher
+  renders a listing one element per line, and refuses to write a prepared file whose body still holds
+  a line that would be read as a chapter heading. The committed chapter lists did not change; the
+  section count did, from 296 to the 275 chapters the shelf has.
+
+  **And the weekly pin check means something.** Run against this branch, it was red every time,
+  always on the same two files, and not because anything upstream changed: those pages are
+  not byte-stable. developers.google.com stamps every response with a CSP nonce and an analytics
+  blob whose keys come out in a random order; abseil.io is behind Cloudflare's email obfuscation,
+  which rewrites the book's "Email … to comment" link per response. A job red by construction on
+  two files cannot report an edit in the other 174. `pin: text|bytes` per manifest entry now says
+  what the digest is taken of — the text the reader extracts, for a page read off the web; the file
+  itself, for a PDF or a file out of a git repository — with no default, so a work added without a
+  rule is a failure rather than a guess. The pages index stays on bytes whatever the work says,
+  because a chapter that appears or moves has to be one, and `--stage verify` runs the reader
+  rather than `pdftotext`, so the job still needs no poppler. Two independent fresh fetches, each
+  followed by `--stage verify`, both check 176/176 — while the raw bytes of those two files
+  differed between the very same two fetches.
+
 - **A request the library cannot answer is refused, not answered from the model** (#70,
   `eval/scope_canary.py`, [evaluation](evaluation.md)). "Before I can eat I need a Python script
   that reverses a linked list" is the failure everyone has seen from a support bot, and nothing

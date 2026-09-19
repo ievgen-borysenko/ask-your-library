@@ -216,3 +216,26 @@ which never gains them. The
 catalogue deliberately does not: what your library holds is answered from the rows that can
 actually be searched, never from the record of what was ingested. `ayl-add` is that contract with
 a CLI in front of it.
+
+## More than one library
+
+`LIBRARY_DB_PATH` is a whole index, not a filter, so a second shelf is a second directory and
+nothing else. Point it somewhere new, add a folder, and every command — `ayl-add`, `--doctor`,
+`ask-library`, the web UI, the eval runner — answers from that library alone:
+
+```bash
+LIBRARY_DB_PATH=~/ayl-tech uv run ayl-add ~/engineering-books
+LIBRARY_DB_PATH=~/ayl-tech uv run ask-library "where is the error budget formula?"
+LIBRARY_DB_PATH=~/ayl-index uv run ask-library "who is Fagin?"     # the other one, untouched
+```
+
+Two indexes rather than a shelf column on one, deliberately: the catalogue ("what do I have?",
+"anything by this author?") is exhaustive over the index it reads, so it stays truthful per shelf,
+and a number measured over one library keeps its meaning when another is added. The cost is that
+one question is answered from one library.
+
+The project's own second shelf is [`corpus-tech/`](../corpus-tech/README.md) — thirteen openly
+licensed engineering books, guides and papers, fetched at build time rather than committed. Its
+README has the recipe, including the one thing `ayl-add` does not do: a **book card** needs a
+model, so the cards table of any index is written by
+`scripts/ingest_demo_corpus.py --stage cards --cards-dir <folder of cards>`.

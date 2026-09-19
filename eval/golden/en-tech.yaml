@@ -1,0 +1,292 @@
+# The engineer's shelf (#58): thirteen questions over the second demo corpus,
+# the one built by scripts/fetch_tech_shelf.py and indexed into an index of its
+# own (LIBRARY_DB_PATH). The classics sets are measured over a different index
+# and are not comparable with this one item by item.
+#
+# Verification levels are the ones en-demo.yaml uses:
+#   Reader-verified = the golden author has read the work and checked the notes.
+#   Text-verified   = checked against the prepared text by an AI session, no reader.
+#   PROPOSED        = awaiting the reader's verdict; the item is kept for its scenario.
+# EVERY item here is PROPOSED: the facts were checked against
+# corpus-tech/prepared/<id>.md and the committed chapter lists in corpus-tech/toc/,
+# and one local pre-run (2026-09-18, recorded in the items' notes) was read to find
+# items that were wrong as written. No verdict is recorded yet; those come from the
+# reader, after a run over the index this shelf is meant to be measured on.
+#
+# That index: the full text of all thirteen works, the ten `shared` cards
+# (model-written, committed in corpus-tech/cards/), and a structure card for each
+# of the three CC BY-NC-ND works — title, chapter list and the publishing site's
+# own description, no summary. The pre-run had one card on the shelf, not these.
+#
+# Nothing of the three CC BY-NC-ND works is quoted in this file: their licence
+# grants reproduction but this repository keeps its own files free of their text
+# (a test enforces it). For those items the notes name the chapter and state the
+# fact in this file's own words; the prepared text is where a reader checks it.
+# The other ten works are quoted where a quote is what makes a note checkable.
+questions:
+- id: t01-sre-error-budget-formula
+  question: How do you actually work out a service's error budget once the availability
+    target is set? I remember it being almost embarrassingly simple.
+  type: answer
+  expected_books:
+  - Site Reliability Engineering
+  - The Site Reliability Workbook
+  expected_facts:
+  - minus
+  notes: 'PROPOSED 2026-09-17, needs the reader''s verdict; facts text-verified against
+    corpus-tech/prepared/sre-book.md. In chapter "3. Embracing Risk" the budget is the
+    availability target subtracted from one, illustrated with a four-nines service. The
+    Workbook gives the same subtraction, with a three-nines SLO as its example, in
+    "Appendix B. Example Error Budget Policy".
+
+    CORRECTED after the first local run of 2026-09-18, which answered it from the Workbook
+    and was scored FAIL. The item was wrong, not the answer: this note always said that
+    naming the Workbook instead is not a failure of retrieval and that only naming neither
+    is, and `expected_books` listed one book, so the two halves of the item contradicted
+    each other. Both books are now expected, either of which passes. The numbers left
+    `expected_facts` for the same reason — the two books work the same formula through
+    different examples (99.99%/0.01% in the 2016 book, 99.9%/0.1% in the Workbook), so a
+    numeric fact would score which book was retrieved rather than whether the formula was
+    given. What is left is the subtraction itself, which both books state and which no
+    non-answer contains; the numbers are in this note, for the reader''s manual check.'
+
+- id: t02-toil-clarify
+  question: I'm after the one about toil — the chapter that defines what counts as toil
+    and argues about how much of an engineer's time may go into it. Which of my books was
+    that?
+  type: identify
+  expected_behavior: clarify
+  expected_books:
+  - Site Reliability Engineering
+  - The Site Reliability Workbook
+  expected_facts: []
+  notes: 'PROPOSED 2026-09-17. THE question that carries the demo (the owner''s decision of
+    2026-09-17). Both works have a chapter with that exact title, and the committed chapter
+    lists say so: corpus-tech/toc/sre-book.json has "5. Eliminating Toil" and
+    corpus-tech/toc/sre-workbook.json has "6. Eliminating Toil". Picking one without asking
+    is a fail however good the answer is; the pass is a question naming both candidates
+    ("the 2016 book or the Workbook?"). expected_facts is empty on purpose: the two
+    candidates would contradict each other. Neither book has a model-written card (CC
+    BY-NC-ND); each has a structure card whose chapter list carries its "Eliminating Toil",
+    so the card side can now surface both candidates without anything having been summarised.
+    What this item measures is whether the clarify is built from that pair: two books with
+    the same chapter title, found through the text hits and the two chapter lists.
+
+    First local run 2026-09-18 (qwen2.5:14b, text-only index, one card on the shelf): no
+    clarify, and NOT because the clarify was declined — `clarify_candidates` was EMPTY.
+    All four evidence items came from one chapter of one book, "5. Eliminating Toil" of the
+    2016 book, quoted verbatim and correctly; the Workbook''s "6. Eliminating Toil" never
+    entered the candidate set at all. The first step went straight to a chapter read in that
+    one book, so nothing in the run ever held two books to ask about. The item is left
+    exactly as written — there is nothing here to fix in the question, and the measurement
+    is about the shelf''s retrieval and the missing cards, which is what it was written to
+    measure. That run had no structure cards; the next one does, and is the one to read.'
+
+- id: t03-twelve-factor-config
+  question: Which of the twelve factors is the one about configuration, and what does it
+    actually demand?
+  type: answer
+  expected_books:
+  - The Twelve-Factor App
+  expected_facts:
+  - III. Config
+  - environment variables
+  notes: 'PROPOSED 2026-09-17; facts text-verified against corpus-tech/prepared/twelve-factor-app.md.
+    Factor III, "Store config in the environment": "The twelve-factor app stores config in
+    environment variables". A good answer keeps the litmus test ("could the codebase be made
+    open source at any moment, without compromising any credentials") and does not confuse
+    this with the Rails-style grouped "environments" the same chapter argues against.'
+
+- id: t04-react-reflexion-clarify
+  question: I'm looking for the paper where the model writes a thought, then calls a tool,
+    then reads the result, and goes round again in a loop. Which one is it?
+  type: identify
+  expected_behavior: clarify
+  expected_books:
+  - ReAct
+  - Reflexion
+  expected_facts: []
+  notes: 'PROPOSED 2026-09-17. The second clarify pair. ReAct is the interleaved
+    thought-action-observation loop ("generate both reasoning traces and task-specific
+    actions in an interleaved manner"); Reflexion wraps a loop of its own around a trial,
+    writing verbal self-reflection into memory before the next attempt — and it is built on
+    ReAct, so the description fits both. The pass is a question that separates them
+    (something like "within one attempt, or learning between attempts?"); a confident single
+    pick is a fail. Both papers have model-written cards, unlike t02, so this pair also says whether the
+    clarify path behaves differently when cards are there.
+
+    First local run 2026-09-18: no clarify and no answer. The run stopped after one step on
+    a single piece of evidence — one sentence from ReAct''s "Appendix A Additional Results"
+    about human-in-the-loop interaction — and then said that evidence does not describe the
+    loop, which is true of that sentence and false of the paper. Reflexion never appeared,
+    so `clarify_candidates` was empty here too. Neither paper had a card in that run, which
+    is precisely the condition this item was written to be measured WITHOUT: re-run it once
+    the cards are built before drawing any conclusion about the clarify path.'
+
+- id: t05-owasp-llm01
+  question: In the OWASP top ten for LLM applications, what is number one, and what does it
+    cover?
+  type: answer
+  expected_books:
+  - OWASP Top 10 for LLM Applications 2025
+  expected_facts:
+  - LLM01
+  - Prompt Injection
+  notes: 'PROPOSED 2026-09-17; facts text-verified against corpus-tech/prepared/owasp-llm-top-10-2025.md,
+    chapter "LLM01:2025 Prompt Injection": "A Prompt Injection Vulnerability occurs when
+    user prompts alter the LLM''s behavior or output in unintended ways." The 2025 edition
+    is pinned in corpus-tech/manifest.yaml; a 2026 edition exists upstream and would be a
+    different document with different numbering, which is what the checksum is for.
+
+    First local run 2026-09-18: ERROR, not a verdict. Ollama aborted a call with "prediction
+    aborted, token repeat limit reached" after seven calls — the local model looped on its
+    own output. Nothing about the item was measured.'
+
+- id: t06-rules-of-ml-first-model
+  question: There is a numbered rule about what your very first machine-learned model should
+    be like. Which number is it, and what else does it tell you to get right?
+  type: answer
+  expected_books:
+  - Rules of Machine Learning
+  expected_facts:
+  # Quoted: an unquoted "#" opens a YAML comment and the fact would be "Rule".
+  - "Rule #4"
+  - infrastructure
+  notes: 'PROPOSED 2026-09-17; facts text-verified against corpus-tech/prepared/rules-of-ml.md:
+    "Rule #4: Keep the first model simple and get the infrastructure right." The rules are
+    `<h4>`s inside the chapter "ML Phase I: Your First Pipeline", not chapters of their own,
+    so this item also measures whether a hit inside a long section is read closely enough to
+    give the number.'
+
+- id: t07-self-rag-reflection-tokens
+  question: How does Self-RAG decide whether to retrieve anything at all, and what are the
+    special tokens it emits called?
+  type: answer
+  expected_books:
+  - Self-RAG
+  expected_facts:
+  - reflection tokens
+  - critique
+  notes: 'PROPOSED 2026-09-17; facts text-verified against corpus-tech/prepared/self-rag.md:
+    the model "generates and reflects on retrieved passages and its own generations using
+    special tokens, called reflection tokens", which are "categorized into retrieval and
+    critique tokens". GraphRAG is the near miss here — the shelf holds both, and "retrieval
+    that decides what to read" describes both — so an answer that quotes GraphRAG is a
+    retrieval failure worth seeing.'
+
+- id: t08-bge-m3-three-modes
+  question: The bge-m3 paper claims the model does three kinds of retrieval at the same
+    time. Which three?
+  type: answer
+  expected_books:
+  - M3-Embedding
+  expected_facts:
+  - dense
+  - sparse
+  - multi-vector
+  notes: 'PROPOSED 2026-09-17; facts text-verified against corpus-tech/prepared/bge-m3.md:
+    "It can simultaneously accomplish the three common retrieval functionalities: dense
+    retrieval, multi-vector retrieval, and sparse retrieval." This is the model this
+    repository embeds with, so the reader can check the answer against the running system —
+    the point of having it on the shelf at all.'
+
+- id: t09-graphrag-community-summaries
+  question: What does GraphRAG build in advance, before any question is asked, and what does
+    it do with it when a broad question finally arrives?
+  type: answer
+  expected_books:
+  - Graph RAG
+  expected_facts:
+  - community summaries
+  - map-reduce
+  notes: 'PROPOSED 2026-09-17; facts text-verified against corpus-tech/prepared/graphrag.md:
+    the index is built "first, to derive an entity knowledge graph from the source documents,
+    then to pregenerate community summaries for all groups of closely related entities", and
+    answering is "map-reduce processing of community summaries". expected_books is the
+    substring "Graph RAG" because the work''s title is "From Local to Global: A Graph RAG
+    Approach to Query-Focused Summarization".'
+
+- id: t10-refusal-data-intensive
+  question: What does Designing Data-Intensive Applications say about the difference between
+    logical and physical replication logs?
+  type: refusal
+  expected_books: []
+  expected_facts: []
+  notes: 'PROPOSED 2026-09-17. The book everyone in this audience owns and this shelf does
+    not have (the owner''s decision of 2026-09-17). The near miss is strong and deliberate:
+    the shelf holds four Google engineering books full of replication, consensus and data
+    integrity, so retrieval will return confident-looking hits from "Managing Critical State"
+    and "Data Integrity". The agent must say it cannot answer from this library and must not
+    narrate Kleppmann from model memory. Scored by refusal markers.'
+
+- id: t11-oncall-across-the-shelf
+  question: Which books on this shelf have something to say about being on call, and do they
+    say different things?
+  type: aggregation
+  expected_books:
+  - Site Reliability Engineering
+  - The Site Reliability Workbook
+  expected_facts:
+  - Being On-Call
+  notes: 'PROPOSED 2026-09-17. Both works carry a chapter of their own on the subject —
+    "11. Being On-Call" in corpus-tech/toc/sre-book.json, "8. On-Call" in
+    corpus-tech/toc/sre-workbook.json — and the 2018 Workbook deliberately revisits the 2016
+    book, which is what makes "do they say different things" answerable rather than a
+    rhetorical question. Software Engineering at Google is the acceptable third name; a
+    paper named here is a failure. Both expected books are CC BY-NC-ND: their cards are
+    structure cards, which list the on-call chapters but say nothing about them, so what the
+    two books SAY has to come from the text hits — this is the aggregation case with the
+    card side reduced to chapter lists.'
+
+- id: t12-catalog-by-betsy-beyer
+  question: Do I have anything by Betsy Beyer on this shelf?
+  type: catalog
+  expected_op: by_author
+  expected_resolved: true
+  expected_count: 3
+  expected_books:
+  - Site Reliability Engineering — Betsy Beyer, Chris Jones, Jennifer Petoff, Niall Richard
+    Murphy (eds.)
+  - The Site Reliability Workbook — Betsy Beyer, Niall Richard Murphy, David K. Rensin, Kent
+    Kawahara, Stephen Thorne (eds.)
+  - Building Secure and Reliable Systems — Heather Adkins, Betsy Beyer, Paul Blankinship,
+    Piotr Lewandowski, Ana Oprea, Adam Stubblefield
+  expected_total: 13
+  expected_facts: []
+  notes: 'PROPOSED 2026-09-17. Reworded from "do I have anything by Google?", which asked
+    about a publisher: corpus-tech/manifest.yaml credits every work to the people who wrote
+    or edited it, so no author called Google exists and the only honest expectation was that
+    the catalogue resolve nothing — a catalogue question that measures an empty answer.
+    Betsy Beyer is the real version of the same question: she is an editor of the SRE book
+    and of the Workbook and a co-author of Building Secure and Reliable Systems, and her
+    name is spelled identically in all three author fields (verified against the manifest;
+    nothing had to be normalised). The three expected_books are those manifest keys in full,
+    because a catalogue item is scored on set equality against the keys the code listed.
+    What this item really measures is the contained-name path in catalog.py: each author
+    field holds several names in one string, so "Betsy Beyer" resolves by being contained in
+    it as whole words, not by equalling it. Software Engineering at Google is the near miss
+    — same house, same series, and she is not on it.'
+
+- id: t13-beyonce-rule
+  question: There is a testing rule at Google named after a pop song. What is it called, and
+    what does it actually mean for a test?
+  type: answer
+  expected_books:
+  - Software Engineering at Google
+  expected_facts:
+  - Beyoncé Rule
+  - CI
+  notes: 'PROPOSED 2026-09-17; facts text-verified against corpus-tech/prepared/swe-at-google.md,
+    chapter "Testing Overview", which names the rule after the song and states it as: anything
+    you want kept working needs a test in continuous integration. The meaning is the half that
+    matters: a behaviour no CI test covers is not protected, whatever else checks it. Third of
+    the three CC BY-NC-ND works, whose structure card lists "Testing Overview" and nothing of
+    what it says, so this is the item that says whether a quote question works over text.
+
+    First local run 2026-09-18: refused in one second, with no search at all — the planner''s
+    out-of-scope gate (#70) read it as a request the library cannot supply and routed it to
+    `refusal`. It is not: the answer is in a book on this shelf, in the chapter "Testing
+    Overview". The question is left exactly as written, because it is phrased the way a
+    reader phrases it and rewording it would hide the finding rather than measure it. What
+    this item now also measures is the gate''s false-positive rate on a real book question
+    that happens to sound like trivia.'
