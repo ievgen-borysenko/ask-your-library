@@ -11,8 +11,8 @@
 #     instead of a guess.
 #   fetch     the shape of the source, one of: html-chapters, git-markdown,
 #             git-html, pdf, arxiv-html, arxiv-pdf (see the script's docstring).
-#   cards     what kind of book card this work gets, and where it may live —
-#             one of three values, with no fourth:
+#   cards     which book card the REPOSITORY carries for this work — one of
+#             three values, with no fourth:
 #               shared     a full card, written by a model at `--stage cards`
 #                          and committed to corpus-tech/cards/. For the works
 #                          whose licence allows a derivative to be shared.
@@ -24,13 +24,23 @@
 #                          in part, which is what CC BY-NC-ND grants, and never
 #                          a summary, which is the derivative it withholds. The
 #                          three CC BY-NC-ND works are `structure`.
-#               local      a full card, written by a model at `--stage cards`
-#                          into the gitignored corpus-tech/cards-local/ and
-#                          never committed: a card the reader may build for
-#                          themself but the repository may not share. A work
-#                          that names no value is treated as `local`.
-#             Whatever this says, a work whose licence is NoDerivatives never
-#             reaches a model (`card_targets` in the script).
+#               local      no committed card; a full card, written by a model
+#                          at `--stage cards` into $AYL_HOME/cards/tech/,
+#                          outside any checkout: a card the reader may build
+#                          for themself but the repository may not share. A
+#                          work that names no value is treated as `local`.
+#   local_card
+#             `structure` works only, default false: true means the reader's
+#             machine ALSO builds a full model-written card at `--stage cards`,
+#             into $AYL_HOME/cards/tech/ and never into the repository. The
+#             three CC BY-NC-ND works carry it: the licence lets a reader make
+#             an adaptation for themself (2(a)(1)(B)) and withholds sharing it.
+#             A second field rather than a fourth `cards:` value, because it is
+#             a second question: `cards:` says what is shipped, this says what
+#             is built on the reader's machine besides it.
+#             Whatever `cards:` says, a model-written card of a work whose
+#             licence is NoDerivatives is only ever written under AYL_HOME
+#             (`card_targets` and `card_dir` in the script).
 #   about / about_source / about_checked
 #             `structure` works only: the publisher's own one-paragraph
 #             description of the work, copied character for character (only
@@ -79,6 +89,7 @@ works:
     page_pattern: "^/sre-book/(?!table-of-contents/)[^/]+/$"
     container: "div#content"
     cards: structure
+    local_card: true
     about: >-
       Members of the SRE team explain how their engagement with the entire
       software lifecycle has enabled Google to build, deploy, monitor, and
@@ -156,6 +167,7 @@ works:
     page_pattern: "^/workbook/(?!table-of-contents/)[^/]+/$"
     container: "div#content"
     cards: structure
+    local_card: true
     about: >-
       The Site Reliability Workbook is the hands-on companion to the bestselling
       Site Reliability Engineering book and uses concrete examples to show how
@@ -224,6 +236,7 @@ works:
     page_pattern: "^(?:foreword|pr01|part[0-9]|ch[0-9]{2})\\.html$"
     container: "section"
     cards: structure
+    local_card: true
     about: >-
       The Software Engineering at Google book (“SWE Book”) is not about
       programming, per se, but about the engineering practices utilized at

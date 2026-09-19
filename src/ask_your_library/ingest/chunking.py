@@ -179,11 +179,31 @@ def _split_long(section_text: str) -> list[str]:
     return parts
 
 
+# The suffix that keeps a local card's rows apart from the committed card of the
+# same book (see `card_note`).
+LOCAL_CARD_NOTE_SUFFIX = "@local"
+
+
+def card_note(path: Path, meta: dict) -> str:
+    """The row key (`note`, and the head of every `chunk_id`) of a card file.
+
+    The file name, except for a card whose front matter says `card_kind: local`:
+    a card built on the reader's machine may sit beside a committed card of the
+    same book under the same file name — the engineer's shelf's NoDerivatives
+    works have a committed structure card AND a model-written one under
+    AYL_HOME (#58) — and two cards under one note would share chunk ids, which
+    retrieval fuses hits on. Both keep the same H1, so they stay one book."""
+    note = path.stem
+    if meta.get("card_kind") == "local":
+        note += LOCAL_CARD_NOTE_SUFFIX
+    return note
+
+
 def chunk_card(path: Path) -> list[Chunk]:
     """Markdown card -> one chunk per "## section" (long sections split)."""
     raw = path.read_text(encoding="utf-8")
     meta, body = parse_frontmatter(raw)
-    note = path.stem
+    note = card_note(path, meta)
     m = re.search(r"^# (.+)$", body, re.M)
     book = m.group(1).strip() if m else note
     source = meta.get("source", "")

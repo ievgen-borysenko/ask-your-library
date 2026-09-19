@@ -23,8 +23,9 @@ uv run scripts/fetch_tech_shelf.py --stage verify     # re-hash the files agains
 What is committed is this file, `manifest.yaml`, `toc/` — the chapter list of each work, which is
 what a reviewer reads to see which edition a golden question was written against, and what a
 drifted pin is diffed against — and `cards/`, which holds no passage of any work beyond its title,
-its chapter list and, for the three NoDerivatives works, its publishing site's own description,
-quoted. `raw/`, `prepared/` and `cards-local/` are gitignored.
+its chapter list, a shared card's short quotations attributed to a chapter and, for the three
+NoDerivatives works, its publishing site's own description, quoted. `raw/` and `prepared/` are gitignored; the cards a reader may build only for themself are
+not in the checkout at all, but under [`AYL_HOME`](#local-cards-and-ayl_home).
 
 **The rule behind that split: the repository ships the generator, never the derivative.** Anything
 a work's licence lets anybody share is committed; anything it lets a reader make only for
@@ -38,7 +39,8 @@ it) processes passages of the reader's own copy on the reader's behalf — no wo
 adaptation of one, is shared with anybody by that. So the NoDerivatives works are indexed and
 answered from like every other book, on either backend, and the only thing the code enforces
 about them is what can leave the reader's machine *as a file*: no model-written card of one is
-ever produced (`card_targets()`), and no passage of one is committed. That last one is a check
+ever written inside the repository tree (`card_targets()` and `card_dir()`, which send it to
+`AYL_HOME` or nowhere), and no passage of one is committed. That last one is a check
 on the builder's machine, not in CI: a test compares every tracked file, the chapter lists and
 cards included, with the prepared text of the three works and fails on any run of eight words or
 more that is not a name, a title or a chapter title — and it can only run where that text has been
@@ -50,9 +52,9 @@ any other: [`docs/privacy-and-threat-model.md`](../docs/privacy-and-threat-model
 
 | Work | Licence | Text | Card (`cards:`) |
 |---|---|---|---|
-| Site Reliability Engineering (2016) | CC BY-NC-ND 4.0 | built | **structure**, committed |
-| The Site Reliability Workbook (2018) | CC BY-NC-ND 4.0 | built | **structure**, committed |
-| Software Engineering at Google (2020) | CC BY-NC-ND 4.0 | built | **structure**, committed |
+| Site Reliability Engineering (2016) | CC BY-NC-ND 4.0 | built | **structure**, committed; + local |
+| The Site Reliability Workbook (2018) | CC BY-NC-ND 4.0 | built | **structure**, committed; + local |
+| Software Engineering at Google (2020) | CC BY-NC-ND 4.0 | built | **structure**, committed; + local |
 | Building Secure and Reliable Systems (2020) | CC BY 4.0 | built | shared, committed |
 | The Twelve-Factor App | MIT | built | shared, committed |
 | OWASP Top 10 for LLM Applications 2025 | CC BY-SA 4.0 | built | shared, committed, **share-alike** |
@@ -65,7 +67,8 @@ any other: [`docs/privacy-and-threat-model.md`](../docs/privacy-and-threat-model
 | GraphRAG (arXiv 2404.16130) | CC BY 4.0 | built | shared, committed |
 
 *Built* means fetched from the publisher and converted on your machine by the script, never
-committed.
+committed. *+ local* means a model-written card is also built on your machine, under `AYL_HOME`
+(`local_card: true`).
 
 Each entry in `manifest.yaml` carries the licence identifier, the licence text it names, **the page
 where the work states it**, and the date that page was read. Every one of the thirteen was checked
@@ -75,11 +78,13 @@ sre.google/abseil.io books and for Rules of Machine Learning, and its own second
 PDF. A claim that could not be confirmed there would be marked `licence_unverified` rather than
 guessed; none of the thirteen is.
 
-**The three CC BY-NC-ND works get a structure card and never a summary.** A summary is written
-*from* the book — a derivative work — and NoDerivatives withholds exactly the right to distribute
-one. What the licence does grant is reproducing the work, in whole or in part, so their card
-reproduces three parts of it and adds nothing: the title, the chapter list and the publishing
-site's own description, quoted and attributed (see [Book cards](#book-cards)). The text itself is
+**The three CC BY-NC-ND works get a committed structure card, and a summary only on your
+machine.** A summary is written *from* the book — a derivative work — and NoDerivatives withholds
+exactly the right to distribute one, while letting a reader make one for themself (section
+2(a)(1)(B)). What the licence does grant for sharing is reproducing the work, in whole or in part,
+so their committed card reproduces three parts of it and adds nothing: the title, the chapter list
+and the publishing site's own description, quoted and attributed (see [Book cards](#book-cards)).
+Their model-written card is written under `AYL_HOME`, outside the checkout, and never committed. The text itself is
 fetched, converted and indexed, so they answer quote questions ("where is the error-budget
 formula?").
 
@@ -99,8 +104,9 @@ A **book card** is one Markdown page per work: what the work is, its key ideas w
 each lives in, its chapter list, the vocabulary it uses in its own way, and the concerns that run
 across it. It is the second thing the agent searches — the full text answers "what does this book
 say about X", the card answers "which of my books is this" and "which chapter covers X", and the
-catalogue is built from the cards. A card holds no passage of the work, which is why the cards
-are the one part of this shelf that **is** committed — except a `local` one, below.
+catalogue is built from the cards. A committed card holds no passage of the work beyond short
+quotations marked as such, which is why the cards are the one part of this shelf that **is**
+committed — except a local one, below.
 
 ```sh
 uv run scripts/fetch_tech_shelf.py --stage cards                # every work that may have one
@@ -108,13 +114,20 @@ uv run scripts/fetch_tech_shelf.py --stage cards --work twelve  # just that one
 uv run scripts/fetch_tech_shelf.py --stage cards --force        # rebuild cards already written
 ```
 
-**Three kinds of card, and the manifest's `cards:` says which one a work gets:**
+**Three kinds of card. The manifest's `cards:` says which one the repository carries, and
+`local_card:` whether the reader's machine builds a model-written card besides it:**
 
-| `cards:` | Written by | Where | Committed |
+| Manifest | Written by | Where | Committed |
 |---|---|---|---|
-| `shared` | a model, at `--stage cards` | `cards/` | yes — the licence lets a summary be shared |
-| `structure` | code, at `--stage structure-cards`, no model | `cards/` | yes — a verbatim reproduction in part |
-| `local` | a model, at `--stage cards` | `cards-local/` | **never** — gitignored |
+| `cards: shared` | a model, at `--stage cards` | `cards/` | yes — the licence lets a summary be shared |
+| `cards: structure` | code, at `--stage structure-cards`, no model | `cards/` | yes — a verbatim reproduction in part |
+| `cards: local` | a model, at `--stage cards` | `$AYL_HOME/cards/tech/` | **never** — outside the checkout |
+| `cards: structure` + `local_card: true` | both of the two above | both | the structure card only |
+
+`local_card` is a second field rather than a fourth `cards:` value because it answers a second
+question: `cards:` is what the repository ships for a work, and `local_card` is what the reader's
+machine builds besides it. It is valid only beside `structure` — a `shared` work's model card is the
+committed one, a `local` work's is local already — and the script refuses it anywhere else.
 
 A **structure card** is what the three CC BY-NC-ND works get: `## About`, the description of the
 work on the site that publishes it online, quoted character for character with the page it came
@@ -128,16 +141,43 @@ stage reads only committed files, so it is part of the plain run, and a test reb
 committed structure card and compares it byte for byte.
 
 A **local card** is for a work whose licence lets a reader make a summary for themself but not
-share it. No work on this shelf is `local` today; it is the value a work gets when it names none,
-because a card nobody decided may be shared is not one to commit. The stage writes it to
-`cards-local/`, which `.gitignore` excludes, and nothing else: which folder a card goes to is
-decided in one function, and it cannot send a `local` card to `cards/`.
+share it: the three NoDerivatives works (`local_card: true`), and any work that is `cards: local` —
+the value a work gets when it names none, because a card nobody decided may be shared is not one to
+commit. No work is `cards: local` today. A local card says `card_kind: local` in its front matter;
+its prompt asks for paraphrase only when the work is NoDerivatives.
 
-**No model ever writes a card of a NoDerivatives work, whatever its `cards:` says.** The model
-stage may only read the list `card_targets()` returns, and that list checks the licence as well as
-the manifest value — so a mislabelled ND work is still skipped before its text is read. The rule,
-the belt-and-braces check, and the committed ND cards being structure cards and nothing else are
-all tests (`tests/test_tech_shelf.py`).
+**No model-written card of a NoDerivatives work is ever written inside the repository tree,
+whatever its `cards:` says.** The model stage may only read the list `card_targets()` returns, which
+checks the licence as well as the manifest value: an ND work is offered only when the manifest asks
+for a local card, so one mislabelled `shared` is skipped before its text is read. Which folder a
+card goes to is decided in one function, `card_dir()`, which sends every card of an ND work, and
+every `local` card, to `AYL_HOME` — and that folder is refused when it resolves inside a git work
+tree. The rule, the belt-and-braces check, the refusal and the committed ND cards being structure
+cards and nothing else are all tests (`tests/test_tech_shelf.py`, `tests/test_home.py`).
+
+### Local cards and AYL_HOME
+
+`AYL_HOME` is the reader's own folder for what is built on this machine and never shared. It
+defaults to `~/AskYourLibrary`, outside any checkout, and a local card of this shelf is
+`$AYL_HOME/cards/tech/<id>.md`. It is an environment variable, like `LIBRARY_DB_PATH`, and `.env`
+may set it. **It is never a folder inside the repository**: `.gitignore` is not a boundary — a
+`git add -f` walks through it — so the script checks the resolved path instead, and refuses to write
+a local card when `AYL_HOME` is inside any git work tree, this checkout or another. `AYL_HOME` is
+also where the private shelf of the reader's own books, their cards and their index will live
+(ADR-026, a later change); for now local cards are all it holds.
+
+Build the local cards (all of them, or `--work` one; a model is called, see below), then index
+them together with the committed ones:
+
+```sh
+uv run scripts/fetch_tech_shelf.py --stage cards --work "Site Reliability"
+LIBRARY_DB_PATH=~/ayl-tech uv run scripts/ingest_demo_corpus.py --stage cards \
+    --cards-dir corpus-tech/cards --cards-dir "${AYL_HOME:-$HOME/AskYourLibrary}/cards/tech"
+```
+
+The structure card and the local card of one work share a file name and a book key: they stay one
+book in the catalogue, and the local card's rows carry the key `<id>@local`, so the two never share
+a chunk id.
 
 This stage is the only one that calls a model, so it is asked for by name and is never part of
 `--stage all`. The call goes through the project's own client, so `LLM_BACKEND=ollama` writes the
@@ -164,7 +204,8 @@ The ten committed cards were written through OpenRouter with the model named in 
 `card_model`, before `LLM_REASONING` existed — so the settings that reproduce them are
 `LLM_BACKEND=openrouter ORCHESTRATOR_MODEL=anthropic/claude-sonnet-4.6 LLM_REASONING=provider`, not
 the hosted defaults of today. A model's reply is not byte-reproducible anyway; what those settings
-reproduce is the same model under the same prompt.
+reproduce is the same model under the same prompt — and they were written under the earlier,
+paraphrase-only prompt, before short attributed quotations were allowed (below).
 
 The licence lines are the notice a shared adaptation owes the work (CC BY 4.0 §3(a)): its licence,
 where it is, and that the card is a model-written summary rather than the work. A card of a
@@ -174,11 +215,17 @@ model-written card are derived rather than generated, so `--stage restamp-cards`
 the manifest and the chapter list without calling a model, and a test holds every committed card to
 exactly that.
 
-**A shared card is a paraphrase, and a hand edit says so.** The prompt forbids copying the work,
-and on the builder's machine a test compares each shared card with its work's prepared text and
-fails on any run of twelve words or more that is not a name, a title or a chapter title. Where a
-line slipped through anyway it is reworded by hand, never regenerated silently, and the card
-records it in its front matter, so that `card_model` stays a true account of who wrote the rest:
+**A shared card is a paraphrase with at most short, attributed quotations, and a hand edit says
+so.** The prompt lets a card of a work that allows adaptations quote sparingly — one sentence at
+most, in double quotation marks, followed at once by the chapter it comes from in parentheses,
+`"…" (3. Embracing Risk)` — and asks for everything else in the card's own words; for a
+NoDerivatives work's local card it forbids quoting at all. On the builder's machine a test compares
+each shared card with its work's prepared text and fails on any run of twelve words or more that is
+not a name, a title, a chapter title or inside such an attributed quotation — the same words outside
+the quotation marks, or quoted with no chapter after them, still fail. The NoDerivatives rule is not
+relaxed by this: the eight-word test over every tracked file exempts no quotation. Where a line
+slipped through anyway it is reworded by hand, never regenerated silently, and the card records it
+in its front matter, so that `card_model` stays a true account of who wrote the rest:
 
 ```yaml
 edited: "one Terms line (Understandability) reworded by hand to drop a verbatim phrase of the book, 2026-09-19"
@@ -274,7 +321,7 @@ uv run scripts/fetch_tech_shelf.py --stage cards                    # the cards
 export LIBRARY_DB_PATH=~/ayl-tech
 uv run ayl-add corpus-tech/prepared                                 # index the prepared folder
 uv run scripts/ingest_demo_corpus.py --stage cards --cards-dir corpus-tech/cards \
-    --cards-dir corpus-tech/cards-local                             # local cards, if any
+    --cards-dir "${AYL_HOME:-$HOME/AskYourLibrary}/cards/tech"      # + local cards, if any
 uv run ayl-add --doctor                                             # ledger vs index, no writes
 uv run ask-library "where is the error budget formula?"
 ```
@@ -284,8 +331,9 @@ the YAML front matter the prepare stage writes, so nothing about the shelf is sp
 [add your own books](../docs/add-your-own-books.md) for what it does with them, and
 `--dry-run` for what it would change before it embeds anything. It does not write a cards table (a
 card needs a model), which is what the second command is for: `--cards-dir` points the classics'
-cards stage at this shelf's cards — repeat it to add the cards built only on this machine; a folder
-that does not exist is empty — and `LIBRARY_DB_PATH` decides which index they land in.
+cards stage at this shelf's cards — repeat it to add the cards built only on this machine, under
+`AYL_HOME`; a folder that does not exist is empty — and `LIBRARY_DB_PATH` decides which index they
+land in.
 
 The whole shelf, measured on one M3 Pro / 36 GB with `EMBED_BACKEND=ollama` (bge-m3, 1024 dims):
 **13 books, 275 sections, 2,590 chunks in 5.4 minutes**, chunker `sentence-pack-2`, with the

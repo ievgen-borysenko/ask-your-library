@@ -14,12 +14,14 @@ file that was fetched to build it — taken per the work's `pin:`, which is
 `bytes` for a PDF or a file out of a git repository and `text` for a page read
 off the web, because two of these publishers do not serve the same bytes twice
 (see `digest_of`). Three of the works are CC BY-NC-ND: they are
-fetched as text and never get a generated book card, because a card is a
-derivative work and ND forbids distributing one. They get a structure card
-instead — title, chapter list and the publisher's own description, reproduced
-verbatim and built by code (`cards: structure` in the manifest) — and
-`card_targets` below, which never returns a NoDerivatives work, is the only list
-a model-card stage may read.
+fetched as text, and their committed card is a structure card — title, chapter
+list and the publisher's own description, reproduced verbatim and built by code
+(`cards: structure` in the manifest) — because a model-written card is a
+derivative and ND forbids distributing one. The licence does let a reader make
+one for themself (section 2(a)(1)(B)), so they also get a model-written card
+(`local_card: true`) that is written only under AYL_HOME, outside any checkout:
+`card_dir` sends every model-written card of a NoDerivatives work there, and
+`ask_your_library.home.private_dir` refuses a folder inside a git work tree.
 
 Stages (all cached in corpus-tech/raw/, safe to re-run):
   uv run scripts/fetch_tech_shelf.py --stage fetch      # download, nothing else
@@ -33,17 +35,19 @@ Stages (all cached in corpus-tech/raw/, safe to re-run):
 `--stage cards` is the one stage that calls a model, so it is asked for by name
 and never runs as part of `--stage all`:
 
-  uv run scripts/fetch_tech_shelf.py --stage cards                 # the ten works that may have one
+  uv run scripts/fetch_tech_shelf.py --stage cards                 # every work that may have one
   uv run scripts/fetch_tech_shelf.py --stage cards --work twelve   # one of them
   uv run scripts/fetch_tech_shelf.py --stage cards --force         # rebuild cards already written
 
-It writes corpus-tech/cards/<id>.md for a `shared` work and the gitignored
-corpus-tech/cards-local/<id>.md for a `local` one, through the repository's own client
+It writes corpus-tech/cards/<id>.md for a `shared` work and
+$AYL_HOME/cards/tech/<id>.md for a local one (a `cards: local` work, and a
+`structure` work with `local_card: true`), through the repository's own client
 (`ask_your_library.llm.llm_invoke`), so LLM_BACKEND=ollama|openrouter picks the
 backend and the egress and observer rules of ADR-017 apply unchanged, and it
 records in each card which backend and model wrote it. The cards are indexed
 into the shelf's own index with
-`scripts/ingest_demo_corpus.py --stage cards --cards-dir corpus-tech/cards`.
+`scripts/ingest_demo_corpus.py --stage cards --cards-dir corpus-tech/cards
+--cards-dir ~/AskYourLibrary/cards/tech`.
 
 Every other stage is deliberately separate from `scripts/ingest_demo_corpus.py`:
 that script owns the classics index and embeds; these ones write files and
@@ -126,10 +130,14 @@ def works(manifest: dict) -> list[dict]:
     return manifest["works"]
 
 
-# What `cards:` in the manifest may say, and nothing else (see its header).
+# What `cards:` in the manifest may say, and nothing else (see its header). It
+# names the card the REPOSITORY carries for a work, if any.
 CARD_POLICIES = ("shared", "structure", "local")
-# The policies whose card a model writes. `structure` is not one of them.
+# The policies whose card a model writes. `structure` is not one of them: a
+# structure work's model-written card, if it has one, is `local_card: true`.
 MODEL_CARD_POLICIES = ("shared", "local")
+# Where a local card of this shelf goes under AYL_HOME: $AYL_HOME/cards/tech/.
+SHELF_NAME = "tech"
 
 
 def card_policy(work: dict) -> str:
@@ -142,6 +150,25 @@ def card_policy(work: dict) -> str:
         raise ValueError(f"{work['id']}: cards is {policy!r}, not one of "
                          f"{', '.join(CARD_POLICIES)}")
     return policy
+
+
+def local_card(work: dict) -> bool:
+    """`local_card: true`: a `structure` work that ALSO gets a model-written card,
+    built on the reader's machine for the reader and never committed.
+
+    A second field rather than a fourth `cards:` value, because it answers a
+    second question. `cards:` is what the repository ships for the work (plan
+    of 2026-09-18, section 3.1: shared, structure or local); this is whether the
+    reader's machine builds a model card besides it (section 2's "built" tier).
+    It is only meaningful beside `structure`: a `shared` work's model card is the
+    committed one, and a `local` work's model card is local already."""
+    value = work.get("local_card", False)
+    if not isinstance(value, bool):
+        raise ValueError(f"{work['id']}: local_card is {value!r}, not true or false")
+    if value and card_policy(work) != "structure":
+        raise ValueError(f"{work['id']}: local_card belongs beside cards: structure, "
+                         f"not cards: {card_policy(work)}")
+    return value
 
 
 # The shape of a licence identifier in the manifest: SPDX-style, one token, no
@@ -168,18 +195,34 @@ def share_alike(work: dict) -> bool:
     return "SA" in licence_terms(work)
 
 
+def wants_model_card(work: dict) -> bool:
+    """Whether the manifest asks for a model-written card of this work at all."""
+    return card_policy(work) in MODEL_CARD_POLICIES or local_card(work)
+
+
+def model_card_is_local(work: dict) -> bool:
+    """Whether this work's model-written card is local — written under AYL_HOME
+    and never into the repository tree. Always, for a NoDerivatives work, read
+    off its licence whatever `cards:` says: CC BY-NC-ND lets the reader make an
+    adaptation for themself and withholds sharing one (section 2(a)(1)(B))."""
+    return card_policy(work) != "shared" or no_derivatives(work)
+
+
 def card_targets(manifest: dict) -> list[dict]:
     """The works a MODEL may write a card for, and the only list the model-card
     stage is allowed to read.
 
     A book card is a summary written from the work — a derivative — so for a
-    CC BY-NC-ND work distributing one is exactly what the licence withholds.
-    Those works get a structure card instead, which a model never touches
-    (`structure_targets`). The licence is checked here as well as the manifest
-    value, so a NoDerivatives work mislabelled `shared` or `local` still never
-    reaches a model (#58)."""
+    CC BY-NC-ND work distributing one is exactly what the licence withholds,
+    while making one for the reader is what it grants. The licence is read here
+    as well as the manifest: a NoDerivatives work is offered only when the
+    manifest itself asks for a LOCAL model card (`cards: local`, or `structure`
+    with `local_card: true`), so a work mislabelled `shared` is skipped before
+    its text is read — and `card_dir` sends every card of an ND work to AYL_HOME
+    regardless (#58)."""
     return [work for work in works(manifest)
-            if card_policy(work) in MODEL_CARD_POLICIES and not no_derivatives(work)]
+            if wants_model_card(work)
+            and not (no_derivatives(work) and card_policy(work) == "shared")]
 
 
 def structure_targets(manifest: dict) -> list[dict]:
@@ -961,12 +1004,21 @@ def write_toc(entries: list[dict]) -> None:
 # Three kinds of card, by the work's `cards:` value (see the manifest header):
 # a `shared` card, written by a model and committed here; a `structure` card,
 # built by code from the manifest and the chapter list and committed here; and a
-# `local` card, written by a model into CARDS_LOCAL_DIR, which is gitignored and
-# never committed — the reader may build a card for themself that the repository
-# may not share. `card_dir` is the one place that decides which folder a card is
-# written to, and it cannot send a `local` card here.
+# local card, written by a model under AYL_HOME ($AYL_HOME/cards/tech/), outside
+# any checkout — the reader may build a card for themself that the repository
+# may not share. A `structure` work with `local_card: true` has both. `card_dir`
+# is the one place that decides which folder a model-written card is written to,
+# and it cannot send a local card, or any card of a NoDerivatives work, here.
 CARDS_DIR = SHELF / "cards"
-CARDS_LOCAL_DIR = SHELF / "cards-local"
+
+
+def local_cards_dir() -> Path:
+    """$AYL_HOME/cards/tech, refused when AYL_HOME resolves inside a git work
+    tree (`ask_your_library.home.private_dir`). Imported here, not at the top,
+    so the stages that need no configuration keep importing none."""
+    from ask_your_library.home import private_dir
+
+    return private_dir("cards", SHELF_NAME)
 
 # How much of a work the model is shown. Never the whole book: the shelf is 5 MB
 # of prepared text and the largest single work is over a megabyte, which no
@@ -988,11 +1040,20 @@ CARD_TOTAL_CHARS = 60_000
 # being the prepared text's own, so they are written here and not generated.
 CARD_MODEL_SECTIONS = ("Summary", "Key ideas", "Terms", "Themes")
 
+# What the card prompt says about the work's own words, by where the card may
+# go. A shared card is an adaptation this repository distributes: it may carry a
+# short quotation the way any review does, marked and attributed, and the rest is
+# paraphrase. A card of a NoDerivatives work is never shared, and is paraphrase
+# only, so nothing of the work's text is copied into a card at all.
+CARD_QUOTES = """Write every sentence in your own words. You may quote the text sparingly: a quotation is at most one sentence of under 25 words, stands inside double quotation marks, and is followed at once by the chapter it comes from in parentheses, spelled exactly as in the chapter list — "a quoted sentence" (III. Config). Never copy a sentence, a definition or any run of more than a few words without marking it that way. Names, titles, chapter titles and the work's own coined terms may be used as they are."""
+
+CARD_PARAPHRASE_ONLY = """Write every sentence in your own words. Never copy a sentence, a definition or any run of more than a few words from the text you are given, and do not quote it: this card is a paraphrase of the work, never an excerpt of it. Names, titles, chapter titles and the work's own coined terms are the only things you copy."""
+
 CARD_SYSTEM = """You write a reference card for one technical work: the page a reader consults to decide whether this work answers their question, and which of its chapters to open.
 
 Write ONLY from the text you are given. Add nothing you know about this work from anywhere else. Do not invent chapters, numbers, figures or quotations, and claim nothing the given text does not support.
 
-Write every sentence in your own words. Never copy a sentence, a definition or any run of more than a few words from the text you are given, and do not quote it: this card is a paraphrase of the work, never an excerpt of it. Names, titles, chapter titles and the work's own coined terms are the only things you copy. Where you name a chapter, spell it EXACTLY as it stands in the chapter list you are given.
+{words} Where you name a chapter, spell it EXACTLY as it stands in the chapter list you are given.
 
 Reply with exactly these sections, in this order, and with nothing else — no preamble, no closing remark, no code fence, no title line above them:
 
@@ -1011,6 +1072,13 @@ Five to twelve bullets, the vocabulary this work uses in its own way — words i
 ## Themes
 Four to eight bullets, the concerns that run across chapters rather than sitting in one, each in the form
 - **<theme>** — <one sentence>"""
+
+
+def card_system(work: dict) -> str:
+    """The card prompt for this work: short attributed quotes allowed, except
+    for a NoDerivatives work, whose (local) card is paraphrase only."""
+    words = CARD_PARAPHRASE_ONLY if no_derivatives(work) else CARD_QUOTES
+    return CARD_SYSTEM.format(words=words)
 
 
 def prepared_chapters(work: dict) -> list[tuple[str, str]]:
@@ -1105,7 +1173,7 @@ def model_card_front_matter(work: dict, model: str, built: str,
              "tags: [book, tech-shelf]",
              "type: book-card",
              f"source: \"{work['author']} — {work['title']}\"",
-             f"card_kind: {card_policy(work)}",
+             f"card_kind: {'local' if model_card_is_local(work) else 'shared'}",
              f"card_model: {model}",
              f"card_built: {built}",
              f"licence: {work['licence']}",
@@ -1191,26 +1259,30 @@ def restamp_cards(entries: list[dict], manifest: dict) -> None:
 
 def card_dir(work: dict) -> Path:
     """The folder a model-written card of this work goes to: the committed one
-    for `shared`, the gitignored one for `local`. Anything else has no
-    model-written card, and asking is a bug in the caller."""
-    policy = card_policy(work)
-    if policy == "shared":
-        return CARDS_DIR
-    if policy == "local":
-        return CARDS_LOCAL_DIR
-    raise ValueError(f"{work['id']}: a {policy} card is not written by a model")
+    for a `shared` work, $AYL_HOME/cards/tech for every other — and for every
+    NoDerivatives work whatever its `cards:` says (`model_card_is_local`). A
+    work the manifest gives no model card has none, and asking is a bug in the
+    caller."""
+    if not wants_model_card(work):
+        raise ValueError(f"{work['id']}: a {card_policy(work)} card is not written by a model")
+    if model_card_is_local(work):
+        return local_cards_dir()
+    return CARDS_DIR
 
 
 def build_cards(entries: list[dict], manifest: dict, force: bool = False) -> None:
     """Write the model-written cards: corpus-tech/cards/<id>.md for a `shared`
-    work, corpus-tech/cards-local/<id>.md for a `local` one.
+    work, $AYL_HOME/cards/tech/<id>.md for a local one.
 
     The NoDerivatives rule is enforced here and not only documented: the list
     this loop runs over is `card_targets`, intersected with whatever `--work`
-    selected, and a work that is not in it is reported and skipped. A card for a
-    CC BY-NC-ND work is a derivative this project has no right to distribute, so
-    the check is an assertion in the code and a test, not a convention
-    (`tests/test_tech_shelf.py`). Those works' structure cards are built by
+    selected, and a work that is not in it is reported and skipped; the folder
+    is `card_dir`'s, which sends every card of a CC BY-NC-ND work under
+    AYL_HOME, and `local_cards_dir` refuses an AYL_HOME inside a git work tree.
+    A card of such a work is a derivative the reader may make and this project
+    may not distribute, so no model-written card of one is ever written inside
+    the repository tree — an assertion in the code and a test, not a convention
+    (`tests/test_tech_shelf.py`). Their committed structure cards are built by
     `build_structure_cards`, which calls no model."""
     # Imported here rather than at the top of the file so that `fetch`,
     # `prepare`, `toc`, `checksums` and `verify` keep needing no model, no key
@@ -1229,6 +1301,11 @@ def build_cards(entries: list[dict], manifest: dict, force: bool = False) -> Non
                   f"cards: {card_policy(work)}), skipped")
             continue
         folder = card_dir(work)
+        if model_card_is_local(work) and folder.resolve().is_relative_to(REPO.resolve()):
+            # `private_dir` has refused this already; the second check costs
+            # nothing and names the rule the code exists for.
+            raise RuntimeError(f"{work['id']}: a local card may not be written inside "
+                               f"the repository ({folder})")
         folder.mkdir(parents=True, exist_ok=True)
         path = folder / f"{work['id']}.md"
         if path.exists() and not force:
@@ -1236,7 +1313,7 @@ def build_cards(entries: list[dict], manifest: dict, force: bool = False) -> Non
             continue
         chapters = prepared_chapters(work)
         started = time.monotonic()
-        reply = llm_invoke(CARD_SYSTEM, card_user(work, chapters), role="card").content
+        reply = llm_invoke(card_system(work), card_user(work, chapters), role="card").content
         sections = card_sections(reply)
         missing = [name for name in CARD_MODEL_SECTIONS if not sections.get(name)]
         if missing:
@@ -1246,7 +1323,8 @@ def build_cards(entries: list[dict], manifest: dict, force: bool = False) -> Non
             problems.append(f"  {work['id']}: the reply has no {', '.join(missing)}")
             continue
         path.write_text(card_text(work, sections, chapters, model, built), encoding="utf-8")
-        print(f"  {work['id']}: {len(chapters)} chapters -> {folder.name}/{path.name}, "
+        where = path.relative_to(REPO) if path.is_relative_to(REPO) else path
+        print(f"  {work['id']}: {len(chapters)} chapters -> {where}, "
               f"{len(reply):,} characters from {model} in "
               f"{(time.monotonic() - started) / 60:.1f} min")
     if problems:

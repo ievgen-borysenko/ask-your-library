@@ -17,7 +17,7 @@ Stages (all cached in data/, safe to re-run):
   uv run scripts/ingest_demo_corpus.py --stage cards       # cards table
   uv run scripts/ingest_demo_corpus.py --stage cards --cards-dir corpus-tech/cards
   uv run scripts/ingest_demo_corpus.py --stage cards --cards-dir corpus-tech/cards \
-      --cards-dir corpus-tech/cards-local   # plus the cards built only on this machine
+      --cards-dir ~/AskYourLibrary/cards/tech   # + cards built only here ($AYL_HOME)
   uv run scripts/ingest_demo_corpus.py --book alice        # filter by substring
   uv run scripts/ingest_demo_corpus.py --stage stamp-meta  # fingerprint pre-existing tables
   uv run scripts/ingest_demo_corpus.py --stage checksums   # pin source sha256 into the manifest
@@ -60,7 +60,8 @@ from ask_your_library.ingest import (Chunk, build_fts_index, chunk_card, embeddi
 # the generic `ayl-add`) cuts books into sections identically.
 from ask_your_library.ingest.chapters import (DEFAULT_CHAPTER_RE, MIN_CHAPTER_CHARS,  # noqa: F401
                                               split_chapters, with_parts)
-from ask_your_library.ingest.chunking import CARD_CHUNKER_VERSION, CHUNKER_VERSION
+from ask_your_library.ingest.chunking import (CARD_CHUNKER_VERSION, CHUNKER_VERSION, card_note,
+                                              parse_frontmatter)
 from ask_your_library.ingest.ledger import open_ledger
 from ask_your_library.ingest.lock import IngestBusy, ingest_lock
 from ask_your_library.ingest.publish import (add_ledger_columns, rebuild_table,
@@ -558,20 +559,26 @@ def ingest_transcripts_table(backend: str, book_filter: str | None, entry_ids: l
 
 
 def card_files(cards_dirs: list[Path]) -> list[Path]:
-    """Every `*.md` card under the given folders, refusing one book carded twice.
+    """Every `*.md` card under the given folders, refusing one card key twice.
 
     More than one folder because the engineer's shelf keeps its committed cards
-    in corpus-tech/cards/ and the ones a reader may only build for themself in
-    the gitignored corpus-tech/cards-local/ (#58); a folder that does not exist
-    holds no cards, which is the ordinary state of cards-local/. The same file
-    name in two folders would be two cards with one `note` and one chunk id, so
-    it is a failure rather than a silent overwrite."""
+    in corpus-tech/cards/ and the ones a reader may only build for themself
+    under AYL_HOME, in ~/AskYourLibrary/cards/tech/ by default (#58); a folder
+    that does not exist holds no cards, which is the ordinary state of a local
+    folder nobody has built. What must be unique is the card's row key
+    (`chunking.card_note`): a local card (`card_kind: local`) keeps its rows
+    apart from the committed card of the same book under the same file name,
+    while two cards that would share a key are two cards with one chunk id, so
+    that is a failure rather than a silent overwrite."""
     cards, seen = [], {}
     for folder in cards_dirs:
         for path in sorted(folder.glob("*.md")):
-            if path.name in seen:
-                sys.exit(f"{path.name} is a card in both {seen[path.name]} and {folder}")
-            seen[path.name] = folder
+            meta, _ = parse_frontmatter(path.read_text(encoding="utf-8"))
+            note = card_note(path, meta)
+            if note in seen:
+                sys.exit(f"{path.name} is a card in both {seen[note]} and {folder} "
+                         f"(card key {note!r})")
+            seen[note] = folder
             cards.append(path)
     return cards
 
@@ -675,10 +682,11 @@ def main() -> None:
                          "when such a backup is already there)")
     ap.add_argument("--retranscribe", action="store_true",
                     help="ignore shipped audio transcripts and run Whisper (macOS)")
-    ap.add_argument("--cards-dir", type=Path, action="append", metavar="DIR",
+    ap.add_argument("--cards-dir", type=lambda value: Path(value).expanduser(),
+                    action="append", metavar="DIR",
                     help="--stage cards only: a folder of *.md cards to index, repeatable "
                          f"(default {CARDS_DIR.relative_to(REPO)}; the engineer's shelf "
-                         "passes corpus-tech/cards, and corpus-tech/cards-local for the "
+                         "passes corpus-tech/cards, and $AYL_HOME/cards/tech for the "
                          "cards built only on this machine, together with its own "
                          "LIBRARY_DB_PATH)")
     args = ap.parse_args()

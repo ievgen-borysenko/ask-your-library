@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+- **Local cards live in `AYL_HOME`, outside the checkout, and the three NoDerivatives works get
+  one** (#58, [`corpus-tech/README.md`](../corpus-tech/README.md#local-cards-and-ayl_home)). A new
+  setting, `AYL_HOME` (default `~/AskYourLibrary`), is the reader's own folder for what is built on
+  this machine and never shared; a local card of the engineer's shelf is
+  `$AYL_HOME/cards/tech/<id>.md`. `corpus-tech/cards-local/` and its `.gitignore` line are gone:
+  `.gitignore` is not a boundary, so the script refuses to write a local card when `AYL_HOME`
+  resolves inside any git work tree (`ask_your_library.home.private_dir`, tested with a `.git`
+  directory, a worktree's `.git` file and a symlink into a checkout). The later private shelf of the
+  reader's own books (ADR-026) reuses the same variable.
+
+  The manifest gains `local_card: true`, valid only beside `cards: structure`: the three CC BY-NC-ND
+  works keep their committed, code-built structure card and also get a model-written card on the
+  reader's machine, which the licence allows a reader to make (2(a)(1)(B)) and withholds sharing. A
+  second field and not a fourth `cards:` value, because `cards:` says what the repository ships and
+  `local_card` what the reader's machine builds besides it. The guarantee changes from "no model
+  writes a card of an ND work" to **"no model-written card of an ND work is ever written inside the
+  repository tree"**: `card_targets()` still reads ND off the licence string and skips an ND work
+  labelled `shared`, and `card_dir()` sends every model-written card of an ND work to `AYL_HOME`
+  whatever `cards:` says. Either backend may write them. A local card says `card_kind: local`,
+  and its rows are keyed `<id>@local`, so it sits beside the structure card of the same book
+  without sharing a chunk id; `ingest_demo_corpus.py --cards-dir` expands `~` and refuses only two
+  cards with one row key.
+
+  **Quotations in committed cards.** The card prompt now lets a card of a work that allows
+  adaptations quote sparingly — one sentence at most, in quotation marks, followed by its chapter in
+  parentheses — and asks a NoDerivatives work's local card for paraphrase only. The shared-card test
+  follows: a verbatim run of twelve words or more passes only inside quotation marks followed by one
+  of the work's chapter titles, and fails outside them. The eight-word test over every tracked file
+  for the NoDerivatives works is unchanged and exempts no quotation.
+
 - **A part heading now ends the section before it: Dumas's Celebrated Crimes gains the eleven
   essays that had no chapters of their own.** With a manifest `part_regex`, part headings only
   prefixed chapter titles, so a part without CHAPTER headings ran on inside the previous part's last
@@ -100,9 +130,9 @@
   and Terms in place of Plot and Characters. The model is shown the chapter list and the opening of
   each chapter within a budget, never the whole work, and `## Structure` is copied from the prepared
   text rather than generated, so the section that answers "which chapter covers X" cannot rename or
-  invent a chapter. **No model ever writes a card of a CC BY-NC-ND work**: the stage may read only
-  `card_targets()`, which checks the licence as well as the manifest, asserted in the code and in
-  tests. Each model-written card records `card_model` and `card_built`, because a card written
+  invent a chapter. **No model-written card of a CC BY-NC-ND work is committed**: the stage may
+  read only `card_targets()`, which checks the licence as well as the manifest, asserted in the
+  code and in tests (and, since the entry above, writes such a card only under `AYL_HOME`). Each model-written card records `card_model` and `card_built`, because a card written
   on the local model and one written on a hosted model are otherwise the same file. The ten
   licence-clean works carry cards written through OpenRouter, with the model in each card's
   `card_model`; each also carries its work's licence, a link to it and an adaptation notice, and the
@@ -111,8 +141,8 @@
 
   `cards:` in the manifest is three-valued — `shared` (a model-written card, committed),
   `structure` (a card built by code with no model, committed) and `local` (a model-written card
-  written to the gitignored `corpus-tech/cards-local/`, never committed; also what a work that names
-  no value gets). The three NoDerivatives works are `structure`: title, chapter list and the
+  written outside the checkout, under `AYL_HOME` since the entry above, never committed; also
+  what a work that names no value gets). The three NoDerivatives works are `structure`: title, chapter list and the
   publishing site's own description, reproduced verbatim and attributed, and nothing paraphrased —
   a reproduction in part, which the licence grants, not an adaptation, which it withholds. A test
   rebuilds each committed structure card and compares it byte for byte. `--stage structure-cards`

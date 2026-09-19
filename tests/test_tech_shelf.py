@@ -13,6 +13,8 @@ read sre.google. What it can do is refuse an entry that claims a licence without
 saying where the work states it and when that page was read, which is the shape
 of the claim corpus-tech/README.md makes on the repository's behalf.
 """
+import contextlib
+import inspect
 import importlib.util
 import json
 import re
@@ -41,7 +43,8 @@ SHA256 = re.compile(r"[0-9a-f]{64}")
 URL = re.compile(r"https://\S+$")
 FETCH_KINDS = {"html-chapters", "git-markdown", "git-html", "pdf", "arxiv-html", "arxiv-pdf"}
 KINDS = {"book", "paper", "guide"}
-# The works whose licence forbids a derivative, and therefore a generated card.
+# The works whose licence forbids sharing a derivative: no model-written card of
+# them is ever committed, and the one they get is written under AYL_HOME only.
 NO_CARD = {"sre-book", "sre-workbook", "swe-at-google"}
 CARDS_DIR = REPO / "corpus-tech" / "cards"
 
@@ -153,31 +156,42 @@ def test_ids_and_title_author_pairs_are_unique():
 
 # --- 2. no card for a NoDerivatives work -------------------------------------
 
-def test_the_no_derivatives_works_are_never_offered_to_a_card_stage():
-    """The whole point of `cards: structure`. A book card is a summary written from
-    the work, which is a derivative, and CC BY-NC-ND withholds the right to
-    distribute one — so the three NC-ND works must not appear in the only list a
-    card-generating stage is allowed to read."""
-    offered = {work["id"] for work in shelf.card_targets(manifest())}
-    assert not (offered & NO_CARD), \
-        f"cards would be generated for NoDerivatives works: {sorted(offered & NO_CARD)}"
-    assert offered == {work["id"] for work in works()} - NO_CARD, \
-        "every other work of the shelf may carry a card"
+def test_the_no_derivatives_works_get_a_model_card_only_under_ayl_home(tmp_path, monkeypatch):
+    """The owner's decision of 2026-09-19: a model-written card of a CC BY-NC-ND
+    work may exist on the reader's machine (the licence grants making an
+    adaptation, 2(a)(1)(B)) and never in the repository (it withholds sharing
+    one). So the three are offered to the card stage, and every one of them is
+    routed to AYL_HOME — never to corpus-tech/cards/."""
+    monkeypatch.setattr(config, "AYL_HOME", tmp_path / "home")
+    offered = {work["id"]: work for work in shelf.card_targets(manifest())}
+    assert set(offered) == {work["id"] for work in works()}, \
+        "every work of the shelf may carry a model-written card somewhere"
+    for key in sorted(NO_CARD):
+        folder = shelf.card_dir(offered[key])
+        assert folder == (tmp_path / "home" / "cards" / "tech").resolve(), key
+        assert not folder.is_relative_to(REPO), f"{key}: a model card inside the repository"
+    committed = {key for key, work in offered.items() if shelf.card_dir(work) == shelf.CARDS_DIR}
+    assert committed == {work["id"] for work in works() if work["cards"] == "shared"}
+    assert not (committed & NO_CARD)
 
 
 def test_the_cards_value_and_the_licence_agree():
     """Read the other way round: a work that says ND in its licence is
-    `structure`, whoever adds it later and whatever they meant — not `shared`,
-    whose card is committed, and not `local` either: this shelf builds no
-    model-written card of a NoDerivatives work anywhere."""
+    `structure` with `local_card: true`, whoever adds it later and whatever they
+    meant — not `shared`, whose card is committed."""
     # Read off the licence string here, independently of the script's helper
     # and of NO_CARD, so a new ND work is caught the day it is added.
     nd = {work["id"] for work in works()
           if "ND" in re.split(r"[-\s_]+", work["licence"].upper())}
-    wrong = sorted(key for key in nd
-                   if next(w for w in works() if w["id"] == key)["cards"] != "structure")
+    by_id = {work["id"]: work for work in works()}
+    wrong = sorted(key for key in nd if by_id[key]["cards"] != "structure")
     assert not wrong, f"NoDerivatives works not marked `cards: structure`: {wrong}"
-    assert nd == {work["id"] for work in works() if shelf.no_derivatives(work)}
+    no_local = sorted(key for key in nd if by_id[key].get("local_card") is not True)
+    assert not no_local, f"NoDerivatives works without `local_card: true`: {no_local}"
+    assert nd == {work["id"] for work in works() if shelf.no_derivatives(work)} == NO_CARD
+    stray = sorted(work["id"] for work in works() if "local_card" in work
+                   and work["cards"] != "structure")
+    assert not stray, f"`local_card` beside something other than `cards: structure`: {stray}"
 
 
 @pytest.mark.parametrize("licence", ["CC-BY-NC-ND-4.0", "CC BY-NC-ND 4.0", "CC BY-ND 4.0",
@@ -193,9 +207,18 @@ def test_a_licence_that_allows_adaptation_is_not_read_as_no_derivatives(licence)
     assert not shelf.no_derivatives({"licence": licence})
 
 
-def test_a_spaced_no_derivatives_work_never_reaches_a_model():
+def test_a_spaced_no_derivatives_work_is_never_offered_as_a_shared_card(tmp_path, monkeypatch):
+    """The licence is read in any spelling: an ND work mislabelled `shared` is
+    not offered at all, and one labelled `local` is offered and routed to
+    AYL_HOME."""
     spaced = {"id": "spaced", "licence": "CC BY-NC-ND 4.0", "cards": "shared"}
     assert shelf.card_targets({"works": [spaced]}) == []
+    monkeypatch.setattr(config, "AYL_HOME", tmp_path / "home")
+    local = dict(spaced, cards="local")
+    assert shelf.card_targets({"works": [local]}) == [local]
+    assert shelf.card_dir(local).is_relative_to(tmp_path / "home")
+    # and even asked directly, an ND work's model card is never the committed folder
+    assert shelf.model_card_is_local(spaced)
 
 
 def test_a_licence_nobody_confirmed_is_never_shared():
@@ -216,7 +239,7 @@ def test_every_committed_card_is_for_a_work_that_may_have_one():
     the one file of this shelf that IS committed, so a summary of a NoDerivatives
     work would be distributed by this repository the moment it was added — this
     test is what stands between that and a green suite. And a `local` work's
-    card never lands here at all: that folder is corpus-tech/cards-local/."""
+    card never lands here at all: it is written under AYL_HOME."""
     by_policy = {work["id"]: work["cards"] for work in works()}
     written = set(committed_cards())
     assert written <= set(by_policy), \
@@ -296,7 +319,7 @@ def test_every_committed_model_card_is_its_own_restamp():
     was edited by hand there, or restamped against an older manifest."""
     cards = committed_cards()
     for work in shelf.card_targets(manifest()):
-        if work["id"] in cards:
+        if work["cards"] == "shared" and work["id"] in cards:
             assert shelf.restamp_card(cards[work["id"]], work, shelf.committed_chapters(work)) \
                 == cards[work["id"]], \
                 f"{work['id']}: run `uv run scripts/fetch_tech_shelf.py --stage restamp-cards`"
@@ -317,17 +340,39 @@ def test_a_restamp_touches_no_model_written_section(card_shelf):
     assert sections["Summary"] == "A demo work about configuration, in two chapters."
 
 
-def test_the_local_card_folder_is_never_committed():
-    """`cards-local/` holds what the reader may build but the repository may not
-    share. A test cannot stop `git add -f`, but it can keep the ordinary path
-    closed: the folder is in .gitignore, and nothing is committed under it."""
-    ignored = (REPO / ".gitignore").read_text(encoding="utf-8").splitlines()
-    assert "corpus-tech/cards-local/" in ignored
+def test_there_is_no_local_card_folder_inside_the_repository():
+    """Local cards used to go to a gitignored corpus-tech/cards-local/. They now
+    live under AYL_HOME, outside the checkout — .gitignore is not a boundary, so
+    the old folder and its ignore line are gone, and nothing names them."""
+    ignored = (REPO / ".gitignore").read_text(encoding="utf-8")
+    assert "cards-local" not in ignored
+    assert not hasattr(shelf, "CARDS_LOCAL_DIR")
+    for path in (REPO / "scripts" / "fetch_tech_shelf.py",
+                 REPO / "scripts" / "ingest_demo_corpus.py",
+                 REPO / "corpus-tech" / "manifest.yaml", REPO / "corpus-tech" / "README.md"):
+        assert "cards-local" not in path.read_text(encoding="utf-8"), path.name
+
+
+def test_the_local_cards_folder_is_under_ayl_home(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "AYL_HOME", tmp_path / "home")
+    assert shelf.local_cards_dir() == (tmp_path / "home" / "cards" / "tech").resolve()
+
+
+def test_local_cards_are_refused_when_ayl_home_is_inside_a_git_work_tree(tmp_path, monkeypatch):
+    """An AYL_HOME inside a git work tree — any repository, this checkout above
+    all — is where one `git add` would commit what may never be shared, so no
+    local card is written there."""
+    other = tmp_path / "some-repo"
+    (other / ".git").mkdir(parents=True)
+    homes = [other / "ayl"]
     if (REPO / ".git").exists():
-        tracked = subprocess.run(["git", "ls-files", "corpus-tech/cards-local"], cwd=REPO,
-                                 capture_output=True, text=True, check=True).stdout
-        assert tracked == "", f"committed under cards-local/: {tracked}"
-    assert shelf.CARDS_LOCAL_DIR == REPO / "corpus-tech" / "cards-local"
+        homes.append(REPO / "corpus-tech" / "private")
+    for home in homes:
+        monkeypatch.setattr(config, "AYL_HOME", home)
+        with pytest.raises(RuntimeError, match="inside the git work tree"):
+            shelf.local_cards_dir()
+        with pytest.raises(RuntimeError, match="inside the git work tree"):
+            shelf.card_dir(dict(WORK, cards="local"))
 
 
 # --- 2b. what a pin is taken of ----------------------------------------------
@@ -783,7 +828,7 @@ def card_shelf(prepared, monkeypatch):
     """The prepared demo work, a temporary cards directory, and a fake model
     whose last prompt the test can read."""
     monkeypatch.setattr(shelf, "CARDS_DIR", prepared / "cards")
-    monkeypatch.setattr(shelf, "CARDS_LOCAL_DIR", prepared / "cards-local")
+    monkeypatch.setattr(config, "AYL_HOME", prepared / "home")
     calls = []
 
     def fake_invoke(system, user, role):
@@ -792,7 +837,8 @@ def card_shelf(prepared, monkeypatch):
 
     monkeypatch.setattr(llm, "llm_invoke", fake_invoke)
     return types.SimpleNamespace(root=prepared, cards=prepared / "cards",
-                                 cards_local=prepared / "cards-local", calls=calls)
+                                 cards_local=(prepared / "home" / "cards" / "tech").resolve(),
+                                 calls=calls)
 
 
 def build(card_shelf, entries=(WORK,), works_in_manifest=None, force=False):
@@ -939,25 +985,87 @@ def test_a_work_that_was_never_prepared_is_named_rather_than_summarised_empty(ca
 
 # --- 8. three kinds of card --------------------------------------------------
 
-def test_a_local_card_is_written_to_the_local_folder_and_never_the_committed_one(card_shelf):
+def test_a_local_card_is_written_under_ayl_home_and_never_the_committed_folder(card_shelf):
     """The generator cannot put a `local` card where it would be committed: the
-    folder is chosen from the work's `cards:` value in one place, `card_dir`."""
+    folder is chosen in one place, `card_dir`, and a local one is AYL_HOME's."""
     local = dict(WORK, cards="local")
     build(card_shelf, entries=(local,), works_in_manifest=(local,))
-    assert (card_shelf.cards_local / "demo-work.md").exists()
+    card = card_shelf.cards_local / "demo-work.md"
+    assert card.exists()
+    assert chunking.parse_frontmatter(card.read_text(encoding="utf-8"))[0]["card_kind"] == "local"
     assert not card_shelf.cards.exists() or not list(card_shelf.cards.glob("*.md"))
 
 
-def test_a_no_derivatives_work_never_reaches_a_model_whatever_its_cards_value_says(card_shelf):
-    """Belt and braces: the licence is read as well as `cards:`, so a
-    NoDerivatives work mislabelled `shared` or `local` is still skipped before
-    any model call, and no card of it is written to either folder."""
-    for value in ("shared", "local"):
-        mislabelled = dict(ND_WORK, cards=value)
-        build(card_shelf, entries=(mislabelled,), works_in_manifest=(mislabelled,))
-    assert not card_shelf.calls, "a NoDerivatives work reached the model"
-    for folder in (card_shelf.cards, card_shelf.cards_local):
-        assert not folder.exists() or not list(folder.glob("*.md"))
+ND_LOCAL = dict(ND_WORK, id="demo-work", local_card=True, source="https://example.invalid/",
+                licence_url="https://creativecommons.org/licenses/by-nc-nd/4.0/")
+
+
+def test_a_no_derivatives_work_gets_its_model_card_under_ayl_home_only(card_shelf):
+    """`cards: structure` with `local_card: true`: the model writes a card of
+    the NoDerivatives work, and it lands under AYL_HOME, marked local — and
+    nothing of it in the committed folder. The work's structure card is a
+    separate stage and untouched."""
+    build(card_shelf, entries=(ND_LOCAL,), works_in_manifest=(ND_LOCAL,))
+    assert len(card_shelf.calls) == 1
+    card = card_shelf.cards_local / "demo-work.md"
+    meta, _ = chunking.parse_frontmatter(card.read_text(encoding="utf-8"))
+    assert meta["card_kind"] == "local"
+    assert meta["licence"] == "CC-BY-NC-ND-4.0"
+    assert not card_shelf.cards.exists() or not list(card_shelf.cards.glob("*.md"))
+
+
+def test_no_model_card_of_a_no_derivatives_work_is_written_in_the_repository(card_shelf):
+    """Belt and braces: whatever `cards:` says, a NoDerivatives work's model card
+    goes under AYL_HOME or nowhere. `shared` is a mislabel and is skipped before
+    any model call; `local` and `structure` + `local_card` go to AYL_HOME."""
+    mislabelled = dict(ND_LOCAL, cards="shared", local_card=False)
+    build(card_shelf, entries=(mislabelled,), works_in_manifest=(mislabelled,))
+    assert not card_shelf.calls, "a NoDerivatives work labelled shared reached the model"
+    for value in ({"cards": "local", "local_card": False}, {"cards": "structure"}):
+        work = dict(ND_LOCAL, **value)
+        build(card_shelf, entries=(work,), works_in_manifest=(work,), force=True)
+    assert len(card_shelf.calls) == 2
+    assert not card_shelf.cards.exists() or not list(card_shelf.cards.glob("*.md"))
+    assert (card_shelf.cards_local / "demo-work.md").exists()
+
+
+def test_a_no_derivatives_card_is_not_built_when_ayl_home_is_in_a_repository(card_shelf,
+                                                                              monkeypatch):
+    """The refusal comes before the model is called and before anything is
+    written: the work's text never leaves for a card that could not be kept."""
+    monkeypatch.setattr(config, "AYL_HOME", REPO / "corpus-tech" / "private")
+    if not (REPO / ".git").exists():
+        (card_shelf.root / "repo" / ".git").mkdir(parents=True)
+        monkeypatch.setattr(config, "AYL_HOME", card_shelf.root / "repo" / "ayl")
+    with pytest.raises(RuntimeError, match="inside the git work tree"):
+        build(card_shelf, entries=(ND_LOCAL,), works_in_manifest=(ND_LOCAL,))
+    assert not card_shelf.calls
+    assert not (REPO / "corpus-tech" / "private").exists()
+
+
+def test_the_prompt_allows_attributed_quotes_except_for_a_no_derivatives_work(card_shelf):
+    """A shared card may quote the way a review does — marked and followed by
+    the chapter; a NoDerivatives work's local card is paraphrase only."""
+    build(card_shelf)
+    build(card_shelf, entries=(ND_LOCAL,), works_in_manifest=(ND_LOCAL,), force=True)
+    shared_prompt, nd_prompt = (call["system"] for call in card_shelf.calls)
+    assert "You may quote the text sparingly" in shared_prompt
+    assert "followed at once by the chapter it comes from" in shared_prompt
+    assert "do not quote it" not in shared_prompt
+    assert "do not quote it" in nd_prompt and "You may quote" not in nd_prompt
+    for prompt in (shared_prompt, nd_prompt):
+        assert "{words}" not in prompt and "## Key ideas" in prompt
+
+
+def test_a_local_card_and_the_committed_card_of_one_book_keep_apart_rows(card_shelf):
+    """The structure card and the local card of one ND work share a file name
+    and an H1: they stay one book, under two row keys, so no chunk id is
+    shared between them."""
+    build(card_shelf, entries=(ND_LOCAL,), works_in_manifest=(ND_LOCAL,))
+    chunks = chunking.chunk_card(card_shelf.cards_local / "demo-work.md")
+    assert {chunk.note for chunk in chunks} == {"demo-work@local"}
+    assert all(chunk.chunk_id.startswith("demo-work@local#") for chunk in chunks)
+    assert {chunk.book for chunk in chunks} == {"A Work Nobody May Summarise — N. D. Author"}
 
 
 def test_a_structure_work_is_skipped_by_the_model_stage(card_shelf):
@@ -974,6 +1082,16 @@ def test_a_work_with_no_cards_value_is_local_and_an_unknown_value_is_refused():
         shelf.card_policy({"id": "x", "cards": True})
     with pytest.raises(ValueError, match="not written by a model"):
         shelf.card_dir({"id": "x", "cards": "structure"})
+
+
+def test_local_card_belongs_beside_structure_and_is_a_boolean():
+    assert shelf.local_card({"id": "x", "cards": "structure", "local_card": True})
+    assert not shelf.local_card({"id": "x", "cards": "structure"})
+    for value in ("shared", "local"):
+        with pytest.raises(ValueError, match="belongs beside cards: structure"):
+            shelf.local_card({"id": "x", "cards": value, "local_card": True})
+    with pytest.raises(ValueError, match="not true or false"):
+        shelf.local_card({"id": "x", "cards": "structure", "local_card": "yes"})
 
 
 STRUCTURE_WORK = dict(ND_WORK, licence_url="https://creativecommons.org/licenses/by-nc-nd/4.0/",
@@ -1027,33 +1145,53 @@ def test_a_structure_card_without_the_description_is_refused():
         shelf.structure_card_text(dict(STRUCTURE_WORK, about_source=""), ["One"])
 
 
-def test_the_cards_table_reads_the_committed_and_the_local_folder_together(tmp_path):
-    """`ingest_demo_corpus.py --stage cards --cards-dir A --cards-dir B`: the
-    local folder may not exist, and one book carded in both is refused rather
-    than indexed twice under one chunk id."""
+def load_ingest(name: str):
     ingest_spec = importlib.util.spec_from_file_location(
-        "ingest_demo_corpus_cards", REPO / "scripts" / "ingest_demo_corpus.py")
+        name, REPO / "scripts" / "ingest_demo_corpus.py")
     ingest = importlib.util.module_from_spec(ingest_spec)
     ingest_spec.loader.exec_module(ingest)
-    shared, local = tmp_path / "cards", tmp_path / "cards-local"
+    return ingest
+
+
+def test_the_cards_table_reads_the_committed_and_the_local_folder_together(tmp_path):
+    """`ingest_demo_corpus.py --stage cards --cards-dir A --cards-dir B`: the
+    local folder may not exist; a local card (`card_kind: local`) of a book that
+    also has a committed card is read beside it; two cards under one row key
+    are refused rather than indexed twice under one chunk id."""
+    ingest = load_ingest("ingest_demo_corpus_cards")
+    shared, local = tmp_path / "cards", tmp_path / "home" / "cards" / "tech"
     shared.mkdir()
     (shared / "a.md").write_text("# A\n", encoding="utf-8")
     assert [p.name for p in ingest.card_files([shared, local])] == ["a.md"]
-    local.mkdir()
+    local.mkdir(parents=True)
     (local / "b.md").write_text("# B\n", encoding="utf-8")
     assert [p.name for p in ingest.card_files([shared, local])] == ["a.md", "b.md"]
+    (local / "a.md").write_text("---\ncard_kind: local\n---\n# A\n", encoding="utf-8")
+    assert [p.parent.name for p in ingest.card_files([shared, local])] == ["cards", "tech", "tech"]
     (local / "a.md").write_text("# A again\n", encoding="utf-8")
     with pytest.raises(SystemExit, match="a.md"):
         ingest.card_files([shared, local])
 
 
+def test_cards_dir_takes_a_folder_under_the_home_directory(monkeypatch, tmp_path):
+    """The documented command names `~/AskYourLibrary/cards/tech`; a quoted or
+    `--cards-dir=` form reaches the script unexpanded, so the script expands it."""
+    ingest = load_ingest("ingest_demo_corpus_home")
+    seen = {}
+    monkeypatch.setattr(ingest, "ingest_cards_table",
+                        lambda backend, dirs: seen.setdefault("dirs", dirs))
+    monkeypatch.setattr(ingest, "ingest_lock", lambda *args, **kwargs: contextlib.nullcontext())
+    monkeypatch.setattr(sys, "argv", ["ingest_demo_corpus.py", "--stage", "cards",
+                                      "--cards-dir", "corpus-tech/cards",
+                                      "--cards-dir=~/AskYourLibrary/cards/tech"])
+    ingest.main()
+    assert seen["dirs"][1] == Path.home() / "AskYourLibrary" / "cards" / "tech"
+
+
 def test_cards_dir_belongs_to_the_cards_stage(monkeypatch, capsys):
     """Like `--chunker`: a flag another stage would ignore is refused, not
     silently dropped."""
-    ingest_spec = importlib.util.spec_from_file_location(
-        "ingest_demo_corpus_flags", REPO / "scripts" / "ingest_demo_corpus.py")
-    ingest = importlib.util.module_from_spec(ingest_spec)
-    ingest_spec.loader.exec_module(ingest)
+    ingest = load_ingest("ingest_demo_corpus_flags")
     monkeypatch.setattr(sys, "argv", ["ingest_demo_corpus.py", "--stage", "all",
                                       "--cards-dir", "corpus-tech/cards"])
     with pytest.raises(SystemExit) as raised:
@@ -1176,11 +1314,37 @@ def test_no_tracked_file_holds_a_passage_of_a_no_derivatives_work():
                           "fact in your own words and name the chapter:\n" + "\n".join(problems))
 
 
+# A quotation a shared card may carry: text in double quotation marks, straight
+# or curly, followed at once (after at most a comma or a full stop) by the
+# chapter it comes from in parentheses. `attributed_quotes` checks that the
+# parenthesis names one of the work's own chapter titles.
+QUOTATION = re.compile(r'(?:"([^"\n]+)"|“([^”\n]+)”)[,.]?\s*\(([^()\n]+)\)')
+# What an accepted quotation is replaced with before the verbatim check: a word
+# no text holds, so the words either side of the quote cannot join into a run.
+QUOTE_GAP = " qqquotationqqq "
+
+
+def outside_attributed_quotes(text: str, titles: list[str]) -> str:
+    """`text` with every attributed quotation cut out: a quotation whose
+    parenthesis is a chapter title of the work. A quotation with no chapter
+    after it, or with something else in the parenthesis, stays in, and so does
+    anything outside the quotation marks — those are still held to the rule."""
+    chapters = {" ".join(word_list(title)) for title in titles}
+
+    def cut(match: re.Match) -> str:
+        return QUOTE_GAP if " ".join(word_list(match.group(3))) in chapters else match.group(0)
+    return QUOTATION.sub(cut, text)
+
+
 def test_no_shared_card_copies_a_passage_of_its_work():
-    """A shared card is a paraphrase. A run of 12 or more words of the work's own
-    text, outside names, titles and chapter titles, is an excerpt that slipped
-    through the prompt, and is reworded by hand with an `edited:` line."""
+    """A shared card is a paraphrase with, at most, short quotations that say
+    so. A run of 12 or more words of the work's own text, outside names, titles,
+    chapter titles and quotations attributed to a chapter, is an excerpt that
+    slipped through the prompt, and is reworded by hand with an `edited:` line.
+    A NoDerivatives work has no shared card; its passages are held by the
+    stricter test above, which no quotation mark exempts."""
     shared = [work for work in works() if work["cards"] == "shared"]
+    assert not [work["id"] for work in shared if shelf.no_derivatives(work)]
     absent = [work["id"] for work in shared if not (PREPARED / f"{work['id']}.md").exists()]
     if absent:
         pytest.skip(f"corpus-tech/prepared/ has no text of {absent} (gitignored) — "
@@ -1190,6 +1354,7 @@ def test_no_shared_card_copies_a_passage_of_its_work():
         card = (CARDS_DIR / f"{work['id']}.md").read_text(encoding="utf-8")
         _, body = chunking.parse_frontmatter(card)
         body = re.sub(r"(?ms)^## Structure\n.*?(?=^## |\Z)", "", body.split("\n", 2)[-1])
+        body = outside_attributed_quotes(body, shelf.committed_chapters(work))
         source = grams_of(word_list((PREPARED / f"{work['id']}.md").read_text(encoding="utf-8")),
                           SHARED_RUN_WORDS)
         for run in verbatim_runs(body, source, SHARED_RUN_WORDS,
@@ -1206,3 +1371,37 @@ def test_the_verbatim_check_finds_a_copied_run_and_passes_a_name():
                          lambda run: True) == []
     assert verbatim_runs("one two three four five six seven", source, 8,
                          lambda run: False) == []
+
+
+SOURCE_TEXT = ("the error budget is the amount of unreliability a service may spend "
+               "before the release process has to slow down for everybody")
+PASSAGE = "the error budget is the amount of unreliability a service may spend"
+
+
+@pytest.mark.parametrize("card, flagged", [
+    # quoted and followed by a chapter of the work: allowed
+    (f'- **Budgets** — "{PASSAGE}" (3. Embracing Risk)', False),
+    (f'- **Budgets** — “{PASSAGE}”, (3. Embracing Risk)', False),
+    # the same words outside quotation marks: still a copy
+    (f"- **Budgets** — {PASSAGE} (3. Embracing Risk)", True),
+    # quoted, but no chapter after it
+    (f'- **Budgets** — "{PASSAGE}" says the book', True),
+    # quoted, but the parenthesis names no chapter of the work
+    (f'- **Budgets** — "{PASSAGE}" (page 12)', True),
+    # a quotation that is attributed does not excuse a run outside it
+    (f'"{PASSAGE}" (3. Embracing Risk) and then {PASSAGE}', True),
+])
+def test_a_verbatim_run_is_allowed_only_quoted_and_followed_by_its_chapter(card, flagged):
+    source = grams_of(word_list(SOURCE_TEXT), SHARED_RUN_WORDS)
+    body = outside_attributed_quotes(card, ["1. Introduction", "3. Embracing Risk"])
+    runs = verbatim_runs(body, source, SHARED_RUN_WORDS, lambda run: False)
+    assert bool(runs) == flagged, runs
+
+
+def test_the_nd_check_exempts_no_quotation():
+    """The NoDerivatives test is not relaxed: it reads every tracked file as it
+    stands, with no quotation cut out, so an attributed quote of an ND work in
+    a tracked file still fails it."""
+    source = inspect.getsource(test_no_tracked_file_holds_a_passage_of_a_no_derivatives_work)
+    assert "outside_attributed_quotes" not in source
+    assert "ND_RUN_WORDS = 8" in inspect.getsource(sys.modules[__name__])

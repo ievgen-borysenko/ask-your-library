@@ -11,9 +11,6 @@ data/
 # corpus-tech/toc/ (the chapter lists), which is the whole reviewable record.
 corpus-tech/raw/
 corpus-tech/prepared/
-# A `cards: local` work's card is built by the reader for the reader and never
-# shared: it is written here, and this folder is never committed.
-corpus-tech/cards-local/
 
 # Secrets: every .env variant except the committed example
 .env
