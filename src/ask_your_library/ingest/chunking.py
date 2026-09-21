@@ -105,22 +105,26 @@ TRANSCRIPT_MAX_CHARS = max(TRANSCRIPT_TARGET_CHARS,
 TRANSCRIPT_CEILING_CHARS = TRANSCRIPT_MAX_CHARS + TRANSCRIPT_OVERLAP_CHARS
 
 
-def transcript_chunk_floor(chars: int) -> int:
-    """The fewest chunks this packer can cut `chars` characters of prepared
-    text into.
+def transcript_chunk_floor(placed: int) -> int:
+    """The fewest chunks this packer can cut `placed` characters into.
 
-    No chunk holds more than TRANSCRIPT_MAX_CHARS characters, and every chunk
-    after the first in a chapter spends part of that on text repeated from its
-    predecessor — so fewer chunks than this cannot hold the text at all,
-    whatever the sentences look like.
+    **Why it is a bound.** Every chunk `pack_sentences` returns is at most
+    TRANSCRIPT_MAX_CHARS characters long, joining spaces included, and the part
+    of a chunk that is not repeated from its predecessor is what carries the
+    text forward. Every character the packer places sits in the carrying part
+    of exactly one chunk, so `placed` characters cannot come out as fewer than
+    `placed / TRANSCRIPT_MAX_CHARS` chunks — the overlap and the joiners only
+    ever make a chunk carry LESS.
 
-    The divisor is the CEILING (2,400) and not the advance a chunk actually
-    makes (target minus overlap, 2,160), which leaves about 10% between this
-    floor and what a real run produces. That gap is deliberate: it is where the
-    whitespace the splitter drops at sentence boundaries goes, and where a
-    chapter that ends in a half-full chunk goes. The floor is a bound, not a
-    prediction of the row count."""
-    return -(-int(chars) // TRANSCRIPT_MAX_CHARS)
+    **`placed`, not the raw text.** The argument is what `placed_chars` counts:
+    the characters the packer actually puts into chunks. The prepared text is
+    longer than that — the splitter drops the whitespace at every sentence
+    boundary and the cap drops it at every break it makes — and counting the
+    raw length instead would claim a floor above what the packer really
+    produces, which is a refusal of honest work. A chapter of three blank-line
+    separated paragraphs of 799 characters is 2,401 raw and 2,397 placed: one
+    chunk of 2,399, and a raw-length floor of 2 that no run can reach."""
+    return -(-int(placed) // TRANSCRIPT_MAX_CHARS)
 
 # Sentence end: . ! ? … optionally followed by a closing quote/bracket, then whitespace.
 _SENTENCE_END = re.compile(r'(?<=[.!?…])["\')\]]*[ \n]+')
@@ -378,3 +382,32 @@ def pack_sentences(sentences: list[str]) -> list[str]:
     if buffer:
         chunks.append(" ".join(buffer))
     return chunks
+
+
+def placed_chars(text: str) -> int:
+    """How many characters of `text` the packer actually puts into chunks.
+
+    The packer never sees the prepared text: it sees the sentences
+    `split_sentences` cut out of it, capped by `cap_sentence`. Both drop
+    whitespace — the separator between two sentences belongs to neither, and so
+    does the whitespace at a cap's break — so this is smaller than `len(text)`,
+    by about a percent of ordinary prose and by much more where a text is
+    mostly blank lines.
+
+    It is the front half of the packer and nothing else: no chunk is built, no
+    row is written, nothing is re-chunked. What it is for is `chunk_floor`,
+    which has to divide the characters that really go into chunks and not the
+    ones the reader typed."""
+    return sum(len(piece)
+               for sentence in split_sentences(text)
+               for piece in cap_sentence(sentence))
+
+
+def chunk_floor(text: str) -> int:
+    """The fewest chunks this packer can cut ONE chapter of `text` into.
+
+    Per chapter, because that is the unit the packer is called on (a chapter
+    boundary always starts a new chunk), which makes the sum over a book's
+    chapters a tighter — and still true — bound than one division over all of
+    its text."""
+    return transcript_chunk_floor(placed_chars(text))

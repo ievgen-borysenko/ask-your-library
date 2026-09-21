@@ -24,6 +24,9 @@ existed, it is logged at info level, and it is read and written without a word.
 import logging
 import time
 
+import pyarrow as pa
+import pyarrow.compute as pc
+
 # The staged publish this module needs is the ingest's, and `ingest.publish`
 # imports nothing from the package, so this direction costs no cycle. Only
 # `write_index_meta` uses the recovery half: see the note in `read_index_meta`.
@@ -357,24 +360,58 @@ def refuse_version_mismatch(db, table: str, chunker: str | None = None,
 # named chunker could not have produced.
 
 
-def chunk_lengths_by_book(db, table: str) -> dict[str, list[int]]:
-    """The length in characters of every row's text in `table`, grouped by the
-    book key the row carries.
+# Rows per Arrow batch. The point of reading in batches at all is that the
+# `text` column IS the corpus — 110 MB on this project's own 11k-row index, and
+# linear in the size of somebody's library — so it is measured column-wise and
+# thrown away batch by batch. Nothing below ever builds a Python string out of
+# it: what crosses into Python is one integer per row, or one per BOOK.
+_BATCH_ROWS = 8192
 
-    Only two columns are read, so the cost is a projection over the rows and
-    never the vectors — the text itself is the corpus, which is why this is not
-    on any read path: it belongs to `--doctor` and to the stamp, both of which
-    are run by hand."""
+
+def _column_batches(db, table: str, columns: list[str]):
+    """Arrow record batches of exactly `columns` from `table`, or nothing when
+    the table is empty or does not carry them."""
     handle = db.open_table(table)
     count = handle.count_rows() if hasattr(handle, "count_rows") else 0
-    names = handle.schema.names
-    if not count or "text" not in names:
-        return {}
-    columns = ["text"] + (["book"] if "book" in names else [])
-    lengths: dict[str, list[int]] = {}
-    for row in handle.search().select(columns).limit(count).to_list():
-        lengths.setdefault(row.get("book") or "", []).append(len(row.get("text") or ""))
+    if not count or any(column not in handle.schema.names for column in columns):
+        return
+    query = handle.search().select(columns).limit(count)
+    if hasattr(query, "to_batches"):
+        yield from query.to_batches(_BATCH_ROWS)
+    else:                                   # an older client: one Arrow table, then batched
+        yield from query.to_arrow().to_batches(_BATCH_ROWS)
+
+
+def chunk_lengths(db, table: str) -> list[int]:
+    """The length in characters of every row's text in `table`.
+
+    Measured by pyarrow on the column itself (`utf8_length` counts code points,
+    which is what the chunker counts too), so the text of the whole corpus is
+    never materialised as Python strings. The result is one integer per row.
+
+    Not on any read path: it belongs to `--doctor` and to the stamp, both of
+    which are run by hand."""
+    lengths: list[int] = []
+    for batch in _column_batches(db, table, ["text"]):
+        lengths.extend(length or 0
+                       for length in pc.utf8_length(batch.column("text")).to_pylist())
     return lengths
+
+
+def rows_by_book(db, table: str) -> dict[str, int]:
+    """How many rows `table` holds per book key.
+
+    Grouped inside Arrow, so what crosses into Python is one row per DISTINCT
+    book and not one string per row — the difference between a dictionary of
+    tens of entries and a list of hundreds of thousands."""
+    counts: dict[str, int] = {}
+    for batch in _column_batches(db, table, ["book"]):
+        grouped = pa.Table.from_batches([batch]).group_by("book").aggregate([("book", "count")])
+        for book, rows in zip(grouped.column("book").to_pylist(),
+                              grouped.column("book_count").to_pylist()):
+            key = book or ""
+            counts[key] = counts.get(key, 0) + rows
+    return counts
 
 
 def length_rule(table: str, chunker: str | None) -> tuple[int, int] | None:

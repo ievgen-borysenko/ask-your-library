@@ -19,8 +19,8 @@ The catalogue is deliberately not consulted: it answers from the index tables
 import logging
 from dataclasses import dataclass, field
 
-from ..index_meta import (CARDS_PREFIX, CARDS_REBUILD_HINT, length_distribution, length_mismatch,
-                          read_index_meta, rebuild_hint, version_mismatch)
+from ..index_meta import (CARDS_PREFIX, CARDS_REBUILD_HINT, chunk_lengths, length_distribution,
+                          length_mismatch, read_index_meta, rebuild_hint, version_mismatch)
 from .ledger import INDEXED, TABLE, open_ledger
 
 log = logging.getLogger(__name__)
@@ -156,8 +156,7 @@ def _read_stamps(db, report: LedgerReport) -> dict[str, str]:
     return stamped
 
 
-def _report_lengths(report: LedgerReport, stamped: dict[str, str],
-                    lengths: dict[str, list[int]]) -> None:
+def _report_lengths(db, report: LedgerReport, stamped: dict[str, str]) -> None:
     """The chunk-length distribution of every checked table, and the drift when
     the rows are ones the stamped chunker could not have cut (#75).
 
@@ -174,7 +173,9 @@ def _report_lengths(report: LedgerReport, stamped: dict[str, str],
     with no rows behind it: reported, counted in `ok`, and therefore a non-zero
     exit."""
     for name in report.checked_tables:
-        rows = lengths.get(name)
+        # Read on its own, off the Arrow column: `text` is the corpus, and the
+        # row walk below keeps only the two metadata columns for that reason.
+        rows = chunk_lengths(db, name)
         if not rows:
             continue
         chunker = stamped.get(name)
@@ -187,8 +188,9 @@ def _report_lengths(report: LedgerReport, stamped: dict[str, str],
 def check_ledger(db, table_names: list[str], ledger_table: str = TABLE) -> LedgerReport:
     """Compare the ledger with the index tables named, and report.
 
-    Reads only the two metadata columns of each table, so the cost is a
-    projection over the rows and never the vectors."""
+    Reads two metadata columns of each table row by row, and measures the
+    `text` column inside Arrow (`chunk_lengths`, which never builds a Python
+    string out of it). The vectors are never read."""
     report = LedgerReport()
     ledger = open_ledger(db, ledger_table)
     names = db.list_tables() if hasattr(db, "list_tables") else db.table_names()
@@ -206,10 +208,6 @@ def check_ledger(db, table_names: list[str], ledger_table: str = TABLE) -> Ledge
     id_column_missing: list[str] = []
     card_keys: set[str] = set()
     text_keys: set[str] = set()
-    # Row text lengths per table, collected in THIS pass rather than a second
-    # one: the projection widens by one column and the rows are already being
-    # walked, so measuring what the chunker did costs no extra scan.
-    lengths: dict[str, list[int]] = {}
     for name in report.checked_tables:
         table = db.open_table(name)
         count = table.count_rows()
@@ -219,11 +217,8 @@ def check_ledger(db, table_names: list[str], ledger_table: str = TABLE) -> Ledge
         has_id = "book_id" in table.schema.names
         if not has_id and not is_cards:
             id_column_missing.append(name)
-        has_text = "text" in table.schema.names
-        columns = ["book"] + (["book_id"] if has_id else []) + (["text"] if has_text else [])
+        columns = ["book"] + (["book_id"] if has_id else [])
         for row in table.search().select(columns).limit(count).to_list():
-            if has_text:
-                lengths.setdefault(name, []).append(len(row.get("text") or ""))
             key = row.get("book")
             if key:
                 keys_in_index.add(key)
@@ -236,7 +231,7 @@ def check_ledger(db, table_names: list[str], ledger_table: str = TABLE) -> Ledge
             elif has_id:
                 rows_without_id += 1
 
-    _report_lengths(report, stamped, lengths)
+    _report_lengths(db, report, stamped)
 
     for name in id_column_missing:
         report.notes.append(f"{name} has no book_id column yet (an index built before the "

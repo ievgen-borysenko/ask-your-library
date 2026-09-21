@@ -51,9 +51,9 @@ import yaml
 from ask_your_library.bookkey import author_of, book_key, chunk_id, title_of
 from ask_your_library.config import DB_PATH, EMBED_BACKEND
 from ask_your_library.embeddings import get_embedder
-from ask_your_library.index_meta import (META_TABLE, check_index, chunk_lengths_by_book,
+from ask_your_library.index_meta import (CARDS_PREFIX, META_TABLE, check_index, chunk_lengths,
                                          expected_chunker, length_mismatch, read_index_meta,
-                                         refuse_version_mismatch, write_index_meta)
+                                         refuse_version_mismatch, rows_by_book, write_index_meta)
 from ask_your_library.ingest import (Chunk, build_fts_index, chunk_card, embedding_text,
                                      pack_sentences, rows_for, split_sentences)
 # Chapter splitting lives in the package so every ingest path (this script and
@@ -61,8 +61,8 @@ from ask_your_library.ingest import (Chunk, build_fts_index, chunk_card, embeddi
 from ask_your_library.ingest.chapters import (DEFAULT_CHAPTER_RE, MIN_CHAPTER_CHARS,  # noqa: F401
                                               split_chapters, with_parts)
 from ask_your_library.ingest.chunking import (CARD_CHUNKER_VERSION, CHUNKER_VERSION,
-                                              TRANSCRIPT_MAX_CHARS, card_note, parse_frontmatter,
-                                              transcript_chunk_floor)
+                                              TRANSCRIPT_MAX_CHARS, card_note, chunk_floor,
+                                              parse_frontmatter)
 from ask_your_library.ingest.ledger import open_ledger
 from ask_your_library.ingest.lock import IngestBusy, ingest_lock
 from ask_your_library.ingest.publish import (add_ledger_columns, rebuild_table,
@@ -653,22 +653,53 @@ def ingest_cards_table(backend: str, cards_dirs: list[Path] | None = None) -> No
     print(f"cards done: {len(cards)} cards from {where} -> {table.count_rows()} chunks")
 
 
-def prepared_chars_by_book(entry_ids: list[str]) -> dict[str, int]:
-    """`{book key: characters of prepared text}` for the prepared files that
-    are on disk.
+def prepared_chunk_floors(entry_ids: list[str]) -> dict[str, int]:
+    """`{book key: the fewest chunks this packer can cut its prepared text
+    into}` for the prepared files that are on disk.
+
+    The floor is taken per CHAPTER and summed, because a chapter is the unit
+    `pack_sentences` is called on: a chapter boundary always starts a new
+    chunk, so the sum of the chapters' floors is a tighter bound than one
+    division over the book, and still one the packer cannot go under
+    (`ingest.chunking.chunk_floor`).
+
+    Two book keys that are the same string are ADDED, not replaced: the table
+    holds their rows under that one key, so the bound has to cover both of
+    them. Two editions of one title with one author is exactly the shape that
+    would otherwise halve the floor.
 
     A read, not an ingest: a file with no manifest entry is ignored here rather
     than fatal (that check belongs to `prepared_docs`, where it decides what
     gets written), and a missing file is simply a book this cannot say
     anything about."""
-    sizes: dict[str, int] = {}
+    floors: dict[str, int] = {}
     for entry_id in entry_ids:
         path = PREPARED_DIR / f"{entry_id}.json"
         if not path.exists():
             continue
         doc = json.loads(path.read_text(encoding="utf-8"))
-        sizes[doc["book"]] = sum(len(chapter["text"]) for chapter in doc["chapters"])
-    return sizes
+        floor = sum(chunk_floor(chapter["text"]) for chapter in doc["chapters"])
+        floors[doc["book"]] = floors.get(doc["book"], 0) + floor
+    return floors
+
+
+def _uncompared(floors: dict[str, int], rows: dict[str, int], shared: list[str]) -> str:
+    """The books the row-count check did NOT cover, named.
+
+    Printed on every run, including the ones where everything matched: "35 of
+    35" is the sentence that makes a coverage number worth reading, and a
+    silent partial check is how a comparison over two books out of thirty-five
+    passes for a comparison over the corpus."""
+    prepared_only = sorted(set(floors) - set(shared))
+    table_only = sorted(set(rows) - set(shared))
+    parts = []
+    if prepared_only:
+        parts.append(f"prepared but not in the table: {', '.join(prepared_only[:3])}"
+                     + (f" (+{len(prepared_only) - 3} more)" if len(prepared_only) > 3 else ""))
+    if table_only:
+        parts.append(f"in the table but not prepared: {', '.join(table_only[:3])}"
+                     + (f" (+{len(table_only) - 3} more)" if len(table_only) > 3 else ""))
+    return f" — {'; '.join(parts)}" if parts else " — every book on both sides"
 
 
 def stamp_sample_problem(db, name: str, claimed: str, entry_ids: list[str]) -> str | None:
@@ -688,25 +719,36 @@ def stamp_sample_problem(db, name: str, claimed: str, entry_ids: list[str]) -> s
     * **too long** — a row longer than the packer's ceiling plus one overlap.
       A coarser chunker (`sentence-pack-1` packed to 4,000) fails this on
       nearly every row it wrote.
-    * **too few** — fewer rows than `transcript_chunk_floor` says the prepared
-      text needs. No chunk holds more than the ceiling, so fewer rows cannot
-      hold the text, whatever the sentences look like. A finer chunker fails
-      this; #75's table held 7,285 rows where the prepared corpus needs at
-      least about 12,000.
+    * **too few** — fewer rows than `chunk_floor` says the prepared text needs,
+      counted per chapter and summed per book. No chunk carries more than
+      TRANSCRIPT_MAX_CHARS characters forward, so fewer rows cannot hold the
+      text the packer places, whatever the sentences look like. A finer chunker
+      fails this; #75's table held 7,285 rows where the prepared corpus needs
+      at least about 12,000.
+
+    Neither bound can be crossed by a run of this packer — that is what makes
+    them fit to refuse an operator with. The ceiling is one whole overlap above
+    the longest chunk the packer can return, and the floor divides the
+    characters the packer actually PLACES (`placed_chars`) rather than the
+    prepared text, which is longer by the whitespace the splitter drops. The
+    slack that remains is all on the operator's side.
 
     The count is compared PER BOOK and only over books the table and the
-    prepared texts share. An index this corpus did not build (the engineer's
+    prepared texts share; the coverage is printed either way, so a check that
+    compared two books out of thirty-five cannot be mistaken for one that
+    compared all of them. An index this corpus did not build (the engineer's
     shelf, with its own `LIBRARY_DB_PATH`) shares no book key, so nothing is
     compared and nothing is refused on numbers that are not about it.
 
-    None of this re-chunks anything: it reads two columns and the prepared
-    JSON's character counts."""
-    lengths = chunk_lengths_by_book(db, name)
+    Nothing here is re-chunked: two columns are measured inside Arrow, and the
+    prepared texts go through the packer's sentence split only to be counted —
+    no chunk is built and no row is written."""
+    lengths = chunk_lengths(db, name)
     if not lengths:
         return None
-    problems = [length_mismatch(name, claimed, [n for rows in lengths.values() for n in rows])]
+    problems = [length_mismatch(name, claimed, lengths)]
 
-    if claimed != CHUNKER_VERSION or name.startswith("cards"):
+    if claimed != CHUNKER_VERSION or name.startswith(CARDS_PREFIX):
         # The card chunker has no arithmetic ceiling — a "## section" with no
         # bullet inside it cannot be split, so a card chunk is as long as its
         # section — and the cards are not built from the prepared texts. There
@@ -715,24 +757,21 @@ def stamp_sample_problem(db, name: str, claimed: str, entry_ids: list[str]) -> s
         print(f"  {name}: nothing to sample — {claimed!r} has no length rule this code can "
               f"check, so the stamp stays the operator's assertion")
     else:
-        prepared = prepared_chars_by_book(entry_ids)
-        shared = sorted(set(prepared) & set(lengths))
-        if not shared:
-            print(f"  {name}: the row count is not checked — none of its books is among the "
-                  f"prepared texts in {prepared_where()}, so there is nothing "
-                  f"to compare it with")
-        else:
-            floors = {book: transcript_chunk_floor(prepared[book]) for book in shared}
-            rows = {book: len(lengths[book]) for book in shared}
-            short = sorted((floors[b] - rows[b], b) for b in shared if rows[b] < floors[b])
-            if short:
-                problems.append(
-                    f"{name} holds {sum(rows.values()):,} row(s) for {len(shared)} prepared "
-                    f"book(s) whose text needs at least {sum(floors.values()):,} chunks of "
-                    f"{TRANSCRIPT_MAX_CHARS:,} characters — {len(short)} book(s) are short, "
-                    f"worst: " + "; ".join(f"{book} has {rows[book]:,}, needs {floors[book]:,}"
-                                           for _, book in reversed(short[-3:])) +
-                    f". Rows cut by {claimed!r} out of this text cannot be that few")
+        floors = prepared_chunk_floors(entry_ids)
+        rows = rows_by_book(db, name)
+        shared = sorted(set(floors) & set(rows))
+        print(f"  {name}: row count compared for {len(shared)} of {len(floors)} prepared "
+              f"book(s){_uncompared(floors, rows, shared)}")
+        short = sorted((floors[b] - rows[b], b) for b in shared if rows[b] < floors[b])
+        if short:
+            problems.append(
+                f"{name} holds {sum(rows[b] for b in shared):,} row(s) for the "
+                f"{len(shared)} prepared book(s) it shares, whose text needs at least "
+                f"{sum(floors[b] for b in shared):,} chunks of {TRANSCRIPT_MAX_CHARS:,} "
+                f"characters — {len(short)} book(s) are short, worst: "
+                + "; ".join(f"{book} has {rows[book]:,}, needs {floors[book]:,}"
+                            for _, book in reversed(short[-3:])) +
+                f". Rows cut by {claimed!r} out of this text cannot be that few")
     found = [problem for problem in problems if problem]
     if not found:
         return None
@@ -803,7 +842,10 @@ STAGES = ("prepare-text", "prepare-audio", "prepare-canaries", "ingest", "cards"
           "stamp-meta", "checksums")
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    """`argv` for the tests, as `ayl-add.main` takes it: the argument checks
+    below are worth a test of their own, and the only other way to reach them
+    is a subprocess that would also have to be kept away from a real index."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--stage", choices=("all",) + STAGES, default="all")
@@ -834,12 +876,21 @@ def main() -> None:
                          "passes corpus-tech/cards, and $AYL_HOME/cards/tech for the "
                          "cards built only on this machine, together with its own "
                          "LIBRARY_DB_PATH)")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     if args.chunker and args.stage != "stamp-meta":
         # Silently ignoring it would let somebody believe they had asserted a
         # chunker over an index that was never stamped with one.
         ap.error("--chunker belongs to --stage stamp-meta; every other stage stamps the "
                  "chunker it actually used")
+    if args.book and args.stage == "stamp-meta":
+        # A stamp is written on the WHOLE table, and the row count it is
+        # checked against is the whole corpus's. Filtering the books would
+        # leave a fingerprint claiming a chunker for rows the run never looked
+        # at — and, with the sampling, would compare one book's rows against
+        # one book's floor and stamp all of them on the strength of it.
+        ap.error("--book does not narrow --stage stamp-meta: a fingerprint is written per "
+                 "TABLE, not per book, and the row count it is checked against is the whole "
+                 "corpus's")
     if args.cards_dir and args.stage != "cards":
         # `--stage all --cards-dir corpus-tech/cards` would write the shelf's
         # cards into whichever index the classics' transcripts just went to, and

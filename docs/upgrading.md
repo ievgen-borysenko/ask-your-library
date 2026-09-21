@@ -186,8 +186,12 @@ uv run scripts/ingest_demo_corpus.py --stage stamp-meta --chunker current
 
 `--chunker current` claims the version this code chunks at, and that claim is **sampled before it
 is written**: the stamp is refused if the longest row is above the ceiling named above, or if a
-book holds fewer rows than its prepared text needs chunks (no chunk holds more than 2,400
-characters, so fewer rows cannot hold the text at all). The refusal prints both numbers and writes nothing.
+book holds fewer rows than its prepared text needs chunks. Both bounds are ones a run of this
+chunker cannot cross, so an honest index is never refused — the ceiling sits a whole overlap above
+the longest chunk the packer can return, and the row floor divides, per chapter, the characters the
+packer actually places into chunks (the whitespace between two sentences is in the file and in no
+chunk) by the 2,400 that no chunk carries more than. The refusal prints both numbers, names the
+books that are short, and writes nothing: neither table is stamped if either one fails.
 
 Naming an **older** version — `--chunker sentence-pack-1` — is an assertion about the past that
 nothing here can check, so it is believed as-is; that is the way through for an operator who
@@ -330,7 +334,7 @@ uv run ayl-add ~/books --db ~/ayl-index
 uv run ayl-add ~/books --db ~/ayl-index                       # refused, and it names --rebuild
 uv run ayl-add ~/books --rebuild --backup ~/ayl-backups --db ~/ayl-index   # copy, drop, re-index
 # for the demo corpus, a full rebuild is the repair (it replaces every row):
-uv run scripts/ingest_demo_corpus.py --stage ingest || exit 1
+uv run scripts/ingest_demo_corpus.py --stage ingest
 
 # 5. only now, and only if step 4b succeeded, is the index what the stamp would claim
 uv run ayl-add --doctor --db ~/ayl-index
@@ -339,15 +343,28 @@ uv run ayl-add --doctor --db ~/ayl-index
 uv run ayl-add --restore ~/ayl-backups/<timestamp> --db ~/ayl-index --force
 ```
 
+Run steps 4b and 5 from a **script** rather than pasting them into a terminal, so that a failing
+line ends the run instead of the next line going ahead on top of it:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail                  # any failing line ends the run
+
+uv run scripts/ingest_demo_corpus.py --stage ingest
+uv run ayl-add --doctor --db ~/ayl-index
+```
+
 **A failed ingest stops the chain: never stamp after one.** `scripts/ingest_demo_corpus.py --stage ingest`
-exits non-zero when it has nothing to ingest — a missing `data/prepared` is the ordinary case, and it names the
-directory it looked in — and every later line of a script like the one above has to be conditional
-on that, which is what the `|| exit 1` is for (`set -euo pipefail` at the top of a runbook does the
-same for all of them). #75 is what the missing `||` costs: the ingest skipped all 35 books and
-exited 1, the next line stamped the chunker anyway onto the rows the old one had left, `--doctor`
-said "no drift", and an hour of measurement ran on an index that claimed one chunker and held
-another. The stamp now samples the rows and would refuse that write — but a chain that runs on
-after a failure is the defect, and the refusal is the second line of defence, not the first.
+exits non-zero when it has nothing to ingest — a missing `data/prepared` is the ordinary case, and
+it names the directory it looked in — so the `set -euo pipefail` above is what keeps the rest of
+the script from running. #75 is what its absence costs: the ingest skipped all 35 books and exited
+1, the next line stamped the chunker anyway onto the rows the old one had left, `--doctor` said
+"no drift", and an hour of measurement ran on an index that claimed one chunker and held another.
+The stamp now samples the rows and would refuse that write — but a chain that runs on after a
+failure is the defect, and the refusal is the second line of defence, not the first.
+
+Do not reach for `|| exit 1` when you are pasting the lines into a terminal instead: in an
+interactive shell that closes the window. The script above is the version that stops safely.
 
 ## See also
 
