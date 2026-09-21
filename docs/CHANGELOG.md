@@ -39,6 +39,58 @@
   instead of stamping after one — the chain that produced #75 — as a script with
   `set -euo pipefail` rather than a `|| exit 1` that would close a reader's terminal, and the
   `--doctor` example shows the new lines. Chunking itself is unchanged: nothing here re-chunks or re-embeds a row.
+- **Back matter is a section of its own, and Napoleon's misprinted chapter number is read as a
+  heading** (#82). The chapter splitter had no end-of-book boundary, so everything after the last
+  chapter heading was text of that chapter: Scott's notes were "CHAPTER XLIV" (Ivanhoe), Butler's
+  footnotes were "BOOK XXIV" (The Odyssey), the Fronto appendix with the notes and the glossary were
+  "THE TWELFTH BOOK" (Meditations), and the etext editor's bookmarks were the last chapter of the
+  Napoleon memoirs. A note could be cited as text of the last chapter, and a chapter read of it
+  spent its window on the apparatus. The manifest gains an optional per-book `end_regex`, the
+  heading the back matter starts with; everything from it becomes one section named after that
+  heading, so nothing of the book leaves the index and a citation says what the passage is. A second
+  optional field, `end_title`, names that section when the heading names only the first item of what
+  follows it: Ivanhoe's apparatus opens with "NOTE TO CHAPTER I." and holds the notes to ten
+  chapters, so its section is `NOTES` (and Meditations' is `APPENDIX AND GLOSSARY`); a renamed
+  section keeps the heading line as its first line rather than losing it with the title. The section
+  carries no part prefix — an appendix at the end of volume IV is the book's, not that volume's —
+  and neither half of the cut is measured against `MIN_CHAPTER_CHARS`, which is a contents-page
+  heuristic and no reason to drop text. An `end_regex` that cut nothing (a typo, an edition that
+  renamed its appendix, a heading that turns out to sit outside the last chapter) exits the prepare
+  stage instead of passing quietly, because the cut is silent by construction. Only the
+  last section is searched, so a heading that reads like back matter inside a chapter is no
+  boundary, and a book without `end_regex` splits byte for byte as before — the other 27 Gutenberg
+  texts were split with the old code and the new one and compared. The chapters shrink to the
+  chapter: Ivanhoe XLIV 74,040 → 25,312 characters (notes 48,723), Odyssey XXIV 79,271 → 27,485
+  (footnotes 51,769), Meditations XII 72,423 → 20,314 (appendix 52,104), Napoleon IV XIII
+  115,986 → 113,442 (bookmarks 2,511). Don Quixote gets no
+  `end_regex`: its last chapter ends with the verses of the Academicians of Argamasilla, which are
+  Cervantes's text and not an apparatus; what sits in the wrong place in that book is the front
+  matter, under a contents-page heading, and `end_regex` is not the fix for it.
+
+  The same manifest entry fixes a chapter that was two: this edition of the memoirs prints
+  `CHAPTER XXYI.` for XXVI, no chapter regex matched it, and "VOLUME II — CHAPTER XXV." held both
+  chapters (68,928 characters). Napoleon now carries a regex of its own — uppercase `CHAPTER`, one
+  space, a roman or arabic number (volume I opens with "CHAPTER 1"), or that misprint — which
+  against the pinned text loses none of the default regex's 228 matches and gains exactly the two
+  `CHAPTER XXYI.` lines, the contents page's and the heading's. The section keeps the number the
+  page carries (68,928 → 36,814, and a new "VOLUME II — CHAPTER XXYI." of 32,092); the source text
+  is not edited.
+
+  The corpus is 1,246 sections after this change (1,228 before #80's part sections). The places
+  that quote that number in running text — `CHAPTER_SCAN_CHARS` in `config.py`,
+  [configuration](configuration.md), [known limits](known-limits.md) and
+  [ADR-025](adr/README.md) — are re-measured with it: 1,243 of the 1,246 fit whole inside the
+  120,000-character scan budget, the median section is 14,821 characters and the longest 245,244
+  (it was 585,482 before the part sections split Dumas's longest). Records of earlier measurements
+  keep their own numbers.
+
+  **Re-prepare and re-ingest those four books.**
+  `uv run scripts/ingest_demo_corpus.py --stage prepare-text --book <title>` and then
+  `--stage ingest --book <title>` for Ivanhoe, The Odyssey, Meditations and the Napoleon memoirs;
+  an index built before this keeps the old sections and answers from them. `corpus/toc/` and the
+  book-identity fixture are regenerated here. `CHUNKER_VERSION` is unchanged, as it was for the
+  part-section change below: it names how a section is packed into chunks, not where a section
+  begins, and the demo corpus is rebuilt from the manifest rather than detected as stale.
 - **Where a question lost its evidence, and whether the all-dropped cap fired** (#77). The agent
   eval's item header now carries, on a question that lost a whole step's quotes, the longest run of
   all-dropped steps it reached and whether `MAX_DROPPED_STREAK` turned any of them dry — `peak 3

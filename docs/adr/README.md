@@ -996,8 +996,8 @@ longest 10,778, and 90.3% of them longer than the window** — so the retriever 
 fused, text that was then cut off before the model read it. The 10,778 came from raw Whisper
 output, where a "sentence" the splitter cannot end is the whole of a passage of speech: the
 longest in the corpus is 10,140 characters. One scale up, the same defect: a chapter read took the
-first 12,000 characters of the chapter, and **61% of the corpus's 1,228 chapters are longer than
-that** (median 14,783, the longest 585,482), so a question about the end of a long chapter was
+first 12,000 characters of the chapter, and **62% of the corpus's 1,246 sections are longer than
+that** (median 14,821, the longest 245,244), so a question about the end of a long chapter was
 answered from its beginning.
 
 **Decision, in two halves.**
@@ -1014,7 +1014,7 @@ reveal, and lowering it would cut text out of a chunk the retriever ranked whole
 
 *(B) For `read_chapter`, the window is cut around the match.* `reflect` may say what it is opening
 the chapter for (`looking_for`); `act` reads the chapter as far as `CHAPTER_SCAN_CHARS` (120,000 —
-1,224 of the 1,228 chapters whole) and cuts a `CHAPTER_HIT_CHARS` window around the best lexical
+1,243 of the 1,246 sections whole) and cuts a `CHAPTER_HIT_CHARS` window around the best lexical
 match inside it, scored by how many DISTINCT words of the query a run covers, then by density,
 then by position. No stop-word list: the library is not one language, and "distinct words covered"
 already prices a common word at what it is worth. A request that names no query, and a query whose
