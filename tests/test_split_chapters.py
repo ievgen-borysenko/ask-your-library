@@ -211,7 +211,7 @@ def test_back_matter_becomes_a_section_of_its_own():
     appendices were text of the last chapter — cited as that chapter, and read
     instead of it when the chapter was read."""
     chapters = dict(ingest.split_chapters(CHAPTERS + "FOOTNOTES:\n" + NOTES,
-                                          CHAPTER_RE, None, r"^FOOTNOTES:$"))
+                                          CHAPTER_RE, end_re=r"^FOOTNOTES:$"))
     assert list(chapters) == ["CHAPTER I.", "CHAPTER II.", "FOOTNOTES:"]
     assert chapters["CHAPTER II."] == BODY.strip()
     assert chapters["FOOTNOTES:"] == NOTES.strip()
@@ -229,7 +229,7 @@ def test_a_back_matter_heading_inside_an_earlier_chapter_is_no_boundary():
     matter in the middle of the book cannot cut a chapter in half."""
     text = ("CHAPTER I.\n" + BODY + "\nFOOTNOTES:\n" + NOTES
             + "\nCHAPTER II.\n" + BODY + "\nFOOTNOTES:\n" + NOTES)
-    chapters = ingest.split_chapters(text, CHAPTER_RE, None, r"^FOOTNOTES:$")
+    chapters = ingest.split_chapters(text, CHAPTER_RE, end_re=r"^FOOTNOTES:$")
     assert [t for t, _ in chapters] == ["CHAPTER I.", "CHAPTER II.", "FOOTNOTES:"]
     assert "FOOTNOTES:" in dict(chapters)["CHAPTER I."]
 
@@ -238,7 +238,7 @@ def test_an_end_heading_with_nothing_under_it_is_no_boundary():
     """A match on the file's last line is not back matter; cutting there would
     take the line out of the chapter and open an empty section."""
     text = CHAPTERS + "FOOTNOTES:\n"
-    assert (ingest.split_chapters(text, CHAPTER_RE, None, r"^FOOTNOTES:$")
+    assert (ingest.split_chapters(text, CHAPTER_RE, end_re=r"^FOOTNOTES:$")
             == ingest.split_chapters(text, CHAPTER_RE))
 
 
@@ -247,7 +247,7 @@ def test_a_last_section_that_is_back_matter_only_is_renamed_not_emptied():
     section is the notes, so it takes their name instead of leaving an empty
     chapter behind."""
     text = CHAPTERS + "CHAPTER III.\nFOOTNOTES:\n" + NOTES
-    chapters = ingest.split_chapters(text, CHAPTER_RE, None, r"^FOOTNOTES:$")
+    chapters = ingest.split_chapters(text, CHAPTER_RE, end_re=r"^FOOTNOTES:$")
     assert [t for t, _ in chapters] == ["CHAPTER I.", "CHAPTER II.", "FOOTNOTES:"]
     assert chapters[-1][1] == NOTES.strip()
 
@@ -257,7 +257,7 @@ def test_end_title_names_the_section_when_the_heading_names_only_its_first_item(
     to ten chapters: under the heading's own name, a quote from the note to
     chapter XLI would be cited as a note to chapter I."""
     text = CHAPTERS + "NOTE TO CHAPTER I.\n" + NOTES
-    chapters = ingest.split_chapters(text, CHAPTER_RE, None, r"^NOTE TO CHAPTER I\.$",
+    chapters = ingest.split_chapters(text, CHAPTER_RE, end_re=r"^NOTE TO CHAPTER I\.$",
                                      end_title="NOTES")
     assert [t for t, _ in chapters] == ["CHAPTER I.", "CHAPTER II.", "NOTES"]
     # the heading is nobody's title now, so it is kept as the section's first
@@ -272,7 +272,7 @@ def test_the_back_matter_section_carries_no_part_prefix():
     text = ("VOLUME I\nCHAPTER I.\n" + BODY + "\nVOLUME II\nCHAPTER I.\n" + BODY
             + "\nFOOTNOTES:\n" + NOTES)
     chapters = ingest.split_chapters(text, CHAPTER_RE, r"^(VOLUME [IV]+)$",
-                                     r"^FOOTNOTES:$")
+                                     end_re=r"^FOOTNOTES:$")
     assert [t for t, _ in chapters] == [
         "VOLUME I — CHAPTER I.", "VOLUME II — CHAPTER I.", "FOOTNOTES:"]
 
@@ -286,27 +286,49 @@ def test_an_end_regex_that_cut_nothing_stops_the_prepare_stage():
     matches — a typo, an edition that renamed its appendix — would prepare the
     book with its notes back inside the last chapter and say nothing."""
     text = CHAPTERS + "FOOTNOTES:\n" + NOTES
+    uncut = ingest.split_chapters(text, CHAPTER_RE)
     entry = {"id": "book", "end_regex": r"^NOTES AND QUERIES$"}
-    chapters = ingest.split_chapters(text, CHAPTER_RE, None, entry["end_regex"])
     with pytest.raises(SystemExit) as raised:
-        ingest.refuse_an_end_regex_that_cut_nothing(entry, text, chapters)
-    assert "matches nothing" in str(raised.value)
+        ingest.cut_back_matter_or_exit(entry, uncut)
+    assert "cut nothing" in str(raised.value)
 
     # a heading that matches only outside the last chapter: the cut cannot
     # happen there, and the back matter is still somebody's chapter
     mid_book = "CHAPTER I.\nFOOTNOTES:\n" + NOTES + "\nCHAPTER II.\n" + BODY
     entry = {"id": "book", "end_regex": r"^FOOTNOTES:$"}
-    chapters = ingest.split_chapters(mid_book, CHAPTER_RE, None, entry["end_regex"])
-    with pytest.raises(SystemExit) as raised:
-        ingest.refuse_an_end_regex_that_cut_nothing(entry, mid_book, chapters)
-    assert "cut nothing" in str(raised.value)
+    with pytest.raises(SystemExit):
+        ingest.cut_back_matter_or_exit(entry, ingest.split_chapters(mid_book, CHAPTER_RE))
 
     # and the cut that did happen passes, under the heading's name or end_title
     for entry in ({"id": "book", "end_regex": r"^FOOTNOTES:$"},
                   {"id": "book", "end_regex": r"^FOOTNOTES:$", "end_title": "NOTES"}):
-        chapters = ingest.split_chapters(text, CHAPTER_RE, None, entry["end_regex"],
-                                         end_title=entry.get("end_title"))
-        assert ingest.refuse_an_end_regex_that_cut_nothing(entry, text, chapters) is None
+        cut = ingest.cut_back_matter_or_exit(entry, uncut)
+        assert cut[-1][0] == entry.get("end_title", "FOOTNOTES:")
+        assert cut[:-1] == [(t, b) for t, b in uncut[:-1]] + [("CHAPTER II.", BODY.strip())]
+
+
+def test_a_cut_that_did_not_happen_is_not_read_off_the_section_titles():
+    """The guard asks the cut whether it moved anything; asking the RESULT —
+    "is the last section named what the manifest asked for?" — answers yes to a
+    book where the end_regex matched nothing and `end_title` happens to be the
+    last chapter's own name."""
+    mid_book = "CHAPTER I.\nFOOTNOTES:\n" + NOTES + "\nCHAPTER II.\n" + BODY
+    entry = {"id": "book", "end_regex": r"^FOOTNOTES:$", "end_title": "CHAPTER II."}
+    sections = ingest.split_chapters(mid_book, CHAPTER_RE)
+    assert sections[-1][0] == entry["end_title"]      # the collision
+    with pytest.raises(SystemExit) as raised:
+        ingest.cut_back_matter_or_exit(entry, sections)
+    assert "cut nothing" in str(raised.value)
+
+
+def test_a_positional_call_written_before_end_re_still_means_what_it_meant():
+    """`end_re` and `end_title` are keyword-only and come after the options
+    this function already had, so the generic ingest's fully positional call
+    (min_chapter_chars=0, keep_preamble=True, drop_toc_leftovers=False) cannot
+    silently bind a regex to a size limit."""
+    text = "Front matter of this edition.\n\nCHAPTER I.\nOne short line.\n"
+    assert ingest.split_chapters(text, CHAPTER_RE, None, 0, True, False) == [
+        ("", "Front matter of this edition."), ("CHAPTER I.", "One short line.")]
 
 
 def test_the_napoleon_regex_reads_the_editions_misprinted_chapter_number():

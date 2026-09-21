@@ -69,11 +69,11 @@ class MergedHeading(NamedTuple):
 
 
 def split_chapters(text: str, heading_re: str, part_re: str | None = None,
-                   end_re: str | None = None,
                    min_chapter_chars: int = MIN_CHAPTER_CHARS,
                    keep_preamble: bool = False,
                    drop_toc_leftovers: bool = True,
-                   *, end_title: str | None = None) -> list[tuple[str, str]]:
+                   *, end_re: str | None = None,
+                   end_title: str | None = None) -> list[tuple[str, str]]:
     """[(title, body)] using whole-line headings. Table-of-contents lines match
     the same regex as real headings, but their "body" (text up to the next
     match) is tiny — so headings with a body under min_chapter_chars are
@@ -104,7 +104,10 @@ def split_chapters(text: str, heading_re: str, part_re: str | None = None,
     (`cut_back_matter`), named after the matched heading or after `end_title`
     when the heading is a poor name for what follows it. Without it nothing
     moves: a book with no `end_regex` in the manifest splits byte for byte as
-    it always did.
+    it always did. Both are keyword-only and sit AFTER the three options this
+    function already had, so a positional call written before them still means
+    what it meant; a caller that needs to know whether the cut happened calls
+    `cut_back_matter` itself, which says so.
     """
     pattern = re.compile(heading_re, re.M)
     matches = list(pattern.finditer(text))
@@ -196,7 +199,7 @@ def split_chapters(text: str, heading_re: str, part_re: str | None = None,
     if not kept:
         return [("", text)]
     if end_re:
-        kept = cut_back_matter(kept, end_re, end_title=end_title)
+        kept, _ = cut_back_matter(kept, end_re, end_title=end_title)
     # The preamble is prepended AFTER with_parts and the contents heuristics,
     # both of which reason about chapter headings only; it belongs to no part
     # and can never be a contents leftover.
@@ -211,7 +214,8 @@ def heading_title(heading: str) -> str:
 
 
 def cut_back_matter(chapters: list[tuple[str, str]], end_re: str,
-                    *, end_title: str | None = None) -> list[tuple[str, str]]:
+                    *, end_title: str | None = None
+                    ) -> tuple[list[tuple[str, str]], bool]:
     """Move a book's back matter — the translator's notes, an appendix and
     glossary, a transcriber's list of bookmarks — out of the last chapter and
     into a section of its own, named after the heading it starts with, or after
@@ -238,22 +242,31 @@ def cut_back_matter(chapters: list[tuple[str, str]], end_re: str,
     matter earlier in the book (a note inside a chapter) cannot cut one of the
     chapters in half. A match with no text after it is not a boundary but the
     book's last line, and nothing moves; a last section that is back matter
-    from its first line replaces itself rather than leaving an empty chapter."""
+    from its first line replaces itself rather than leaving an empty chapter.
+
+    Returns the sections and whether anything was actually cut. The flag is the
+    point: every way of missing — an unmatched regex, a heading that sits in
+    the contents page or inside a chapter, a book whose chapter regex matched
+    nothing so there is one section and no last chapter — leaves the sections
+    exactly as they came in, and a caller cannot tell those apart by looking at
+    the result afterwards. Reading it back off the section titles is worse than
+    useless: an `end_title` equal to the last chapter's name would answer "cut"
+    to a book nothing happened to."""
     title, body = chapters[-1]
     m = re.search(end_re, body, re.M)
     if not m:
-        return chapters
+        return chapters, False
     chapter, following = body[:m.start()].strip(), body[m.end():].strip()
     if not following:
-        return chapters
+        return chapters, False
     # Without a name of its own the section takes the heading's, as a chapter
     # does. With `end_title` the heading is nobody's title any more, so it stays
     # at the top of the section's text instead of being dropped with it.
     back_section = ((end_title, body[m.start():].strip()) if end_title
                     else (heading_title(m.group(0)), following))
     if not chapter:
-        return chapters[:-1] + [back_section]
-    return chapters[:-1] + [(title, chapter), back_section]
+        return chapters[:-1] + [back_section], True
+    return chapters[:-1] + [(title, chapter), back_section], True
 
 
 def part_title(m: re.Match) -> str:
