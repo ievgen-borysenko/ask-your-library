@@ -87,6 +87,41 @@ MAX_SENTENCE_CHARS = 2000
 TRANSCRIPT_MAX_CHARS = max(TRANSCRIPT_TARGET_CHARS,
                            TRANSCRIPT_OVERLAP_CHARS + 1 + MAX_SENTENCE_CHARS)
 
+# --- what the numbers above let anyone SAY about rows already in a table -----
+#
+# Two bounds, and both are one-sided on purpose: they exist to refuse a claim
+# ("these rows were cut by this packer"), so each has to be something the packer
+# CANNOT do, never something it merely does not usually do. A bound that a real
+# corpus can cross is a bound that refuses honest work, and the way out of a
+# refusal here is a re-ingest that costs half an hour.
+
+# No chunk this packer returns is longer than TRANSCRIPT_MAX_CHARS. The ceiling
+# used to judge somebody else's rows is one overlap above that: the slack a
+# flush can add on top of a chunk is exactly the overlap it carries into the
+# next one, so a row longer than this is longer than any arrangement of these
+# three numbers can produce. `sentence-pack-1`, which packed to 4,000 with no
+# sentence cap, crosses it on nearly every chunk and by 8,000 characters on the
+# one that #28 was named after.
+TRANSCRIPT_CEILING_CHARS = TRANSCRIPT_MAX_CHARS + TRANSCRIPT_OVERLAP_CHARS
+
+
+def transcript_chunk_floor(chars: int) -> int:
+    """The fewest chunks this packer can cut `chars` characters of prepared
+    text into.
+
+    No chunk holds more than TRANSCRIPT_MAX_CHARS characters, and every chunk
+    after the first in a chapter spends part of that on text repeated from its
+    predecessor — so fewer chunks than this cannot hold the text at all,
+    whatever the sentences look like.
+
+    The divisor is the CEILING (2,400) and not the advance a chunk actually
+    makes (target minus overlap, 2,160), which leaves about 10% between this
+    floor and what a real run produces. That gap is deliberate: it is where the
+    whitespace the splitter drops at sentence boundaries goes, and where a
+    chapter that ends in a half-full chunk goes. The floor is a bound, not a
+    prediction of the row count."""
+    return -(-int(chars) // TRANSCRIPT_MAX_CHARS)
+
 # Sentence end: . ! ? … optionally followed by a closing quote/bracket, then whitespace.
 _SENTENCE_END = re.compile(r'(?<=[.!?…])["\')\]]*[ \n]+')
 

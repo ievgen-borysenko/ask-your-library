@@ -19,7 +19,8 @@ The catalogue is deliberately not consulted: it answers from the index tables
 import logging
 from dataclasses import dataclass, field
 
-from ..index_meta import CARDS_PREFIX, CARDS_REBUILD_HINT, read_index_meta, version_mismatch
+from ..index_meta import (CARDS_PREFIX, CARDS_REBUILD_HINT, length_distribution, length_mismatch,
+                          read_index_meta, rebuild_hint, version_mismatch)
 from .ledger import INDEXED, TABLE, open_ledger
 
 log = logging.getLogger(__name__)
@@ -56,6 +57,13 @@ class LedgerReport:
     # A stamped chunker or row schema this code cannot match (#27): the same
     # sentence the reader gets as a warning and the writer as a refusal.
     version_mismatches: list[str] = field(default_factory=list)
+    # How long the rows of each table actually are, against the numbers of the
+    # chunker stamped on it — read out whether or not anything is wrong, for
+    # the same reason the stamps are (#75).
+    chunk_lengths: list[str] = field(default_factory=list)
+    # Rows the chunker stamped on their table could not have produced: a stamp
+    # that does not describe the rows under it.
+    length_drift: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
     @property
@@ -63,7 +71,8 @@ class LedgerReport:
         return not (self.indexed_but_absent or self.in_index_but_not_in_ledger
                     or self.orphan_row_counts or self.never_indexed
                     or self.duplicate_keys or self.row_count_drift
-                    or self.cards_without_a_book or self.version_mismatches)
+                    or self.cards_without_a_book or self.version_mismatches
+                    or self.length_drift)
 
     def lines(self) -> list[str]:
         out = [f"ledger: {self.books_in_ledger} book(s); index "
@@ -71,6 +80,10 @@ class LedgerReport:
                f"{self.books_in_index} book key(s)"]
         for stamp in self.stamps:
             out.append(f"  stamp: {stamp}")
+        for line in self.chunk_lengths:
+            out.append(f"  chunks: {line}")
+        for line in self.length_drift:
+            out.append(f"  CHUNK LENGTH        {line}")
         for line in self.version_mismatches:
             if line.endswith(CARDS_REBUILD_HINT):
                 # a cards table: reads with a warning, and its rebuild is the
@@ -109,19 +122,23 @@ class LedgerReport:
         return out
 
 
-def _read_stamps(db, report: LedgerReport) -> None:
+def _read_stamps(db, report: LedgerReport) -> dict[str, str]:
     """What each checked table is stamped with, against what this code writes.
+    Returns the chunker each table claims, which is what the row lengths are
+    then read against (`_report_lengths`).
 
     The embedder is not re-checked here — that is `check_index`, it runs before
     every search and before every write, and it is fatal in both places, so a
     reconciliation report is not where anyone would first learn of it. What
     this adds is the pair `check_index` cannot speak about: the chunker and the
     row schema, whose whole policy is that they do not stop a read."""
+    stamped: dict[str, str] = {}
     for name in report.checked_tables:
         meta = read_index_meta(db, name)
         if meta is None:
             report.stamps.append(f"{name}: no fingerprint (built before stamps existed)")
             continue
+        stamped[name] = (meta.get("chunker") or "").strip()
         # A fingerprint row written before ADR-024 has neither field at all, so
         # both read as an absence rather than as `None` — which in a report
         # reads like a value somebody wrote.
@@ -136,6 +153,35 @@ def _read_stamps(db, report: LedgerReport) -> None:
             if name.startswith(CARDS_PREFIX):
                 detail = f"{detail} — reads with a warning. {CARDS_REBUILD_HINT}"
             report.version_mismatches.append(detail)
+    return stamped
+
+
+def _report_lengths(report: LedgerReport, stamped: dict[str, str],
+                    lengths: dict[str, list[int]]) -> None:
+    """The chunk-length distribution of every checked table, and the drift when
+    the rows are ones the stamped chunker could not have cut (#75).
+
+    This is the half of the fingerprint check that does not take the stamp's
+    word for it. `version_mismatch` above compares two strings, and a string is
+    only worth what the hand that wrote it knew: `--stage stamp-meta` writes a
+    chunker name because an operator asserted one. When that assertion was
+    wrong, everything downstream agreed with it — the reader warned about
+    nothing, the writer refused nothing, and `--doctor` said "no drift" over a
+    table holding another chunker's rows.
+
+    So the rows are measured against the numbers of the chunker they claim, and
+    a length that chunker cannot return is drift, exactly like a ledger row
+    with no rows behind it: reported, counted in `ok`, and therefore a non-zero
+    exit."""
+    for name in report.checked_tables:
+        rows = lengths.get(name)
+        if not rows:
+            continue
+        chunker = stamped.get(name)
+        report.chunk_lengths.append(length_distribution(name, chunker, rows))
+        drift = length_mismatch(name, chunker, rows)
+        if drift:
+            report.length_drift.append(f"{drift}. {rebuild_hint(name)}")
 
 
 def check_ledger(db, table_names: list[str], ledger_table: str = TABLE) -> LedgerReport:
@@ -148,7 +194,7 @@ def check_ledger(db, table_names: list[str], ledger_table: str = TABLE) -> Ledge
     names = db.list_tables() if hasattr(db, "list_tables") else db.table_names()
     present = list(getattr(names, "tables", names))
     report.checked_tables = [name for name in table_names if name in present]
-    _read_stamps(db, report)
+    stamped = _read_stamps(db, report)
 
     # Per table, not merged: only the transcripts table ever carries `book_id`
     # (see the cards note below), and merging the two made the orphan check
@@ -160,6 +206,10 @@ def check_ledger(db, table_names: list[str], ledger_table: str = TABLE) -> Ledge
     id_column_missing: list[str] = []
     card_keys: set[str] = set()
     text_keys: set[str] = set()
+    # Row text lengths per table, collected in THIS pass rather than a second
+    # one: the projection widens by one column and the rows are already being
+    # walked, so measuring what the chunker did costs no extra scan.
+    lengths: dict[str, list[int]] = {}
     for name in report.checked_tables:
         table = db.open_table(name)
         count = table.count_rows()
@@ -169,8 +219,11 @@ def check_ledger(db, table_names: list[str], ledger_table: str = TABLE) -> Ledge
         has_id = "book_id" in table.schema.names
         if not has_id and not is_cards:
             id_column_missing.append(name)
-        columns = ["book"] + (["book_id"] if has_id else [])
+        has_text = "text" in table.schema.names
+        columns = ["book"] + (["book_id"] if has_id else []) + (["text"] if has_text else [])
         for row in table.search().select(columns).limit(count).to_list():
+            if has_text:
+                lengths.setdefault(name, []).append(len(row.get("text") or ""))
             key = row.get("book")
             if key:
                 keys_in_index.add(key)
@@ -182,6 +235,8 @@ def check_ledger(db, table_names: list[str], ledger_table: str = TABLE) -> Ledge
                 rows_by_id[book_id] = rows_by_id.get(book_id, 0) + 1
             elif has_id:
                 rows_without_id += 1
+
+    _report_lengths(report, stamped, lengths)
 
     for name in id_column_missing:
         report.notes.append(f"{name} has no book_id column yet (an index built before the "
