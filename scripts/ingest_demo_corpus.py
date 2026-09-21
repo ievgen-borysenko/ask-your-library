@@ -59,14 +59,9 @@ from ask_your_library.ingest import (Chunk, build_fts_index, chunk_card, embeddi
 # Chapter splitting lives in the package so every ingest path (this script and
 # the generic `ayl-add`) cuts books into sections identically.
 from ask_your_library.ingest.chapters import (DEFAULT_CHAPTER_RE, MIN_CHAPTER_CHARS,  # noqa: F401
-<<<<<<< HEAD
-                                              split_chapters, with_parts)
+                                              cut_back_matter, split_chapters, with_parts)
 from ask_your_library.ingest.chunking import (CARD_CHUNKER_VERSION, CHUNKER_VERSION,
                                               TRANSCRIPT_MAX_CHARS, card_note, chunk_floor,
-=======
-                                              cut_back_matter, split_chapters, with_parts)
-from ask_your_library.ingest.chunking import (CARD_CHUNKER_VERSION, CHUNKER_VERSION, card_note,
->>>>>>> origin/main
                                               parse_frontmatter)
 from ask_your_library.ingest.ledger import open_ledger
 from ask_your_library.ingest.lock import IngestBusy, ingest_lock
