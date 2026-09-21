@@ -565,21 +565,29 @@ def best_match_span(passage: str, query: str, width: int) -> tuple[int, int] | N
     passage holds none of them.
 
     "Thickest" is, in order: how many DIFFERENT words of the query the run
-    covers, then — between runs covering the same words — how many OCCURRENCES
-    of query words it holds, then the shorter run, then the earlier one.
+    covers, then its OCCURRENCE PROFILE — the per-word counts, sorted
+    ascending and compared position by position, so the rarest of the covered
+    words is what decides first — then the shorter run, then the earlier one.
 
     Distinct-first is still what keeps a page that repeats "the" from
-    outranking the one page that carries the query's rare words together:
-    occurrences are only ever compared between runs that already cover the same
-    set of words, so no amount of repetition buys a run the words it does not
-    spell. Within that set, density is evidence, and it has to come BEFORE
-    length: a run here is every hit that fits in `width` from its first one, so
-    at chapter scale — `width` is the whole window — the shortest run is a hit
-    with nothing after it for a window's length, and a one-word `looking_for`
-    centred the window on the first mention followed by silence rather than on
-    the pages that keep returning to the word (#81). Shorter-then-earlier still follow, so the result is one span and not
-    a set of equally good ones, because a retrieval this deterministic is the
-    only kind that can be tested and re-run.
+    outranking the one page that carries the query's rare words together: the
+    profile is only ever read between runs that cover the same NUMBER of query
+    words, and no amount of repetition buys a run a word it does not spell.
+    Comparing the profile rarest-first is what keeps it honest when the numbers
+    are the same: for `who was given the black spot`, a page with 204 "the"s
+    and one "spot" profiles as (1, …) and loses to the page with six of each,
+    (6, 6, …) — repetition of a common word cannot outvote a second mention of
+    the rare one, which a plain total of occurrences let it do. For a one-word
+    query the profile IS the occurrence count.
+
+    Density has to come BEFORE length: a run here is every hit that fits in
+    `width` from its first one, so at chapter scale — `width` is the whole
+    window — the shortest run is a hit with nothing after it for a window's
+    length, and a one-word `looking_for` centred the window on the first
+    mention followed by silence rather than on the pages that keep returning to
+    the word (#81). Shorter-then-earlier still follow, so the result is one
+    span and not a set of equally good ones, because a retrieval this
+    deterministic is the only kind that can be tested and re-run.
 
     What density cannot do is said in the same breath: it counts spellings, so
     a chapter where people "watch" each other outweighs the page with the
@@ -587,9 +595,11 @@ def best_match_span(passage: str, query: str, width: int) -> tuple[int, int] | N
     a candidate at all.
 
     There is no stop-word list: the corpus is not one language (the demo
-    library holds Ukrainian), a list per language is a thing to maintain and
-    get wrong, and "distinct words covered" already prices a common word at
-    what it is worth — one word out of several.
+    library holds Ukrainian), and a list per language is a thing to maintain
+    and get wrong. The key prices a common word instead of banning it —
+    distinct coverage counts it as one word out of several, and the
+    rarest-first profile stops its repetitions from deciding between runs that
+    cover as much — which is the same arithmetic in every language.
 
     This is a LEXICAL match over the raw text, not the retrieval the index
     does: no vectors, no BM25 statistics, nothing but the query's own words.
@@ -606,7 +616,7 @@ def best_match_span(passage: str, query: str, width: int) -> tuple[int, int] | N
     if not hits:
         return None
     best: tuple[int, int] | None = None
-    best_key: tuple[int, int, int] | None = None
+    best_key: tuple[int, tuple[int, ...], int] | None = None
     counts: dict[str, int] = {}
     distinct = 0
     right = 0
@@ -621,9 +631,11 @@ def best_match_span(passage: str, query: str, width: int) -> tuple[int, int] | N
         if right == left:           # this single hit is wider than the budget
             continue
         start, end = hits[left][0][0], hits[right - 1][0][1]
-        # `right - left` is every hit inside this run, which is what `counts`
-        # sums to: the density key costs nothing and keeps the scan O(hits).
-        key = (distinct, right - left, -(end - start))
+        # `counts` is already the run's tally — the zeros are the words the
+        # window has slid past. Sorting it is O(distinct log distinct) per
+        # step, and `distinct` is the number of words in the query.
+        profile = tuple(sorted(count for count in counts.values() if count))
+        key = (distinct, profile, -(end - start))
         if best_key is None or key > best_key:
             best_key, best = key, (start, end)
         term = hits[left][1]

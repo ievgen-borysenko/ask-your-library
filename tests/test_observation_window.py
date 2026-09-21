@@ -370,9 +370,10 @@ def test_a_single_term_query_picks_the_densest_cluster_not_a_stray_mention():
     """#81: every occurrence of a one-word query covers the same one distinct
     word, so the span was decided by the tie-break — the shorter run, which at
     chapter scale is a hit with nothing after it for a window's length — and a
-    stray mention beat the paragraph that keeps returning to the word. Occurrences rank between
-    coverage and the tie-breaks, so now the paragraph does."""
-    term = "cannibals"
+    stray mention beat the paragraph that keeps returning to the word.
+    Occurrences rank between coverage and the tie-breaks, so now the paragraph
+    does."""
+    term = "surveyors"
     passing = f"A traveller had spoken of {term} once, and was not believed. "
     cluster = (f"The {term} kept their own account of it, and the account the {term} "
                f"gave was not the captain's. Whatever the {term} were, they were not that. ")
@@ -403,11 +404,48 @@ def test_a_stray_pair_after_the_scene_does_not_pull_the_window_off_it():
     assert stray not in windowed
 
 
+def test_a_one_word_ukrainian_query_picks_the_cluster_too():
+    """The same shape, in the other language of the demo library: there is no
+    stop-word list and no per-language rule, so the arithmetic that moves an
+    English window has to move a Ukrainian one."""
+    filler = ("Наглядач маяка рахував кораблі, що проходили повз мис. "
+              "Він записував кожну назву в журнал у зеленій оправі. ")
+    term = "вовки"
+    passing = f"Подорожній колись казав, що тут є {term}, і йому не повірили. "
+    cluster = (f"{term.capitalize()} вели власний рахунок цій справі, і той рахунок, що дали "
+               f"{term}, не збігався з капітановим. Хоч би ким були {term}, вони були не тими. ")
+    text = f"{filler * 60}{passing}{filler * 400}{cluster}{filler * 300}"
+
+    windowed = window_around(text, term, config.CHAPTER_HIT_CHARS)
+
+    assert cluster.strip() in windowed
+    assert passing not in windowed
+
+
+def test_a_common_word_all_through_the_filler_does_not_decide_the_window():
+    """The regression a plain count of occurrences brings (#81, `who was given
+    the black spot`): at chapter scale a run holds hundreds of "the"s, so among
+    the runs that cover every query word the winner is whichever sits in the
+    chattiest prose — here a stretch that names the black spot once. Counts are
+    compared rarest-first instead, so the five words spelt once tie and the
+    scene's six "black spot"s decide it."""
+    chatter = "the day, the hour, the ship, the sea, the rope, the shore. "
+    scene = ("Who was given the black spot? "
+             + "The black spot went from hand to hand again. " * 5)
+    mention = "Who was given the black spot to hold, he asked. "
+    text = f"{FILLER * 200}{scene}{FILLER * 140}{mention}{chatter * 200}{FILLER * 60}"
+
+    windowed = window_around(text, "who was given the black spot", config.CHAPTER_HIT_CHARS)
+
+    assert scene.strip() in windowed
+    assert mention not in windowed
+
+
 def test_a_word_repeated_many_times_still_loses_to_more_of_the_query():
     """The guard the distinct-first order is there for, with the numbers turned
     against it: sixty occurrences of one query word in a row must not outrank
-    the four-word run, because occurrences are only ever compared between runs
-    that already cover the same words."""
+    the four-word run, because the occurrence counts are only read between runs
+    that cover the same NUMBER of query words."""
     decoy = "lamp lamp lamp " * 20
     real = "drowned lamp under the seventh stair"
     passage = f"{decoy}{'filler words here. ' * 200}the {real}{' tail words. ' * 200}"
