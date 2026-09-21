@@ -70,6 +70,14 @@ jobs:
         # downloaded. Without this stage the two canary toc files were the only
         # ones the diff below could never have anything to say about.
         run: uv run scripts/ingest_demo_corpus.py --stage prepare-canaries
+      - name: The manifest's end_regex values are checked against the prepared texts
+        # tests/test_split_chapters.py holds one test that needs data/prepared —
+        # each end_regex must match its book's back-matter heading and nothing
+        # else — and the prepared texts are not committed, so it skips itself
+        # everywhere except here, right after the stages that just wrote them.
+        # --group dev for pytest, which the job's own `uv sync` leaves out; -rs
+        # so a skip (an empty data/prepared) is visible rather than green.
+        run: uv run --group dev pytest -q -rs tests/test_split_chapters.py
       - name: The chapter split still matches the committed tables of contents
         # The stages above rewrite corpus/toc/*.json from the sources they just
         # read. A re-pin makes the checksums green by construction; this is what

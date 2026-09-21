@@ -196,8 +196,8 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   additionally waits at most 300 s for a clarify reply.
 - **Chapter reads are capped at 12,000 characters**, and since 2026-09-17 (#28,
   [ADR-025](adr/README.md)) that budget is spent around the match rather than at the head of the
-  chapter — but only when the request says what it is looking for. 61% of the demo corpus's 1,228
-  chapters are longer than one read (median 14,783 characters, the longest 585,482), so until this
+  chapter — but only when the request says what it is looking for. 62% of the demo corpus's 1,246
+  sections are longer than one read (median 14,821 characters, the longest 245,244), so until this
   change a question about the end of a long chapter was answered from its beginning. Now `reflect`
   may name a phrase, `act` reads up to `CHAPTER_SCAN_CHARS` (120,000) of the chapter and cuts the
   window around the best lexical match in it, and what is left out is stated in band at both ends.
