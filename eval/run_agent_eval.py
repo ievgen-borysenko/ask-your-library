@@ -318,6 +318,77 @@ def role_seconds(usage: dict) -> dict:
             if "seconds" in r}
 
 
+class GateLedger:
+    """What `observe`'s provenance gate made of each step, and whether the
+    all-dropped cap fired — read off the events the loop already emits (#77).
+
+    The state carries the gate's spend as RUN TOTALS (`dropped_unverified`,
+    `dropped_by_reason`) and `dropped_streak` as the value the run ended on,
+    never its peak. So a report could say how many quotes a question lost but
+    not WHERE it lost them, and two different runs — three all-dropped steps
+    under the cap, and one all-dropped step followed by two dry ones — ended
+    with the same stop reason and left no artifact that tells them apart
+    (`docs/eval-results/2026-09-18-rechunk-and-observe-feedback.md`, `c05`).
+
+    Both facts are already in the stream of updates, which is why this needed
+    no change to `nodes.py`. Every `observe` update carries the evidence list
+    and, on a step that dropped anything, the run total of what it dropped;
+    both are cumulative, so the difference against the previous update is this
+    step's. `dropped_streak` rides on the same update, written only when it
+    says something — a channel an update omits keeps its value, and the node
+    writes that key when the streak is not 0 or when it has just been reset —
+    so an ABSENT key is a streak of 0, exactly.
+
+    `distilled` is the well-formed quotes the gate JUDGED this step: kept plus
+    dropped. An item the model malformed — not an object, no quote, or a reply
+    that was no usable JSON at all — is counted nowhere on the state and so is
+    in none of the three numbers; the scratchpad's `### observe, step N` line
+    (#81) is where such a step is visible. `kept` is after the clarify filter,
+    like the evidence the state holds.
+    """
+
+    def __init__(self) -> None:
+        self.steps: list[dict] = []
+        self._step = 0        # the step number `act` last announced
+        self._evidence = 0    # evidence items ON THE STATE as of the last update
+        self._dropped = 0     # dropped_unverified, the run total so far
+
+    def see(self, node_name: str, update: dict) -> None:
+        """One node's update, in the order the runner delivers them."""
+        if isinstance(update.get("steps_taken"), int):
+            self._step = update["steps_taken"]
+        if node_name == "observe":
+            kept = max(0, len(update.get("evidence") or []) - self._evidence)
+            dropped = max(0, int(update.get("dropped_unverified", self._dropped)) - self._dropped)
+            streak = int(update.get("dropped_streak", 0) or 0)
+            self.steps.append({"step": self._step, "distilled": kept + dropped, "kept": kept,
+                               "dropped": dropped, "dropped_streak": streak,
+                               # the step where the hold ran out: the MAX_DROPPED_STREAK'th
+                               # all-dropped step in a row is itself counted dry, so the CRAG
+                               # gate may end the run on it (#29, ADR-004 amended 17.09)
+                               "cap_fired": streak >= MAX_DROPPED_STREAK})
+        # Read on EVERY node and after the row above: `plan` rewrites the
+        # evidence list when a clarify reply narrows the run to one book, and
+        # the next step's `kept` is a difference against what is on the state
+        # now, not against the longest list the run has held.
+        if isinstance(update.get("evidence"), list):
+            self._evidence = len(update["evidence"])
+        if isinstance(update.get("dropped_unverified"), int):
+            self._dropped = update["dropped_unverified"]
+
+    @property
+    def peak_dropped_streak(self) -> int:
+        """The longest run of consecutive all-dropped steps this question
+        reached — the number the end state cannot report, because any later
+        step resets the streak it ended on."""
+        return max((step["dropped_streak"] for step in self.steps), default=0)
+
+    @property
+    def cap_fired(self) -> bool:
+        """Whether any step of this question turned a held step dry."""
+        return any(step["cap_fired"] for step in self.steps)
+
+
 def run_one(graph, item: dict, attempt: int = 1) -> dict:
     """One question through the same runner the CLI and the web UI use.
 
@@ -338,8 +409,10 @@ def run_one(graph, item: dict, attempt: int = 1) -> dict:
     # attempt keeps the name it has always had.
     suffix = "" if attempt == 1 else f"-{attempt}"
     steps_log = []
+    gate = GateLedger()
 
     def on_event(node_name: str, update: dict) -> None:
+        gate.see(node_name, update)
         if node_name == "reflect" and update.get("current_query"):
             steps_log.append(f"reflect -> {update['current_query'][:80]}")
         elif node_name == "reflect" and update.get("stop_reason"):
@@ -387,6 +460,14 @@ def run_one(graph, item: dict, attempt: int = 1) -> dict:
         # cross_book, short, not_found — because they call for different fixes
         "dropped_by_reason": result.dropped_by_reason,
         "repinned": result.repinned,
+        # the same gate per step (#77): what each step distilled, kept and lost,
+        # the longest run of all-dropped steps this question reached, and
+        # whether the MAX_DROPPED_STREAK cap turned a held step dry. Run totals
+        # cannot say where the evidence went, and the end state cannot say
+        # whether the cap fired — both are differenced off observe's own events
+        "gate_steps": gate.steps,
+        "peak_dropped_streak": gate.peak_dropped_streak,
+        "cap_fired": gate.cap_fired,
         "clarify_asked": result.clarify_asked,
         "clarify_candidates": result.clarify_candidates,
         "clarify_unresolved": result.clarify_unresolved,
@@ -865,6 +946,10 @@ def empty_totals() -> dict:
             "confirmed": 0, "evidence": 0,
             "unattributed": 0, "broken": 0, "card_only": 0,
             "dropped_unverified": 0, "dropped_cross_book": 0, "repinned": 0,
+            # questions whose all-dropped cap fired at least once (#77): a count
+            # of ITEMS, not of quotes or of steps — the other gate figures here
+            # are quotes, and one item can fire the cap on several steps
+            "cap_fired_items": 0,
             "behavior_ok": 0, "titles_mentioned": 0, "titles_expected": 0,
             "facts_found": 0, "facts_expected": 0, "facts_items": 0, "facts_items_ok": 0,
             "drill_expected": 0, "drill_ok": 0, "cost_usd": 0.0, "llm_calls": 0,
@@ -914,6 +999,13 @@ def render_summary(totals: dict, per_group: dict, repeat: int, attempt_totals: l
                    if totals["dropped_unverified"] else "")
                 + (f"; {totals['repinned']} quotes re-pinned to the passage that holds them"
                    if totals["repinned"] else "")
+                # The cap on the hold (#29, #77), on the same rule: a run where
+                # no question ever reached MAX_DROPPED_STREAK writes the line it
+                # has always written. "Items", because a question that fired the
+                # cap on two steps is one question whose evidence stopped
+                # holding the loop open.
+                + (f"; the all-dropped cap fired on {totals['cap_fired_items']} items"
+                   if totals["cap_fired_items"] else "")
                 # The chapter-read window (#28), on the same rule again: a run
                 # that read no chapter writes the line it always wrote.
                 + (f"; chapter reads {totals['chapter_reads']} "
@@ -984,6 +1076,11 @@ def render_summary(totals: dict, per_group: dict, repeat: int, attempt_totals: l
                                          column("dropped_cross_book")))
         lines.insert(-1, spread_line("quotes re-pinned to the passage that holds them",
                                      column("repinned")))
+    if any(column("cap_fired_items")):
+        # Added only where it happened, like the block above, and per attempt
+        # like every other figure at N > 1: never a sum across attempts.
+        lines.insert(-1, spread_line("items where the all-dropped cap fired",
+                                     column("cap_fired_items")))
     if expected["drill_items"]:
         lines.append(spread_line("chapter drill-down", column("drill_ok"),
                                  of=expected["drill_items"]))
@@ -1284,6 +1381,10 @@ def main(argv: list[str] | None = None) -> None:
                 totals["dropped_unverified"] += r.get("dropped_unverified", 0)
                 totals["dropped_cross_book"] += (r.get("dropped_by_reason") or {}).get("cross_book", 0)
                 totals["repinned"] += r.get("repinned", 0)
+                # One per question that fired the cap at all (#77), never per
+                # step. `.get` with False: a record written before this reads
+                # back as the run it was, one nobody measured the cap on.
+                totals["cap_fired_items"] += int(r.get("cap_fired", False))
                 totals["evidence"] += r["evidence_items"]
                 for key in ("cost_usd", "llm_calls", "tokens_in", "tokens_out"):
                     totals[key] += r[key]
@@ -1327,6 +1428,13 @@ def main(argv: list[str] | None = None) -> None:
                               f"another book")
                 if r.get("repinned"):
                     drill += f", {r['repinned']} quotes re-pinned"
+                if r.get("peak_dropped_streak"):
+                    # Only on a question that lost a whole step's quotes, so
+                    # every other row is the row it has always been. The peak,
+                    # not the streak the run ended on: any later step resets it.
+                    drill += (f", peak {r['peak_dropped_streak']} all-dropped step(s) in a row"
+                              + (f" (the cap of {MAX_DROPPED_STREAK} fired: a held step counted "
+                                 f"dry)" if r.get("cap_fired") else ""))
                 if r.get("chapter_reads"):
                     # Only on a question that read a chapter at all, so every
                     # other row is the row it has always been.
