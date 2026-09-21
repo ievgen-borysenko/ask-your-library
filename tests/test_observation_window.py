@@ -366,6 +366,81 @@ def test_the_window_prefers_the_run_that_covers_most_of_the_query():
     assert span and passage[span[0]:span[1]] == real
 
 
+def test_a_single_term_query_picks_the_densest_cluster_not_a_stray_mention():
+    """#81: every occurrence of a one-word query covers the same one distinct
+    word, so the span was decided by the tie-break — the shorter run, which at
+    chapter scale is a hit with nothing after it for a window's length — and a
+    stray mention beat the paragraph that keeps returning to the word. Occurrences rank between
+    coverage and the tie-breaks, so now the paragraph does."""
+    term = "cannibals"
+    passing = f"A traveller had spoken of {term} once, and was not believed. "
+    cluster = (f"The {term} kept their own account of it, and the account the {term} "
+               f"gave was not the captain's. Whatever the {term} were, they were not that. ")
+    text = f"{FILLER * 40}{passing}{FILLER * 400}{cluster}{FILLER * 300}"
+    assert len(text) > config.CHAPTER_HIT_CHARS
+
+    windowed = window_around(text, term, config.CHAPTER_HIT_CHARS)
+
+    assert cluster.strip() in windowed
+    assert passing not in windowed
+    assert windowed.startswith(library.HEAD_MARKER_PREFIX)   # not the head of the chapter
+
+
+def test_a_stray_pair_after_the_scene_does_not_pull_the_window_off_it():
+    """The shape measured in #81 (`black spot`): five mentions tell the scene,
+    one of the two words turns up once more a page later, and the phrase is
+    spelt a last time a chapter's length on. Every run out of the scene
+    stretched to that trailing word, so the lone pair at the end — nothing
+    after it, the shortest run there is — took the window."""
+    scene = "".join(f"The black spot went from hand to hand, number {i}. " for i in range(5))
+    trailing = "It was a black night. "
+    stray = "Years on, nobody spoke of the black spot again. "
+    text = f"{FILLER * 300}{scene}{FILLER * 60}{trailing}{FILLER * 400}{stray}{FILLER * 200}"
+
+    windowed = window_around(text, "black spot", config.CHAPTER_HIT_CHARS)
+
+    assert scene.strip() in windowed
+    assert stray not in windowed
+
+
+def test_a_word_repeated_many_times_still_loses_to_more_of_the_query():
+    """The guard the distinct-first order is there for, with the numbers turned
+    against it: sixty occurrences of one query word in a row must not outrank
+    the four-word run, because occurrences are only ever compared between runs
+    that already cover the same words."""
+    decoy = "lamp lamp lamp " * 20
+    real = "drowned lamp under the seventh stair"
+    passage = f"{decoy}{'filler words here. ' * 200}the {real}{' tail words. ' * 200}"
+
+    span = best_match_span(passage, "drowned lamp seventh stair", 600)
+
+    assert span and passage[span[0]:span[1]] == real
+
+
+def test_runs_that_tie_on_words_and_occurrences_resolve_shorter_then_earlier():
+    """The tie-breaks below density, both of them: same words and the same
+    number of hits picks the tighter run, and two runs alike in all three keys
+    pick the earlier one. One span comes back, always the same one."""
+    tight = "drowned stair"
+    loose = f"drowned{' padding words between them. ' * 6}stair"
+    passage = f"{loose}{' filler here. ' * 60}{tight}{' filler here. ' * 60}"
+
+    span = best_match_span(passage, "drowned stair", 600)
+    assert span and passage[span[0]:span[1]] == tight
+
+    twins = f"{tight}{' filler here. ' * 60}{tight}"
+    assert best_match_span(twins, "drowned stair", 600) == (0, len(tight))
+
+
+def test_a_query_the_chapter_does_not_carry_is_still_the_head_cut_byte_for_byte():
+    """The fallback the ranking must not disturb: no hits, no span, and the
+    read is the unaimed read down to the character."""
+    text = long_chapter()
+    head = library.join_chapter([{"chunk_id": "b/c/1", "text": text}], config.CHAPTER_HIT_CHARS)
+
+    assert window_around(text, "zeppelins over montevideo", config.CHAPTER_HIT_CHARS) == head
+
+
 def test_the_joiner_between_two_chunks_survives_the_window(monkeypatch, tmp_path):
     """A window may span the `[...]` that separates two chunks — it is text on
     the page and the reader is shown it — but it must carry the joiner through,

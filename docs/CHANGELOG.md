@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **A chapter read aimed at one word lands where the word is thickest, not on the first mention with
+  silence after it** (#81). `best_match_span` ranks the runs of query words that fit in the window
+  by how many distinct query words they cover, and between equals took the SHORTER run. At chapter
+  scale a run is every hit that fits in a 12,000-character window from its first one, so the
+  shortest run is a hit with nothing after it for a window's length — the end of a cluster or a
+  stray mention — and the earliest such won: `black spot` centred the window on one stray mention at
+  41246 of a 69,686-character section while the five mentions that tell the scene sat at
+  24450–28953, and `execution` opened at 25744 of 73,853 with the answering sentence at 63588.
+  Occurrences of query words are now a rank key between distinct coverage and the existing
+  tie-breaks: same words covered → more occurrences wins, then the shorter run, then the earlier
+  one. Replayed over the 22 aimed reads of long sections in the 19.09 runs, 18 windows move; both
+  windows above now hold what they missed. What it does not fix, measured in the same replay:
+  `cannibals` occurs three times in its section, none after 8198, and the passage that answers
+  (18023) never spells the word, so no lexical aim reaches it; and `watch` moves from the page with
+  the stolen watch (25582) to the pages where people watch each other — density cannot tell a noun
+  from a verb. Distinct-first is unchanged, the scan stays linear in the hits, the window
+  construction, the head-cut fallback and the markers are untouched, and a query the section does
+  not carry still returns the head of the chapter character for character.
+
 - **The hosted default graded by hand, and its limit written down**
   ([`eval-results/2026-09-19-hosted-default-quality.md`](eval-results/2026-09-19-hosted-default-quality.md)).
   `deepseek/deepseek-v4-flash-0731` with thinking off, core and extended sets at `--repeat 3`, is
