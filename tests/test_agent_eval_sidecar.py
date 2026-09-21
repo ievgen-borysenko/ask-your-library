@@ -24,7 +24,8 @@ from ask_your_library.i18n import t
 # The real compiled graph, its scripted model and its `run` fixture, so that
 # the per-step numbers of #77 can be checked against a run of the loop itself
 # and not only against handwritten events (tests/test_graph_e2e.py owns them).
-from test_graph_e2e import MOBY, FakeLibrary, ScriptedModel, by_name, evidence, run  # noqa: F401
+from test_graph_e2e import (GULLIVER, MOBY, FakeLibrary, ScriptedModel,  # noqa: F401
+                            by_name, evidence, names, run)
 
 spec = importlib.util.spec_from_file_location(
     "run_agent_eval", Path(__file__).resolve().parents[1] / "eval" / "run_agent_eval.py")
@@ -841,16 +842,51 @@ def test_the_peak_survives_the_step_that_resets_the_streak():
     assert book.cap_fired is True
 
 
-def test_the_clarify_filter_does_not_make_the_next_step_lose_evidence():
+def test_the_baseline_follows_an_evidence_list_that_plan_rewrote():
     """After a clarify reply `plan` rewrites the evidence list to the one book
     the reader chose, so the state can hold FEWER items than the step before.
     The baseline follows that update; without it the next step would report
-    negative — or zero — evidence it really kept."""
+    none of the evidence it really kept. (The same thing through the real
+    graph: test_the_baseline_follows_a_real_clarify_filter below.)"""
     book = ledger(("observe", {"evidence": evidence_list(3), "empty_streak": 0}),
                   ("plan", {"evidence": evidence_list(1), "clarify_chosen": "Moby Dick"}),
                   ("observe", {"evidence": evidence_list(2), "empty_streak": 0}))
 
     assert [s["kept"] for s in book.steps] == [3, 1]
+
+
+def test_the_runners_metrics_event_never_moves_a_baseline():
+    """`metrics` is the runner's own account, delivered through the same
+    callback as a node update and carrying `usage_snapshot()` — at a clarify
+    pause it arrives in the MIDDLE of a run. Its keys are not state channels,
+    so a counter of its own that happened to be named like one must not
+    silently re-baseline the steps after it."""
+    metrics = {"steps_taken": 99, "evidence": evidence_list(7), "dropped_unverified": 42,
+               "llm_calls": 3, "partial": True}
+    book = ledger(("act", {"steps_taken": 1}),
+                  ("observe", {"evidence": evidence_list(1), "empty_streak": 0}),
+                  ("metrics", metrics),
+                  ("act", {"steps_taken": 2}),
+                  ("observe", {"evidence": evidence_list(3), "empty_streak": 0}))
+
+    assert [(s["step"], s["kept"], s["dropped"]) for s in book.steps] == [(1, 1, 0), (2, 2, 0)]
+
+
+def test_a_timed_out_observe_call_is_marked_and_counts_nothing():
+    """`observe`'s call can run out of time: the step's passages are lost, the
+    evidence of the run stands, and the update looks like a dry step's from the
+    outside. The row says which it was — otherwise a report would read a budget
+    that expired as a library that had nothing to give."""
+    book = ledger(("act", {"steps_taken": 1}),
+                  ("observe", {"evidence": evidence_list(2), "empty_streak": 0}),
+                  ("act", {"steps_taken": 2}),
+                  ("observe", {"evidence": evidence_list(2), "empty_streak": 1,
+                               "call_timed_out": True, "stop_reason": "out of time"}))
+
+    dry, timed_out = book.steps
+    assert "timed_out" not in dry              # written only on the step that timed out
+    assert timed_out == {"step": 2, "distilled": 0, "kept": 0, "dropped": 0,
+                         "dropped_streak": 0, "cap_fired": False, "timed_out": True}
 
 
 def test_run_one_records_the_gate_step_by_step_and_whether_the_cap_fired(monkeypatch, tmp_path):
@@ -921,7 +957,7 @@ def test_the_summary_line_counts_the_items_the_cap_fired_on(monkeypatch, tmp_pat
                    lambda item, attempt: capped_result(item) if item["id"] == "q01-moby"
                    else fake_result(item))
     report = only(out, ".md").read_text(encoding="utf-8")
-    assert "; the all-dropped cap fired on 1 items" in report
+    assert "; the all-dropped cap fired on 1 item(s)" in report
 
 
 def test_a_run_where_the_cap_never_fired_writes_the_line_it_always_wrote(monkeypatch, tmp_path):
@@ -1025,3 +1061,33 @@ def test_a_run_that_holds_one_dropped_step_never_reports_the_cap(run):
     assert book.peak_dropped_streak == 1 and book.cap_fired is False
     assert by_name(events, "reflect")[-1]["stop_reason"] == t("stop_crag",
                                                               n=config.MAX_EMPTY_STREAK)
+
+
+def test_the_baseline_follows_a_real_clarify_filter(run):
+    """The clarify path through the graph itself: the first step keeps two
+    quotes, the reader picks one of the two books, `plan` rewrites the evidence
+    list to that book's one quote, and the second step keeps one more. Read
+    against the longest list the run has held, that second step would report
+    nothing kept — and the `metrics` event of the clarify pause sits between
+    the two, carrying a `steps_taken` of its own."""
+    model = ScriptedModel(
+        plan=[{"mode": "identify", "queries": ["stranded traveller strange land"]},
+              {"mode": "identify", "queries": ["Lilliput tiny people"]}],
+        observe=[{"evidence": [evidence(MOBY, "cards", "s1h1"),
+                               evidence(GULLIVER, "cards", "s1h3")]},
+                 {"evidence": [evidence(GULLIVER, "transcripts", "s2h2")]}],
+        reflect=[{"decision": "clarify", "clarify_question": "Which one do you mean?"},
+                 {"decision": "enough"}],
+        synthesize=["Gulliver's Travels [Gulliver's Travels, Chapter 1]."],
+    )
+    _, events, asked = run(model, FakeLibrary(), "A man stranded in a strange land, which book?",
+                           reply_to_clarify="the second one")
+
+    assert len(asked) == 1 and "metrics" in names(events)
+    # what `plan` left on the state after the reply: one book's evidence
+    assert len(by_name(events, "plan")[1]["evidence"]) == 1
+    assert ledger(*events).steps == [
+        {"step": 1, "distilled": 2, "kept": 2, "dropped": 0, "dropped_streak": 0,
+         "cap_fired": False},
+        {"step": 2, "distilled": 1, "kept": 1, "dropped": 0, "dropped_streak": 0,
+         "cap_fired": False}]

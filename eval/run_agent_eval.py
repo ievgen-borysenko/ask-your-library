@@ -340,12 +340,28 @@ class GateLedger:
     so an ABSENT key is a streak of 0, exactly.
 
     `distilled` is the well-formed quotes the gate JUDGED this step: kept plus
-    dropped. An item the model malformed — not an object, no quote, or a reply
-    that was no usable JSON at all — is counted nowhere on the state and so is
-    in none of the three numbers; the scratchpad's `### observe, step N` line
-    (#81) is where such a step is visible. `kept` is after the clarify filter,
-    like the evidence the state holds.
+    dropped. TWO KINDS OF QUOTE ARE IN NEITHER, because the state counts them
+    nowhere either. An item the model malformed — not an object, no quote, or a
+    reply that was no usable JSON at all — never reached the gate's verdicts.
+    And a quote the gate CONFIRMED that `observe`'s clarify filter then took
+    off, because it is about a book the reader did not choose, leaves the
+    evidence list without ever being dropped: `kept` is the evidence as the
+    state holds it, after that filter. The scratchpad's `### observe, step N`
+    line (#81) is where both are visible, as `filtered` and in the step's own
+    note.
+
+    `timed_out` marks the row of a step whose `observe` call ran out of time
+    (`call_timed_out`): its passages are lost, nothing was distilled, kept or
+    dropped, and without the mark the row is a dry step's row exactly. Written
+    only on that step, like every other clause of this record.
     """
+
+    # The runner's own account of the run, delivered through the same callback
+    # as the node updates and carrying `usage_snapshot()` (twice: partially, at
+    # a clarify pause, and once at the end). It is not a node and its keys are
+    # not state channels, so no baseline may be moved by it — a future counter
+    # named like one of these would otherwise corrupt every later step.
+    NOT_A_NODE = ("metrics",)
 
     def __init__(self) -> None:
         self.steps: list[dict] = []
@@ -355,18 +371,30 @@ class GateLedger:
 
     def see(self, node_name: str, update: dict) -> None:
         """One node's update, in the order the runner delivers them."""
+        if node_name in self.NOT_A_NODE:
+            return
         if isinstance(update.get("steps_taken"), int):
             self._step = update["steps_taken"]
         if node_name == "observe":
-            kept = max(0, len(update.get("evidence") or []) - self._evidence)
-            dropped = max(0, int(update.get("dropped_unverified", self._dropped)) - self._dropped)
+            timed_out = bool(update.get("call_timed_out"))
+            # A timed-out call returns the evidence it was given and nothing
+            # else, so the difference below is 0 anyway; said outright, because
+            # the row means "this step produced nothing", not "the gate judged
+            # nothing".
+            kept = 0 if timed_out else max(0, len(update.get("evidence") or []) - self._evidence)
+            dropped = 0 if timed_out else max(
+                0, int(update.get("dropped_unverified", self._dropped)) - self._dropped)
             streak = int(update.get("dropped_streak", 0) or 0)
-            self.steps.append({"step": self._step, "distilled": kept + dropped, "kept": kept,
-                               "dropped": dropped, "dropped_streak": streak,
-                               # the step where the hold ran out: the MAX_DROPPED_STREAK'th
-                               # all-dropped step in a row is itself counted dry, so the CRAG
-                               # gate may end the run on it (#29, ADR-004 amended 17.09)
-                               "cap_fired": streak >= MAX_DROPPED_STREAK})
+            row = {"step": self._step, "distilled": kept + dropped, "kept": kept,
+                   "dropped": dropped, "dropped_streak": streak,
+                   # True on the MAX_DROPPED_STREAK'th all-dropped step in a row
+                   # AND on every all-dropped step after it: each of them counts
+                   # dry, so the CRAG gate may end the run on any one of them
+                   # (#29, ADR-004 amended 17.09)
+                   "cap_fired": streak >= MAX_DROPPED_STREAK}
+            if timed_out:
+                row["timed_out"] = True
+            self.steps.append(row)
         # Read on EVERY node and after the row above: `plan` rewrites the
         # evidence list when a clarify reply narrows the run to one book, and
         # the next step's `kept` is a difference against what is on the state
@@ -385,7 +413,7 @@ class GateLedger:
 
     @property
     def cap_fired(self) -> bool:
-        """Whether any step of this question turned a held step dry."""
+        """Whether the cap turned any all-dropped step of this question dry."""
         return any(step["cap_fired"] for step in self.steps)
 
 
@@ -1004,7 +1032,7 @@ def render_summary(totals: dict, per_group: dict, repeat: int, attempt_totals: l
                 # has always written. "Items", because a question that fired the
                 # cap on two steps is one question whose evidence stopped
                 # holding the loop open.
-                + (f"; the all-dropped cap fired on {totals['cap_fired_items']} items"
+                + (f"; the all-dropped cap fired on {totals['cap_fired_items']} item(s)"
                    if totals["cap_fired_items"] else "")
                 # The chapter-read window (#28), on the same rule again: a run
                 # that read no chapter writes the line it always wrote.
@@ -1433,7 +1461,7 @@ def main(argv: list[str] | None = None) -> None:
                     # every other row is the row it has always been. The peak,
                     # not the streak the run ended on: any later step resets it.
                     drill += (f", peak {r['peak_dropped_streak']} all-dropped step(s) in a row"
-                              + (f" (the cap of {MAX_DROPPED_STREAK} fired: a held step counted "
+                              + (f" (the cap of {MAX_DROPPED_STREAK} fired: such a step counted "
                                  f"dry)" if r.get("cap_fired") else ""))
                 if r.get("chapter_reads"):
                     # Only on a question that read a chapter at all, so every
