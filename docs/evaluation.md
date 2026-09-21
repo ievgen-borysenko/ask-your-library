@@ -71,6 +71,33 @@ corrected inside their own book). All are per question and in totals, in the rep
 sidecar, and every clause is written only where there was something to say, so a run that spent none
 of them writes the line the harness has always written.
 
+**Those totals have a per-step ledger beside them since #77** (runs made with that harness change;
+every report written before it is a run nobody measured this on). They say how many quotes a
+question lost, not *where* it lost them, and the state's `dropped_streak` is the value the run ended
+on rather than its peak — so a run of all-dropped steps under `MAX_DROPPED_STREAK` and one
+all-dropped step followed by two quote-less ones ended with the same stop reason and no artifact told
+them apart. The sidecar now carries `gate_steps` per attempt: one row per `observe` step with
+`distilled` (the well-formed quotes the gate judged), `kept`, `dropped`, the `dropped_streak` after
+that step, `cap_fired` (that step was the `MAX_DROPPED_STREAK`th all-dropped one in a row, **or a
+later one in the same run** — each of them counts dry) and, only where it happened, `timed_out` (the
+step's own `observe` call ran out of time, so it distilled, kept and dropped nothing; without the
+mark the row is a dry step's row exactly). Beside them, `peak_dropped_streak` and `cap_fired` for the
+question, and `cap_fired_items` in the totals, which the summary line reports as "the all-dropped cap
+fired on N item(s)".
+
+**The split between the two artifacts is deliberate**: the Markdown report carries the question's
+peak streak and the cap in words, which is what a reader needs to tell two identical stop reasons
+apart, and the per-step ledger stays in the sidecar, like the evidence list of #81 — a row per step
+in every item header would be a table nobody reads inside a page of prose.
+
+All of it is differenced out of the events `observe` already emits — no node, prompt or decision
+changed, and no field was renamed, so the sidecar stays `schema_version` 1 and a file written before
+this reads back as the run it was. Two kinds of quote are in none of the three counts, because the
+state counts them nowhere either: one the model **malformed** (no usable object, no quote, or a
+reply that was no usable JSON), and one the gate **confirmed and the clarify filter then took off**,
+because it is about a book the reader did not choose — `kept` is the evidence as the state holds it,
+after that filter. The scratchpad's `### observe, step N` line is where both are visible.
+
 The gate's own behavioural effect — whether a set answers as well with it as without — was measured
 on 2026-09-16/17 on **two local models**, each run under the gate on `c79018a` and compared with the
 same model's baseline run on `169b511`, both golden sets, `--repeat 3 --clarify-pick second`
