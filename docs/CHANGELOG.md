@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+- **The chunker stamp is checked against the rows before it is written, and `--doctor` measures
+  them** (#75, [upgrading](upgrading.md)). `--stage stamp-meta --chunker current` claims the
+  version this code chunks at; it now samples the table first and refuses, with the numbers, when
+  the rows cannot have come from it. Two bounds, both from the sentence packer's own arithmetic and
+  both one-sided, so that only an impossible table is refused: a row longer than the packer's
+  ceiling plus one overlap (2,640 characters), and a book holding fewer rows than its prepared text
+  needs chunks of 2,400 (`transcript_chunk_floor`). The count is compared per book and only over
+  books the table and the prepared texts share, so a second index built from other books is not
+  judged by this corpus's numbers. Naming an **older** version (`--chunker sentence-pack-1`) stays
+  an unchecked assertion about the past, which is the way through for an operator who means it; a
+  refusal writes nothing, and every table is sampled before any of them is stamped.
+
+  `ayl-add --doctor` prints a `chunks:` line per table — rows, median, p95, longest, against the
+  target and ceiling of the chunker stamped on it — and reports a table whose rows are above that
+  ceiling as **drift**, so the exit code is non-zero. The lengths are collected in the pass the
+  reconciliation already makes, so the check costs no extra scan, and a table stamped with a
+  chunker this code does not implement is left to `version_mismatch`, which already says the only
+  true thing about it. A cards table has no ceiling (a "## section" with no bullet in it cannot be
+  split) and gets the distribution without a verdict.
+
+  `--stage ingest` says where it looked when there is nothing prepared (`data/prepared/`, relative
+  to the checkout, and whether the directory is missing or empty); it exited non-zero before and
+  still does. The documented procedure in [upgrading](upgrading.md) now stops on a failed ingest
+  instead of stamping after one — the chain that produced #75 — and the `--doctor` example shows
+  the new lines. Chunking itself is unchanged: nothing here re-chunks or re-embeds a row.
+
 - **The hosted default graded by hand, and its limit written down**
   ([`eval-results/2026-09-19-hosted-default-quality.md`](eval-results/2026-09-19-hosted-default-quality.md)).
   `deepseek/deepseek-v4-flash-0731` with thinking off, core and extended sets at `--repeat 3`, is

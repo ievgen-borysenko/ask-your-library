@@ -80,7 +80,8 @@ The cards table is untouched by the bump, so `--stage cards` is not part of this
 **If you do not want to rebuild yet**, nothing forces you: keep reading the index and postpone
 adding books to it. What you must not do is silence the warning by re-stamping the table
 (`--stage stamp-meta --chunker …`) — the stamp would then claim something the rows do not have,
-which is worse than no stamp at all.
+which is worse than no stamp at all. Since #75 the command refuses that attempt itself: claiming the
+version this code chunks at samples the rows first and refuses when they cannot have come from it.
 
 ### What the warning looks like
 
@@ -152,8 +153,27 @@ index /Users/…/ayl-index
 ledger: 33 book(s); index (transcripts_ollama, cards_ollama): 33 book key(s)
   stamp: transcripts_ollama: bge-m3 / 1024d, chunker sentence-pack-2, row schema 2, stamped 2026-09-17T05:12:44
   stamp: cards_ollama: bge-m3 / 1024d, chunker card-sections-2, row schema 1, stamped 2026-09-17T05:19:02
+  chunks: transcripts_ollama: 11,342 row(s), median 2,287, p95 2,396, longest 2,400 characters (chunker sentence-pack-2 packs to 2,400 and cannot return more than 2,640)
+  chunks: cards_ollama: 412 row(s), median 863, p95 1,704, longest 1,988 characters
   no drift: every indexed book has its rows, and every row its book
 ```
+
+The `chunks:` line is the stamp checked against the rows under it rather than taken on trust
+(#75). The ceiling it names is the sentence packer's own arithmetic — the longest chunk it can
+return, plus one overlap of slack — and a table holding rows above it is reported as drift and
+exits non-zero, because a chunker name that does not describe the rows is the one thing the stamp
+exists to prevent:
+
+```
+  CHUNK LENGTH        transcripts_ollama holds 6,551 of its 7,285 rows longer than chunker
+  'sentence-pack-2' can return — it packs to 2,400 characters and cannot return more than 2,640
+  (2,400 plus one 240-character overlap), and the longest here is 10,778. These rows are not
+  what that chunker produces. The way out is a rebuild, which replaces every row: …
+```
+
+The cards table has no such line: a "## section" with no bullet inside it cannot be split, so a
+card chunk is as long as its section and there is no ceiling to check it against. Its distribution
+is still printed.
 
 A table stamped with **no chunker** is not a mismatch and never warns. That is every index built
 before 0.4.0, and it means "nobody recorded which chunker made these rows" — not "they disagree".
@@ -164,8 +184,15 @@ you can say so once and get the checks from then on:
 uv run scripts/ingest_demo_corpus.py --stage stamp-meta --chunker current
 ```
 
-That is an assertion, like the embedding model the same command stamps: it is believed, not
-verified. Leave it off if you are not sure.
+`--chunker current` claims the version this code chunks at, and that claim is **sampled before it
+is written**: the stamp is refused if the longest row is above the ceiling named above, or if a
+book holds fewer rows than its prepared text needs chunks (no chunk holds more than 2,400
+characters, so fewer rows cannot hold the text at all). The refusal prints both numbers and writes nothing.
+
+Naming an **older** version — `--chunker sentence-pack-1` — is an assertion about the past that
+nothing here can check, so it is believed as-is; that is the way through for an operator who
+really means the old one. Either way it is an assertion, like the embedding model the same command
+stamps. Leave it off if you are not sure.
 
 ## Backup
 
@@ -303,11 +330,24 @@ uv run ayl-add ~/books --db ~/ayl-index
 uv run ayl-add ~/books --db ~/ayl-index                       # refused, and it names --rebuild
 uv run ayl-add ~/books --rebuild --backup ~/ayl-backups --db ~/ayl-index   # copy, drop, re-index
 # for the demo corpus, a full rebuild is the repair (it replaces every row):
-uv run scripts/ingest_demo_corpus.py --stage ingest
+uv run scripts/ingest_demo_corpus.py --stage ingest || exit 1
 
-# 5. if the rebuild goes wrong, the backup is the way back
+# 5. only now, and only if step 4b succeeded, is the index what the stamp would claim
+uv run ayl-add --doctor --db ~/ayl-index
+
+# 6. if the rebuild goes wrong, the backup is the way back
 uv run ayl-add --restore ~/ayl-backups/<timestamp> --db ~/ayl-index --force
 ```
+
+**A failed ingest stops the chain: never stamp after one.** `scripts/ingest_demo_corpus.py --stage ingest`
+exits non-zero when it has nothing to ingest — a missing `data/prepared` is the ordinary case, and it names the
+directory it looked in — and every later line of a script like the one above has to be conditional
+on that, which is what the `|| exit 1` is for (`set -euo pipefail` at the top of a runbook does the
+same for all of them). #75 is what the missing `||` costs: the ingest skipped all 35 books and
+exited 1, the next line stamped the chunker anyway onto the rows the old one had left, `--doctor`
+said "no drift", and an hour of measurement ran on an index that claimed one chunker and held
+another. The stamp now samples the rows and would refuse that write — but a chain that runs on
+after a failure is the defect, and the refusal is the second line of defence, not the first.
 
 ## See also
 
