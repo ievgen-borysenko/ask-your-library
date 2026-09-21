@@ -965,7 +965,9 @@ def test_a_run_where_the_cap_never_fired_writes_the_line_it_always_wrote(monkeyp
     where there was nothing to say (eval/summarize_report.py copies this block
     into every committed summary)."""
     out = prepared(monkeypatch, tmp_path, [], lambda item, attempt: fake_result(item))
-    assert "cap fired" not in only(out, ".md").read_text(encoding="utf-8")
+    report = only(out, ".md").read_text(encoding="utf-8")
+    assert "cap fired" not in report
+    assert "all-dropped" not in report      # no all-dropped step: no header clause either
 
 
 def test_the_cap_counts_items_not_steps_and_rides_per_attempt_in_the_sidecar(monkeypatch, tmp_path):

@@ -19,7 +19,8 @@
   `c05`). Every number is differenced out of the events `observe` already emits, so the loop, the
   cap, `nodes.py` and every prompt are untouched; the sidecar keeps `schema_version` 1 (fields are
   added, none renamed), and the header clause and the summary clause are written only where there
-  was something to say, so a run that never reached the cap writes the report it has always written.
+  was something to say: a run with no all-dropped step writes the report it has always written, one
+  all-dropped step adds the peak to its item's header, and only a fired cap adds the summary clause.
   Two kinds of quote are in none of the three per-step counts, because the state counts them nowhere
   either: one the model malformed, and one the gate confirmed and the clarify filter then took off
   as belonging to a book the reader did not choose. The scratchpad shows both (#81).
