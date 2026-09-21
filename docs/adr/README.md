@@ -240,7 +240,10 @@ the fixed refusal by code when `evidence` is empty, so `SYNTHESIZE_RULES` is nev
 naming rule cannot reach the answer that needs a name most. **The cap is not visible in the data**:
 `MAX_DROPPED_STREAK` is configured in both runs, `c05` stops in a way consistent with it firing, and
 no artifact records `dropped_streak` or the per-step refusal counts, so whether it fired is
-undecidable from a report. A counter in the item header would close that.
+undecidable from a report. A counter in the item header would close that. **Closed for runs made
+with the harness change of #77**: the eval's item header and sidecar carry the question's peak
+`dropped_streak` and whether the cap fired, and the sidecar carries the distilled / kept / dropped
+counts of every step. The measurement above predates them and stays undecidable.
 
 **What the hold decision really costs, said as a number — in the shipped configuration.** Take a
 model that retrieves passages and quotes none of them verbatim, so every step drops everything.
@@ -260,8 +263,10 @@ about, is untouched by it. (One caution, from the measurement: `c05-quixote-wind
 `mistral-small3.2:24b-ctx20k` stops at 3 steps on the CRAG gate in exactly this shape, but no
 artifact records `dropped_streak` per step, so that run is consistent with the sequence above and
 does not confirm it — [the report][rechunk-feedback] says so, and a counter in the item header is
-what would settle it.) The price is still paid exactly by the runs that produce the least, which is
-why the acceptance below is about behaviour at repeat and not only about the quote counts.
+what would settle it. Since #77 the harness writes exactly that counter, so the next run of such a
+question settles it; that one, made before, cannot be settled after the fact.) The price is still
+paid exactly by the runs that produce the least, which is why the acceptance below is about
+behaviour at repeat and not only about the quote counts.
 
 **A second coupling, not decided here: the coverage gate (ADR-013).** `coverage._uncovered_books` is
 the hits of the run minus the books the *evidence* names, so evidence the gate thinned makes a book
@@ -991,8 +996,8 @@ longest 10,778, and 90.3% of them longer than the window** — so the retriever 
 fused, text that was then cut off before the model read it. The 10,778 came from raw Whisper
 output, where a "sentence" the splitter cannot end is the whole of a passage of speech: the
 longest in the corpus is 10,140 characters. One scale up, the same defect: a chapter read took the
-first 12,000 characters of the chapter, and **61% of the corpus's 1,228 chapters are longer than
-that** (median 14,783, the longest 585,482), so a question about the end of a long chapter was
+first 12,000 characters of the chapter, and **62% of the corpus's 1,246 sections are longer than
+that** (median 14,821, the longest 245,244), so a question about the end of a long chapter was
 answered from its beginning.
 
 **Decision, in two halves.**
@@ -1009,7 +1014,7 @@ reveal, and lowering it would cut text out of a chunk the retriever ranked whole
 
 *(B) For `read_chapter`, the window is cut around the match.* `reflect` may say what it is opening
 the chapter for (`looking_for`); `act` reads the chapter as far as `CHAPTER_SCAN_CHARS` (120,000 —
-1,224 of the 1,228 chapters whole) and cuts a `CHAPTER_HIT_CHARS` window around the best lexical
+1,243 of the 1,246 sections whole) and cuts a `CHAPTER_HIT_CHARS` window around the best lexical
 match inside it, scored by how many DISTINCT words of the query a run covers, then by its per-term
 occurrence counts compared rarest-first, then by the shorter run, then by the earlier one. No
 stop-word list: the library is not one language, and the key prices a common word rather than

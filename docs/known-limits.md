@@ -196,8 +196,8 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   additionally waits at most 300 s for a clarify reply.
 - **Chapter reads are capped at 12,000 characters**, and since 2026-09-17 (#28,
   [ADR-025](adr/README.md)) that budget is spent around the match rather than at the head of the
-  chapter — but only when the request says what it is looking for. 61% of the demo corpus's 1,228
-  chapters are longer than one read (median 14,783 characters, the longest 585,482), so until this
+  chapter — but only when the request says what it is looking for. 62% of the demo corpus's 1,246
+  sections are longer than one read (median 14,821 characters, the longest 245,244), so until this
   change a question about the end of a long chapter was answered from its beginning. Now `reflect`
   may name a phrase, `act` reads up to `CHAPTER_SCAN_CHARS` (120,000) of the chapter and cuts the
   window around the best lexical match in it, and what is left out is stated in band at both ends.
@@ -372,9 +372,15 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   mixed-chunker write cannot be undone at all. See [upgrading](upgrading.md).
   **What it cannot detect:** an index already mixed before this shipped, because nothing recorded
   which chunker wrote those rows; an absent chunker stamp is treated as the absence it is, read
-  and written without a word. And only the stamp is compared — nothing measures the rows, so an
-  index whose stamp was asserted by hand (`--stage stamp-meta --chunker …`) is trusted exactly as
-  far as the person who asserted it. The way out is `ayl-add <folder> --rebuild`, which drops the
+  and written without a word. On a read or a write only the stamp is compared; the rows are
+  measured in two places, both run by hand (#75). `--stage stamp-meta --chunker current` refuses
+  to write the stamp when a row is longer than the packer can return (2,640 characters) or a book
+  holds fewer rows than its prepared text needs, and `--doctor` prints the chunk-length
+  distribution and reports rows above that ceiling as drift. What those two still cannot see: a
+  table cut by another chunker whose rows happen to fit under the ceiling and above the floor; a
+  cards table, whose chunker has no ceiling; row counts of books that have no prepared text
+  beside them; and a stamp naming an OLDER version (`--chunker <name>`), which stays an
+  assertion trusted exactly as far as the person who made it. The way out is `ayl-add <folder> --rebuild`, which drops the
   table and re-indexes — it keeps the ledger's minted ids, but the books the ledger holds that
   this folder does not lose their rows with the table and are reported as `requested`, to be
   re-indexed from their own folders.

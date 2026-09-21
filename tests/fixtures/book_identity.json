@@ -192,7 +192,8 @@
         "meditations#THE NINTH BOOK",
         "meditations#THE TENTH BOOK",
         "meditations#THE ELEVENTH BOOK",
-        "meditations#THE TWELFTH BOOK"
+        "meditations#THE TWELFTH BOOK",
+        "meditations#APPENDIX AND GLOSSARY"
       ]
     },
     {
@@ -564,7 +565,8 @@
         "odyssey#BOOK XXI",
         "odyssey#BOOK XXII",
         "odyssey#BOOK XXIII",
-        "odyssey#BOOK XXIV"
+        "odyssey#BOOK XXIV",
+        "odyssey#FOOTNOTES:"
       ]
     },
     {
@@ -993,7 +995,8 @@
         "ivanhoe#CHAPTER XLI",
         "ivanhoe#CHAPTER XLII",
         "ivanhoe#CHAPTER XLIII",
-        "ivanhoe#CHAPTER XLIV"
+        "ivanhoe#CHAPTER XLIV",
+        "ivanhoe#NOTES"
       ]
     },
     {
@@ -1429,6 +1432,7 @@
         "napoleon-memoirs#VOLUME II — CHAPTER XXIII.",
         "napoleon-memoirs#VOLUME II — CHAPTER XXIV.",
         "napoleon-memoirs#VOLUME II — CHAPTER XXV.",
+        "napoleon-memoirs#VOLUME II — CHAPTER XXYI.",
         "napoleon-memoirs#VOLUME II — CHAPTER XXVII.",
         "napoleon-memoirs#VOLUME II — CHAPTER XXVIII.",
         "napoleon-memoirs#VOLUME II — CHAPTER XXIX.",
@@ -1482,7 +1486,8 @@
         "napoleon-memoirs#VOLUME IV — CHAPTER X.",
         "napoleon-memoirs#VOLUME IV — CHAPTER XI.",
         "napoleon-memoirs#VOLUME IV — CHAPTER XII.",
-        "napoleon-memoirs#VOLUME IV — CHAPTER XIII"
+        "napoleon-memoirs#VOLUME IV — CHAPTER XIII",
+        "napoleon-memoirs#ETEXT EDITOR'S BOOKMARKS:"
       ]
     },
     {

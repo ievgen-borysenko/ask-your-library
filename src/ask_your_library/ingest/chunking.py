@@ -87,6 +87,45 @@ MAX_SENTENCE_CHARS = 2000
 TRANSCRIPT_MAX_CHARS = max(TRANSCRIPT_TARGET_CHARS,
                            TRANSCRIPT_OVERLAP_CHARS + 1 + MAX_SENTENCE_CHARS)
 
+# --- what the numbers above let anyone SAY about rows already in a table -----
+#
+# Two bounds, and both are one-sided on purpose: they exist to refuse a claim
+# ("these rows were cut by this packer"), so each has to be something the packer
+# CANNOT do, never something it merely does not usually do. A bound that a real
+# corpus can cross is a bound that refuses honest work, and the way out of a
+# refusal here is a re-ingest that costs half an hour.
+
+# No chunk this packer returns is longer than TRANSCRIPT_MAX_CHARS. The ceiling
+# used to judge somebody else's rows is one overlap above that: the slack a
+# flush can add on top of a chunk is exactly the overlap it carries into the
+# next one, so a row longer than this is longer than any arrangement of these
+# three numbers can produce. `sentence-pack-1`, which packed to 4,000 with no
+# sentence cap, crosses it on nearly every chunk and by 8,000 characters on the
+# one that #28 was named after.
+TRANSCRIPT_CEILING_CHARS = TRANSCRIPT_MAX_CHARS + TRANSCRIPT_OVERLAP_CHARS
+
+
+def transcript_chunk_floor(placed: int) -> int:
+    """The fewest chunks this packer can cut `placed` characters into.
+
+    **Why it is a bound.** Every chunk `pack_sentences` returns is at most
+    TRANSCRIPT_MAX_CHARS characters long, joining spaces included, and the part
+    of a chunk that is not repeated from its predecessor is what carries the
+    text forward. Every character the packer places sits in the carrying part
+    of exactly one chunk, so `placed` characters cannot come out as fewer than
+    `placed / TRANSCRIPT_MAX_CHARS` chunks — the overlap and the joiners only
+    ever make a chunk carry LESS.
+
+    **`placed`, not the raw text.** The argument is what `placed_chars` counts:
+    the characters the packer actually puts into chunks. The prepared text is
+    longer than that — the splitter drops the whitespace at every sentence
+    boundary and the cap drops it at every break it makes — and counting the
+    raw length instead would claim a floor above what the packer really
+    produces, which is a refusal of honest work. A chapter of three blank-line
+    separated paragraphs of 799 characters is 2,401 raw and 2,397 placed: one
+    chunk of 2,399, and a raw-length floor of 2 that no run can reach."""
+    return -(-int(placed) // TRANSCRIPT_MAX_CHARS)
+
 # Sentence end: . ! ? … optionally followed by a closing quote/bracket, then whitespace.
 _SENTENCE_END = re.compile(r'(?<=[.!?…])["\')\]]*[ \n]+')
 
@@ -343,3 +382,32 @@ def pack_sentences(sentences: list[str]) -> list[str]:
     if buffer:
         chunks.append(" ".join(buffer))
     return chunks
+
+
+def placed_chars(text: str) -> int:
+    """How many characters of `text` the packer actually puts into chunks.
+
+    The packer never sees the prepared text: it sees the sentences
+    `split_sentences` cut out of it, capped by `cap_sentence`. Both drop
+    whitespace — the separator between two sentences belongs to neither, and so
+    does the whitespace at a cap's break — so this is smaller than `len(text)`,
+    by about a percent of ordinary prose and by much more where a text is
+    mostly blank lines.
+
+    It is the front half of the packer and nothing else: no chunk is built, no
+    row is written, nothing is re-chunked. What it is for is `chunk_floor`,
+    which has to divide the characters that really go into chunks and not the
+    ones the reader typed."""
+    return sum(len(piece)
+               for sentence in split_sentences(text)
+               for piece in cap_sentence(sentence))
+
+
+def chunk_floor(text: str) -> int:
+    """The fewest chunks this packer can cut ONE chapter of `text` into.
+
+    Per chapter, because that is the unit the packer is called on (a chapter
+    boundary always starts a new chunk), which makes the sum over a book's
+    chapters a tighter — and still true — bound than one division over all of
+    its text."""
+    return transcript_chunk_floor(placed_chars(text))
