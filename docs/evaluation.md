@@ -71,6 +71,21 @@ corrected inside their own book). All are per question and in totals, in the rep
 sidecar, and every clause is written only where there was something to say, so a run that spent none
 of them writes the line the harness has always written.
 
+**Since 2026-09-21 those totals have a per-step ledger beside them (#77).** They say how many quotes
+a question lost, not *where* it lost them, and the state's `dropped_streak` is the value the run
+ended on rather than its peak — so a run of all-dropped steps under `MAX_DROPPED_STREAK` and one
+all-dropped step followed by two quote-less ones ended with the same stop reason and no artifact told
+them apart. The sidecar now carries `gate_steps` per attempt: one row per `observe` step with
+`distilled` (the well-formed quotes the gate judged), `kept`, `dropped`, the `dropped_streak` after
+that step and `cap_fired` (the step was the `MAX_DROPPED_STREAK`th all-dropped one in a row, so it
+counted dry). Beside them, `peak_dropped_streak` and `cap_fired` for the question, which the item
+header repeats in words, and `cap_fired_items` in the totals, which the summary line reports as "the
+all-dropped cap fired on N items". All of it is differenced out of the events `observe` already
+emits — no node, prompt or decision changed, and no field was renamed, so the sidecar stays
+`schema_version` 1 and a file written before this reads back as the run it was. A quote the model
+malformed is in none of the three counts (the state never counted it either); the scratchpad's
+`### observe, step N` line is where such a step is visible.
+
 The gate's own behavioural effect — whether a set answers as well with it as without — was measured
 on 2026-09-16/17 on **two local models**, each run under the gate on `c79018a` and compared with the
 same model's baseline run on `169b511`, both golden sets, `--repeat 3 --clarify-pick second`

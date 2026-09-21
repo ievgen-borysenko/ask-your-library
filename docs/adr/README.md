@@ -240,7 +240,10 @@ the fixed refusal by code when `evidence` is empty, so `SYNTHESIZE_RULES` is nev
 naming rule cannot reach the answer that needs a name most. **The cap is not visible in the data**:
 `MAX_DROPPED_STREAK` is configured in both runs, `c05` stops in a way consistent with it firing, and
 no artifact records `dropped_streak` or the per-step refusal counts, so whether it fired is
-undecidable from a report. A counter in the item header would close that.
+undecidable from a report. A counter in the item header would close that. **Closed for runs made
+after 2026-09-21 (#77)**: the eval's item header and sidecar carry the question's peak
+`dropped_streak` and whether the cap fired, and the sidecar carries the distilled / kept / dropped
+counts of every step. The measurement above predates them and stays undecidable.
 
 **What the hold decision really costs, said as a number — in the shipped configuration.** Take a
 model that retrieves passages and quotes none of them verbatim, so every step drops everything.
@@ -260,8 +263,10 @@ about, is untouched by it. (One caution, from the measurement: `c05-quixote-wind
 `mistral-small3.2:24b-ctx20k` stops at 3 steps on the CRAG gate in exactly this shape, but no
 artifact records `dropped_streak` per step, so that run is consistent with the sequence above and
 does not confirm it — [the report][rechunk-feedback] says so, and a counter in the item header is
-what would settle it.) The price is still paid exactly by the runs that produce the least, which is
-why the acceptance below is about behaviour at repeat and not only about the quote counts.
+what would settle it. Since #77 the harness writes exactly that counter, so the next run of such a
+question settles it; that one, made before, cannot be settled after the fact.) The price is still
+paid exactly by the runs that produce the least, which is why the acceptance below is about
+behaviour at repeat and not only about the quote counts.
 
 **A second coupling, not decided here: the coverage gate (ADR-013).** `coverage._uncovered_books` is
 the hits of the run minus the books the *evidence* names, so evidence the gate thinned makes a book
