@@ -327,9 +327,10 @@ def cut_back_matter_or_exit(entry: dict, chapters: list[tuple[str, str]]
     The cut is silent by construction — it leaves the sections as they were —
     and every way of missing looks the same afterwards: a typo in the manifest,
     a re-pinned edition that renamed its appendix, a heading that sits in the
-    contents page or inside a chapter rather than after the last one, or a
-    chapter regex that matched nothing at all, in which case the whole text is
-    one section and there is no last chapter to cut. The book would then be
+    contents page or inside a chapter rather than after the last one. (A chapter
+    regex that matched nothing at all is refused first, below: the whole text
+    is then one untitled section, and a cut inside it would succeed and hide
+    the real fault.) The book would then be
     prepared with its notes back inside the last chapter and nothing said,
     which is the state #82 exists to end.
 
@@ -340,6 +341,12 @@ def cut_back_matter_or_exit(entry: dict, chapters: list[tuple[str, str]]
     end_re = entry.get("end_regex")
     if not end_re:
         return chapters
+    if len(chapters) == 1 and not chapters[0][0]:
+        # The chapter regex matched nothing, so the "last section" is the whole
+        # book under no title. A cut would succeed there and hide the real
+        # fault, which is the chapter regex.
+        sys.exit(f"{entry['id']}: the chapter regex matched nothing, so end_regex {end_re!r} "
+                 f"has no last chapter to cut from. Fix chapter_regex in corpus/manifest.yaml.")
     chapters, cut = cut_back_matter(chapters, end_re, end_title=entry.get("end_title"))
     if not cut:
         sys.exit(f"{entry['id']}: end_regex {end_re!r} cut nothing. It has to match a whole "

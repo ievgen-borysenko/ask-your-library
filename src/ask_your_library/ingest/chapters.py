@@ -246,8 +246,7 @@ def cut_back_matter(chapters: list[tuple[str, str]], end_re: str,
 
     Returns the sections and whether anything was actually cut. The flag is the
     point: every way of missing — an unmatched regex, a heading that sits in
-    the contents page or inside a chapter, a book whose chapter regex matched
-    nothing so there is one section and no last chapter — leaves the sections
+    the contents page or inside a chapter — leaves the sections
     exactly as they came in, and a caller cannot tell those apart by looking at
     the result afterwards. Reading it back off the section titles is worse than
     useless: an `end_title` equal to the last chapter's name would answer "cut"

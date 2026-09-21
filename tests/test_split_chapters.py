@@ -321,6 +321,18 @@ def test_a_cut_that_did_not_happen_is_not_read_off_the_section_titles():
     assert "cut nothing" in str(raised.value)
 
 
+def test_a_book_whose_chapter_regex_matched_nothing_is_not_cut_at_all():
+    """With no chapter found the whole text is one untitled section, and the
+    back-matter heading would be found inside it: the cut would succeed and the
+    real fault — the chapter regex — would go unsaid."""
+    text = "No headings here.\n" + BODY + "\nFOOTNOTES:\n" + NOTES
+    sections = ingest.split_chapters(text, CHAPTER_RE)
+    assert sections == [("", text)]
+    with pytest.raises(SystemExit) as raised:
+        ingest.cut_back_matter_or_exit({"id": "book", "end_regex": r"^FOOTNOTES:$"}, sections)
+    assert "chapter regex matched nothing" in str(raised.value)
+
+
 def test_a_positional_call_written_before_end_re_still_means_what_it_meant():
     """`end_re` and `end_title` are keyword-only and come after the options
     this function already had, so the generic ingest's fully positional call
