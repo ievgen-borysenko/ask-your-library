@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+- **Back matter is a section of its own, and Napoleon's misprinted chapter number is read as a
+  heading** (#82). The chapter splitter had no end-of-book boundary, so everything after the last
+  chapter heading was text of that chapter: Scott's notes were "CHAPTER XLIV" (Ivanhoe), Butler's
+  footnotes were "BOOK XXIV" (The Odyssey), the Fronto appendix with the notes and the glossary were
+  "THE TWELFTH BOOK" (Meditations), and the etext editor's bookmarks were the last chapter of the
+  Napoleon memoirs. A note could be cited as text of the last chapter, and a chapter read of it
+  spent its window on the apparatus. The manifest gains an optional per-book `end_regex`, the
+  heading the back matter starts with; everything from it becomes one section named after that
+  heading, so nothing of the book leaves the index and a citation says what the passage is. Only the
+  last section is searched, so a heading that reads like back matter inside a chapter is no
+  boundary, and a book without `end_regex` splits byte for byte as before — the other 27 Gutenberg
+  texts were split with the old code and the new one and compared. The chapters shrink to the
+  chapter: Ivanhoe XLIV 74,040 → 25,312 characters (notes 48,702), Odyssey XXIV 79,271 → 27,485
+  (footnotes 51,769), Meditations XII 72,423 → 20,314 (appendix 52,094), Napoleon IV XIII
+  115,986 → 113,442 (bookmarks 2,511). Don Quixote gets no
+  `end_regex`: its last chapter ends with the verses of the Academicians of Argamasilla, which are
+  Cervantes's text and not an apparatus; what sits in the wrong place in that book is the front
+  matter, under a contents-page heading, and `end_regex` is not the fix for it.
+
+  The same manifest entry fixes a chapter that was two: this edition of the memoirs prints
+  `CHAPTER XXYI.` for XXVI, no chapter regex matched it, and "VOLUME II — CHAPTER XXV." held both
+  chapters (68,928 characters). Napoleon now carries the default regex's `CHAPTER` branch plus that
+  misprint, and the section keeps the number the page carries (68,928 → 36,814, and a new
+  "VOLUME II — CHAPTER XXYI." of 32,092); the source text is not edited.
+
+  **Re-prepare and re-ingest those four books.**
+  `uv run scripts/ingest_demo_corpus.py --stage prepare-text --book <title>` and then
+  `--stage ingest --book <title>` for Ivanhoe, The Odyssey, Meditations and the Napoleon memoirs;
+  an index built before this keeps the old sections and answers from them. `corpus/toc/` and the
+  book-identity fixture are regenerated here. `CHUNKER_VERSION` is unchanged, as it was for the
+  part-section change below: it names how a section is packed into chunks, not where a section
+  begins, and the demo corpus is rebuilt from the manifest rather than detected as stale.
+
 - **The hosted default graded by hand, and its limit written down**
   ([`eval-results/2026-09-19-hosted-default-quality.md`](eval-results/2026-09-19-hosted-default-quality.md)).
   `deepseek/deepseek-v4-flash-0731` with thinking off, core and extended sets at `--repeat 3`, is

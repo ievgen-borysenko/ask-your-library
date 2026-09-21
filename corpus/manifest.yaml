@@ -7,6 +7,19 @@
 # source: librivox   -> per-chapter mp3s from archive.org item, transcribed locally
 # source: canary     -> synthetic book committed under corpus/canaries/
 #
+# How a book is cut into sections — all three optional, per book:
+#   chapter_regex -> the whole-line heading that opens a section, when the default
+#                    (ingest/chapters.py) also fires on something that is not a chapter
+#   part_regex    -> part / volume / act headings: they prefix the chapter titles of
+#                    editions that restart numbering, and a part with text before its
+#                    first chapter becomes a section of its own
+#   end_regex     -> the heading the book's back matter starts with (notes, an appendix,
+#                    a transcriber's list). Everything from it becomes one section named
+#                    after that heading instead of the tail of the last chapter, so a
+#                    chapter read of the last chapter is the chapter and a citation of a
+#                    note says it is a note. Nothing is dropped. A book without it splits
+#                    exactly as before.
+#
 # Naming convention: `id` is the primary key (file names, chunk ids). When a
 # second edition/translation of the same work is added, BOTH its id and title
 # get a qualifier (e.g. id: kobzar-hunter-tr, title: "The Kobzar ... (Hunter
@@ -68,6 +81,8 @@ books:
     pg_id: 2680
     # Restrict to the 12 books; the default regex also fires on appendix notes
     chapter_regex: "^THE [A-Z]+ BOOK$"
+    # the appendix (Fronto correspondence), the notes and the glossary after it
+    end_regex: "^APPENDIX$"
 
   - id: senecas-morals
     sha256: acd016ee6b7cb232b8050ff88582a229770f14c70fd1fe35468b765e9949065d
@@ -128,6 +143,8 @@ books:
     author: "Homer"
     source: gutenberg
     pg_id: 1727
+    # Butler's numbered footnotes, all of them after Book XXIV
+    end_regex: "^FOOTNOTES:$"
 
   # --- expansion batch (14.08): distractor pairs + user's picks ---
 
@@ -214,6 +231,9 @@ books:
     author: "Walter Scott"
     source: gutenberg
     pg_id: 82
+    # Scott's own notes, the first of them the start of 48k characters of
+    # apparatus that used to be text of CHAPTER XLIV
+    end_regex: "^NOTE TO CHAPTER I\\.$"
 
   - id: huckleberry-finn
     sha256: d617a37aa7ae1e1a93dcde2634db2bccb86824e31e29a55230bdbf77d6872d59
@@ -278,6 +298,13 @@ books:
     pg_id: 3567
     # numbering restarts per part: sections become "PART — CHAPTER"
     part_regex: "^(VOLUME [IV]+)\\. -- \\d{4}-\\d{4}$"
+    # The default regex's CHAPTER branch, plus this edition's typo: volume II
+    # prints "CHAPTER XXYI." for XXVI, and an unmatched heading put two chapters
+    # in one section. The section keeps the misprinted number, which is what the
+    # text says; the source is not edited here.
+    chapter_regex: "^CHAPTER (?:[IVXLCDM]+|XXYI|[0-9]+)\\b[^\\n]{0,80}$"
+    # the etext editor's list of bookmarks, after the last chapter
+    end_regex: "^ETEXT EDITOR'S BOOKMARKS:$"
 
   - id: kobzar
     sha256: 9d7ece80b90f5431814cf4467f810f7815541f74aa7166250e9dd0bf28fb7dcc

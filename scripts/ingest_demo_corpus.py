@@ -314,7 +314,7 @@ def prepare_text(entries: list[dict], refetch: bool = False) -> None:
         verify_checksum(entry, raw_file)
         text = strip_boilerplate(raw_file.read_text(encoding="utf-8"))
         chapters = split_chapters(text, entry.get("chapter_regex", DEFAULT_CHAPTER_RE),
-                                  entry.get("part_regex"))
+                                  entry.get("part_regex"), entry.get("end_regex"))
         save_prepared(entry, chapters, f"pg:{entry['pg_id']}")
 
 

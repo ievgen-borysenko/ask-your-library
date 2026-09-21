@@ -1,17 +1,24 @@
-"""Chapter splitting with part-aware sections, and the `--book` re-ingest guard
-(pure functions from the ingest script)."""
+"""Chapter splitting with part-aware sections, the back-matter cut, and the
+`--book` re-ingest guard (pure functions from the ingest script)."""
 import importlib.util
+import json
+import re
 from pathlib import Path
 
 import lancedb
 import pytest
+import yaml
 
 from ask_your_library.index_meta import write_index_meta
 
+REPO = Path(__file__).resolve().parents[1]
+
 spec = importlib.util.spec_from_file_location(
-    "ingest_demo_corpus", Path(__file__).resolve().parents[1] / "scripts" / "ingest_demo_corpus.py")
+    "ingest_demo_corpus", REPO / "scripts" / "ingest_demo_corpus.py")
 ingest = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ingest)
+
+MANIFEST = yaml.safe_load((REPO / "corpus" / "manifest.yaml").read_text(encoding="utf-8"))
 
 BODY = "Lorem ipsum dolor sit amet. " * 12   # > MIN_CHAPTER_CHARS
 TEXT = (
@@ -190,3 +197,101 @@ def test_a_part_lead_in_before_the_first_chapter_does_not_shield_a_contents_left
             + "\nCHAPTER I.\n" + BODY + "\nCHAPTER II.\n" + BODY + "\n")
     chapters = ingest.split_chapters(text, r"^CHAPTER [IVX]+\..*$", r"^(PART [A-Z]+)$")
     assert [t for t, _ in chapters] == ["PART ONE — CHAPTER I.", "PART ONE — CHAPTER II."]
+
+
+# --- back matter: the manifest's end_regex (#82) -------------------------------
+
+NOTES = "[1] The footstool kept bare feet off a floor that was often wet. " * 4
+CHAPTERS = "CHAPTER I.\n" + BODY + "\nCHAPTER II.\n" + BODY + "\n"
+CHAPTER_RE = r"^CHAPTER [IVX]+\.$"
+
+
+def test_back_matter_becomes_a_section_of_its_own():
+    """There is no end-of-book boundary in the heading regex, so notes and
+    appendices were text of the last chapter — cited as that chapter, and read
+    instead of it when the chapter was read."""
+    chapters = dict(ingest.split_chapters(CHAPTERS + "FOOTNOTES:\n" + NOTES,
+                                          CHAPTER_RE, None, r"^FOOTNOTES:$"))
+    assert list(chapters) == ["CHAPTER I.", "CHAPTER II.", "FOOTNOTES:"]
+    assert chapters["CHAPTER II."] == BODY.strip()
+    assert chapters["FOOTNOTES:"] == NOTES.strip()
+
+
+def test_without_an_end_regex_the_back_matter_stays_in_the_last_chapter():
+    """A book with no end_regex splits byte for byte as it always did."""
+    chapters = ingest.split_chapters(CHAPTERS + "FOOTNOTES:\n" + NOTES, CHAPTER_RE)
+    assert [t for t, _ in chapters] == ["CHAPTER I.", "CHAPTER II."]
+    assert chapters[-1][1].endswith(NOTES.strip())
+
+
+def test_a_back_matter_heading_inside_an_earlier_chapter_is_no_boundary():
+    """Only the last section is searched, so a heading that reads like back
+    matter in the middle of the book cannot cut a chapter in half."""
+    text = ("CHAPTER I.\n" + BODY + "\nFOOTNOTES:\n" + NOTES
+            + "\nCHAPTER II.\n" + BODY + "\nFOOTNOTES:\n" + NOTES)
+    chapters = ingest.split_chapters(text, CHAPTER_RE, None, r"^FOOTNOTES:$")
+    assert [t for t, _ in chapters] == ["CHAPTER I.", "CHAPTER II.", "FOOTNOTES:"]
+    assert "FOOTNOTES:" in dict(chapters)["CHAPTER I."]
+
+
+def test_an_end_heading_with_nothing_under_it_is_no_boundary():
+    """A match on the file's last line is not back matter; cutting there would
+    take the line out of the chapter and open an empty section."""
+    text = CHAPTERS + "FOOTNOTES:\n"
+    assert (ingest.split_chapters(text, CHAPTER_RE, None, r"^FOOTNOTES:$")
+            == ingest.split_chapters(text, CHAPTER_RE))
+
+
+def test_a_last_section_that_is_back_matter_only_is_renamed_not_emptied():
+    """An edition that prints its notes under a heading of their own: the
+    section is the notes, so it takes their name instead of leaving an empty
+    chapter behind."""
+    text = CHAPTERS + "CHAPTER III.\nFOOTNOTES:\n" + NOTES
+    chapters = ingest.split_chapters(text, CHAPTER_RE, None, r"^FOOTNOTES:$")
+    assert [t for t, _ in chapters] == ["CHAPTER I.", "CHAPTER II.", "FOOTNOTES:"]
+    assert chapters[-1][1] == NOTES.strip()
+
+
+def book_entry(book_id: str) -> dict:
+    return next(e for e in MANIFEST["books"] if e["id"] == book_id)
+
+
+def test_the_napoleon_regex_reads_the_editions_misprinted_chapter_number():
+    """The source prints "CHAPTER XXYI." for XXVI, which no chapter regex
+    matched, so volume II's chapters XXV and XXVI were one section. The
+    manifest regex covers the misprint, and still volume I's "CHAPTER 1", the
+    one heading this edition numbers in arabic. The text itself is not edited:
+    the section keeps the number the page carries."""
+    regex = book_entry("napoleon-memoirs")["chapter_regex"]
+    text = ("CHAPTER 1\n" + BODY + "\nCHAPTER XXV.\n" + BODY
+            + "\nCHAPTER XXYI.\n" + BODY + "\nCHAPTER XXVII.\n" + BODY)
+    assert [t for t, _ in ingest.split_chapters(text, regex)] == [
+        "CHAPTER 1", "CHAPTER XXV.", "CHAPTER XXYI.", "CHAPTER XXVII."]
+
+
+@pytest.mark.skipif(not (ingest.PREPARED_DIR.exists()
+                         and any(ingest.PREPARED_DIR.glob("*.json"))),
+                    reason="the prepared demo texts are not in the repository (data/prepared)")
+def test_every_end_regex_is_the_back_matter_heading_and_nothing_else():
+    """An end_regex that also matches earlier in its book would cut a chapter
+    in half, and the prepared texts are the only place that can be checked —
+    they are not committed, so this runs where they are.
+
+    Title and text are searched together, which makes the check true before the
+    re-prepare and after it: the heading is a line of the last chapter until
+    the book is prepared again, and the name of the last section afterwards."""
+    checked = 0
+    for entry in MANIFEST["books"]:
+        prepared = ingest.PREPARED_DIR / f"{entry['id']}.json"
+        if not entry.get("end_regex") or not prepared.exists():
+            continue
+        checked += 1
+        sections = json.loads(prepared.read_text(encoding="utf-8"))["chapters"]
+        blocks = [f"{c['title']}\n{c['text']}" for c in sections]
+        found = [i for i, block in enumerate(blocks)
+                 if re.search(entry["end_regex"], block, re.M)]
+        assert found == [len(blocks) - 1], (
+            f"{entry['id']}: end_regex {entry['end_regex']!r} matches in sections "
+            f"{[sections[i]['title'] for i in found]}, not only in the last one")
+        assert len(re.findall(entry["end_regex"], blocks[-1], re.M)) == 1, entry["id"]
+    assert checked, "no prepared text for any book with an end_regex"
