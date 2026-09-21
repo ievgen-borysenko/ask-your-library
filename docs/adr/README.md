@@ -1023,7 +1023,12 @@ decide between runs that cover as much. A request that names no query, and a que
 words the chapter does not carry, get the head of the chapter exactly as before — nothing is
 invented in place of a missing field, and a window centred on the wrong words is worse than an
 honest beginning. What the window leaves out is said in band at both ends, because a passage from
-the middle of a chapter read as its opening is a new way to be wrong.
+the middle of a chapter read as its opening is a new way to be wrong. Two limits of a lexical
+aim, measured on the 19.09 runs (#81): a passage that answers without spelling the query's word is
+not a candidate at all (`cannibals` occurs three times in its section, none near the answer), and
+counting spellings cannot tell a noun from a verb (one-word `watch` lands where people watch each
+other, not on the stolen watch). Reaching the first needs the window chosen by something other than
+the spelling of `looking_for`.
 
 **Why B is not also the answer for search, and why A had to come first.** Reading around the
 matching span at retrieval time needs the offsets of what matched, and neither retriever returns
