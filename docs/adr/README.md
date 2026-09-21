@@ -241,7 +241,7 @@ naming rule cannot reach the answer that needs a name most. **The cap is not vis
 `MAX_DROPPED_STREAK` is configured in both runs, `c05` stops in a way consistent with it firing, and
 no artifact records `dropped_streak` or the per-step refusal counts, so whether it fired is
 undecidable from a report. A counter in the item header would close that. **Closed for runs made
-after 2026-09-21 (#77)**: the eval's item header and sidecar carry the question's peak
+with the harness change of #77**: the eval's item header and sidecar carry the question's peak
 `dropped_streak` and whether the cap fired, and the sidecar carries the distilled / kept / dropped
 counts of every step. The measurement above predates them and stays undecidable.
 
