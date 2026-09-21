@@ -59,7 +59,7 @@ from ask_your_library.ingest import (Chunk, build_fts_index, chunk_card, embeddi
 # Chapter splitting lives in the package so every ingest path (this script and
 # the generic `ayl-add`) cuts books into sections identically.
 from ask_your_library.ingest.chapters import (DEFAULT_CHAPTER_RE, MIN_CHAPTER_CHARS,  # noqa: F401
-                                              split_chapters, with_parts)
+                                              heading_title, split_chapters, with_parts)
 from ask_your_library.ingest.chunking import (CARD_CHUNKER_VERSION, CHUNKER_VERSION, card_note,
                                               parse_frontmatter)
 from ask_your_library.ingest.ledger import open_ledger
@@ -314,8 +314,42 @@ def prepare_text(entries: list[dict], refetch: bool = False) -> None:
         verify_checksum(entry, raw_file)
         text = strip_boilerplate(raw_file.read_text(encoding="utf-8"))
         chapters = split_chapters(text, entry.get("chapter_regex", DEFAULT_CHAPTER_RE),
-                                  entry.get("part_regex"), entry.get("end_regex"))
+                                  entry.get("part_regex"), entry.get("end_regex"),
+                                  end_title=entry.get("end_title"))
+        refuse_an_end_regex_that_cut_nothing(entry, text, chapters)
         save_prepared(entry, chapters, f"pg:{entry['pg_id']}")
+
+
+def refuse_an_end_regex_that_cut_nothing(entry: dict, text: str,
+                                         chapters: list[tuple[str, str]]) -> None:
+    """A manifest `end_regex` that produced no back-matter section is a failure,
+    not a no-op.
+
+    The cut is silent by construction — an unmatched regex leaves the split
+    exactly as it was — and every way of missing looks the same afterwards: a
+    typo in the manifest, a re-pinned edition that renamed its appendix, or a
+    chapter regex that matched nothing at all, in which case `split_chapters`
+    returns the whole text as one section before `end_re` is ever consulted.
+    The book would then be prepared with its notes back inside the last chapter
+    and nothing said, which is the state #82 exists to end. So this exits, with
+    the regex and the section it expected named."""
+    end_re = entry.get("end_regex")
+    if not end_re:
+        return
+    # The LAST match in the text: the cut uses the first one inside the final
+    # section, and a book whose regex also matches earlier is a manifest error
+    # of its own (tests/test_split_chapters.py checks the corpus for it).
+    matched = [m.group(0) for m in re.finditer(end_re, text, re.M)]
+    expected = entry.get("end_title") or (heading_title(matched[-1]) if matched else None)
+    if expected is None:
+        sys.exit(f"{entry['id']}: end_regex {end_re!r} matches nothing in the text. "
+                 f"Fix it in corpus/manifest.yaml, or remove it if this edition has no "
+                 f"back matter.")
+    if chapters[-1][0] != expected:
+        sys.exit(f"{entry['id']}: end_regex {end_re!r} cut nothing — the last section is "
+                 f"{chapters[-1][0]!r}, not {expected!r}. The heading it matches is not in "
+                 f"the last chapter (it may sit in the contents page or inside a chapter), "
+                 f"so the back matter is still the tail of {chapters[-1][0]!r}.")
 
 
 def prepare_canaries(entries: list[dict]) -> None:
