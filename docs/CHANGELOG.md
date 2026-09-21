@@ -54,6 +54,28 @@
   book-identity fixture are regenerated here. `CHUNKER_VERSION` is unchanged, as it was for the
   part-section change below: it names how a section is packed into chunks, not where a section
   begins, and the demo corpus is rebuilt from the manifest rather than detected as stale.
+- **Where a question lost its evidence, and whether the all-dropped cap fired** (#77). The agent
+  eval's item header now carries, on a question that lost a whole step's quotes, the longest run of
+  all-dropped steps it reached and whether `MAX_DROPPED_STREAK` turned any of them dry — `peak 3
+  all-dropped step(s) in a row (the cap of 2 fired: such a step counted dry)` — and the
+  summary line gains `the all-dropped cap fired on N item(s)`. `answers-*.json` gains three fields
+  per attempt: `gate_steps` (per step `distilled`, `kept`, `dropped`, `dropped_streak`, `cap_fired`,
+  and `timed_out` where that step's own `observe` call ran out of time),
+  `peak_dropped_streak` and `cap_fired`, and `cap_fired_items` in the totals. The per-step ledger
+  stays in the sidecar and the peak and the cap are what the Markdown carries. Until now the state's
+  run totals could say how many quotes a question lost but not where it lost them, and the end state
+  carried the streak the run finished on rather than its peak: three all-dropped steps under the cap
+  and one all-dropped step followed by two quote-less ones ended with the same stop reason, and no
+  artifact told them apart
+  ([`eval-results/2026-09-18-rechunk-and-observe-feedback.md`](eval-results/2026-09-18-rechunk-and-observe-feedback.md),
+  `c05`). Every number is differenced out of the events `observe` already emits, so the loop, the
+  cap, `nodes.py` and every prompt are untouched; the sidecar keeps `schema_version` 1 (fields are
+  added, none renamed), and the header clause and the summary clause are written only where there
+  was something to say: a run with no all-dropped step writes the report it has always written, one
+  all-dropped step adds the peak to its item's header, and only a fired cap adds the summary clause.
+  Two kinds of quote are in none of the three per-step counts, because the state counts them nowhere
+  either: one the model malformed, and one the gate confirmed and the clarify filter then took off
+  as belonging to a book the reader did not choose. The scratchpad shows both (#81).
 
 - **The hosted default graded by hand, and its limit written down**
   ([`eval-results/2026-09-19-hosted-default-quality.md`](eval-results/2026-09-19-hosted-default-quality.md)).

@@ -18,6 +18,15 @@ from pathlib import Path
 
 import pytest
 
+from ask_your_library import config
+from ask_your_library.i18n import t
+
+# The real compiled graph, its scripted model and its `run` fixture, so that
+# the per-step numbers of #77 can be checked against a run of the loop itself
+# and not only against handwritten events (tests/test_graph_e2e.py owns them).
+from test_graph_e2e import (GULLIVER, MOBY, FakeLibrary, ScriptedModel,  # noqa: F401
+                            by_name, evidence, names, run)
+
 spec = importlib.util.spec_from_file_location(
     "run_agent_eval", Path(__file__).resolve().parents[1] / "eval" / "run_agent_eval.py")
 harness = importlib.util.module_from_spec(spec)
@@ -721,13 +730,16 @@ def test_min_pass_is_a_floor_on_every_attempt(monkeypatch, tmp_path):
 
 # ---------------------------------------------------------------- what observe kept (#81)
 class _FinalStateGraph:
-    """Enough of a compiled graph for `run_one`: one event, then a final state."""
+    """Enough of a compiled graph for `run_one`: the events of a run, then a
+    final state. `events` is what the stream yields — the default is the one
+    `act` event this fake has always emitted."""
 
-    def __init__(self, final: dict):
+    def __init__(self, final: dict, events=None):
         self.final = final
+        self.events = [{"act": {"steps_taken": 2}}] if events is None else events
 
     def stream(self, run_input, config):
-        yield {"act": {"steps_taken": 2}}
+        yield from self.events
 
     def get_state(self, config):
         return types.SimpleNamespace(values=self.final)
@@ -766,3 +778,318 @@ def test_the_evidence_and_the_windows_reach_the_sidecar_and_not_the_markdown(mon
     assert attempt["evidence"] == kept and attempt["chapter_windows"] == [WINDOW]
     report = only(out, ".md").read_text(encoding="utf-8")
     assert "Call me Ishmael" not in report and "the purse" not in report
+
+
+# ------------------------------------------- the gate step by step, and the cap (#77)
+def ledger(*events) -> "harness.GateLedger":
+    """A ledger fed (node, update) pairs in the order the runner delivers them."""
+    book = harness.GateLedger()
+    for node_name, update in events:
+        book.see(node_name, update)
+    return book
+
+
+def evidence_list(n: int) -> list[dict]:
+    """An evidence list of n items, as the state carries it: only its length
+    is read here, and the ledger differences the lengths of two updates."""
+    return [{"quote": f"item {i}"} for i in range(n)]
+
+
+def test_the_gate_ledger_differences_observe_s_own_run_totals():
+    """`observe` emits the evidence list and `dropped_unverified` as RUN
+    TOTALS; per step they are the difference against the update before."""
+    book = ledger(("act", {"steps_taken": 1}),
+                  ("observe", {"evidence": evidence_list(2), "empty_streak": 0}),
+                  ("act", {"steps_taken": 2}),
+                  ("observe", {"evidence": evidence_list(2), "empty_streak": 0, "dropped_streak": 1,
+                               "dropped_unverified": 3}),
+                  ("act", {"steps_taken": 3}),
+                  ("observe", {"evidence": evidence_list(3), "empty_streak": 0, "dropped_streak": 0,
+                               "dropped_unverified": 4}))
+
+    assert book.steps == [
+        {"step": 1, "distilled": 2, "kept": 2, "dropped": 0, "dropped_streak": 0,
+         "cap_fired": False},
+        {"step": 2, "distilled": 3, "kept": 0, "dropped": 3, "dropped_streak": 1,
+         "cap_fired": False},
+        {"step": 3, "distilled": 2, "kept": 1, "dropped": 1, "dropped_streak": 0,
+         "cap_fired": False}]
+    assert book.peak_dropped_streak == 1 and book.cap_fired is False
+
+
+def test_an_absent_dropped_streak_is_a_streak_of_zero():
+    """`observe` writes the key only when it says something — the streak is not
+    0, or it has just been reset — so an update without it is a step that
+    dropped nothing. Read as "unknown" it would lose every clean step."""
+    book = ledger(("observe", {"evidence": evidence_list(1), "empty_streak": 0}))
+    assert book.steps[0]["dropped_streak"] == 0 and book.peak_dropped_streak == 0
+
+
+def test_the_peak_survives_the_step_that_resets_the_streak():
+    """The number the end state cannot report: a run that recovers ends on a
+    streak of 0, and the question still lost two whole steps of quotes."""
+    book = ledger(("observe", {"evidence": evidence_list(0), "empty_streak": 0, "dropped_streak": 1,
+                               "dropped_unverified": 1}),
+                  ("observe", {"evidence": evidence_list(0), "empty_streak": 1, "dropped_streak": 2,
+                               "dropped_unverified": 2}),
+                  ("observe", {"evidence": evidence_list(1), "empty_streak": 0,
+                               "dropped_streak": 0}))
+
+    assert [s["dropped_streak"] for s in book.steps] == [1, 2, 0]
+    assert book.peak_dropped_streak == 2
+    # the cap turned the second step dry: that is the fact no artifact recorded
+    assert [s["cap_fired"] for s in book.steps] == [False, True, False]
+    assert book.cap_fired is True
+
+
+def test_the_baseline_follows_an_evidence_list_that_plan_rewrote():
+    """After a clarify reply `plan` rewrites the evidence list to the one book
+    the reader chose, so the state can hold FEWER items than the step before.
+    The baseline follows that update; without it the next step would report
+    none of the evidence it really kept. (The same thing through the real
+    graph: test_the_baseline_follows_a_real_clarify_filter below.)"""
+    book = ledger(("observe", {"evidence": evidence_list(3), "empty_streak": 0}),
+                  ("plan", {"evidence": evidence_list(1), "clarify_chosen": "Moby Dick"}),
+                  ("observe", {"evidence": evidence_list(2), "empty_streak": 0}))
+
+    assert [s["kept"] for s in book.steps] == [3, 1]
+
+
+def test_the_runners_metrics_event_never_moves_a_baseline():
+    """`metrics` is the runner's own account, delivered through the same
+    callback as a node update and carrying `usage_snapshot()` — at a clarify
+    pause it arrives in the MIDDLE of a run. Its keys are not state channels,
+    so a counter of its own that happened to be named like one must not
+    silently re-baseline the steps after it."""
+    metrics = {"steps_taken": 99, "evidence": evidence_list(7), "dropped_unverified": 42,
+               "llm_calls": 3, "partial": True}
+    book = ledger(("act", {"steps_taken": 1}),
+                  ("observe", {"evidence": evidence_list(1), "empty_streak": 0}),
+                  ("metrics", metrics),
+                  ("act", {"steps_taken": 2}),
+                  ("observe", {"evidence": evidence_list(3), "empty_streak": 0}))
+
+    assert [(s["step"], s["kept"], s["dropped"]) for s in book.steps] == [(1, 1, 0), (2, 2, 0)]
+
+
+def test_a_timed_out_observe_call_is_marked_and_counts_nothing():
+    """`observe`'s call can run out of time: the step's passages are lost, the
+    evidence of the run stands, and the update looks like a dry step's from the
+    outside. The row says which it was — otherwise a report would read a budget
+    that expired as a library that had nothing to give."""
+    book = ledger(("act", {"steps_taken": 1}),
+                  ("observe", {"evidence": evidence_list(2), "empty_streak": 0}),
+                  ("act", {"steps_taken": 2}),
+                  ("observe", {"evidence": evidence_list(2), "empty_streak": 1,
+                               "call_timed_out": True, "stop_reason": "out of time"}))
+
+    dry, timed_out = book.steps
+    assert "timed_out" not in dry              # written only on the step that timed out
+    assert timed_out == {"step": 2, "distilled": 0, "kept": 0, "dropped": 0,
+                         "dropped_streak": 0, "cap_fired": False, "timed_out": True}
+
+
+def test_run_one_records_the_gate_step_by_step_and_whether_the_cap_fired(monkeypatch, tmp_path):
+    """The per-attempt record of #77, off the events of a run that lost every
+    quote of two steps in a row."""
+    monkeypatch.setattr(harness, "RESULTS_DIR", tmp_path)
+    events = [{"act": {"steps_taken": 1}},
+              {"observe": {"evidence": [], "empty_streak": 0, "dropped_streak": 1,
+                           "dropped_unverified": 2}},
+              {"act": {"steps_taken": 2}},
+              {"observe": {"evidence": [], "empty_streak": 1, "dropped_streak": 2,
+                           "dropped_unverified": 5}},
+              {"reflect": {"stop_reason": "2 dry steps in a row"}}]
+    item = {"id": "q01-moby", "type": "answer", "question": "Which whale?",
+            "expected_books": ["Moby Dick"], "expected_facts": ["Pequod"]}
+
+    graph = _FinalStateGraph({"answer": "No evidence survived.", "steps_taken": 2}, events)
+    record = harness.run_one(graph, item)
+
+    assert record["gate_steps"] == [
+        {"step": 1, "distilled": 2, "kept": 0, "dropped": 2, "dropped_streak": 1,
+         "cap_fired": False},
+        {"step": 2, "distilled": 3, "kept": 0, "dropped": 3, "dropped_streak": 2,
+         "cap_fired": True}]
+    assert record["peak_dropped_streak"] == 2 and record["cap_fired"] is True
+
+
+def test_run_one_reports_no_cap_on_a_question_that_kept_its_quotes(monkeypatch, tmp_path):
+    monkeypatch.setattr(harness, "RESULTS_DIR", tmp_path)
+    events = [{"act": {"steps_taken": 1}},
+              {"observe": {"evidence": [{"quote": "Call me Ishmael."}], "empty_streak": 0}}]
+    item = {"id": "q01-moby", "type": "answer", "question": "Which whale?",
+            "expected_books": ["Moby Dick"], "expected_facts": ["Pequod"]}
+
+    graph = _FinalStateGraph({"answer": "Moby Dick aboard the Pequod", "steps_taken": 1}, events)
+    record = harness.run_one(graph, item)
+
+    assert record["gate_steps"] == [{"step": 1, "distilled": 1, "kept": 1, "dropped": 0,
+                                     "dropped_streak": 0, "cap_fired": False}]
+    assert record["peak_dropped_streak"] == 0 and record["cap_fired"] is False
+
+
+def capped_result(item: dict, **over) -> dict:
+    """A fake result of a question the cap fired on."""
+    return fake_result(item, dropped_unverified=5,
+                       dropped_by_reason={"not_found": 5, "no_hit": 0, "cross_book": 0, "short": 0},
+                       peak_dropped_streak=3, cap_fired=True,
+                       gate_steps=[{"step": 1, "distilled": 2, "kept": 0, "dropped": 2,
+                                    "dropped_streak": 1, "cap_fired": False}], **over)
+
+
+def test_the_item_header_carries_the_peak_streak_and_says_the_cap_fired(monkeypatch, tmp_path):
+    out = prepared(monkeypatch, tmp_path, [],
+                   lambda item, attempt: capped_result(item) if item["id"] == "q01-moby"
+                   else fake_result(item))
+    report = only(out, ".md").read_text(encoding="utf-8")
+
+    header = next(line for line in report.splitlines() if line.startswith("## q01-moby"))
+    assert "peak 3 all-dropped step(s) in a row" in header
+    assert f"the cap of {harness.MAX_DROPPED_STREAK} fired" in header
+    # and the question that never lost a step keeps the header it always had
+    assert "all-dropped" not in next(line for line in report.splitlines()
+                                     if line.startswith("## q02-drac"))
+
+
+def test_the_summary_line_counts_the_items_the_cap_fired_on(monkeypatch, tmp_path):
+    out = prepared(monkeypatch, tmp_path, [],
+                   lambda item, attempt: capped_result(item) if item["id"] == "q01-moby"
+                   else fake_result(item))
+    report = only(out, ".md").read_text(encoding="utf-8")
+    assert "; the all-dropped cap fired on 1 item(s)" in report
+
+
+def test_a_run_where_the_cap_never_fired_writes_the_line_it_always_wrote(monkeypatch, tmp_path):
+    """The byte-compat rule every clause of this line follows: nothing is said
+    where there was nothing to say (eval/summarize_report.py copies this block
+    into every committed summary)."""
+    out = prepared(monkeypatch, tmp_path, [], lambda item, attempt: fake_result(item))
+    report = only(out, ".md").read_text(encoding="utf-8")
+    assert "cap fired" not in report
+    assert "all-dropped" not in report      # no all-dropped step: no header clause either
+
+
+def test_the_cap_counts_items_not_steps_and_rides_per_attempt_in_the_sidecar(monkeypatch, tmp_path):
+    """One question that fires the cap on several steps is one item. Under
+    --repeat the count is per attempt, like every other figure."""
+    out = prepared(monkeypatch, tmp_path, ["--repeat", "2"],
+                   lambda item, attempt: capped_result(item) if item["id"] == "q01-moby"
+                   else fake_result(item))
+    sidecar = json.loads(only(out, ".json").read_text(encoding="utf-8"))
+
+    assert [one["cap_fired_items"] for one in sidecar["attempt_totals"]] == [1, 1]
+    assert sidecar["totals"]["per_attempt"]["cap_fired_items"]["values"] == [1, 1]
+    assert ("- items where the all-dropped cap fired 1–1 over 2 attempts"
+            in only(out, ".md").read_text(encoding="utf-8"))
+
+
+def test_the_gate_steps_reach_the_sidecar_and_not_the_markdown(monkeypatch, tmp_path):
+    """Per step the numbers are the sidecar's, like the evidence list of #81:
+    the Markdown carries the item's peak and the cap, which is what a reader
+    of the report needs to tell two identical stop reasons apart."""
+    out = prepared(monkeypatch, tmp_path, [],
+                   lambda item, attempt: capped_result(item) if item["id"] == "q01-moby"
+                   else fake_result(item))
+    sidecar = json.loads(only(out, ".json").read_text(encoding="utf-8"))
+    attempt = sidecar["questions"][0]["attempts"][0]
+
+    assert attempt["gate_steps"] == [{"step": 1, "distilled": 2, "kept": 0, "dropped": 2,
+                                      "dropped_streak": 1, "cap_fired": False}]
+    assert attempt["peak_dropped_streak"] == 3 and attempt["cap_fired"] is True
+    assert "distilled" not in only(out, ".md").read_text(encoding="utf-8")
+
+
+# ------------------------- the same numbers off a run of the real loop (#77)
+def test_the_harness_reads_the_peak_and_the_cap_off_a_real_run(run):
+    """The derivation against the graph itself, not against handwritten
+    events: a model that retrieves passages and quotes none of them verbatim
+    loses every quote of three steps in a row, and the harness reads the peak
+    streak and the cap firing off the events `observe` already emitted.
+
+    This is what the measurement of the cap could not say
+    (`docs/eval-results/2026-09-18-rechunk-and-observe-feedback.md`, `c05`):
+    the run below and one all-dropped step followed by two dry ones stop for
+    the same reason and differ in every row of `gate_steps`."""
+    nowhere = "Ishmael was a lawyer in Boston."
+    model = ScriptedModel(
+        plan=[{"mode": "answer", "queries": ["q1", "q2", "q3", "q4"]}],
+        observe=[{"evidence": [evidence(MOBY, "transcripts", f"s{n}h2", quote=nowhere)]}
+                 for n in (1, 2, 3)],
+        reflect=[{"decision": "search", "next_query": "q2"},
+                 {"decision": "search", "next_query": "q3"}],
+    )
+    _, events, _ = run(model, FakeLibrary(lambda q: [MOBY]), "Who is Ishmael?")
+
+    book = ledger(*events)
+    assert book.steps == [
+        {"step": 1, "distilled": 1, "kept": 0, "dropped": 1, "dropped_streak": 1,
+         "cap_fired": False},
+        # the MAX_DROPPED_STREAK'th all-dropped step in a row is itself dry
+        {"step": 2, "distilled": 1, "kept": 0, "dropped": 1, "dropped_streak": 2,
+         "cap_fired": True},
+        {"step": 3, "distilled": 1, "kept": 0, "dropped": 1, "dropped_streak": 3,
+         "cap_fired": True}]
+    assert book.peak_dropped_streak == 3 and book.cap_fired is True
+    # TELEMETRY ONLY: the loop is the loop it was. `observe` emits the keys it
+    # emitted before — no channel was added for any of the numbers above — and
+    # the run still stops on the CRAG gate with the evidence it had.
+    assert set(by_name(events, "observe")[0]) == {"evidence", "empty_streak", "dropped_streak",
+                                                  "dropped_unverified", "dropped_by_reason",
+                                                  "dropped_quotes"}
+    assert by_name(events, "reflect")[-1]["stop_reason"] == t("stop_crag",
+                                                              n=config.MAX_EMPTY_STREAK)
+
+
+def test_a_run_that_holds_one_dropped_step_never_reports_the_cap(run):
+    """The other half of the pair the reports could not tell apart: one
+    all-dropped step between two dry ones stops for the SAME reason and the
+    cap never fired. `gate_steps` is where the two runs differ."""
+    model = ScriptedModel(
+        plan=[{"mode": "answer", "queries": ["q1", "q2", "q3", "q4"]}],
+        observe=[{"evidence": []},
+                 {"evidence": [evidence(MOBY, "transcripts", "s2h2",
+                                        quote="Ishmael was a lawyer in Boston.")]},
+                 {"evidence": []}],
+        reflect=[{"decision": "search", "next_query": "q2"},
+                 {"decision": "search", "next_query": "q3"}],
+    )
+    _, events, _ = run(model, FakeLibrary(lambda q: [MOBY]),
+                       "What is the airspeed of a swallow?")
+
+    book = ledger(*events)
+    assert [(s["kept"], s["dropped"], s["dropped_streak"]) for s in book.steps] == [
+        (0, 0, 0), (0, 1, 1), (0, 0, 0)]
+    assert book.peak_dropped_streak == 1 and book.cap_fired is False
+    assert by_name(events, "reflect")[-1]["stop_reason"] == t("stop_crag",
+                                                              n=config.MAX_EMPTY_STREAK)
+
+
+def test_the_baseline_follows_a_real_clarify_filter(run):
+    """The clarify path through the graph itself: the first step keeps two
+    quotes, the reader picks one of the two books, `plan` rewrites the evidence
+    list to that book's one quote, and the second step keeps one more. Read
+    against the longest list the run has held, that second step would report
+    nothing kept — and the `metrics` event of the clarify pause sits between
+    the two, carrying a `steps_taken` of its own."""
+    model = ScriptedModel(
+        plan=[{"mode": "identify", "queries": ["stranded traveller strange land"]},
+              {"mode": "identify", "queries": ["Lilliput tiny people"]}],
+        observe=[{"evidence": [evidence(MOBY, "cards", "s1h1"),
+                               evidence(GULLIVER, "cards", "s1h3")]},
+                 {"evidence": [evidence(GULLIVER, "transcripts", "s2h2")]}],
+        reflect=[{"decision": "clarify", "clarify_question": "Which one do you mean?"},
+                 {"decision": "enough"}],
+        synthesize=["Gulliver's Travels [Gulliver's Travels, Chapter 1]."],
+    )
+    _, events, asked = run(model, FakeLibrary(), "A man stranded in a strange land, which book?",
+                           reply_to_clarify="the second one")
+
+    assert len(asked) == 1 and "metrics" in names(events)
+    # what `plan` left on the state after the reply: one book's evidence
+    assert len(by_name(events, "plan")[1]["evidence"]) == 1
+    assert ledger(*events).steps == [
+        {"step": 1, "distilled": 2, "kept": 2, "dropped": 0, "dropped_streak": 0,
+         "cap_fired": False},
+        {"step": 2, "distilled": 1, "kept": 1, "dropped": 0, "dropped_streak": 0,
+         "cap_fired": False}]
