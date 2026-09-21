@@ -24,10 +24,15 @@ existed, it is logged at info level, and it is read and written without a word.
 import logging
 import time
 
+import pyarrow as pa
+import pyarrow.compute as pc
+
 # The staged publish this module needs is the ingest's, and `ingest.publish`
 # imports nothing from the package, so this direction costs no cycle. Only
 # `write_index_meta` uses the recovery half: see the note in `read_index_meta`.
-from .ingest.chunking import CARD_CHUNKER_VERSION, CHUNKER_VERSION
+from .ingest.chunking import (CARD_CHUNKER_VERSION, CHUNKER_VERSION, TRANSCRIPT_CEILING_CHARS,
+                              TRANSCRIPT_MAX_CHARS, TRANSCRIPT_OVERLAP_CHARS,
+                              TRANSCRIPT_TARGET_CHARS)
 from .ingest.ledger import LEGACY_CHUNKER
 from .ingest.publish import (LEDGER_COLUMNS, STAGING_SUFFIX, rebuild_table,
                              recover_staging)
@@ -339,3 +344,140 @@ def refuse_version_mismatch(db, table: str, chunker: str | None = None,
             f"from two chunkers, and nothing afterwards can tell which rows came from which — "
             f"unlike a read, that cannot be undone except by rebuilding the whole table.\n"
             f"{rebuild_hint(table)}")
+
+
+# --- what the ROWS say about the chunker stamped on them ---------------------
+#
+# Everything above compares one string with another: the stamp against the
+# version this code chunks at. That is the whole of the policy and it is worth
+# exactly as much as the stamp is — and a stamp is an operator's assertion
+# (`--stage stamp-meta`), not a measurement. #75 is what that costs: a chunker
+# name was written onto a table the chunker had never touched, `--doctor` said
+# "no drift", and an hour of measurement ran on a mislabelled index.
+#
+# So the rows are asked too. Not to decide what a chunk is — nothing here
+# chunks anything — but to catch the one thing a name cannot say: rows that the
+# named chunker could not have produced.
+
+
+# Rows per Arrow batch. The point of reading in batches at all is that the
+# `text` column IS the corpus — 110 MB on this project's own 11k-row index, and
+# linear in the size of somebody's library — so it is measured column-wise and
+# thrown away batch by batch. Nothing below ever builds a Python string out of
+# it: what crosses into Python is one integer per row, or one per BOOK.
+_BATCH_ROWS = 8192
+
+
+def _column_batches(db, table: str, columns: list[str]):
+    """Arrow record batches of exactly `columns` from `table`, or nothing when
+    the table is empty or does not carry them."""
+    handle = db.open_table(table)
+    count = handle.count_rows() if hasattr(handle, "count_rows") else 0
+    if not count or any(column not in handle.schema.names for column in columns):
+        return
+    query = handle.search().select(columns).limit(count)
+    if hasattr(query, "to_batches"):
+        yield from query.to_batches(_BATCH_ROWS)
+    else:                                   # an older client: one Arrow table, then batched
+        yield from query.to_arrow().to_batches(_BATCH_ROWS)
+
+
+def chunk_lengths(db, table: str) -> list[int]:
+    """The length in characters of every row's text in `table`.
+
+    Measured by pyarrow on the column itself (`utf8_length` counts code points,
+    which is what the chunker counts too), so the text of the whole corpus is
+    never materialised as Python strings. The result is one integer per row.
+
+    Not on any read path: it belongs to `--doctor` and to the stamp, both of
+    which are run by hand."""
+    lengths: list[int] = []
+    for batch in _column_batches(db, table, ["text"]):
+        lengths.extend(length or 0
+                       for length in pc.utf8_length(batch.column("text")).to_pylist())
+    return lengths
+
+
+def rows_by_book(db, table: str) -> dict[str, int]:
+    """How many rows `table` holds per book key.
+
+    Grouped inside Arrow, so what crosses into Python is one row per DISTINCT
+    book and not one string per row — the difference between a dictionary of
+    tens of entries and a list of hundreds of thousands."""
+    counts: dict[str, int] = {}
+    for batch in _column_batches(db, table, ["book"]):
+        grouped = pa.Table.from_batches([batch]).group_by("book").aggregate([("book", "count")])
+        for book, rows in zip(grouped.column("book").to_pylist(),
+                              grouped.column("book_count").to_pylist()):
+            key = book or ""
+            counts[key] = counts.get(key, 0) + rows
+    return counts
+
+
+def length_rule(table: str, chunker: str | None) -> tuple[int, int] | None:
+    """`(target, ceiling)` the chunker stamped on `table` holds its rows to, or
+    None when there is nothing to hold them to.
+
+    Only one of the two chunkers in this project has an arithmetic ceiling. The
+    sentence packer's is derived from its own three numbers
+    (`TRANSCRIPT_CEILING_CHARS`). The card chunker has none: a "## section" with
+    no bullet and no "###" inside it cannot be split at all, so a card chunk is
+    as long as its section, and a length that surprises a reader is a fact
+    about the card and not about the chunker.
+
+    And a chunker this code does not implement is None as well: the numbers
+    below are THIS packer's, and measuring somebody else's rows against them
+    would report a disagreement that `version_mismatch` has already said in the
+    only terms that are true — the two names differ."""
+    if table.startswith(CARDS_PREFIX) or chunker != CHUNKER_VERSION:
+        return None
+    return TRANSCRIPT_TARGET_CHARS, TRANSCRIPT_CEILING_CHARS
+
+
+def _at(ordered: list[int], fraction: float) -> int:
+    return ordered[min(len(ordered) - 1, int(fraction * len(ordered)))]
+
+
+def length_distribution(table: str, chunker: str | None, lengths: list[int]) -> str:
+    """One line: how long the rows of `table` actually are, and what the
+    chunker stamped on it packs to. Printed whether or not anything is wrong —
+    `--doctor` is where somebody goes to find out what they are holding, and a
+    distribution reported only when it disagrees is one nobody can check in
+    advance."""
+    if not lengths:
+        return f"{table}: no rows"
+    ordered = sorted(lengths)
+    shape = (f"{len(ordered)} row(s), median {_at(ordered, 0.5):,}, p95 "
+             f"{_at(ordered, 0.95):,}, longest {ordered[-1]:,} characters")
+    rule = length_rule(table, chunker)
+    if rule is None:
+        return f"{table}: {shape}"
+    target, ceiling = rule
+    return (f"{table}: {shape} (chunker {chunker} packs to {target:,} and cannot return more "
+            f"than {ceiling:,})")
+
+
+def length_mismatch(table: str, chunker: str | None, lengths: list[int]) -> str | None:
+    """The one sentence saying that the rows of `table` were not cut by the
+    chunker stamped on it — or None.
+
+    The test is the ceiling and nothing else: a row LONGER than any arrangement
+    of the packer's numbers can return. Short rows are not evidence of anything
+    (a chapter ending, a one-line canary), and a distribution that merely looks
+    unusual is not a claim this can make."""
+    rule = length_rule(table, chunker)
+    if rule is None or not lengths:
+        return None
+    target, ceiling = rule
+    longest = max(lengths)
+    if longest <= ceiling:
+        return None
+    over = sum(1 for length in lengths if length > ceiling)
+    # Neutral about whether the name is already written: this sentence is both
+    # the doctor's verdict on a stamp that is there and the stamp command's
+    # reason for not writing one.
+    return (f"{table} holds {over:,} of its {len(lengths):,} rows longer than chunker "
+            f"{chunker!r} can return — it packs to {target:,} characters and cannot return more "
+            f"than {ceiling:,} ({TRANSCRIPT_MAX_CHARS:,} plus one {TRANSCRIPT_OVERLAP_CHARS}-"
+            f"character overlap), and the longest here is {longest:,}. These rows are not what "
+            f"that chunker produces")

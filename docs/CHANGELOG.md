@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+- **The chunker stamp is checked against the rows before it is written, and `--doctor` measures
+  them** (#75, [upgrading](upgrading.md)). `--stage stamp-meta --chunker current` claims the
+  version this code chunks at; it now samples the table first and refuses, with the numbers, when
+  the rows cannot have come from it. Two bounds, both from the sentence packer's own arithmetic and
+  both ones a run of that packer cannot cross, so that only an impossible table is refused: a row
+  longer than the packer's ceiling plus one overlap (2,640 characters), and a book holding fewer
+  rows than its prepared text needs chunks. The floor divides the characters the packer actually
+  PLACES into chunks (`placed_chars` — the splitter drops the whitespace between two sentences, and
+  the cap drops it at every break, so the file is longer than what is chunked) by the 2,400 no
+  chunk carries more than, per chapter, summed per book; taken over the raw file length instead it
+  demanded two rows of a 2,401-character book the packer cuts into one, which would have left that
+  corpus unstampable. The bound was fuzzed against the real packer over 30,000 random chapter
+  shapes, and a shrunk, seeded version of that fuzz is in the suite. The count is compared per book
+  and only over books the table and the prepared texts share — the coverage (`N of M books
+  compared`, naming the rest) is printed either way — so a second index built from other books is
+  not judged by this corpus's numbers. Naming an **older** version (`--chunker sentence-pack-1`)
+  stays an unchecked assertion about the past, which is the way through for an operator who means
+  it; a refusal writes nothing, and every table is sampled before any of them is stamped, so a
+  refused transcripts table leaves the cards table unstamped too. `--book` is now refused with
+  `--stage stamp-meta`: a fingerprint is written per table, not per book.
+
+  `ayl-add --doctor` prints a `chunks:` line per table — rows, median, p95, longest, against the
+  target and ceiling of the chunker stamped on it — and reports a table whose rows are above that
+  ceiling as **drift**, so the exit code is non-zero. The lengths are collected in the pass the
+  reconciliation already makes, and the lengths are measured inside Arrow (batched
+  `utf8_length` over the projected column), so the corpus text never becomes Python
+  strings — the reconciliation's own row walk keeps its two metadata columns. A table stamped with
+  a chunker this code does not implement is left to `version_mismatch`, which already says the only
+  true thing about it. A cards table has no ceiling (a "## section" with no bullet in it cannot be
+  split) and gets the distribution without a verdict.
+
+  `--stage ingest` says where it looked when there is nothing prepared (`data/prepared/`, relative
+  to the checkout, and whether the directory is missing or empty); it exited non-zero before and
+  still does. The documented procedure in [upgrading](upgrading.md) now stops on a failed ingest
+  instead of stamping after one — the chain that produced #75 — as a script with
+  `set -euo pipefail` rather than a `|| exit 1` that would close a reader's terminal, and the
+  `--doctor` example shows the new lines. Chunking itself is unchanged: nothing here re-chunks or re-embeds a row.
 - **Back matter is a section of its own, and Napoleon's misprinted chapter number is read as a
   heading** (#82). The chapter splitter had no end-of-book boundary, so everything after the last
   chapter heading was text of that chapter: Scott's notes were "CHAPTER XLIV" (Ivanhoe), Butler's

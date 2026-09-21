@@ -51,16 +51,17 @@ import yaml
 from ask_your_library.bookkey import author_of, book_key, chunk_id, title_of
 from ask_your_library.config import DB_PATH, EMBED_BACKEND
 from ask_your_library.embeddings import get_embedder
-from ask_your_library.index_meta import (META_TABLE, check_index, expected_chunker,
-                                         read_index_meta, refuse_version_mismatch,
-                                         write_index_meta)
+from ask_your_library.index_meta import (CARDS_PREFIX, META_TABLE, check_index, chunk_lengths,
+                                         expected_chunker, length_mismatch, read_index_meta,
+                                         refuse_version_mismatch, rows_by_book, write_index_meta)
 from ask_your_library.ingest import (Chunk, build_fts_index, chunk_card, embedding_text,
                                      pack_sentences, rows_for, split_sentences)
 # Chapter splitting lives in the package so every ingest path (this script and
 # the generic `ayl-add`) cuts books into sections identically.
 from ask_your_library.ingest.chapters import (DEFAULT_CHAPTER_RE, MIN_CHAPTER_CHARS,  # noqa: F401
                                               cut_back_matter, split_chapters, with_parts)
-from ask_your_library.ingest.chunking import (CARD_CHUNKER_VERSION, CHUNKER_VERSION, card_note,
+from ask_your_library.ingest.chunking import (CARD_CHUNKER_VERSION, CHUNKER_VERSION,
+                                              TRANSCRIPT_MAX_CHARS, card_note, chunk_floor,
                                               parse_frontmatter)
 from ask_your_library.ingest.ledger import open_ledger
 from ask_your_library.ingest.lock import IngestBusy, ingest_lock
@@ -479,9 +480,39 @@ def prepared_docs(entry_ids: list[str]) -> list[dict]:
                  f"(or restore the entries) before ingesting")
     missing = sorted(expected - present)
     if missing:
-        print(f"  WARNING: not prepared yet, skipped: {missing}")
+        print(f"  WARNING: not prepared yet, skipped: {missing} (looked in "
+              f"{prepared_where()})")
     return [json.loads((PREPARED_DIR / f"{i}.json").read_text(encoding="utf-8"))
             for i in entry_ids if f"{i}.json" in present]
+
+
+def prepared_where() -> str:
+    """Where the prepared texts live, spelled the way the runbooks spell it:
+    relative to the checkout. A path that is not inside the checkout — a test's
+    temporary directory — is printed in full, because a relative spelling of it
+    would point at nothing."""
+    try:
+        return f"{PREPARED_DIR.relative_to(REPO)}/ (relative to the checkout)"
+    except ValueError:
+        return str(PREPARED_DIR)
+
+
+def nothing_prepared(book_filter: str | None) -> str:
+    """Why an ingest has nothing to do, naming WHERE it looked.
+
+    `data/prepared` is gitignored and is the first thing a fresh checkout does
+    not have, so "nothing prepared" without a path reads like a bug in the
+    script rather than a missing directory (#75). Relative to the checkout,
+    because that is how the runbooks and the docs spell it and because an
+    absolute path here is the machine it happened to run on."""
+    state = ("the directory does not exist" if not PREPARED_DIR.exists()
+             else f"it holds no matching *.json ({len(list(PREPARED_DIR.glob('*.json')))} file(s) "
+                  f"in it)")
+    return (f"nothing prepared — looked in {prepared_where()} and {state}. "
+            + (f"No prepared book matches --book {book_filter!r}. " if book_filter else "")
+            + "Run the prepare stages first (--stage prepare-text, prepare-canaries, "
+              "prepare-audio). Nothing was written, and nothing downstream may treat this run "
+              "as an ingest that happened.")
 
 
 def refuse_unsafe_partial_reingest(db, name: str, embedder) -> None:
@@ -522,7 +553,7 @@ def ingest_transcripts_table(backend: str, book_filter: str | None, entry_ids: l
     if book_filter:
         docs = [d for d in docs if book_filter.lower() in d["book"].lower()]
     if not docs:
-        sys.exit("nothing prepared — run the prepare stages first")
+        sys.exit(nothing_prepared(book_filter))
 
     embedder = get_embedder(backend)
     db = lancedb.connect(DB_PATH)
@@ -660,11 +691,150 @@ def ingest_cards_table(backend: str, cards_dirs: list[Path] | None = None) -> No
     print(f"cards done: {len(cards)} cards from {where} -> {table.count_rows()} chunks")
 
 
-def stamp_existing_tables(backend: str, chunker: str | None = None) -> None:
+def prepared_chunk_floors(entry_ids: list[str]) -> dict[str, int]:
+    """`{book key: the fewest chunks this packer can cut its prepared text
+    into}` for the prepared files that are on disk.
+
+    The floor is taken per CHAPTER and summed, because a chapter is the unit
+    `pack_sentences` is called on: a chapter boundary always starts a new
+    chunk, so the sum of the chapters' floors is a tighter bound than one
+    division over the book, and still one the packer cannot go under
+    (`ingest.chunking.chunk_floor`).
+
+    Two book keys that are the same string are ADDED, not replaced: the table
+    holds their rows under that one key, so the bound has to cover both of
+    them. Two editions of one title with one author is exactly the shape that
+    would otherwise halve the floor.
+
+    A read, not an ingest: a file with no manifest entry is ignored here rather
+    than fatal (that check belongs to `prepared_docs`, where it decides what
+    gets written), and a missing file is simply a book this cannot say
+    anything about."""
+    floors: dict[str, int] = {}
+    for entry_id in entry_ids:
+        path = PREPARED_DIR / f"{entry_id}.json"
+        if not path.exists():
+            continue
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        floor = sum(chunk_floor(chapter["text"]) for chapter in doc["chapters"])
+        floors[doc["book"]] = floors.get(doc["book"], 0) + floor
+    return floors
+
+
+def _uncompared(floors: dict[str, int], rows: dict[str, int], shared: list[str]) -> str:
+    """The books the row-count check did NOT cover, named.
+
+    Printed on every run, including the ones where everything matched: "35 of
+    35" is the sentence that makes a coverage number worth reading, and a
+    silent partial check is how a comparison over two books out of thirty-five
+    passes for a comparison over the corpus."""
+    prepared_only = sorted(set(floors) - set(shared))
+    table_only = sorted(set(rows) - set(shared))
+    parts = []
+    if prepared_only:
+        parts.append(f"prepared but not in the table: {', '.join(prepared_only[:3])}"
+                     + (f" (+{len(prepared_only) - 3} more)" if len(prepared_only) > 3 else ""))
+    if table_only:
+        parts.append(f"in the table but not prepared: {', '.join(table_only[:3])}"
+                     + (f" (+{len(table_only) - 3} more)" if len(table_only) > 3 else ""))
+    return f" — {'; '.join(parts)}" if parts else " — every book on both sides"
+
+
+def stamp_sample_problem(db, name: str, claimed: str, entry_ids: list[str]) -> str | None:
+    """Why the rows in `name` cannot have been cut by `claimed` — or None.
+
+    This is what #75 cost an evening of measurement for. `--stage stamp-meta`
+    writes an operator's assertion into `_index_meta`, and the assertion is
+    believed by everything downstream: it is the field that lets `ayl-add`
+    refuse a write into a table another chunker built. Stamped wrong, the guard
+    agrees with the mistake in the one direction it exists for.
+
+    So before the code vouches for ITS OWN version, it looks at the rows. Two
+    bounds, both from the packer's own numbers (`ingest.chunking`) and both
+    one-sided, because the only honest reason to refuse an operator here is
+    that this chunker COULD NOT have produced what is in the table:
+
+    * **too long** — a row longer than the packer's ceiling plus one overlap.
+      A coarser chunker (`sentence-pack-1` packed to 4,000) fails this on
+      nearly every row it wrote.
+    * **too few** — fewer rows than `chunk_floor` says the prepared text needs,
+      counted per chapter and summed per book. No chunk carries more than
+      TRANSCRIPT_MAX_CHARS characters forward, so fewer rows cannot hold the
+      text the packer places, whatever the sentences look like. A finer chunker
+      fails this; #75's table held 7,285 rows where the prepared corpus needs
+      at least about 12,000.
+
+    Neither bound can be crossed by a run of this packer — that is what makes
+    them fit to refuse an operator with. The ceiling is one whole overlap above
+    the longest chunk the packer can return, and the floor divides the
+    characters the packer actually PLACES (`placed_chars`) rather than the
+    prepared text, which is longer by the whitespace the splitter drops. The
+    slack that remains is all on the operator's side.
+
+    The count is compared PER BOOK and only over books the table and the
+    prepared texts share; the coverage is printed either way, so a check that
+    compared two books out of thirty-five cannot be mistaken for one that
+    compared all of them. An index this corpus did not build (the engineer's
+    shelf, with its own `LIBRARY_DB_PATH`) shares no book key, so nothing is
+    compared and nothing is refused on numbers that are not about it.
+
+    Nothing here is re-chunked: two columns are measured inside Arrow, and the
+    prepared texts go through the packer's sentence split only to be counted —
+    no chunk is built and no row is written."""
+    lengths = chunk_lengths(db, name)
+    if not lengths:
+        return None
+    problems = [length_mismatch(name, claimed, lengths)]
+
+    if claimed != CHUNKER_VERSION or name.startswith(CARDS_PREFIX):
+        # The card chunker has no arithmetic ceiling — a "## section" with no
+        # bullet inside it cannot be split, so a card chunk is as long as its
+        # section — and the cards are not built from the prepared texts. There
+        # is nothing here to check such a stamp against, and saying so is
+        # better than a silence a reader would mistake for a check.
+        print(f"  {name}: nothing to sample — {claimed!r} has no length rule this code can "
+              f"check, so the stamp stays the operator's assertion")
+    else:
+        floors = prepared_chunk_floors(entry_ids)
+        rows = rows_by_book(db, name)
+        shared = sorted(set(floors) & set(rows))
+        print(f"  {name}: row count compared for {len(shared)} of {len(floors)} prepared "
+              f"book(s){_uncompared(floors, rows, shared)}")
+        short = sorted((floors[b] - rows[b], b) for b in shared if rows[b] < floors[b])
+        if short:
+            problems.append(
+                f"{name} holds {sum(rows[b] for b in shared):,} row(s) for the "
+                f"{len(shared)} prepared book(s) it shares, whose text needs at least "
+                f"{sum(floors[b] for b in shared):,} chunks of {TRANSCRIPT_MAX_CHARS:,} "
+                f"characters — {len(short)} book(s) are short, worst: "
+                + "; ".join(f"{book} has {rows[book]:,}, needs {floors[book]:,}"
+                            for _, book in reversed(short[-3:])) +
+                f". Rows cut by {claimed!r} out of this text cannot be that few")
+    found = [problem for problem in problems if problem]
+    if not found:
+        return None
+    return (f"refusing to stamp {name} with chunker {claimed!r}: " + " Also: ".join(found) + ".\n"
+            f"A stamp is believed by everything downstream — it is what `ayl-add` refuses a "
+            f"write on — so it may not be written over rows it does not describe. Re-ingest "
+            f"(`--stage ingest`) to make it true, or name the version that really built these "
+            f"rows (`--chunker <version>`), which is an assertion about the past and is not "
+            f"checked against this code's numbers.")
+
+
+def stamp_existing_tables(backend: str, chunker: str | None = None,
+                          entry_ids: list[str] | None = None) -> None:
     """Fingerprint tables built before stamps existed. Asserts that they were
     built with the embedder configured right now — only run this when that is
     true. It is the operator's vouching, not a measurement: nothing in a table
     records which model made its vectors, which is why this command exists.
+
+    The CHUNKER half of the vouching is no longer taken on trust when the
+    version being claimed is the one this code chunks at: the rows are sampled
+    first and the stamp is refused, with the numbers, when they cannot have
+    come from it (`stamp_sample_problem`, #75). Naming an older version stays a
+    pure assertion — nothing here knows what `sentence-pack-1` would have
+    produced — which is also the way past a refusal for an operator who really
+    means the old one.
 
     `--chunker <version>` extends the vouching to the chunker, and it is opt-in
     for the same reason the embedder is asserted rather than read. An unstamped
@@ -679,6 +849,7 @@ def stamp_existing_tables(backend: str, chunker: str | None = None) -> None:
     Nothing an operator can vouch for changes what the columns are."""
     embedder = get_embedder(backend)
     db = lancedb.connect(DB_PATH)
+    claims: list[tuple[str, str | None]] = []
     for name in (f"cards_{backend}", f"transcripts_{backend}"):
         if name not in table_names(db):
             print(f"  {name}: not found, skipped")
@@ -687,7 +858,17 @@ def stamp_existing_tables(backend: str, chunker: str | None = None) -> None:
         # is cut by `chunk_card` and the transcripts table by the sentence
         # packer, and asserting the packer's version over cards would be an
         # assertion about a rule that never touched them.
-        claimed = expected_chunker(name) if chunker == "current" else chunker
+        claims.append((name, expected_chunker(name) if chunker == "current" else chunker))
+
+    # Every table is sampled BEFORE any of them is stamped, so a refusal leaves
+    # the fingerprints exactly as they were: half a vouching is a worse state
+    # than none, and the tables are stamped as one act from one command line.
+    for name, claimed in claims:
+        problem = claimed and stamp_sample_problem(db, name, claimed, entry_ids or [])
+        if problem:
+            sys.exit(problem)
+
+    for name, claimed in claims:
         write_index_meta(db, name, backend, embedder.model, embedder.dims, chunker=claimed)
         print(f"  {name}: stamped {embedder.model} / {embedder.dims}d"
               + (f" / chunker {claimed}" if claimed else " (no chunker claimed)"))
@@ -699,7 +880,10 @@ STAGES = ("prepare-text", "prepare-audio", "prepare-canaries", "ingest", "cards"
           "stamp-meta", "checksums")
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    """`argv` for the tests, as `ayl-add.main` takes it: the argument checks
+    below are worth a test of their own, and the only other way to reach them
+    is a subprocess that would also have to be kept away from a real index."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--stage", choices=("all",) + STAGES, default="all")
@@ -713,7 +897,10 @@ def main() -> None:
                          f"existing tables ('current' = {CHUNKER_VERSION!r}). Off by default: "
                          "an unstamped chunker means nobody recorded it, and that is read and "
                          "written without a word; a stamped one warns on read and refuses on "
-                         "write when it disagrees with this code")
+                         "write when it disagrees with this code. Claiming the version this "
+                         "code chunks at ('current') samples the rows first and refuses when "
+                         "they cannot have come from it; naming an older version is an "
+                         "assertion about the past and is not sampled")
     ap.add_argument("--refetch", action="store_true",
                     help="re-download the Gutenberg texts even when a copy is cached "
                          "(the old copy is kept next to it as pg<id>.txt.prev; refuses "
@@ -727,12 +914,21 @@ def main() -> None:
                          "passes corpus-tech/cards, and $AYL_HOME/cards/tech for the "
                          "cards built only on this machine, together with its own "
                          "LIBRARY_DB_PATH)")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     if args.chunker and args.stage != "stamp-meta":
         # Silently ignoring it would let somebody believe they had asserted a
         # chunker over an index that was never stamped with one.
         ap.error("--chunker belongs to --stage stamp-meta; every other stage stamps the "
                  "chunker it actually used")
+    if args.book and args.stage == "stamp-meta":
+        # A stamp is written on the WHOLE table, and the row count it is
+        # checked against is the whole corpus's. Filtering the books would
+        # leave a fingerprint claiming a chunker for rows the run never looked
+        # at — and, with the sampling, would compare one book's rows against
+        # one book's floor and stamp all of them on the strength of it.
+        ap.error("--book does not narrow --stage stamp-meta: a fingerprint is written per "
+                 "TABLE, not per book, and the row count it is checked against is the whole "
+                 "corpus's")
     if args.cards_dir and args.stage != "cards":
         # `--stage all --cards-dir corpus-tech/cards` would write the shelf's
         # cards into whichever index the classics' transcripts just went to, and
@@ -776,7 +972,8 @@ def main() -> None:
         if args.stage == "stamp-meta":
             print("== stamp existing tables with the configured embedding model ==")
             with ingest_lock(DB_PATH, command="ingest_demo_corpus.py --stage stamp-meta"):
-                stamp_existing_tables(args.backend, args.chunker)
+                stamp_existing_tables(args.backend, args.chunker,
+                                      [e["id"] for e in entries])
     except IngestBusy as error:
         sys.exit(str(error))
 
