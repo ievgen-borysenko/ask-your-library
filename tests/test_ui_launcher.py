@@ -1,14 +1,17 @@
 """The Chainlit configuration a start actually runs under.
 
 Chainlit writes its OWN default config.toml into an app root that has none and
-then serves from it, silently. That default is not this application's: no
-`unsafe_allow_html` (the provenance badge and the metrics footer are HTML),
-`auto_tag_thread` back on (which loses every chat title on SQLite), a wide
-`allow_origins`, and `[features.mcp] enabled = true`, the thing SECURITY.md
-names as off. So the tests below read the file on disk after a start has
-prepared the root — the loaded object would agree with itself either way — and
-the last one opens the built wheel, because a template that is not in the
-distribution is Chainlit's default on every machine that installed one.
+then serves from it, silently. That default is not this application's:
+`allow_origins = ["*"]` against our two loopback origins at the serving port,
+`unsafe_allow_html` false where the provenance badge and the metrics footer are
+HTML, `auto_tag_thread` true where it loses every chat title on SQLite. Its
+`[features.mcp] enabled` agrees with ours in 2.12.0, and that is Chainlit's
+decision to revisit rather than one this project would learn about — SECURITY.md
+names that line as what keeps MCP off, so it is asserted here like the rest. The
+tests read the file on disk after a start has prepared the root (the loaded
+object would agree with itself either way), and the last ones open the built
+wheel, because a template that is not in the distribution is Chainlit's default
+on every machine that installed one.
 
 No Chainlit import: the launcher writes files and starts a subprocess, and
 this file must run on a clone without the `ui` extra.
@@ -73,8 +76,9 @@ def root(monkeypatch, tmp_path):
 
 
 def test_a_fresh_app_root_gets_our_config_and_not_chainlits_default(root):
-    """The decisive one. Every key here is a decision this project made and
-    Chainlit's generated default reverses."""
+    """The decisive one. Every key here is a decision this project made, and
+    every one of them is a line Chainlit's generated default either reverses or
+    is free to change without this project hearing about it."""
     launcher.prepare("127.0.0.1", 8123)
     config = written_config(root)
 
@@ -116,8 +120,9 @@ def test_an_ipv6_host_is_written_as_a_url_and_not_as_three_colons(root):
 def test_a_hand_edited_config_is_overwritten_on_the_next_start(root):
     """Decided and pinned: overwritten. The config is generated output whose
     security-relevant half has to match the code that ships with it, and a
-    stale copy — an older version's, or one somebody edited — is exactly how
-    MCP comes back on a machine nobody is looking at."""
+    stale copy — an older version's, or one somebody edited — is a server
+    running on decisions nobody made in this release. The file written here is
+    the shape that costs the most: MCP on, HTML off, every origin allowed."""
     launcher.prepare("127.0.0.1", 8000)
     config_file = root / ".chainlit" / "config.toml"
     config_file.write_text("[project]\nallow_origins = [\"*\"]\n\n"
@@ -220,7 +225,7 @@ def test_every_packaged_file_the_launcher_reads_is_named_in_pyproject():
         assert source.is_file(), source
 
 
-def test_chainlits_own_host_and_port_variables_are_read_and_a_nonsense_port_is_refused(monkeypatch):
+def test_chainlits_own_host_and_port_are_read_and_a_nonsense_port_refused(monkeypatch):
     """`ayl ui` always passes `--host` and `--port`, so Chainlit's CLI never
     gets to read these itself; a variable a reader set that the command
     silently overrode would be worse than not supporting it. A port that is

@@ -262,9 +262,9 @@ def chainlit_server(tmp_path_factory) -> Server:
         # Chainlit writes a default config.toml, a .files/ and a chainlit.md
         # into its app root when it finds none there, so these appearing in the
         # working directory is exactly what an app root the launcher did NOT
-        # prepare looks like — and a config Chainlit wrote is one without
-        # `unsafe_allow_html`, without `auto_tag_thread = false` and with MCP
-        # back on.
+        # prepare looks like — and a config Chainlit wrote is one with
+        # `allow_origins = ["*"]`, without `unsafe_allow_html` and without
+        # `auto_tag_thread = false`.
         stray = sorted(path.name for path in elsewhere.iterdir())
         assert not stray, f"the server was configured from its working directory: {stray}"
         assert (state / ".chainlit" / "config.toml").is_file()

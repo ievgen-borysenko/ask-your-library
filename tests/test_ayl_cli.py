@@ -535,10 +535,10 @@ def test_ui_writes_the_projects_config_into_the_app_root_before_starting(monkeyp
     """Chainlit reads its settings from the app root's `.chainlit/config.toml`
     and WRITES A DEFAULT ONE where it finds none. That default has no
     `unsafe_allow_html` (the provenance badge and the metrics footer),
-    `auto_tag_thread` back on, a wide `allow_origins` and MCP enabled — so the
-    file has to be there, with the port that was typed, before the server
-    starts. tests/test_ui_launcher.py pins the contents; this pins that `ayl
-    ui` is what puts them there."""
+    `auto_tag_thread` back on and `allow_origins = ["*"]` — so the file has to
+    be there, with the port that was typed, before the server starts.
+    tests/test_ui_launcher.py pins the contents; this pins that `ayl ui` is
+    what puts them there."""
     monkeypatch.setenv("AYL_CHAINLIT_DIR", str(tmp_path / "root" / ".chainlit"))
     monkeypatch.setattr(launcher.subprocess, "call", lambda command, env=None: 0)
 

@@ -5,12 +5,14 @@ app root is `CHAINLIT_APP_ROOT` or the working directory
 (`chainlit/config.py`). Where it finds no config it WRITES ITS OWN DEFAULT
 (`chainlit.config.init_config`) and where it finds no `chainlit.md` it writes a
 placeholder (`chainlit.markdown.init_markdown`) — silently, and then serves
-from it. Chainlit's default is not this app's configuration: it loses
-`unsafe_allow_html` (the provenance badge and the metrics footer are HTML),
-`auto_tag_thread = false` (with it on, SQLite refuses the tag list and the
-insert that carries a chat's title is lost), the narrowed `allow_origins`, and
-`[features.mcp] enabled = false`, which SECURITY.md names as what keeps MCP
-off.
+from it. Chainlit's default is not this app's configuration. Its
+`allow_origins` is `["*"]`, where ours names the two loopback origins at the
+serving port; its `unsafe_allow_html` is false, where the provenance badge and
+the metrics footer are HTML; its `auto_tag_thread` is true, and with it on
+SQLite refuses the tag list and the insert that carries a chat's title is lost.
+Its `[features.mcp] enabled` happens to agree with ours in 2.12.0 — which is
+Chainlit's decision to revisit at any release, not ours to lose track of, and
+SECURITY.md names that line as what keeps MCP off.
 
 That is why the web chat used to be startable only from the checkout: the
 committed `.chainlit/config.toml` was the app root's only because the command
@@ -149,7 +151,8 @@ def prepare(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> Path:
     generated output, the security-relevant half of it (`allow_origins`,
     `[features.mcp]`, `unsafe_allow_html`) has to match the code that ships
     with it, and a copy left behind by an older version — or edited by hand —
-    is exactly how MCP gets re-enabled on a machine nobody is looking at.
+    is a server running on decisions nobody made in this release, MCP among
+    them.
 
     The translation and the welcome page are copied only when they are absent:
     neither carries a decision the code depends on, and Chainlit itself would

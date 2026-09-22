@@ -76,14 +76,16 @@
   naming that root.
 
   **Why every start, overwriting what is there.** Chainlit writes ITS OWN default configuration
-  into an app root that has none and then serves from it, silently — no `unsafe_allow_html` (the
-  provenance badge and the metrics footer are HTML), `auto_tag_thread` back on (which loses every
-  chat title on SQLite), a wide `allow_origins`, and `[features.mcp] enabled = true`, the thing
-  [SECURITY](../SECURITY.md) names as off. That is what made the web chat startable only from the
-  checkout, where the committed file happened to be the app root's. Generated output whose
-  security-relevant half has to match the code that ships with it is not a file to preserve
-  edits in: a stale copy — an older version's, or one somebody edited — is exactly how MCP comes
-  back on a machine nobody is looking at. `tests/test_ui_launcher.py` reads the written file and
+  into an app root that has none and then serves from it, silently: `allow_origins = ["*"]`
+  against the two loopback origins this project narrows it to, `unsafe_allow_html` false where the
+  provenance badge and the metrics footer are HTML, `auto_tag_thread` true where it loses every
+  chat title on SQLite. Its `[features.mcp] enabled` agrees with ours in 2.12.0, which is
+  Chainlit's decision to revisit at any release rather than one this project would hear about —
+  and [SECURITY](../SECURITY.md) names that line as what keeps MCP off. That is what made the web
+  chat startable only from the checkout, where the committed file happened to be the app root's.
+  Generated output whose security-relevant half has to match the code that ships with it is not a
+  file to preserve edits in: a stale copy — an older version's, or one somebody edited — is a
+  server running on decisions nobody made in this release. `tests/test_ui_launcher.py` reads the written file and
   pins every one of those keys, pins that a hand-edited config is overwritten, and opens the built
   wheel to check the three data files are in it at all.
 
