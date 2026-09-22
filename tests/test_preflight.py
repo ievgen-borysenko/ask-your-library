@@ -88,7 +88,7 @@ def test_preflight_clean_environment(monkeypatch, tmp_path):
 
 
 def test_missing_cards_table_is_a_notice_not_an_error(monkeypatch, tmp_path):
-    """An `ayl-add` index has no cards table. That is supported, but the person
+    """An `ayl add` index has no cards table. That is supported, but the person
     asking must be told, not only the server log."""
     from ask_your_library import preflight as pf
     preflight = healthy(monkeypatch, tmp_path, [pf.TABLES["transcripts"]])
@@ -296,17 +296,46 @@ def test_index_only_keeps_the_status_a_missing_index_always_had(monkeypatch, tmp
     assert result.kinds == ["no_tables"] and pf.exit_code(result) == pf.EXIT_NO_INDEX
 
 
-def test_index_only_still_reports_the_degradations_the_reader_should_know(monkeypatch,
-                                                                         tmp_path):
-    """The notices belong to the index, not to the model server: an index
-    without book cards is the shape `ayl add` builds, and saying so is as
-    useful under `ayl books` as under a question."""
+def test_index_only_does_not_warn_about_the_cards_table(monkeypatch, tmp_path):
+    """The no-cards notice is about SEARCH — the agent will work over full text
+    alone — and a command that only lists what the index holds does not search.
+    Saying it under `ayl books` would be a warning about something the reader
+    did not ask for and that command does not do. The full check still says it.
+    """
     from ask_your_library import preflight as pf
     preflight = healthy(monkeypatch, tmp_path, [pf.TABLES["transcripts"]])
 
-    result = preflight.check_environment(index_only=True)
-    assert result == [] and len(result.notices) == 1
-    assert pf.TABLES["cards"] in result.notices[0]
+    assert preflight.check_environment(index_only=True).notices == []
+    assert pf.TABLES["cards"] in preflight.check_environment().notices[0]
+
+
+def test_an_explicit_db_and_backend_are_what_the_index_half_reads(monkeypatch, tmp_path):
+    """`ayl doctor --db <dir> --backend <name>` checks THAT index: a preflight
+    left on the configured one reported the database at LIBRARY_DB_PATH as
+    missing while the doctor beside it read the one it was pointed at."""
+    from ask_your_library import preflight as pf
+    preflight = healthy(monkeypatch, tmp_path, ["transcripts_openrouter"])
+    monkeypatch.setattr(preflight, "DB_PATH", tmp_path / "not-built-yet")
+
+    assert preflight.check_environment(index_only=True).kinds == ["no_db"]
+    # the same call, aimed at the index that is there, and at ITS table suffix
+    assert preflight.check_environment(index_only=True, db_path=tmp_path,
+                                       backend="openrouter") == []
+    # and the suffix is not cosmetic: the ollama tables are not in that index
+    assert preflight.check_environment(index_only=True, db_path=tmp_path,
+                                       backend="ollama").kinds == ["no_tables"]
+
+
+def test_an_explicit_db_does_not_change_the_configured_one(monkeypatch, tmp_path):
+    """A parameter, not a write to `config`: a setting changed for one check is
+    a setting changed for everything that runs after it."""
+    from ask_your_library import preflight as pf
+    preflight = healthy(monkeypatch, tmp_path, list(pf.TABLES.values()))
+    monkeypatch.setattr(preflight, "DB_PATH", tmp_path / "not-built-yet")
+
+    preflight.check_environment(index_only=True, db_path=tmp_path)
+    assert preflight.DB_PATH == tmp_path / "not-built-yet"
+    assert preflight.check_environment(index_only=True).kinds == ["no_db"]
 
 
 def test_a_repo_env_file_cannot_hand_the_suite_a_provider_key(tmp_path):
@@ -368,7 +397,7 @@ def test_a_missing_ollama_and_a_missing_index_are_different_statuses(monkeypatch
     assert result.kinds == ["no_db"]
     assert pf.exit_code(result) == pf.EXIT_NO_INDEX == 3
     # And it says which command builds one.
-    assert "ingest_demo_corpus.py" in result[0] and "ayl-add" in result[0]
+    assert "ingest_demo_corpus.py" in result[0] and "ayl add" in result[0]
 
 
 def test_a_missing_key_keeps_its_own_status_on_the_hosted_backend(monkeypatch, tmp_path):

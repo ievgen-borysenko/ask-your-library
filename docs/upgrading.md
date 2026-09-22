@@ -12,7 +12,9 @@ uv run ayl backup ~/ayl-backups --db ~/ayl-index
 ```
 
 `ayl backup`, `ayl restore`, `ayl doctor` and `ayl add` are one program under four verbs, so
-every flag on this page is one of its flags. Upgrading from a version before `ayl`: the two names
+every flag on this page is one of its flags; `ayl <verb> --help` lists the ones that verb takes.
+`--db <dir>` aims the whole command at that index — the checks it runs and the report it prints
+alike. Upgrading from a version before `ayl`: the two names
 it replaced, `ask-library` and `ayl-add`, are still installed and still run the same code — each
 prints one deprecation line and is removed at `0.6.0`, so a script of your own has one minor
 release to change the name it types.

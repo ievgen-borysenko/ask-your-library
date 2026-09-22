@@ -30,10 +30,19 @@ OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_EMBED_MODEL = os.environ.get("OLLAMA_EMBED_MODEL", "bge-m3")
 OPENROUTER_EMBED_MODEL = os.environ.get("OPENROUTER_EMBED_MODEL", "openai/text-embedding-3-small")
 
-TABLES = {
-    "cards": f"cards_{EMBED_BACKEND}",              # distilled book cards (plot / characters / takeaways)
-    "transcripts": f"transcripts_{EMBED_BACKEND}",  # full book text, chapter-aware chunks
-}
+def tables_for(backend: str) -> dict[str, str]:
+    """The two table names of an index built by `backend`.
+
+    A function and not only the pair below, because a command may be pointed at
+    ANOTHER index than the configured one — `--db <dir> --backend <name>` — and
+    the checks over it must ask for that index's tables, not this process's."""
+    return {
+        "cards": f"cards_{backend}",              # distilled book cards (plot / characters / takeaways)
+        "transcripts": f"transcripts_{backend}",  # full book text, chapter-aware chunks
+    }
+
+
+TABLES = tables_for(EMBED_BACKEND)
 
 # --- orchestrator LLM (OpenAI-compatible endpoint; local Ollama by default) --
 # The shipped default is LLM_BACKEND=ollama: every agent node runs on a local

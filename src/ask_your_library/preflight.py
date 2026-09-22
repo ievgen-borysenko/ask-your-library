@@ -17,6 +17,8 @@ yet, or there is no index yet. A script that wraps the CLI needs to tell them
 apart without matching on translated prose, so `exit_code()` turns the kinds
 into the distinct status the CLI exits with.
 """
+from pathlib import Path
+
 import lancedb
 import requests
 # Bound here so the except clauses survive a stubbed `requests`. HTTPError is a
@@ -24,7 +26,7 @@ import requests
 from requests import HTTPError, RequestException
 
 from .config import (DB_PATH, EMBED_BACKEND, LLM_BACKEND, OLLAMA_EMBED_MODEL, OLLAMA_URL, OPENROUTER_NEEDS_KEY,
-                     ORCHESTRATOR_MODEL, TABLES)
+                     ORCHESTRATOR_MODEL, TABLES, tables_for)
 from .embeddings import get_embedder, openrouter_api_key
 from .i18n import t
 from .index_meta import check_index, warn_version_mismatch
@@ -118,7 +120,8 @@ def pull_commands() -> str:
     return ", ".join(f"`ollama pull {model}`" for model in models)
 
 
-def check_environment(index_only: bool = False) -> PreflightResult:
+def check_environment(index_only: bool = False, db_path: Path | None = None,
+                      backend: str | None = None) -> PreflightResult:
     """Human-readable problems (empty = good to go), with `.notices` for
     non-fatal degradations and `.kinds` for what each problem was.
 
@@ -130,13 +133,27 @@ def check_environment(index_only: bool = False) -> PreflightResult:
     is the same code either way, reporting the same kinds, so "no index" is
     exit 3 here exactly as it is for a question.
 
+    `db_path` and `backend` aim the index half at ANOTHER index than the
+    configured one, which is what `--db <dir>` / `--backend <name>` mean to
+    every command that takes them: without it `ayl doctor --db ~/other` would
+    report the database at LIBRARY_DB_PATH as missing while reading the one it
+    was pointed at. They are parameters and not a write to `config`, because a
+    process-wide setting changed for one check is a setting changed for
+    everything that runs after it. `backend` also selects the table names and
+    the embedder the fingerprint is compared against, exactly as it does for an
+    ingest.
+
     The key is still checked when the EMBEDDER is the hosted one, because the
     fingerprint check builds that embedder and cannot without it."""
     problems = []
     notices = []
     kinds = []
-    needs_key = (EMBED_BACKEND == "openrouter") if index_only else OPENROUTER_NEEDS_KEY
-    checks_local_runtime = not index_only and (EMBED_BACKEND == "ollama"
+    db = DB_PATH if db_path is None else Path(db_path)
+    embed_backend = EMBED_BACKEND if backend is None else backend
+    tables = TABLES if backend is None else tables_for(backend)
+    needs_key = ((embed_backend == "openrouter") if index_only
+                 else (OPENROUTER_NEEDS_KEY or embed_backend == "openrouter"))
+    checks_local_runtime = not index_only and (embed_backend == "ollama"
                                                or LLM_BACKEND == "ollama")
 
     def problem(kind: str, message: str) -> None:
@@ -194,38 +211,38 @@ def check_environment(index_only: bool = False) -> PreflightResult:
                     # model checked here is the model the client will call. Only this
                     # half is conditional: with a hosted LLM nothing is pulled locally.
                     problem("no_local_model", t("pf_no_local_model", model=ORCHESTRATOR_MODEL))
-                if EMBED_BACKEND == "ollama" and not _pulled(OLLAMA_EMBED_MODEL, names):
+                if embed_backend == "ollama" and not _pulled(OLLAMA_EMBED_MODEL, names):
                     # The same for the embedding model: a reachable Ollama without
                     # it passes every other check and then fails on the first
                     # search, which is the least legible place to learn about it.
                     problem("no_embed_model", t("pf_no_embed_model", model=OLLAMA_EMBED_MODEL))
 
-    if not DB_PATH.exists():
-        problem("no_db", t("pf_no_db", path=DB_PATH))
+    if not db.exists():
+        problem("no_db", t("pf_no_db", path=db))
     else:
         # Full text is the corpus the agent cannot work without; book cards are
         # optional, because `ayl-add` builds an index without them (they need an
         # LLM per book). library.search skips a corpus whose table is absent.
-        required = {TABLES["transcripts"]}
+        required = {tables["transcripts"]}
         try:
-            present = set(lancedb.connect(DB_PATH).table_names())
+            present = set(lancedb.connect(db).table_names())
         except Exception:
             present = set()
         missing = required - present
         if missing:
-            problem("no_tables", t("pf_no_tables", path=DB_PATH,
+            problem("no_tables", t("pf_no_tables", path=db,
                                    tables=", ".join(sorted(missing))))
         else:
             # Degraded, not broken: search runs over full text alone. Said here
             # because library.has_table only logs it, which in the web UI is a
             # server log the person asking the question never sees.
-            if TABLES["cards"] not in present:
-                notices.append(t("pf_no_cards", table=TABLES["cards"]))
+            if not index_only and tables["cards"] not in present:
+                notices.append(t("pf_no_cards", table=tables["cards"]))
             try:
-                emb = get_embedder(EMBED_BACKEND)
-                db = lancedb.connect(DB_PATH)
-                for name in sorted(set(TABLES.values()) & present):
-                    mismatch = check_index(db, name, emb.model, emb.dims)
+                emb = get_embedder(embed_backend)
+                connection = lancedb.connect(db)
+                for name in sorted(set(tables.values()) & present):
+                    mismatch = check_index(connection, name, emb.model, emb.dims)
                     if mismatch:
                         problem("index_mismatch", t("pf_index_mismatch", detail=mismatch))
                     # Degraded, not broken, and for that reason a NOTICE and not
@@ -235,7 +252,7 @@ def check_environment(index_only: bool = False) -> PreflightResult:
                     # to spend half an hour on — and because the write path will
                     # refuse the next `ayl-add` over this index, and being told
                     # then, mid-ingest, is being told too late.
-                    stale = warn_version_mismatch(db, name)
+                    stale = warn_version_mismatch(connection, name)
                     if stale:
                         notices.append(t("pf_version_mismatch", detail=stale))
             except Exception as error:  # a key error for openrouter etc. is reported above

@@ -22,6 +22,7 @@ from ask_your_library.i18n import t
 from ask_your_library.ingest import add_folder
 from ask_your_library.library import TITLE_SEPARATOR
 from ask_your_library.preflight import PreflightResult
+from test_add_folder import PARA, fake_embedder, write  # noqa: F401
 
 
 @pytest.fixture(autouse=True)
@@ -29,7 +30,7 @@ def no_environment(monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("OPENROUTER_ENV_FILE", raising=False)
 
-    def forbidden(index_only=False):
+    def forbidden(index_only=False, db_path=None, backend=None):
         raise AssertionError("check_environment() was called for --help/--version")
     monkeypatch.setattr(ayl, "check_environment", forbidden)
     monkeypatch.setattr(cli, "check_environment", forbidden)
@@ -110,15 +111,21 @@ def recorded(monkeypatch):
     return calls
 
 
+HOME = str(Path("~").expanduser())
+
+
 @pytest.mark.parametrize("argv, expected", [
     (["ask", "--verbose", "who is Fagin?"],
      ("ask", ["--verbose", "who is Fagin?"], "ayl ask")),
+    # `add` is the one that is handed its arguments unread: it IS that command,
+    # so its parser is the one the docs-as-code check of #72 compares against.
     (["add", "~/books", "--rebuild", "--backup", "~/b"],
      ("add", ["~/books", "--rebuild", "--backup", "~/b"], "ayl add")),
     (["backup", "~/b", "--db", "~/i"],
-     ("add", ["--backup", "~/b", "--db", "~/i"], "ayl backup")),
+     ("add", ["--backup", f"{HOME}/b", "--db", f"{HOME}/i"], "ayl backup")),
     (["restore", "~/b/20260922", "--db", "~/i", "--force"],
-     ("add", ["--restore", "~/b/20260922", "--db", "~/i", "--force"], "ayl restore")),
+     ("add", ["--restore", f"{HOME}/b/20260922", "--db", f"{HOME}/i", "--force"],
+      "ayl restore")),
 ])
 def test_each_subcommand_reaches_the_parser_that_always_took_those_flags(argv, expected,
                                                                         recorded):
@@ -126,12 +133,68 @@ def test_each_subcommand_reaches_the_parser_that_always_took_those_flags(argv, e
     assert recorded == [expected]
 
 
-def test_backup_without_a_directory_is_refused_before_the_ingest_parser(recorded, capsys):
-    """`--backup` takes the directory as its argument, so an empty `ayl backup`
-    would otherwise arrive as argparse's "expected one argument" under a flag
-    the reader never typed."""
-    assert ayl.main(["backup"]) == 2
+def test_a_verb_forwards_only_what_the_reader_typed(recorded):
+    """An option left out means "whatever is configured", which is the ingest
+    parser's own default: passing its default back would make every run look
+    like one that named a database."""
+    assert ayl.main(["backup", "/b"]) == 0
+    assert recorded == [("add", ["--backup", "/b"], "ayl backup")]
+
+
+def test_backup_without_a_directory_is_argparses_own_error(recorded, capsys):
+    """The directory is this verb's required positional, so an empty `ayl
+    backup` is answered by name — not by argparse missing the argument of a
+    `--backup` flag the reader never typed."""
+    with pytest.raises(SystemExit) as exit_info:
+        ayl.main(["backup"])
+    assert exit_info.value.code == 2
     assert recorded == [] and "ayl backup" in capsys.readouterr().err
+
+
+# --- a verb flag cannot be smuggled under another verb ------------------------
+
+@pytest.mark.parametrize("verb, argv", [
+    ("ayl backup", ["backup", "/b", "--doctor"]),
+    ("ayl backup", ["backup", "/b", "--restore", "/x"]),
+    ("ayl restore", ["restore", "/b", "--doctor"]),
+    ("ayl restore", ["restore", "/b", "--backup", "/x"]),
+    ("ayl doctor", ["doctor", "--backup", "/x"]),
+    ("ayl doctor", ["doctor", "--restore", "/x"]),
+    ("ayl doctor", ["doctor", "--rebuild"]),
+])
+def test_another_verbs_flag_is_not_an_option_of_this_one(verb, argv, recorded, capsys):
+    """The ingest parser answers `--doctor` before `--backup`, so `ayl backup
+    <dir> --doctor` took no copy, reported a clean index and exited 0. Each
+    verb now declares its own options, and one of these is not among them."""
+    with pytest.raises(SystemExit) as exit_info:
+        ayl.main(argv)
+    assert exit_info.value.code == 2
+    assert recorded == [] and verb in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("flag, verb", [("--doctor", "ayl doctor"),
+                                        ("--backup", "ayl backup"),
+                                        ("--restore", "ayl restore"),
+                                        ("--rebuild", "ayl add <folder> --rebuild")])
+def test_the_escape_hatch_does_not_carry_a_verb_flag_either(flag, verb, recorded, capsys):
+    """`--` passes a flag this verb does not declare straight to the ingest
+    command, which is the point of it — but a flag that decides WHICH command
+    runs is not an option, and it is named rather than obeyed."""
+    with pytest.raises(SystemExit) as exit_info:
+        ayl.main(["backup", "/b", "--", flag])
+    assert exit_info.value.code == 2
+    err = capsys.readouterr().err
+    assert recorded == []
+    assert flag in err and verb in err          # and it names what to type instead
+
+
+def test_the_escape_hatch_passes_an_undeclared_flag_through(recorded):
+    """The documented way out: a flag of the ingest parser that this verb does
+    not declare (`ayl backup` has no `--backend`, the copy is of a directory)
+    still reaches it, after everything the verb itself parsed."""
+    assert ayl.main(["backup", "/b", "--db", "/i", "--", "--backend", "openrouter"]) == 0
+    assert recorded == [("add", ["--backup", "/b", "--db", "/i", "--backend", "openrouter"],
+                         "ayl backup")]
 
 
 def test_a_subcommands_help_is_the_help_of_the_parser_that_runs_it(capsys):
@@ -184,11 +247,14 @@ def test_an_add_exit_status_passes_through(monkeypatch, code):
 
 # --- doctor: the environment half and the index half --------------------------
 
-def test_doctor_runs_both_halves_and_reports_the_environment_first(monkeypatch, capsys):
+def test_doctor_aims_both_halves_at_the_same_index(monkeypatch, capsys):
+    """The environment half is reported first, and it is aimed where the reader
+    aimed the command: a preflight left on LIBRARY_DB_PATH reported the
+    configured database as missing while the doctor beside it read `--db`."""
     order = []
 
-    def preflight(index_only=False):
-        order.append(("preflight", index_only))
+    def preflight(index_only=False, db_path=None, backend=None):
+        order.append(("preflight", index_only, str(db_path), backend))
         return PreflightResult([], (), [])
     monkeypatch.setattr(ayl, "check_environment", preflight)
 
@@ -197,9 +263,26 @@ def test_doctor_runs_both_halves_and_reports_the_environment_first(monkeypatch, 
         return 0
     monkeypatch.setattr(add_folder, "main", doctor)
 
-    assert ayl.main(["doctor", "--db", "~/i"]) == 0
-    assert order == [("preflight", False),          # the doctor reports the whole environment
-                     ("doctor", ["--doctor", "--db", "~/i"], "ayl doctor")]
+    assert ayl.main(["doctor", "--db", "~/i", "--backend", "openrouter"]) == 0
+    assert order == [
+        # the whole environment (not index_only), at ~/i, as openrouter built it
+        ("preflight", False, f"{HOME}/i", "openrouter"),
+        ("doctor", ["--doctor", "--db", f"{HOME}/i", "--backend", "openrouter"], "ayl doctor")]
+
+
+def test_doctor_without_a_db_leaves_the_configured_one_to_the_preflight(monkeypatch):
+    """Nothing typed means nothing forwarded: `None` is what
+    `check_environment` and the ingest parser both read as "the configured
+    index", and neither is told a path that is only their own default."""
+    seen = []
+    monkeypatch.setattr(ayl, "check_environment",
+                        lambda index_only=False, db_path=None, backend=None:
+                        seen.append((db_path, backend)) or PreflightResult([], (), []))
+    monkeypatch.setattr(add_folder, "main",
+                        lambda argv=None, prog=None: seen.append(list(argv)) or 0)
+
+    assert ayl.main(["doctor"]) == 0
+    assert seen == [(None, None), ["--doctor"]]
 
 
 def test_a_broken_environment_still_runs_the_index_doctor_and_sets_the_status(monkeypatch,
@@ -208,8 +291,8 @@ def test_a_broken_environment_still_runs_the_index_doctor_and_sets_the_status(mo
     which is what the reader opened this command for. The status is the
     preflight's classification, the same number `ayl ask` would exit with."""
     monkeypatch.setattr(ayl, "check_environment",
-                        lambda index_only=False: PreflightResult(["ollama is not there"], (),
-                                                                  ["no_ollama"]))
+                        lambda index_only=False, db_path=None, backend=None:
+                        PreflightResult(["ollama is not there"], (), ["no_ollama"]))
     seen = []
     monkeypatch.setattr(add_folder, "main",
                         lambda argv=None, prog=None: seen.append(list(argv)) or 0)
@@ -221,7 +304,8 @@ def test_a_broken_environment_still_runs_the_index_doctor_and_sets_the_status(mo
 
 def test_a_healthy_environment_leaves_the_doctors_own_status(monkeypatch):
     monkeypatch.setattr(ayl, "check_environment",
-                        lambda index_only=False: PreflightResult([], (), []))
+                        lambda index_only=False, db_path=None, backend=None:
+                        PreflightResult([], (), []))
     monkeypatch.setattr(add_folder, "main", lambda argv=None, prog=None: 1)
     assert ayl.main(["doctor"]) == 1
 
@@ -258,7 +342,8 @@ def index(tmp_path, monkeypatch):
     db = lancedb.connect(str(tmp_path / "db"))
     db.create_table(library.TABLES["transcripts"], [row(MOBY), row(GULLIVER, "pg:829")])
     monkeypatch.setattr(ayl, "check_environment",
-                        lambda index_only=False: PreflightResult([], (), []))
+                        lambda index_only=False, db_path=None, backend=None:
+                        PreflightResult([], (), []))
 
 
 def test_books_lists_the_index_and_calls_no_model(index, monkeypatch, capsys):
@@ -279,7 +364,8 @@ def test_books_lists_the_index_and_calls_no_model(index, monkeypatch, capsys):
 def test_books_without_an_index_is_the_preflights_status_and_not_a_traceback(monkeypatch,
                                                                             capsys):
     monkeypatch.setattr(ayl, "check_environment",
-                        lambda index_only=False: PreflightResult(["no index yet"], (), ["no_db"]))
+                        lambda index_only=False, db_path=None, backend=None:
+                        PreflightResult(["no index yet"], (), ["no_db"]))
     assert ayl.main(["books"]) == 3
     assert "no index yet" in capsys.readouterr().err
 
@@ -352,6 +438,45 @@ def test_doctor_still_reports_the_unreachable_ollama(unreachable_everything, cap
     assert t("pf_no_key") in err
 
 
+def test_doctor_reports_a_healthy_index_the_configured_path_does_not_hold(monkeypatch,
+                                                                         tmp_path, capsys,
+                                                                         fake_embedder):
+    """`ayl doctor --db <dir>` over a healthy index exits 0.
+
+    It did not: the preflight half stayed on `config.DB_PATH`, which in a clone
+    that keeps its library elsewhere does not exist, so the command printed
+    `Database not found: data/lancedb` — the line docs/upgrading.md tells the
+    reader to act on — and exited 3 over an index it had just reconciled
+    cleanly. Everything else here is stubbed exactly as tests/test_preflight.py
+    stubs it, so the one variable is which database the two halves read."""
+    from ask_your_library import preflight
+
+    db_path = tmp_path / "db"
+    folder = tmp_path / "books"
+    write(folder, "The Green Ledger - A. Keeper.txt", PARA * 4)
+    add_folder.add_books(add_folder.read_folder(folder), "ollama", db_path, folder)
+    capsys.readouterr()                        # the ingest's own lines are not the subject
+
+    monkeypatch.setattr(ayl, "check_environment", preflight.check_environment)
+    monkeypatch.setattr(preflight, "DB_PATH", tmp_path / "nothing-was-built-here")
+    monkeypatch.setattr(preflight, "openrouter_api_key", lambda: "sk-x")
+    monkeypatch.setattr(preflight, "get_embedder", lambda backend: fake_embedder)
+    monkeypatch.setattr(preflight, "check_index", lambda *a: None)
+
+    class Up:
+        def get(self, *a, **k):
+            return type("Tags", (), {
+                "status_code": 200,
+                "raise_for_status": lambda self: None,
+                "json": lambda self: {"models": [{"name": "bge-m3:latest"},
+                                                 {"name": "qwen2.5:14b"}]}})()
+    monkeypatch.setattr(preflight, "requests", Up())
+
+    assert ayl.main(["doctor", "--db", str(db_path)]) == 0
+    out = capsys.readouterr()
+    assert "no drift" in out.out and t("pf_header") not in out.err
+
+
 # --- ui -----------------------------------------------------------------------
 
 def test_ui_runs_chainlit_against_the_checkouts_script_on_loopback(monkeypatch, tmp_path):
@@ -359,11 +484,32 @@ def test_ui_runs_chainlit_against_the_checkouts_script_on_loopback(monkeypatch, 
     script.write_text("")
     monkeypatch.setattr(ayl, "REPO_ROOT", str(tmp_path))
     seen = []
-    monkeypatch.setattr(ayl.subprocess, "call", lambda command: seen.append(command) or 0)
+    monkeypatch.setattr(ayl.subprocess, "call",
+                        lambda command, cwd=None: seen.append((command, cwd)) or 0)
 
     assert ayl.main(["ui", "-w", "--port", "8123"]) == 0
-    assert seen == [["chainlit", "run", str(script), "--host", "127.0.0.1", "-w",
-                     "--port", "8123"]]
+    assert seen == [(["chainlit", "run", str(script), "--host", "127.0.0.1", "-w",
+                      "--port", "8123"], tmp_path)]
+
+
+def test_ui_starts_chainlit_in_the_checkout_so_the_committed_config_is_the_one_that_loads(
+        monkeypatch, tmp_path):
+    """Chainlit derives its app root from `CHAINLIT_APP_ROOT or os.getcwd()`
+    and WRITES a default `.chainlit/config.toml` where it finds none. Started
+    anywhere else, the committed config is not the one that loads:
+    `unsafe_allow_html`, `auto_tag_thread = false`, the narrowed
+    `allow_origins` and the MCP disable SECURITY.md names are all silently back
+    at Chainlit's defaults, and a `.chainlit/` appears in the caller's
+    directory."""
+    script = tmp_path / "ui.py"
+    script.write_text("")
+    monkeypatch.setattr(ayl, "REPO_ROOT", str(tmp_path))
+    seen = {}
+    monkeypatch.setattr(ayl.subprocess, "call",
+                        lambda command, cwd=None: seen.update(cwd=cwd) or 0)
+
+    assert ayl.main(["ui"]) == 0
+    assert seen["cwd"] == script.parent == tmp_path
 
 
 def test_ui_without_a_checkout_names_what_is_missing(monkeypatch, capsys):
@@ -371,7 +517,7 @@ def test_ui_without_a_checkout_names_what_is_missing(monkeypatch, capsys):
     ui.py in it: the web chat is not in the distribution yet."""
     monkeypatch.setattr(ayl, "REPO_ROOT", "")
     monkeypatch.setattr(ayl.subprocess, "call",
-                        lambda command: pytest.fail("chainlit was started anyway"))
+                        lambda command, cwd=None: pytest.fail("chainlit was started anyway"))
 
     assert ayl.main(["ui"]) == 1
     assert "ui.py" in capsys.readouterr().err
@@ -381,7 +527,7 @@ def test_ui_without_chainlit_names_the_extra(monkeypatch, tmp_path, capsys):
     (tmp_path / "ui.py").write_text("")
     monkeypatch.setattr(ayl, "REPO_ROOT", str(tmp_path))
 
-    def missing(command):
+    def missing(command, cwd=None):
         raise FileNotFoundError(command[0])
     monkeypatch.setattr(ayl.subprocess, "call", missing)
 
@@ -391,7 +537,7 @@ def test_ui_without_chainlit_names_the_extra(monkeypatch, tmp_path, capsys):
 
 def test_ui_help_does_not_start_a_server(monkeypatch, capsys):
     monkeypatch.setattr(ayl.subprocess, "call",
-                        lambda command: pytest.fail("chainlit was started for --help"))
+                        lambda command, cwd=None: pytest.fail("chainlit was started for --help"))
     with pytest.raises(SystemExit) as exit_info:
         ayl.main(["ui", "--help"])
     assert exit_info.value.code == 0

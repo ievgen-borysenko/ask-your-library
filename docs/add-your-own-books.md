@@ -11,10 +11,12 @@ LIBRARY_DB_PATH=~/ayl-index uv run ayl books                  # what the index h
 LIBRARY_DB_PATH=~/ayl-index uv run ayl ask "..."              # ask it
 ```
 
-`ayl add`, `ayl doctor`, `ayl backup` and `ayl restore` are one program under four verbs: the
-flags below are its flags, and `ayl add --help` prints all of them. `ayl-add`, the name this had
-before, is still installed and still runs the same code; it prints one deprecation line and is
-removed at `0.6.0`.
+`ayl add`, `ayl doctor`, `ayl backup` and `ayl restore` are one program under four verbs. Each
+verb's own `--help` lists what it takes; `ayl add --help` lists everything the ingest command
+accepts, and anything written after a bare `--` reaches it verbatim (`ayl backup <dir> --
+--backend openrouter`), except a flag that would turn one verb into another. `ayl-add`, the name
+this had before, is still installed and still runs the same code; it prints one deprecation line
+and is removed at `0.6.0`.
 
 Every `.txt` / `.md` file under the folder (recursively) is **one book**. Skipped, and reported
 on stderr: hidden files and directories; **symlinks** — in or out of the folder, including files
