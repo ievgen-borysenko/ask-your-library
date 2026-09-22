@@ -9,45 +9,45 @@
   shortest run is a hit with nothing after it for a window's length — the end of a cluster or a
   stray mention — and the earliest such won: `black spot` centred the window on one stray mention at
   41246 of a 69,686-character section while the five mentions that tell the scene sat at
-  24450–28953, and `execution` opened at 25744 of 73,853 with the answering sentence at 63588.
-  A run's occurrence counts are now a rank key between distinct coverage and the existing
-  tie-breaks: between runs covering the same number of query words, the per-term counts are sorted
-  ascending and compared position by position, so the rarest of the covered words decides first —
-  a run with 204 "the"s and one "spot" profiles as (1, …) and loses to a run with six of each,
-  (6, 6, …). Then the shorter run, then the earlier one. For a one-word query this is simply the
-  occurrence count. A plain total of occurrences would instead hand a phrase-shaped query to
-  whichever stretch of prose repeats "the" most. Replayed over the 22 aimed reads of long sections
-  in the 19.09 runs, 9 have an anchor to judge them by: 3 fixed (`execution`, `black spot` and
-  one-word `watch`, whose window now holds the parcel that returns the stolen watch, 46598), 0
-  lost, 6 unchanged — `cannibals`, a multi-word read of the `execution` section and `watch stolen
-  returned` missed their answer before and after, while `pardon` and two verbatim phrases were
-  inside their window before and stay inside it. The rest moved or stayed with nothing to judge
-  them by. (First written as "2 fixed, 1 lost": the `watch` anchor had been taken at 25582, where a
-  character looks at his own watch; corrected on the next replay.) What it does not fix, measured
-  in the same replay: `cannibals` occurs three times in its section, none after 8198, and the
-  passage that answers (18023) never spells the word, so no lexical aim reaches it. Distinct-first is unchanged, the scan stays linear in the hits, the window
-  construction, the head-cut fallback and the markers are untouched, and a query the section does
-  not carry still returns the head of the chapter character for character.
-- **The chunker stamp is checked against the rows before it is written, and `--doctor` measures
-  them** (#75, [upgrading](upgrading.md)). `--stage stamp-meta --chunker current` claims the
-  version this code chunks at; it now samples the table first and refuses, with the numbers, when
-  the rows cannot have come from it. Two bounds, both from the sentence packer's own arithmetic and
-  both ones a run of that packer cannot cross, so that only an impossible table is refused: a row
-  longer than the packer's ceiling plus one overlap (2,640 characters), and a book holding fewer
-  rows than its prepared text needs chunks. The floor divides the characters the packer actually
-  PLACES into chunks (`placed_chars` — the splitter drops the whitespace between two sentences, and
-  the cap drops it at every break, so the file is longer than what is chunked) by the 2,400 no
-  chunk carries more than, per chapter, summed per book; taken over the raw file length instead it
-  demanded two rows of a 2,401-character book the packer cuts into one, which would have left that
-  corpus unstampable. The bound was fuzzed against the real packer over 30,000 random chapter
-  shapes, and a shrunk, seeded version of that fuzz is in the suite. The count is compared per book
-  and only over books the table and the prepared texts share — the coverage (`N of M books
-  compared`, naming the rest) is printed either way — so a second index built from other books is
-  not judged by this corpus's numbers. Naming an **older** version (`--chunker sentence-pack-1`)
-  stays an unchecked assertion about the past, which is the way through for an operator who means
-  it; a refusal writes nothing, and every table is sampled before any of them is stamped, so a
-  refused transcripts table leaves the cards table unstamped too. `--book` is now refused with
-  `--stage stamp-meta`: a fingerprint is written per table, not per book.
+  24450–28953, and `execution` opened at 25744 of 73,853 with the answering sentence at 63588. A
+  run's occurrence counts are now a rank key between distinct coverage and the existing tie-breaks:
+  between runs covering the same number of query words, the per-term counts are sorted ascending and
+  compared position by position, so the rarest of the covered words decides first — a run with 204
+  "the"s and one "spot" profiles as (1, …) and loses to a run with six of each, (6, 6, …). Then the
+  shorter run, then the earlier one. For a one-word query this is simply the occurrence count. A
+  plain total of occurrences would instead hand a phrase-shaped query to whichever stretch of prose
+  repeats "the" most. Replayed over the 22 aimed reads of long sections in the 19.09 runs, 9 have an
+  anchor to judge them by: 3 fixed (`execution`, `black spot` and one-word `watch`, whose window now
+  holds the parcel that returns the stolen watch, 46598), 0 lost, 6 unchanged — `cannibals`, a
+  multi-word read of the `execution` section and `watch stolen returned` missed their answer before
+  and after, while `pardon` and two verbatim phrases were inside their window before and stay inside
+  it. The rest moved or stayed with nothing to judge them by. (First written as "2 fixed, 1 lost":
+  the `watch` anchor had been taken at 25582, where a character looks at his own watch; corrected on
+  the next replay.) What it does not fix, measured in the same replay: `cannibals` occurs three
+  times in its section, none after 8198, and the passage that answers (18023) never spells the word,
+  so no lexical aim reaches it. Distinct-first is unchanged, the scan stays linear in the hits, the
+  window construction, the head-cut fallback and the markers are untouched, and a query the section
+  does not carry still returns the head of the chapter character for character. - **The chunker
+  stamp is checked against the rows before it is written, and `--doctor` measures them** (#75,
+  [upgrading](upgrading.md)). `--stage stamp-meta --chunker current` claims the version this code
+  chunks at; it now samples the table first and refuses, with the numbers, when the rows cannot have
+  come from it. Two bounds, both from the sentence packer's own arithmetic and both ones a run of
+  that packer cannot cross, so that only an impossible table is refused: a row longer than the
+  packer's ceiling plus one overlap (2,640 characters), and a book holding fewer rows than its
+  prepared text needs chunks. The floor divides the characters the packer actually PLACES into
+  chunks (`placed_chars` — the splitter drops the whitespace between two sentences, and the cap
+  drops it at every break, so the file is longer than what is chunked) by the 2,400 no chunk carries
+  more than, per chapter, summed per book; taken over the raw file length instead it demanded two
+  rows of a 2,401-character book the packer cuts into one, which would have left that corpus
+  unstampable. The bound was fuzzed against the real packer over 30,000 random chapter shapes, and a
+  shrunk, seeded version of that fuzz is in the suite. The count is compared per book and only over
+  books the table and the prepared texts share — the coverage (`N of M books compared`, naming the
+  rest) is printed either way — so a second index built from other books is not judged by this
+  corpus's numbers. Naming an **older** version (`--chunker sentence-pack-1`) stays an unchecked
+  assertion about the past, which is the way through for an operator who means it; a refusal writes
+  nothing, and every table is sampled before any of them is stamped, so a refused transcripts table
+  leaves the cards table unstamped too. `--book` is now refused with `--stage stamp-meta`: a
+  fingerprint is written per table, not per book.
 
   `ayl-add --doctor` prints a `chunks:` line per table — rows, median, p95, longest, against the
   target and ceiling of the chunker stamped on it — and reports a table whose rows are above that
