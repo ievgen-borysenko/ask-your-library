@@ -140,7 +140,10 @@ def test_a_host_is_lowercased_because_the_check_that_reads_it_compares_exactly(r
     folding it loses nothing."""
     assert launcher.checked_host("Books.LOCAL") == "books.local"
     launcher.prepare("Books.LOCAL", 8000)
-    assert "http://books.local:8000" in written_config(root)["project"]["allow_origins"]
+    # The whole list, not a membership test: the static scanner reads
+    # `url in ...` as substring sanitisation, and equality says more anyway.
+    assert written_config(root)["project"]["allow_origins"] == [
+        "http://localhost:8000", "http://127.0.0.1:8000", "http://books.local:8000"]
 
 
 def test_a_hand_edited_config_is_overwritten_on_the_next_start(root):
@@ -211,9 +214,11 @@ def test_a_host_that_is_not_a_host_is_refused_before_it_reaches_the_file(root):
     # A name and an address still land, and a blank host is "none named" (the
     # wildcard branch), not a refusal: `ayl ui` always passes a host.
     launcher.prepare("books.example.com", 8000)
-    assert "http://books.example.com:8000" in written_config(root)["project"]["allow_origins"]
+    assert written_config(root)["project"]["allow_origins"] == [
+        "http://localhost:8000", "http://127.0.0.1:8000", "http://books.example.com:8000"]
     launcher.prepare("192.168.1.9", 8000)
-    assert "http://192.168.1.9:8000" in written_config(root)["project"]["allow_origins"]
+    assert written_config(root)["project"]["allow_origins"] == [
+        "http://localhost:8000", "http://127.0.0.1:8000", "http://192.168.1.9:8000"]
     launcher.prepare("", 8000)
     assert written_config(root)["project"]["allow_origins"] == ["http://localhost:8000",
                                                                 "http://127.0.0.1:8000"]
