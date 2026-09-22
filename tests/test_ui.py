@@ -667,8 +667,66 @@ def test_a_foreign_host_header_is_refused(ui):
 
     registered = [m for m in app.user_middleware if m.cls is TrustedHostMiddleware]
     assert len(registered) == 1
+    # started with no --host, so the pair is the whole list; the bound host is
+    # test_the_host_the_server_was_bound_to_answers_and_nothing_else_does
     assert registered[0].kwargs["allowed_hosts"] == ["localhost", "127.0.0.1"] == ui.ALLOWED_HOSTS
     assert app.middleware_stack is None, "the stack is already built: add_middleware came too late"
+
+
+def test_the_host_the_server_was_bound_to_answers_and_nothing_else_does(tmp_path):
+    """`ayl ui --host books.local` binds the interface the reader asked for, and
+    the CLI's help says that serves the chat to the network. With the Host check
+    pinned to the loopback pair it served HTTP 400 to every browser that used
+    that name — the one thing a reader would have typed.
+
+    `chainlit run --host X` exports X as CHAINLIT_HOST before it loads the
+    application module, so the name is the one uvicorn is listening on, and it
+    has already been through `launcher.checked_host` (applied again at the
+    import below, because this module can be started by hand). A host that is
+    NOT the bound one is still 400, which is what closes DNS rebinding.
+
+    In a child: the answer needs a real request, a request builds Starlette's
+    middleware stack, and a built stack makes every later `add_middleware` in
+    this process — every later import of the module — an error."""
+    code = ("from starlette.testclient import TestClient\n"
+            "import ask_your_library.ui.app as ui\n"
+            "from chainlit.server import app\n"
+            "client = TestClient(app)\n"
+            "print(ui.ALLOWED_HOSTS)\n"
+            "for host in ('books.local', 'evil.example', '127.0.0.1'):\n"
+            "    print(client.get('/', headers={'host': host}).status_code)\n")
+    allowed, bound, foreign, loopback = _out(
+        code, CHAINLIT_HOST="books.local", CHAINLIT_AUTH_SECRET="test-secret",
+        AYL_ALLOW_DEFAULT_LOGIN="1", AYL_ALLOW_START_WITHOUT_KEY="1",
+        LLM_BACKEND="ollama", EMBED_BACKEND="ollama",
+        AYL_CHAINLIT_DIR=str(tmp_path / "chainlit")).splitlines()
+
+    assert allowed == "['localhost', '127.0.0.1', 'books.local']"
+    assert bound == loopback == "200"
+    assert foreign == "400"
+
+
+def test_a_wildcard_bind_adds_no_host_and_a_bad_one_refuses_to_start(monkeypatch, tmp_path):
+    """`0.0.0.0` names no host a browser sends, so it adds nothing and the
+    loopback pair stands — serving a LAN under a name means passing that name.
+    And the value is checked here too: this module can be started by hand, and
+    `CHAINLIT_HOST` can come from a `.env` Chainlit loads at its own import."""
+    monkeypatch.setenv("CHAINLIT_AUTH_SECRET", "test-secret")
+    monkeypatch.setenv("AYL_ALLOW_DEFAULT_LOGIN", "1")
+    monkeypatch.setenv("AYL_ALLOW_START_WITHOUT_KEY", "1")
+    monkeypatch.setenv("AYL_CHAINLIT_DIR", str(tmp_path / "chainlit"))
+
+    for wildcard in ("0.0.0.0", "::", ""):
+        monkeypatch.setenv("CHAINLIT_HOST", wildcard)
+        sys.modules.pop(UI_MODULE, None)
+        assert importlib.import_module(UI_MODULE).ALLOWED_HOSTS == ["localhost", "127.0.0.1"]
+        sys.modules.pop(UI_MODULE, None)
+
+    monkeypatch.setenv("CHAINLIT_HOST", "not a host")
+    sys.modules.pop(UI_MODULE, None)
+    with pytest.raises(SystemExit, match="host"):
+        importlib.import_module(UI_MODULE)
+    sys.modules.pop(UI_MODULE, None)
 
 
 def test_the_chat_db_is_readable_only_by_its_owner(ui, tmp_path):

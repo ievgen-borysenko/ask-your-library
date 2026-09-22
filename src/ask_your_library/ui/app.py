@@ -68,7 +68,6 @@ from ask_your_library.i18n import (LANG, get_lang, set_lang, source_word,  # noq
                                    status_word, t)
 from ask_your_library.preflight import check_api_key, check_environment  # noqa: E402
 from ask_your_library.bookkey import split_read_query, unescape_marker  # noqa: E402
-from ask_your_library.paths import REPO_ROOT                        # noqa: E402
 from ask_your_library.ui import launcher                           # noqa: E402
 from ask_your_library.provenance import match_span                  # noqa: E402
 from ask_your_library.runner import failed_result, history_entry, run_question  # noqa: E402
@@ -104,9 +103,35 @@ PROFILE_UA = "Українська"
 # to /login and the thread endpoints. It is the Host check, not allow_origins:
 # CORS governs what a page may READ cross-origin, and a login POST does not
 # need to be read to have happened.
-ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
+#
+# The address this server was actually bound to is the third, when it is one a
+# browser can be pointed at. `chainlit run --host X` exports X as CHAINLIT_HOST
+# before it loads this module, so the name here is the name uvicorn is
+# listening on and `ayl ui` has already refused anything that is not an
+# address or a DNS name (launcher.checked_host, which is applied again below
+# because this module can be started by hand). Without it `ayl ui --host
+# books.local` bound the interface the reader asked for and then answered 400
+# to every browser that used that name — the CLI's own help says a non-loopback
+# host serves the chat to the network, and it did not.
+#
+# A wildcard bind is not a name: `0.0.0.0` names no host a browser sends, so it
+# adds nothing here and the loopback pair stands. Serving a LAN under a name
+# means passing that name.
+def _bound_host() -> list[str]:
+    """`CHAINLIT_HOST` as a one-item list, when it is a host a browser can send
+    and not already in the pair above; `[]` otherwise."""
+    name = os.environ.get("CHAINLIT_HOST", "").strip()
+    if name in launcher.WILDCARD_HOSTS or name in ("localhost", "127.0.0.1"):
+        return []
+    return [launcher.checked_host(name)]
 
-SCRATCH_DIR = Path(os.environ.get("ASK_SCRATCH_DIR", ".scratch"))
+
+ALLOWED_HOSTS = ["localhost", "127.0.0.1"] + _bound_host()
+
+# Absolute, and decided by the launcher for a server it starts (`scratch_dir`):
+# `config`'s relative default put the retrieved passages of the first answered
+# question in a `.scratch/` beside whatever directory the command was typed in.
+SCRATCH_DIR = Path(os.environ.get("ASK_SCRATCH_DIR") or launcher.scratch_dir())
 # AYL_CHAINLIT_DIR exists so tests can import this module without touching the
 # checkout's .chainlit/ (the import creates the chat db and the auth secret
 # there). Its default is the checkout's, not this file's directory: the module
@@ -121,9 +146,12 @@ SCRATCH_DIR = Path(os.environ.get("ASK_SCRATCH_DIR", ".scratch"))
 # would be read below as THE signing key of every login token this server issues,
 # and the chat database would be a file someone else owns. AYL_HOME is the
 # reader's own folder, and it is where the launcher already put the config.
-CHAINLIT_DIR = Path(os.environ.get("AYL_CHAINLIT_DIR")
-                    or (Path(REPO_ROOT) / ".chainlit" if REPO_ROOT
-                        else launcher.app_root() / ".chainlit"))
+#
+# The rule itself lives in `launcher.chainlit_dir`, which `ingest/backup.py`
+# reads as well: `ayl backup` copies the file named here and `ayl restore`
+# writes it, and two spellings of one rule disagreed the moment one of them
+# learnt to expand a `~`.
+CHAINLIT_DIR = launcher.chainlit_dir()
 CHAT_DB_PATH = CHAINLIT_DIR / "chat.db"
 
 

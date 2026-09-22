@@ -166,9 +166,10 @@ def _wait_for_http(url: str, timeout: float, process: subprocess.Popen) -> None:
 class Server:
     """A running server and what the test has to know about how it was started."""
 
-    def __init__(self, url: str, log_path: Path):
+    def __init__(self, url: str, log_path: Path, started_in: Path):
         self.url = url
         self.log_path = log_path
+        self.started_in = started_in
         self.username = USERNAME
         self.password = PASSWORD
         self.clarify_timeout_s = CLARIFY_TIMEOUT_S
@@ -268,7 +269,7 @@ def chainlit_server(tmp_path_factory) -> Server:
         stray = sorted(path.name for path in elsewhere.iterdir())
         assert not stray, f"the server was configured from its working directory: {stray}"
         assert (state / ".chainlit" / "config.toml").is_file()
-        yield Server(url, log_path)
+        yield Server(url, log_path, elsewhere)
     finally:
         if process.poll() is None:
             os.killpg(os.getpgid(process.pid), signal.SIGTERM)
@@ -416,6 +417,13 @@ def test_the_release_walkthrough_of_the_web_ui(browser, chainlit_server, tmp_pat
     page = open_page(browser, width, height)
     try:
         walk_through_the_release_check(page, chainlit_server)
+        # Still empty AFTER the questions, not only after the start. A start
+        # writes `.chainlit/`, a `.files/` and a `chainlit.md` where the app
+        # root is; an ANSWERED question writes the retrieved passages, and
+        # `ASK_SCRATCH_DIR` used to default to a relative `.scratch` — which is
+        # the working directory of whoever typed the command.
+        left = sorted(path.name for path in chainlit_server.started_in.iterdir())
+        assert not left, f"the server wrote {left} into the directory it was started in"
     except Exception:
         # A browser test that fails without a picture of the screen is a bug
         # report with the evidence missing. tmp_path is under --basetemp, which

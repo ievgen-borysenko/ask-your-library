@@ -36,6 +36,7 @@ import sys
 from pathlib import Path
 
 from .. import home
+from ..paths import REPO_ROOT
 
 PACKAGE = Path(__file__).resolve().parent
 APP = PACKAGE / "app.py"
@@ -122,8 +123,50 @@ def app_root() -> Path:
     rule applied where it has nothing to protect."""
     named = os.environ.get("AYL_CHAINLIT_DIR")
     if named:
-        return Path(named).expanduser().resolve().parent
+        return chainlit_dir().parent
     return home.ayl_home() / "ui"
+
+
+def chainlit_dir() -> Path:
+    """The directory the web chat keeps its chat database and its auth secret
+    in, as an ABSOLUTE path: `AYL_CHAINLIT_DIR` when set, else the checkout's
+    `.chainlit/`, else the app root's.
+
+    One function, imported by `app.py` (which reads it at its import) and by
+    `ingest/backup.py` (which reads it per call, for `ayl backup` and for the
+    file `ayl restore` writes). Written twice, the two spellings disagreed the
+    moment one of them grew `expanduser`.
+
+    `expanduser` and `resolve` are the point: `.env.example` recommends
+    `AYL_CHAINLIT_DIR=~/AskYourLibrary/ui/.chainlit`, and a `~` no shell
+    expanded is an ordinary directory name — `Path("~/x")` is `<cwd>/~/x`. The
+    server would have minted its auth secret in one place and `ayl backup`
+    looked for the chat database in another, both of them under a literal `~`
+    folder in whatever directory each was started from. Resolving also settles
+    `..` and symlinks before the path is compared or written to.
+
+    The working directory is never a branch here; see `app.py`."""
+    named = os.environ.get("AYL_CHAINLIT_DIR")
+    if named:
+        return Path(named).expanduser().resolve()
+    if REPO_ROOT:
+        return Path(REPO_ROOT) / ".chainlit"
+    return app_root() / ".chainlit"
+
+
+def scratch_dir() -> Path:
+    """`ASK_SCRATCH_DIR` when set, else `$AYL_HOME/scratch` — absolute either
+    way, and never `.scratch` in whatever directory the reader typed the
+    command in.
+
+    `config`'s own default is the relative `.scratch`, which was right while
+    the web chat could only be started from the checkout. From a wheel the
+    first answered question would drop a `.scratch/` with retrieved passages
+    in it wherever the terminal happened to be. Only the launcher decides this,
+    and only for the server it starts: the CLI's default is the CLI's, and both
+    move to this same folder with the index in the slice that moves them."""
+    named = os.environ.get("ASK_SCRATCH_DIR", "").strip()
+    return Path(named).expanduser().resolve() if named else home.ayl_home() / "scratch"
 
 
 def checked_host(host: str) -> str:
@@ -255,10 +298,18 @@ def start(root: Path, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT,
     which `.chainlit/` Chainlit reads, and the child is the only process that
     should be affected by it.
 
+    `ASK_SCRATCH_DIR` is resolved for the child too, and for the same reason:
+    everything this server writes belongs somewhere it was told to write, not
+    in the directory the command was typed in (`scratch_dir`). The host reaches
+    the app as Chainlit's own `CHAINLIT_HOST` — `chainlit run --host` exports
+    it before it loads the application module — which is what lets `app.py`
+    trust that name in its `Host` check.
+
     Apart from `prepare` so that a caller can tell the two failures apart: the
     only FileNotFoundError this raises is the `chainlit` executable, which
     `ayl ui` answers by naming the extra."""
-    environment = {**os.environ, "CHAINLIT_APP_ROOT": str(root)}
+    environment = {**os.environ, "CHAINLIT_APP_ROOT": str(root),
+                   "ASK_SCRATCH_DIR": str(scratch_dir())}
     return subprocess.call([chainlit_command(), "run", str(APP), "--host", host,
                             "--port", str(port), *(extra or [])], env=environment)
 

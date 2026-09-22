@@ -74,27 +74,21 @@ class BackupError(Exception):
 def default_chat_db() -> Path:
     """Where the web UI keeps its chat database.
 
-    The same rule `ui/app.py` applies (`AYL_CHAINLIT_DIR`, else `.chainlit/` in
-    the checkout, else the app root the launcher prepares), re-derived here
-    rather than imported: importing that module pulls in Chainlit, which is an
-    optional extra, and `ayl-add` must run without it. `ui.launcher` is not
-    Chainlit — it writes files and starts a subprocess — so the app-root branch
-    IS shared, and the two cannot disagree about where the database is.
-    Resolved at CALL time, not at import, because the UI resolves it at import
-    and the tests set that variable per test.
+    `ui.launcher.chainlit_dir` is THE rule (`AYL_CHAINLIT_DIR` expanded, else
+    the checkout's `.chainlit/`, else the app root's) and this asks it rather
+    than spelling it out a second time — the two spellings disagreed the moment
+    one of them learnt to expand a `~`, and this function names the file
+    `ayl backup` copies AND the file `ayl restore` writes. Importing the
+    launcher is safe where importing the web chat is not: it writes files and
+    starts a subprocess, and `ayl-add` must run without the Chainlit extra.
 
-    Never the working directory: a `.chainlit/` there is a directory anyone can
-    create first, and this function also names the file a restore WRITES.
+    Asked at CALL time, not at import, because the UI resolves it at ITS import
+    and the tests set that variable per test.
 
     An absent file is not an error anywhere below — plenty of installations
     never start the web UI."""
-    from ..paths import REPO_ROOT
-    from ..ui.launcher import app_root
-    named = os.environ.get("AYL_CHAINLIT_DIR")
-    if named:
-        return Path(named) / "chat.db"
-    base = Path(REPO_ROOT) / ".chainlit" if REPO_ROOT else app_root() / ".chainlit"
-    return base / "chat.db"
+    from ..ui.launcher import chainlit_dir
+    return chainlit_dir() / "chat.db"
 
 
 def _sha256(path: Path) -> str:

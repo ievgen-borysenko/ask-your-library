@@ -110,6 +110,31 @@
   `ayl backup` and `ayl restore` derive the same three-branch rule, so they cannot end up copying
   a different file than the one the UI writes.
 
+  **A `~` in `AYL_CHAINLIT_DIR` is expanded, once, in one place.** No shell expands a value read
+  out of a `.env`, and `Path("~/x")` is a directory literally named `~` under the working
+  directory — so the recommended `AYL_CHAINLIT_DIR=~/AskYourLibrary/ui/.chainlit` would have had
+  the server mint its auth secret in one `~` folder and `ayl backup` look for the chat database in
+  another. `ui.launcher.chainlit_dir()` is now the single rule, expanded and resolved, and the web
+  chat, the launcher's app root and `ayl backup` / `ayl restore` all ask it.
+
+  **`ayl ui --host <name>` is now answered, not refused.** The launcher accepts an address or a
+  DNS name and puts it in `allow_origins`, but the web chat's `Host` check still allowed only the
+  loopback pair, so `ayl ui --host books.local` bound the interface asked for and then served HTTP
+  400 to every browser that used that name — while `--help` said a non-loopback host serves the
+  chat to the network. The bound host joins the trusted-host list, taken from Chainlit's own
+  `CHAINLIT_HOST` (which `chainlit run --host` exports before it loads the application) and put
+  through the same check again, since the module can be started by hand. A wildcard bind adds
+  nothing: `0.0.0.0` is no name a browser sends, and any OTHER host is still 400, which is what
+  closes DNS rebinding.
+
+  **Nothing the server writes lands in the directory it was started in.** `ASK_SCRATCH_DIR`
+  defaulted to a relative `.scratch`, which was right while the web chat could only be started
+  from the checkout; from a wheel the first answered question would have dropped retrieved
+  passages wherever the terminal happened to be. The launcher now hands the server an absolute
+  `$AYL_HOME/scratch` unless the reader named one — the folder the index and the CLI's own scratch
+  move to as well — and the browser walkthrough asserts its working directory is still empty after
+  the questions, not only after the start.
+
   **The host and the port are validated before they are written into that config.** Both can
   arrive from a `.env` — Chainlit loads one at its own import — and the config is TOML being
   generated: `CHAINLIT_HOST=evil"]` would have closed the `allow_origins` array and let what

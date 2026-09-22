@@ -16,6 +16,7 @@ on every machine that installed one.
 No Chainlit import: the launcher writes files and starts a subprocess, and
 this file must run on a clone without the `ui` extra.
 """
+import importlib
 import os
 import subprocess
 import sys
@@ -25,6 +26,7 @@ from pathlib import Path
 
 import pytest
 
+from ask_your_library.ingest import backup
 from ask_your_library.ui import launcher
 
 REPO = Path(__file__).resolve().parents[1]
@@ -297,6 +299,63 @@ def test_the_chat_db_and_the_auth_secret_never_default_to_the_working_directory(
     assert app_root == (home / "ui").resolve()
     assert chat_db == (home / "ui" / ".chainlit" / "chat.db").resolve()
     assert not (cwd / ".chainlit").exists()
+
+
+def test_a_tilde_in_the_variable_is_expanded_everywhere_it_is_read(tmp_path, monkeypatch):
+    """`.env.example` recommends `AYL_CHAINLIT_DIR=~/AskYourLibrary/ui/.chainlit`,
+    and no shell expands a value read out of a file. `Path("~/x")` is a
+    directory literally named `~` under the working directory, so the server
+    would have minted its auth secret in one `~` folder and `ayl backup` looked
+    for the chat database in another. Three readers, one answer: the launcher's
+    app root, the web chat's state directory and the backup command's default.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("AYL_CHAINLIT_DIR", "~/AskYourLibrary/ui/.chainlit")
+    wanted = tmp_path / "AskYourLibrary" / "ui" / ".chainlit"
+
+    assert launcher.chainlit_dir() == wanted
+    assert launcher.app_root() == wanted.parent
+    assert backup.default_chat_db() == wanted / "chat.db"
+    assert "~" not in str(launcher.chainlit_dir())
+
+    # and the app reads the same directory at its own import
+    chainlit = pytest.importorskip("chainlit") and None          # noqa: F841
+    monkeypatch.setenv("CHAINLIT_AUTH_SECRET", "test-secret")
+    monkeypatch.setenv("AYL_ALLOW_DEFAULT_LOGIN", "1")
+    monkeypatch.setenv("AYL_ALLOW_START_WITHOUT_KEY", "1")
+    sys.modules.pop("ask_your_library.ui.app", None)
+    try:
+        app = importlib.import_module("ask_your_library.ui.app")
+        assert app.CHAINLIT_DIR == wanted
+        # the import really wrote there, under the expanded path
+        assert (wanted / "chat.db").exists()
+    finally:
+        sys.modules.pop("ask_your_library.ui.app", None)
+
+
+def test_the_scratch_directory_is_absolute_and_not_beside_the_caller(tmp_path, monkeypatch):
+    """`config`'s default is the relative `.scratch`, which was right while the
+    web chat could only be started from the checkout. From a wheel the first
+    answered question would have dropped retrieved passages in a `.scratch/`
+    wherever the terminal happened to be. `$AYL_HOME/scratch` is where the
+    index and the CLI's own scratch go when they move."""
+    monkeypatch.delenv("ASK_SCRATCH_DIR", raising=False)
+    monkeypatch.setattr("ask_your_library.config.AYL_HOME", tmp_path / "AskYourLibrary")
+    assert launcher.scratch_dir() == (tmp_path / "AskYourLibrary" / "scratch").resolve()
+
+    # and it is what the child is told, unless the reader said otherwise
+    monkeypatch.setenv("AYL_CHAINLIT_DIR", str(tmp_path / "root" / ".chainlit"))
+    seen = {}
+    monkeypatch.setattr(launcher.subprocess, "call",
+                        lambda command, env=None: seen.update(env=env) or 0)
+    launcher.run("127.0.0.1", 8000)
+    assert seen["env"]["ASK_SCRATCH_DIR"] == str((tmp_path / "AskYourLibrary" / "scratch")
+                                                 .resolve())
+
+    monkeypatch.setenv("ASK_SCRATCH_DIR", "~/elsewhere")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    launcher.run("127.0.0.1", 8000)
+    assert seen["env"]["ASK_SCRATCH_DIR"] == str(tmp_path / "elsewhere")
 
 
 def test_chainlits_own_host_and_port_are_read_and_a_nonsense_port_refused(monkeypatch):

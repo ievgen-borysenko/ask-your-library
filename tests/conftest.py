@@ -182,6 +182,12 @@ SCRUBBED = frozenset(DEFAULTS) | frozenset(TRACING_OFF) | frozenset(BLANKED) | {
     "LITERAL_API_KEY",
     "CHAINLIT_AUTH_SECRET", "CHAINLIT_USERNAME", "CHAINLIT_PASSWORD",
     "CHAINLIT_COOKIE_SAMESITE",
+    # Chainlit's own two, which this project now reads as well (#30): they are
+    # the defaults of `ayl ui --host` / `--port`, the port goes into the
+    # generated `allow_origins`, and the host is added to the web chat's
+    # trusted-host list. A developer's exported CHAINLIT_HOST would otherwise
+    # decide what a child reports about any of the three.
+    "CHAINLIT_HOST", "CHAINLIT_PORT",
 } | {name for base in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY")
      for name in (base, base.lower())}
 
