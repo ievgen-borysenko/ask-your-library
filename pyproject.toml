@@ -39,8 +39,13 @@ Issues = "https://github.com/ievgen-borysenko/ask-your-library/issues"
 ui = ["chainlit>=2.12", "sqlalchemy>=2.0", "aiosqlite>=0.20", "greenlet>=3.0"]
 
 [project.scripts]
-ask-library = "ask_your_library.cli:main"
-ayl-add = "ask_your_library.ingest.add_folder:main"
+ayl = "ask_your_library.ayl:main"
+# The two names `ayl` replaced (#30). They run the same code through a wrapper
+# that prints one deprecation line to stderr, so every command line already
+# written down — in these docs, in scripts/install-mac.sh, in someone's shell
+# history — keeps working; they are removed at 0.6.0.
+ask-library = "ask_your_library.cli:ask_library_main"
+ayl-add = "ask_your_library.ingest.add_folder:ayl_add_main"
 
 [dependency-groups]
 # playwright drives the real Chainlit server in a real browser (tests/ui). The

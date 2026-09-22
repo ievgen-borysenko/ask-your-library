@@ -1,14 +1,22 @@
 # Add your own books
 
 ```bash
-LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books            # index a folder
-LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books --dry-run  # what it would change, no writes
-LIBRARY_DB_PATH=~/ayl-index uv run ayl-add --doctor           # ledger vs index, no writes
-LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books --prune    # also delete books whose file is gone
-LIBRARY_DB_PATH=~/ayl-index uv run ayl-add --backup ~/backups # copy the index + chat.db, verified
-LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books --rebuild --backup ~/backups  # copy, then rebuild
-LIBRARY_DB_PATH=~/ayl-index uv run ask-library "..."          # ask it
+LIBRARY_DB_PATH=~/ayl-index uv run ayl add ~/books            # index a folder
+LIBRARY_DB_PATH=~/ayl-index uv run ayl add ~/books --dry-run  # what it would change, no writes
+LIBRARY_DB_PATH=~/ayl-index uv run ayl doctor                 # ledger vs index, no writes
+LIBRARY_DB_PATH=~/ayl-index uv run ayl add ~/books --prune    # also delete books whose file is gone
+LIBRARY_DB_PATH=~/ayl-index uv run ayl backup ~/backups       # copy the index + chat.db, verified
+LIBRARY_DB_PATH=~/ayl-index uv run ayl add ~/books --rebuild --backup ~/backups  # copy, then rebuild
+LIBRARY_DB_PATH=~/ayl-index uv run ayl books                  # what the index holds; no model call
+LIBRARY_DB_PATH=~/ayl-index uv run ayl ask "..."              # ask it
 ```
+
+`ayl add`, `ayl doctor`, `ayl backup` and `ayl restore` are one program under four verbs. Each
+verb's own `--help` lists what it takes; `ayl add --help` lists everything the ingest command
+accepts, and anything written after a bare `--` reaches it verbatim (`ayl backup <dir> --
+--backend openrouter`), except a flag that would turn one verb into another. `ayl-add`, the name
+this had before, is still installed and still runs the same code; it prints one deprecation line
+and is removed at `0.6.0`.
 
 Every `.txt` / `.md` file under the folder (recursively) is **one book**. Skipped, and reported
 on stderr: hidden files and directories; **symlinks** — in or out of the folder, including files
@@ -59,13 +67,13 @@ the ledger rows it wrote. An incremental merge is not worth its complexity at th
 The index is checked, not trusted:
 
 ```
-uv run ayl-add --doctor
+uv run ayl doctor
 ```
 
 reconciles the ledger against the index tables and reports the drift — a book the ledger calls
 indexed with no rows, a book in the index the ledger has no row for, a book requested and never
 finished, one key with two ids. It writes nothing and exits non-zero when it finds something, so
-it can gate a script. Re-running `ayl-add` is what repairs.
+it can gate a script. Re-running `ayl add` is what repairs.
 
 **A book whose file is gone** is reported, not deleted: a folder that failed to mount, a file
 being edited in place and a half-finished sync all look exactly like a deletion. `--dry-run` lists
@@ -73,7 +81,7 @@ such books as `VANISHED`, a normal run names them at the end, and only `--prune`
 rows and their ledger entry. Only books of the folder you named are ever considered: one index can
 hold several folders, and the books of the others are not missing merely because this folder does
 not have them. `--prune` deletes full-text rows only: a **book card** of the same key is kept and
-the run says so, because `ayl-add` never writes the cards table and a card is a model call per book
+the run says so, because `ayl add` never writes the cards table and a card is a model call per book
 that usually came from the demo corpus. The catalogue then lists that key as a book with no text
 until you delete the card yourself, and `--doctor` names it as a card without a book.
 
@@ -87,7 +95,7 @@ correction after it renames in place.
 
 What an upgrade may NOT do is silently invalidate an index that took half an hour to build. Each
 table is stamped with the chunker and the row schema that wrote it, and a disagreement **warns on
-read and refuses on write**: the index goes on answering, and the next `ayl-add` into it stops
+read and refuses on write**: the index goes on answering, and the next `ayl add` into it stops
 before embedding or deleting anything, naming both versions and the way out. A rebuild is the way
 out, and it discards what it replaces — so take a copy first.
 
@@ -97,16 +105,16 @@ longer than the window the model reads it through), so an index built before 202
 every read and refuses the next write until you run the three commands below. Expect a full
 re-embed and about 55% more rows. If your index was fed from more than one folder, `--rebuild`
 goes **once** — it drops the whole table, so a second one would throw away what the first
-produced — and every other folder follows with a plain `uv run ayl-add <folder>`, which appends.
+produced — and every other folder follows with a plain `uv run ayl add <folder>`, which appends.
 A rebuild that would drop another folder's books refuses and says so before dropping anything. Cards are cut
 by a different rule and are not affected. See [upgrading](upgrading.md) for what the warning and
 the refusal actually say.
 
 ```bash
-uv run ayl-add --backup ~/ayl-backups --db ~/ayl-index    # index + chat.db + a verified manifest
-uv run ayl-add --doctor --db ~/ayl-index                  # what this code makes of that index
-uv run ayl-add ~/books --rebuild --backup ~/ayl-backups --db ~/ayl-index   # copy, drop, re-index
-uv run ayl-add --restore ~/ayl-backups/<timestamp> --db ~/ayl-index --force
+uv run ayl backup ~/ayl-backups --db ~/ayl-index          # index + chat.db + a verified manifest
+uv run ayl doctor --db ~/ayl-index                        # what this code makes of that index
+uv run ayl add ~/books --rebuild --backup ~/ayl-backups --db ~/ayl-index   # copy, drop, re-index
+uv run ayl restore ~/ayl-backups/<timestamp> --db ~/ayl-index --force
 ```
 
 `--rebuild` is what a refusal names, because a plain re-run hits the same refusal: it drops the
@@ -170,7 +178,7 @@ as one. The demo corpus is cut more aggressively — it *discards* contents line
 chapters, with a pinned manifest behind that — but your own files lose no text, and `--dry-run`
 lists every section that would be indexed.
 
-**Local vs paid.** `ayl-add` makes no paid calls by default (`EMBED_BACKEND=openrouter` is the
+**Local vs paid.** `ayl add` makes no paid calls by default (`EMBED_BACKEND=openrouter` is the
 exception): chunking is local, embeddings are computed by your local Ollama (`bge-m3`), and the
 LanceDB is written on your machine. Asking questions is free too in the shipped default, which
 answers on that same local Ollama. Only `LLM_BACKEND=openrouter` costs money — the orchestrator
@@ -183,14 +191,14 @@ not.
 
 **What you do not get:** book cards. The demo corpus carries a distilled card per book (plot,
 characters, takeaways) as a second corpus, and generating one costs an LLM call per book, so
-`ayl-add` does not make them — `--cards` prints that and exits. An index without a
+`ayl add` does not make them — `--cards` prints that and exits. An index without a
 `cards_<backend>` table is fully supported: the agent searches full text only and says so — the
 preflight reports it as a notice (not an error) at CLI start-up and as the first message of a web
 chat, and `library.search` logs it once
 per process. Answers are still cited and quote-checked; broad "what is this book about" questions
 are simply weaker without cards.
 
-`ayl-add` writes into an existing table only when the table's fingerprint (`index_meta`) matches
+`ayl add` writes into an existing table only when the table's fingerprint (`index_meta`) matches
 the configured embedder exactly — same model, same dims. A table built by another model, and a
 table with **no** fingerprint at all (matching dims prove nothing about the model), are both
 refused before anything is embedded: one table, one model. Stamp a known-good unstamped table
@@ -202,7 +210,7 @@ book_rev`,
 stamped via `index_meta.write_index_meta` — which now also records the chunker and a schema
 version. `book_id` and `book_rev` are new and sit *beside* `note` rather than replacing it, so chunk ids
 are byte-for-byte what they always were; a table without the column still reads, and the next
-`ayl-add` over it adds one. Beside the index tables is the `books` ledger — `book_id`, `key`,
+`ayl add` over it adds one. Beside the index tables is the `books` ledger — `book_id`, `key`,
 `title`, `author`, `source_ref`, `sha256`, `chunker`, `embedding_model`, `status`, `error`,
 `requested_at`, `indexed_at`, `rows`, `fts_seconds` — which is what `--doctor` reads. `sha256` is
 a digest of the book's *text*, taken after the front matter and any title line are off it, so
@@ -214,19 +222,19 @@ from the version before it. `schema_version` is read from the table's own column
 rows carry `book_id` and `book_rev`, `1` for a table not yet migrated and for the cards table,
 which never gains them. The
 catalogue deliberately does not: what your library holds is answered from the rows that can
-actually be searched, never from the record of what was ingested. `ayl-add` is that contract with
+actually be searched, never from the record of what was ingested. `ayl add` is that contract with
 a CLI in front of it.
 
 ## More than one library
 
 `LIBRARY_DB_PATH` is a whole index, not a filter, so a second shelf is a second directory and
-nothing else. Point it somewhere new, add a folder, and every command — `ayl-add`, `--doctor`,
-`ask-library`, the web UI, the eval runner — answers from that library alone:
+nothing else. Point it somewhere new, add a folder, and every command — `ayl add`, `ayl doctor`,
+`ayl ask`, the web UI, the eval runner — answers from that library alone:
 
 ```bash
-LIBRARY_DB_PATH=~/ayl-tech uv run ayl-add ~/engineering-books
-LIBRARY_DB_PATH=~/ayl-tech uv run ask-library "where is the error budget formula?"
-LIBRARY_DB_PATH=~/ayl-index uv run ask-library "who is Fagin?"     # the other one, untouched
+LIBRARY_DB_PATH=~/ayl-tech uv run ayl add ~/engineering-books
+LIBRARY_DB_PATH=~/ayl-tech uv run ayl ask "where is the error budget formula?"
+LIBRARY_DB_PATH=~/ayl-index uv run ayl ask "who is Fagin?"     # the other one, untouched
 ```
 
 Two indexes rather than a shelf column on one, deliberately: the catalogue ("what do I have?",
@@ -236,6 +244,6 @@ one question is answered from one library.
 
 The project's own second shelf is [`corpus-tech/`](../corpus-tech/README.md) — thirteen openly
 licensed engineering books, guides and papers, fetched at build time rather than committed. Its
-README has the recipe, including the one thing `ayl-add` does not do: a **book card** needs a
+README has the recipe, including the one thing `ayl add` does not do: a **book card** needs a
 model, so the cards table of any index is written by
 `scripts/ingest_demo_corpus.py --stage cards --cards-dir <folder of cards>`.

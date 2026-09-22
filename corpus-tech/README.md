@@ -329,14 +329,14 @@ shelf's catalogue stays exhaustive for its own library.
 uv run scripts/fetch_tech_shelf.py                                  # fetch, prepare, toc, structure cards, verify
 uv run scripts/fetch_tech_shelf.py --stage cards                    # the cards
 export LIBRARY_DB_PATH=~/ayl-tech
-uv run ayl-add corpus-tech/prepared                                 # index the prepared folder
+uv run ayl add corpus-tech/prepared                                 # index the prepared folder
 uv run scripts/ingest_demo_corpus.py --stage cards --cards-dir corpus-tech/cards \
     --cards-dir "${AYL_HOME:-$HOME/AskYourLibrary}/cards/tech"      # + local cards, if any
-uv run ayl-add --doctor                                             # ledger vs index, no writes
-uv run ask-library "where is the error budget formula?"
+uv run ayl doctor                                                   # ledger vs index, no writes
+uv run ayl ask "where is the error budget formula?"
 ```
 
-`ayl-add` treats every `.md` file under the folder as one book and reads the title and author from
+`ayl add` treats every `.md` file under the folder as one book and reads the title and author from
 the YAML front matter the prepare stage writes, so nothing about the shelf is special to it — see
 [add your own books](../docs/add-your-own-books.md) for what it does with them, and
 `--dry-run` for what it would change before it embeds anything. It does not write a cards table (a

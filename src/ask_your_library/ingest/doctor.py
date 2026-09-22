@@ -91,22 +91,22 @@ class LedgerReport:
                 out.append(f"  VERSION MISMATCH    {line}")
                 continue
             out.append(f"  VERSION MISMATCH    {line} — reads with a warning, refuses to be "
-                       f"written to; back up (`ayl-add --backup <dir>`) and rebuild")
+                       f"written to; back up (`ayl backup <dir>`) and rebuild")
         for note in self.notes:
             out.append(f"  note: {note}")
         for key in self.indexed_but_absent:
             out.append(f"  INDEXED BUT ABSENT  {key} — the ledger says it is indexed and the "
-                       f"index holds no rows for it; re-run ayl-add over its folder")
+                       f"index holds no rows for it; re-run `ayl add` over its folder")
         for key in self.never_indexed:
             out.append(f"  NEVER INDEXED       {key} — requested, never confirmed; re-run "
-                       f"ayl-add over its folder")
+                       f"`ayl add` over its folder")
         for key in self.in_index_but_not_in_ledger:
             out.append(f"  NOT IN THE LEDGER   {key} — searchable, but nothing records where "
-                       f"it came from; the next ayl-add over its folder adopts it")
+                       f"it came from; the next `ayl add` over its folder adopts it")
         for key in self.cards_without_a_book:
             out.append(f"  CARD WITHOUT A BOOK {key} — only the cards table holds this key, and "
                        f"no ledger row does. Either --prune removed the book and left its card "
-                       f"(ayl-add never writes the cards table), or the card's heading differs "
+                       f"(`ayl add` never writes the cards table), or the card's heading differs "
                        f"from its book's key. The catalogue lists it as a book with no text; "
                        f"delete the card, or fix its heading to match the book")
         for name, count in sorted(self.orphan_row_counts.items()):
@@ -235,7 +235,7 @@ def check_ledger(db, table_names: list[str], ledger_table: str = TABLE) -> Ledge
 
     for name in id_column_missing:
         report.notes.append(f"{name} has no book_id column yet (an index built before the "
-                            f"ledger); the next ayl-add over this index adds one")
+                            f"ledger); the next `ayl add` over this index adds one")
     if card_keys:
         # Stated rather than assumed: the ledger's unit is the book, a card is a
         # distillate of one, and no card row carries a book_id. The two tables

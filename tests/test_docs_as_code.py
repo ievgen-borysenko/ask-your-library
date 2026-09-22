@@ -800,7 +800,14 @@ def test_a_setting_read_only_in_a_comment_does_not_count_as_read():
 # parser's, so the docs are compared against the parser itself rather than
 # against a list kept beside it.
 AYL_ADD = "ayl-add"
-# Docs that tell a reader what to type at `ayl-add`, plus the front page.
+# The `ayl` subcommands that are that same parser under a verb (#30): `ayl add`
+# reaches it directly, and `doctor` / `backup` / `restore` reach it with one
+# flag prefixed, so a `--db` or a `--force` written after any of them is one of
+# its options and this check still covers it. The other subcommands (`ayl ask`,
+# `ayl books`, `ayl ui`) have parsers of their own and are named below only so
+# that a flag of theirs is not attributed to this one.
+AYL_ADD_FORMS = (AYL_ADD, "ayl add", "ayl doctor", "ayl backup", "ayl restore")
+# Docs that tell a reader what to type at `ayl add`, plus the front page.
 COMMAND_DOCS = ("docs/add-your-own-books.md", "docs/upgrading.md", "README.md")
 # The other programs these pages also show, so that a flag is attributed to the
 # right one: a flag belongs to the last command named at or before it in the
@@ -809,7 +816,8 @@ COMMAND_DOCS = ("docs/add-your-own-books.md", "docs/upgrading.md", "README.md")
 # deliberately absent: they appear as the directory `.chainlit/` and as the value
 # of `LLM_BACKEND=ollama` far more often than as a command, and neither may take
 # a flag away from the command named above it.
-COMMANDS = (AYL_ADD, "ask-library", "ingest_demo_corpus.py", "install-mac.sh")
+COMMANDS = AYL_ADD_FORMS + ("ayl ask", "ayl books", "ayl ui", "ask-library",
+                            "ingest_demo_corpus.py", "install-mac.sh")
 FLAG = re.compile(r"(?<![\w-])(--[a-z][a-z0-9-]*)")
 
 
@@ -833,8 +841,9 @@ def commands_in(text: str) -> list[tuple[int, str]]:
 def flags_attributed_to_ayl_add() -> list[tuple[str, int, str]]:
     """(doc, line number, flag) for every `--flag` whose nearest preceding
     command mention — on the same line, or on the closest line above it — is
-    `ayl-add`. A flag written before any command has been named in the file
-    belongs to nothing this test can identify and is left alone."""
+    one of AYL_ADD_FORMS, i.e. the ingest parser under any of its names. A flag
+    written before any command has been named in the file belongs to nothing
+    this test can identify and is left alone."""
     found: list[tuple[str, int, str]] = []
     for doc in COMMAND_DOCS:
         carried: str | None = None      # the last command named on an earlier line
@@ -843,7 +852,7 @@ def flags_attributed_to_ayl_add() -> list[tuple[str, int, str]]:
             for flag in FLAG.finditer(text):
                 earlier = [name for at, name in named if at < flag.start()]
                 owner = earlier[-1] if earlier else carried
-                if owner == AYL_ADD:
+                if owner in AYL_ADD_FORMS:
                     found.append((doc, number, flag.group(1)))
             if named:
                 carried = named[-1][1]

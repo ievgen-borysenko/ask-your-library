@@ -86,12 +86,19 @@ bash scripts/install-mac.sh              # mostly download time, + ~30 min for t
 Then the first question:
 
 ```bash
-uv run ask-library "What does Marcus Aurelius say about anger?"
+uv run ayl ask "What does Marcus Aurelius say about anger?"
 ```
 
 No account, no API key, nothing to pay: the answering model and the embeddings both run on your
 own machine through Ollama, and the cost line under the answer reads $0.0000. A hosted model is
 available (`bash scripts/install-mac.sh --hosted`) and is the only thing here that needs a key.
+
+`ayl` is the one command: `ayl ask` a question, `ayl add` a folder of your own books, `ayl books`
+for what the index holds, `ayl doctor` for whether this machine is ready, `ayl backup` /
+`ayl restore` for a verified copy, `ayl ui` for the web chat. `ayl --help` lists them, and
+`ayl <command> --help` prints what that command accepts. The two names it replaced,
+`ask-library` and `ayl-add`, still run the same code under a deprecation notice and are removed
+at `0.6.0`.
 
 **Local is slower, and it quotes less reliably: both halves are the trade.** The quoting half is
 under [Privacy and cost](#privacy-and-cost) below and in
@@ -211,8 +218,8 @@ themselves are in [`docs/eval-results/`](docs/eval-results/).
 | [`docs/overview.md`](docs/overview.md) | What the project is, in full, and what it does |
 | [`docs/quick-start.md`](docs/quick-start.md) | Install on any system, the demo corpus, the CLI, the web UI, the eval commands |
 | [`docs/configuration.md`](docs/configuration.md) | Every environment variable, and the fully local, no-account setup |
-| [`docs/add-your-own-books.md`](docs/add-your-own-books.md) | `ayl-add`: book keys, chapters, what is skipped, per-book re-indexing and the ledger |
-| [`docs/upgrading.md`](docs/upgrading.md) | What an upgrade may change, the mismatch policy, `ayl-add --backup` / `--restore` and when a copy is safe |
+| [`docs/add-your-own-books.md`](docs/add-your-own-books.md) | `ayl add`: book keys, chapters, what is skipped, per-book re-indexing and the ledger |
+| [`docs/upgrading.md`](docs/upgrading.md) | What an upgrade may change, the mismatch policy, `ayl backup` / `ayl restore` and when a copy is safe |
 | [`docs/evaluation.md`](docs/evaluation.md) | The two harnesses, three golden sets, the measured runs and the ablation |
 | [`docs/privacy-and-threat-model.md`](docs/privacy-and-threat-model.md) | Data flow, threat model, the four injection layers and their limits |
 

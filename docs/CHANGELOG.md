@@ -2,6 +2,76 @@
 
 ## Unreleased
 
+- **One command, `ayl`, over everything that already ran** (#30). `ayl ask`, `ayl add`,
+  `ayl doctor`, `ayl backup`, `ayl restore`, `ayl books` and `ayl ui`. It is a router, not a
+  second implementation: `ask` and `add` are the CLI's own `main` and the ingest command's,
+  each handed the arguments written after the command name unread — so
+  `ayl add ~/books --rebuild --backup ~/b` is the command line that parser always took, every flag
+  keeps working verbatim, `ayl add --help` is its own help under the name that was typed, and the
+  exit codes (the preflight's 3/4/5 among them) pass straight through. `ayl --help` /
+  `ayl --version` answer before anything touches the environment, as the CLI's always have.
+
+  `doctor`, `backup` and `restore` are one flag of that same ingest command under a verb, and each
+  declares the options that verb actually has: the backup directory is a required positional rather
+  than the argument of a `--backup` nobody typed, `--force` under `ayl restore` describes what it
+  does to a restore and not also to a rebuild, and `ayl backup --help` is six lines instead of the
+  whole ingest parser. A flag that decides WHICH command runs (`--doctor`, `--backup`, `--restore`,
+  `--rebuild`) is refused under a verb that is not its own, naming what to type instead: the ingest
+  parser answers `--doctor` first, so `ayl backup <dir> --doctor` took no copy, reported a clean
+  index and exited 0. Anything after a bare `--` still reaches the ingest command verbatim, for a
+  flag the verb does not declare — screened for those four **by prefix**, because argparse resolves
+  an unambiguous long option by its prefix and `--doct` was `--doctor` to the parser on the other
+  side of the hatch. The ingest parser is built with `allow_abbrev=False` as well: either fix alone
+  closes it, and a flag worth typing is worth typing out.
+
+  **`--db` aims the whole of `ayl doctor`, not half of it.** The environment half read
+  `LIBRARY_DB_PATH` while the index half read `--db`, so `ayl doctor --db ~/other` over a healthy
+  index printed `Database not found: data/lancedb` — the line [upgrading](upgrading.md) tells a
+  reader to act on — and exited 3. `preflight.check_environment` takes `db_path` and `backend`
+  (parameters, not a write to `config`, because a process-wide setting changed for one check is
+  changed for everything after it), and `backend` selects the table names and the embedder the
+  fingerprint is compared against, exactly as it does for an ingest — and whether a key is wanted.
+  The key has two reasons to be needed and they are now asked about apart, each about the backend
+  the call is actually checking: a local answering model with OpenRouter embeddings in the `.env`
+  and `ayl doctor --backend ollama` over a healthy local index exited 4 for a key nothing in that
+  run would have used.
+
+  Two of them are new. **`ayl books`** lists what the index holds from the index alone —
+  `list_books` then `render_catalog`, the pair a catalogue question reaches today only after a
+  planner call decides it is one — so the listing costs nothing and needs no model. Its preflight
+  is the index half only (`check_environment(index_only=True)`, the same code reporting the same
+  kinds): the command reads two metadata columns of a table already on the disk, so a model server
+  that is not running and an unset key are not its problems and are not its exit status, while a
+  missing index is still exit 3. The key is still checked when the EMBEDDER is the hosted one,
+  because the fingerprint check builds that embedder. **`ayl doctor`**
+  runs both halves of "is this machine ready": the preflight environment report the CLI prints
+  before it refuses a question, and then the ledger-against-index reconciliation that was
+  `ayl-add --doctor`. Both always run, because an unreachable Ollama must not hide index drift; the
+  status is the preflight's classification when the environment is the problem, else the doctor's
+  own. **`ayl ui`** is the `chainlit run ui.py --host 127.0.0.1` the docs told a reader to type,
+  and says so plainly when the package was installed as a wheel, which has no `ui.py` in it yet.
+  It runs IN the checkout, which is not cosmetic: Chainlit derives its app root from
+  `CHAINLIT_APP_ROOT or os.getcwd()` and writes a default `config.toml` where it finds none, so
+  started from anywhere else the committed config is not the one that loads — `unsafe_allow_html`
+  (the provenance badge and the metrics footer), `auto_tag_thread = false`, the narrowed
+  `allow_origins` and the MCP disable `SECURITY.md` names are all back at Chainlit's defaults, and
+  a `.chainlit/` appears in whatever directory the reader was in.
+
+  **`ask-library` and `ayl-add` are deprecated, not removed.** Both console scripts still run the
+  same code and print one line to stderr naming what to type instead; they go at `0.6.0`. Nothing a
+  reader has written down stops working in this release — including `scripts/install-mac.sh`, which
+  still prints the old names. The docs now lead with the `ayl` forms
+  ([quick start](quick-start.md), [add your own books](add-your-own-books.md),
+  [upgrading](upgrading.md), [configuration](configuration.md), the README), and the docs-as-code
+  check of #72 learnt the new spellings: a `--flag` written after `ayl add`, `ayl doctor`,
+  `ayl backup` or `ayl restore` is still compared against the parser that would receive it. Every
+  line the code PRINTS for a reader to type now writes the `ayl` form too — the preflight's
+  missing-index and missing-cards sentences, the ingest command's hints after a backup, a restore
+  and an ingest, the rebuild remedy the mismatch refusals quote, the doctor's per-book remedies,
+  the chat database's column warning, and the name each writer records in the ingest lock — so a
+  first run cannot be told to type a command that answers with a deprecation notice. Deliberately
+  left for follow-ups: the macOS installer and the reference pages beyond the five above still
+  write the old names.
 - **A chapter read aimed at one word lands where the word is thickest, not on the first mention with
   silence after it** (#81). `best_match_span` ranks the runs of query words that fit in the window
   by how many distinct query words they cover, and between equals took the SHORTER run. At chapter

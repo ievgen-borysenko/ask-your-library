@@ -83,7 +83,7 @@ def test_an_older_database_keeps_its_shape_and_is_named_for_it(connection):
 
     assert len(problems) == 1
     assert "steps" in problems[0] and "command" in problems[0] and "defaultOpen" in problems[0]
-    assert "Move the file aside" in problems[0] and "--backup" in problems[0]
+    assert "Move the file aside" in problems[0] and "ayl backup" in problems[0]
 
 
 def test_a_missing_table_is_a_different_problem_from_a_missing_column(connection):

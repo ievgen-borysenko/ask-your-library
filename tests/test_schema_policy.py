@@ -1,4 +1,4 @@
-"""The mismatch policy where a user meets it: `ayl-add`, the reader, `--doctor`.
+"""The mismatch policy where a user meets it: `ayl add`, the reader, `ayl doctor`.
 
 `tests/test_index_meta.py` covers the decision itself — what counts as a
 mismatch and what does not. This covers the four places the decision is acted
@@ -27,7 +27,7 @@ BODY = PARA * 4
 
 @pytest.fixture
 def index(tmp_path, fake_embedder):  # noqa: F811
-    """A folder of two books, indexed exactly as `ayl-add` would."""
+    """A folder of two books, indexed exactly as `ayl add` would."""
     folder = tmp_path / "books"
     write(folder, "The Green Ledger - A. Keeper.txt", BODY)
     write(folder, "Sea Notes - B. Mate.txt", BODY + " The tide turned at four.")
@@ -132,7 +132,7 @@ def test_the_reader_warns_once_per_process(index, tmp_path, monkeypatch, caplog,
 
 def test_preflight_reports_a_mismatch_as_a_notice_not_a_problem(monkeypatch, tmp_path):
     """Degraded, not broken: the interfaces start, and the person asking is
-    told — before the next `ayl-add` refuses them mid-ingest."""
+    told — before the next `ayl add` refuses them mid-ingest."""
     from ask_your_library import preflight as pf
     from test_preflight import healthy
 
@@ -168,13 +168,13 @@ def test_doctor_names_a_mismatch_and_exits_non_zero(index, tmp_path, capsys):
     assert code == 1
     out = capsys.readouterr().out
     assert "VERSION MISMATCH" in out and PREVIOUS_CHUNKER in out
-    assert "ayl-add --backup" in out
+    assert "ayl backup" in out
 
 
-# --- the way out: `ayl-add --rebuild` ----------------------------------------
+# --- the way out: `ayl add --rebuild` ----------------------------------------
 
 def test_the_refusal_names_a_command_that_actually_gets_out_of_it(index, tmp_path, capsys):
-    """The refusal used to recommend `ayl-add <folder>`, which hits the same
+    """The refusal used to recommend `ayl add <folder>`, which hits the same
     refusal. The only way out was deleting the index directory by hand, and
     nothing said so."""
     restamp(tmp_path / "db")
@@ -235,7 +235,7 @@ def test_rebuild_refuses_to_drop_another_folders_books_and_says_what_to_run(
     error = capsys.readouterr().err
     assert "Harbour Lights — C. Watch" in error
     # the way out, named: one rebuild, then ordinary runs for the other folders
-    assert "Rebuild ONCE" in error and "ayl-add <folder>" in error and "--force" in error
+    assert "Rebuild ONCE" in error and "ayl add <folder>" in error and "--force" in error
     # and nothing was dropped on the way to saying no
     assert "transcripts_ollama" in lancedb.connect(tmp_path / "db").table_names()
 
@@ -430,7 +430,7 @@ def test_a_cards_table_stamped_card_sections_1_is_stale_and_names_the_cards_stag
     """#58 moved a local card's row key to `<file>@local`, so the card chunker is
     `card-sections-2` and a table stamped `card-sections-1` is reported: on read
     (warning, preflight notice), by the doctor, and on write — each naming the
-    quick cards stage rather than a full `ayl-add --rebuild`."""
+    quick cards stage rather than a full `ayl add --rebuild`."""
     from ask_your_library.ingest.chunking import CARD_CHUNKER_VERSION
 
     assert CARD_CHUNKER_VERSION == "card-sections-2"
@@ -443,7 +443,7 @@ def test_a_cards_table_stamped_card_sections_1_is_stale_and_names_the_cards_stag
     for line in (warning, refusal):
         assert "scripts/ingest_demo_corpus.py --stage cards" in line
         assert "--cards-dir corpus-tech/cards" in line
-        assert "ayl-add <folder> --rebuild" not in line
+        assert "ayl add <folder> --rebuild" not in line
     report = check_ledger(db, ["cards_ollama"])
     assert report.version_mismatches
     printed = "\n".join(report.lines())

@@ -498,14 +498,14 @@ def recover_interrupted(db, table_name: str, ledger: Ledger, about_to_write: set
                           f"older version of it")
         elif present:
             report.append(f"STALE {key}: requested, but the {present} rows in the index are "
-                          f"an older version of it — run ayl-add over its folder again "
+                          f"an older version of it — run `ayl add` over its folder again "
                           f"(the index is still answering from the older text)")
         elif key in about_to_write:
             report.append(f"re-indexing {key}: an earlier run did not finish it")
         else:
             source = display_source(row.get("source_ref") or "") or "an unrecorded source"
             report.append(f"MISSING {key}: requested from {source}, never indexed — "
-                          f"run ayl-add over that folder again to finish it")
+                          f"run `ayl add` over that folder again to finish it")
     return report
 
 
@@ -580,7 +580,7 @@ def refuse_rebuild_over_other_folders(ledger: Ledger, folder: Path | None, keepi
         f"book(s) this run does not cover ({shown}{more}) — a rebuild drops the whole table, so "
         f"their rows would go with it and only {folder or 'this run'}'s books would be left in "
         f"the index. Rebuild ONCE, with any one of the folders, and add the rest with a plain "
-        f"`uv run ayl-add <folder>`: an ordinary run appends, and after the rebuild there is no "
+        f"`uv run ayl add <folder>`: an ordinary run appends, and after the rebuild there is no "
         f"mismatch left for it to refuse. `--rebuild --force` goes ahead anyway and names every "
         f"book it orphans.")
 
@@ -625,7 +625,7 @@ def drop_for_rebuild(db, table_name: str, ledger: Ledger, keeping: set[str]) -> 
                      chunker=row.get("chunker") or LEGACY_CHUNKER,
                      embedding_model=row.get("embedding_model") or "")
         orphaned.append(f"{key or row['book_id']}: its rows were in {table_name} and this "
-                        f"rebuild does not cover it — run ayl-add over its folder "
+                        f"rebuild does not cover it — run `ayl add` over its folder "
                         f"({display_source(row.get('source_ref') or '') or 'source unrecorded'}) "
                         f"to put it back")
     return orphaned
@@ -645,7 +645,7 @@ def add_books(books: list[Book], backend: str, db_path: Path, folder: Path | Non
 
     Everything else is `_write_books`, unchanged and unindented, so that the
     lock is one line and not a re-reading of the whole ingest."""
-    with ingest_lock(db_path, command=f"ayl-add {folder}" if folder else "ayl-add"):
+    with ingest_lock(db_path, command=f"ayl add {folder}" if folder else "ayl add"):
         return _write_books(books, backend, db_path, folder, prune, rebuild, force)
 
 
@@ -870,7 +870,7 @@ def prune_books(db, table_name: str, ledger: Ledger, rows: list[dict],
         ledger.delete(row["book_id"])
         say(f"  pruned {key}: its file is no longer in the folder")
         if cards is not None and cards.count_rows(f"book = '{key.replace(chr(39), chr(39) * 2)}'"):
-            say(f"      its book card in {cards_table} is kept (ayl-add does not write that "
+            say(f"      its book card in {cards_table} is kept (`ayl add` does not write that "
                 f"table): the catalogue still lists {key} as a book with no text")
     return len(rows)
 
@@ -952,7 +952,7 @@ def run_backup(db_path: Path, dest: Path, chat_db: Path | None) -> int:
         return 1
     for line in manifest_lines(target, read_manifest(target)):
         say(line)
-    say(f"restore it with:  uv run ayl-add --restore {target} --db {db_path}")
+    say(f"restore it with:  uv run ayl restore {target} --db {db_path}")
     return 0
 
 
@@ -969,20 +969,31 @@ def run_restore(db_path: Path, source: Path, chat_db: Path | None, force: bool) 
     except (BackupError, IngestBusy) as error:
         say(str(error), error=True)
         return 1
-    say(f"check it with:  uv run ayl-add --doctor --db {db_path}")
+    say(f"check it with:  uv run ayl doctor --db {db_path}")
     return 0
 
 
 # --- entry point ------------------------------------------------------------
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(prog: str = "ayl-add") -> argparse.ArgumentParser:
     """The command line `ayl-add` accepts, built apart from `main` so that it
     can be asked what it accepts without running a command: the docs-as-code
     check of #72 compares the flags docs/add-your-own-books.md, docs/upgrading.md
-    and the README tell a reader to type against this parser's own options."""
+    and the README tell a reader to type against this parser's own options.
+
+    `prog` is what the usage line and the errors call the command: the
+    dispatcher passes "ayl add", "ayl doctor", "ayl backup" or "ayl restore",
+    which are the names a reader typed (#30)."""
     parser = argparse.ArgumentParser(
-        prog="ayl-add",
-        description="Index a folder of .txt / .md books into the Ask Your Library LanceDB.")
+        prog=prog,
+        description="Index a folder of .txt / .md books into the Ask Your Library LanceDB.",
+        # No long-option abbreviations. `--doctor`, `--backup`, `--restore` and
+        # `--rebuild` each decide WHICH command this run is, and argparse
+        # resolves an unambiguous prefix to the option itself: `--doct` was
+        # `--doctor`, so `ayl backup <dir> -- --doct` reported a clean index and
+        # exited 0 having copied nothing (#30). A flag worth typing is worth
+        # typing out.
+        allow_abbrev=False)
     # Optional only because --doctor reads the index and needs no folder; a
     # run without either is the argparse error it always was.
     parser.add_argument("folder", type=Path, nargs="?",
@@ -1030,16 +1041,16 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, prog: str = "ayl-add") -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    args = build_parser().parse_args(argv)
+    args = build_parser(prog).parse_args(argv)
 
     if args.cards:
         say("--cards is not implemented: book cards are LLM-distilled summaries, which "
             "means paid model calls per book. The demo corpus ships its cards in "
             "corpus/cards/ and indexes them with "
             "`uv run scripts/ingest_demo_corpus.py --stage cards`; there is no generic "
-            "card generator yet. Run ayl-add without --cards for a full-text-only index.",
+            "card generator yet. Run `ayl add` without --cards for a full-text-only index.",
             error=True)
         return 2
 
@@ -1062,12 +1073,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.backup and args.folder is None:
         return run_backup(db_default, args.backup.expanduser(), chat_db)
     if args.folder is None:
-        say("no folder given: `ayl-add <folder>`, or one of `--doctor`, `--backup <dir>`, "
-            "`--restore <backup dir>` over an existing index", error=True)
+        say("no folder given: `ayl add <folder>`, or one of `ayl doctor`, `ayl backup <dir>`, "
+            "`ayl restore <backup dir>` over an existing index", error=True)
         return 2
     if args.rebuild and not (args.backup or args.force):
         say("--rebuild replaces every row in the transcripts table, and what it replaces is "
-            "gone. Take the copy in the same command — `ayl-add <folder> --rebuild --backup "
+            "gone. Take the copy in the same command — `ayl add <folder> --rebuild --backup "
             "<dir>` — or say --force if you have one already (or do not want one).", error=True)
         return 2
     folder = args.folder.expanduser()
@@ -1114,9 +1125,21 @@ def main(argv: list[str] | None = None) -> int:
         say(f"pruned {counts['pruned']} book(s) whose file is gone")
     if not counts["cards_table"]:
         say(f"no cards_{args.backend} table here: the agent will search full text only "
-            f"(book cards need an LLM and are not generated by ayl-add)")
-    say(f"ask it something:  LIBRARY_DB_PATH={db_path} uv run ask-library \"...\"")
+            f"(book cards need an LLM and are not generated by `ayl add`)")
+    say(f"ask it something:  LIBRARY_DB_PATH={db_path} uv run ayl ask \"...\"")
     return 0
+
+
+def ayl_add_main(argv: list[str] | None = None) -> int:
+    """The `ayl-add` console script: this same run under the name it had before
+    `ayl add` (#30).
+
+    The notice is printed here rather than in `main` so that `ayl add`, `ayl
+    doctor`, `ayl backup` and `ayl restore` — all of them this same `main` —
+    say nothing. Removed at 0.6.0."""
+    say("ayl-add is deprecated and will be removed in 0.6.0 — run `ayl add` instead "
+        "(`ayl doctor`, `ayl backup`, `ayl restore` for the other flags).", error=True)
+    return main(argv)
 
 
 if __name__ == "__main__":

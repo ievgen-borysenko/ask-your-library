@@ -270,10 +270,10 @@ _T = {
     "pf_no_db": {
         "ua": "Бази нема: {path}. Побудуй демо-корпус "
               "(`uv run scripts/ingest_demo_corpus.py`, ~30 хв), проіндексуй свої книжки "
-              "(`uv run ayl-add <тека>`) або вкажи LIBRARY_DB_PATH на свою LanceDB.",
+              "(`uv run ayl add <тека>`) або вкажи LIBRARY_DB_PATH на свою LanceDB.",
         "en": "Database not found: {path}. Build the demo corpus "
               "(`uv run scripts/ingest_demo_corpus.py`, ~30 min), index your own books "
-              "(`uv run ayl-add <folder>`) or point LIBRARY_DB_PATH at your LanceDB.",
+              "(`uv run ayl add <folder>`) or point LIBRARY_DB_PATH at your LanceDB.",
     },
     "pf_no_tables": {
         "ua": "У базі {path} нема таблиць: {tables}. Заверши інжест "
@@ -327,9 +327,9 @@ _T = {
     },
     "pf_no_cards": {
         "ua": "Таблиці карток {table} нема: відповіді спираються лише на повний текст "
-              "(картки книжок потребують LLM і не створюються `ayl-add`).",
+              "(картки книжок потребують LLM і не створюються `ayl add`).",
         "en": "Cards table {table} absent: answers come from transcripts only "
-              "(book cards need an LLM and are not built by `ayl-add`).",
+              "(book cards need an LLM and are not built by `ayl add`).",
     },
     "pf_notice_header": {
         "ua": "До відома:",

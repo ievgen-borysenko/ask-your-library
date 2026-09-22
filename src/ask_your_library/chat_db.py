@@ -170,7 +170,7 @@ def check_chat_db(connection, ddl: str, path: str = "the chat database",
                     f"chat database keeps its old shape and fails on the first insert that names "
                     f"one of them. Move the file aside and let the UI create a new one (the "
                     f"conversation history in it is lost — back it up first with "
-                    f"`uv run ayl-add --backup <dir>`), or add the column(s) by hand.")
+                    f"`uv run ayl backup <dir>`), or add the column(s) by hand.")
     except Exception as error:                # a file that is not SQLite at all
         problems.append(f"{path} could not be checked ({type(error).__name__}: {error})")
     return problems

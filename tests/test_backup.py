@@ -1,4 +1,4 @@
-"""`ayl-add --backup` / `--restore`, and the lock that says when a copy is safe.
+"""`ayl backup` / `ayl restore`, and the lock that says when a copy is safe.
 
 The product here is not the copy — `cp -r` makes copies. It is the statement
 that the copy was taken at a moment when the index was whole: no ingest
@@ -350,7 +350,7 @@ def test_the_cli_reports_what_it_copied_and_how_to_put_it_back(built, tmp_path, 
     assert "backup written to" in out
     assert "transcripts_ollama:" in out and "books ledger: 2 row(s)" in out
     assert f"chunker {add_folder.CHUNKER_VERSION}" in out
-    assert "--restore" in out
+    assert "ayl restore" in out
 
 
 def test_the_cli_restores_and_points_at_the_check(built, tmp_path, capsys):
@@ -362,7 +362,7 @@ def test_the_cli_restores_and_points_at_the_check(built, tmp_path, capsys):
 
     assert code == 0
     out = capsys.readouterr().out
-    assert "verified" in out and "index restored to" in out and "--doctor" in out
+    assert "verified" in out and "index restored to" in out and "ayl doctor" in out
 
 
 def test_the_cli_turns_a_refusal_into_one_line(built, tmp_path, capsys):

@@ -219,7 +219,7 @@ def check_index(db, table_name: str, model: str, dims: int) -> str | None:
 # which is the one write that is not a mix; `--backup` is in the same command
 # because a rebuild discards every row it replaces.
 REBUILD_HINT = ("The way out is a rebuild, which replaces every row: "
-                "`uv run ayl-add <folder> --rebuild --backup <dir>` takes a copy first, drops the "
+                "`uv run ayl add <folder> --rebuild --backup <dir>` takes a copy first, drops the "
                 "table and re-indexes (`--rebuild --force` skips the copy). For the demo corpus, "
                 "`uv run scripts/ingest_demo_corpus.py --stage ingest` is already a full rebuild.")
 

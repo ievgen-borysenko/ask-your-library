@@ -88,7 +88,7 @@ def test_preflight_clean_environment(monkeypatch, tmp_path):
 
 
 def test_missing_cards_table_is_a_notice_not_an_error(monkeypatch, tmp_path):
-    """An `ayl-add` index has no cards table. That is supported, but the person
+    """An `ayl add` index has no cards table. That is supported, but the person
     asking must be told, not only the server log."""
     from ask_your_library import preflight as pf
     preflight = healthy(monkeypatch, tmp_path, [pf.TABLES["transcripts"]])
@@ -247,6 +247,157 @@ def test_a_hosted_llm_never_asks_for_a_pulled_chat_model(monkeypatch, tmp_path):
     assert preflight.check_environment() == []
 
 
+# --- the index half alone (`ayl books`) --------------------------------------
+
+def test_index_only_leaves_out_the_key_and_the_model_server(monkeypatch, tmp_path):
+    """A command that only READS the index — `ayl books` lists the book keys
+    the tables hold — calls no model and embeds nothing, so neither a missing
+    key nor a dead Ollama is its problem. The full check on the same
+    environment reports both."""
+    from ask_your_library import preflight as pf
+    preflight = healthy(monkeypatch, tmp_path, list(pf.TABLES.values()))
+    monkeypatch.setattr(preflight, "openrouter_api_key",
+                        lambda: (_ for _ in ()).throw(RuntimeError("no key")))
+
+    class Dead:
+        def get(self, *a, **k):
+            raise requests.ConnectionError("nothing on that port")
+    monkeypatch.setattr(preflight, "requests", Dead())
+
+    assert preflight.check_environment(index_only=True) == []
+    assert set(preflight.check_environment().kinds) == {"no_key", "no_ollama"}
+
+
+def local_pair(monkeypatch, tmp_path, tables):
+    """A healthy machine answering on a LOCAL model, with both backends' tables
+    in the index and both models pulled — so the only thing left to decide the
+    key is which embedder the call is about."""
+    from ask_your_library import preflight as pf
+    preflight = healthy(monkeypatch, tmp_path, tables)
+    monkeypatch.setattr(preflight, "LLM_BACKEND", "ollama")
+    monkeypatch.setattr(preflight, "ORCHESTRATOR_MODEL", "qwen3.6")
+    monkeypatch.setattr(preflight, "openrouter_api_key",
+                        lambda: (_ for _ in ()).throw(RuntimeError("no key")))
+
+    class Up:
+        def get(self, *a, **k):
+            return Tags({"models": [{"name": "bge-m3:latest"}, {"name": "qwen3.6:latest"}]})
+    monkeypatch.setattr(preflight, "requests", Up())
+    return preflight
+
+
+BOTH_SUFFIXES = ["transcripts_ollama", "cards_ollama",
+                 "transcripts_openrouter", "cards_openrouter"]
+
+
+def test_an_overriding_backend_is_what_decides_whether_a_key_is_needed(monkeypatch, tmp_path):
+    """`--backend openrouter` means the fingerprint check builds the hosted
+    embedder, and that constructor reads the key — whatever the `.env` says the
+    configured embedder is."""
+    preflight = local_pair(monkeypatch, tmp_path, BOTH_SUFFIXES)
+    monkeypatch.setattr(preflight, "EMBED_BACKEND", "ollama")     # configured: local
+
+    assert preflight.check_environment() == []                    # nothing hosted, no key wanted
+    assert preflight.check_environment(backend="openrouter").kinds == ["no_key"]
+
+
+def test_an_overriding_backend_can_also_take_the_key_requirement_away(monkeypatch, tmp_path):
+    """The other direction, and the one that was wrong: a local answering model,
+    OpenRouter embeddings in the `.env`, and `--backend ollama` over a local
+    index. Nothing in that run touches OpenRouter, and it exited 4."""
+    preflight = local_pair(monkeypatch, tmp_path, BOTH_SUFFIXES)
+    monkeypatch.setattr(preflight, "EMBED_BACKEND", "openrouter")  # configured: hosted
+    # what config derives from that pair, and what the check used to read
+    monkeypatch.setattr(preflight, "OPENROUTER_NEEDS_KEY", True)
+
+    assert preflight.check_environment().kinds == ["no_key"]       # the configured embedder
+    assert preflight.check_environment(backend="ollama") == []     # the one asked about
+    assert preflight.check_environment(backend="ollama", index_only=True) == []
+
+
+def test_a_hosted_answering_model_needs_its_key_whatever_the_embedder_is(monkeypatch,
+                                                                        tmp_path):
+    """The key has two reasons to be wanted and they are asked about apart: an
+    override of the embedding half cannot excuse the answering half."""
+    preflight = local_pair(monkeypatch, tmp_path, BOTH_SUFFIXES)
+    monkeypatch.setattr(preflight, "LLM_BACKEND", "openrouter")
+    monkeypatch.setattr(preflight, "EMBED_BACKEND", "openrouter")
+
+    assert preflight.check_environment(backend="ollama").kinds == ["no_key"]
+    # ...and `ayl books` over that same index still needs none: it answers nothing
+    assert preflight.check_environment(backend="ollama", index_only=True) == []
+
+
+def test_index_only_still_checks_the_key_the_embedder_itself_needs(monkeypatch, tmp_path):
+    """With EMBED_BACKEND=openrouter the fingerprint check builds a hosted
+    embedder, and that constructor reads the key: leaving the key check out
+    here would report the missing key as an unreadable index."""
+    from ask_your_library import preflight as pf
+    preflight = healthy(monkeypatch, tmp_path, list(pf.TABLES.values()))
+    monkeypatch.setattr(preflight, "EMBED_BACKEND", "openrouter")
+    monkeypatch.setattr(preflight, "openrouter_api_key",
+                        lambda: (_ for _ in ()).throw(RuntimeError("no key")))
+
+    assert preflight.check_environment(index_only=True).kinds == ["no_key"]
+
+
+def test_index_only_keeps_the_status_a_missing_index_always_had(monkeypatch, tmp_path):
+    """The index half is the same code, so its kinds and its exit code are the
+    same: no database is still 3, and a wrapper script reads one table."""
+    from ask_your_library import preflight as pf
+    preflight = healthy(monkeypatch, tmp_path, list(pf.TABLES.values()))
+    monkeypatch.setattr(preflight, "DB_PATH", tmp_path / "not-built-yet")
+
+    result = preflight.check_environment(index_only=True)
+    assert result.kinds == ["no_db"] and pf.exit_code(result) == pf.EXIT_NO_INDEX
+
+    preflight = healthy(monkeypatch, tmp_path, [pf.TABLES["cards"]])
+    result = preflight.check_environment(index_only=True)
+    assert result.kinds == ["no_tables"] and pf.exit_code(result) == pf.EXIT_NO_INDEX
+
+
+def test_index_only_does_not_warn_about_the_cards_table(monkeypatch, tmp_path):
+    """The no-cards notice is about SEARCH — the agent will work over full text
+    alone — and a command that only lists what the index holds does not search.
+    Saying it under `ayl books` would be a warning about something the reader
+    did not ask for and that command does not do. The full check still says it.
+    """
+    from ask_your_library import preflight as pf
+    preflight = healthy(monkeypatch, tmp_path, [pf.TABLES["transcripts"]])
+
+    assert preflight.check_environment(index_only=True).notices == []
+    assert pf.TABLES["cards"] in preflight.check_environment().notices[0]
+
+
+def test_an_explicit_db_and_backend_are_what_the_index_half_reads(monkeypatch, tmp_path):
+    """`ayl doctor --db <dir> --backend <name>` checks THAT index: a preflight
+    left on the configured one reported the database at LIBRARY_DB_PATH as
+    missing while the doctor beside it read the one it was pointed at."""
+    from ask_your_library import preflight as pf
+    preflight = healthy(monkeypatch, tmp_path, ["transcripts_openrouter"])
+    monkeypatch.setattr(preflight, "DB_PATH", tmp_path / "not-built-yet")
+
+    assert preflight.check_environment(index_only=True).kinds == ["no_db"]
+    # the same call, aimed at the index that is there, and at ITS table suffix
+    assert preflight.check_environment(index_only=True, db_path=tmp_path,
+                                       backend="openrouter") == []
+    # and the suffix is not cosmetic: the ollama tables are not in that index
+    assert preflight.check_environment(index_only=True, db_path=tmp_path,
+                                       backend="ollama").kinds == ["no_tables"]
+
+
+def test_an_explicit_db_does_not_change_the_configured_one(monkeypatch, tmp_path):
+    """A parameter, not a write to `config`: a setting changed for one check is
+    a setting changed for everything that runs after it."""
+    from ask_your_library import preflight as pf
+    preflight = healthy(monkeypatch, tmp_path, list(pf.TABLES.values()))
+    monkeypatch.setattr(preflight, "DB_PATH", tmp_path / "not-built-yet")
+
+    preflight.check_environment(index_only=True, db_path=tmp_path)
+    assert preflight.DB_PATH == tmp_path / "not-built-yet"
+    assert preflight.check_environment(index_only=True).kinds == ["no_db"]
+
+
 def test_a_repo_env_file_cannot_hand_the_suite_a_provider_key(tmp_path):
     """The suite must not be able to reach a provider, whatever is on the
     machine — and `config.load_dotenv()` runs at the first package import and
@@ -306,7 +457,7 @@ def test_a_missing_ollama_and_a_missing_index_are_different_statuses(monkeypatch
     assert result.kinds == ["no_db"]
     assert pf.exit_code(result) == pf.EXIT_NO_INDEX == 3
     # And it says which command builds one.
-    assert "ingest_demo_corpus.py" in result[0] and "ayl-add" in result[0]
+    assert "ingest_demo_corpus.py" in result[0] and "ayl add" in result[0]
 
 
 def test_a_missing_key_keeps_its_own_status_on_the_hosted_backend(monkeypatch, tmp_path):
