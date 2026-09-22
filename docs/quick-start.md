@@ -16,7 +16,7 @@ bash scripts/install-mac.sh              # mostly download time, + ~30 min for t
 only (`brew services run`, which registers no login item — the one-liner that makes it permanent
 is printed at the end), pulls the two models, syncs the locked environment, writes the fully local
 `.env`, asks once before the demo corpus, and finishes on the preflight the CLI runs before
-every question. When it is done, `uv run ask-library "..."` answers with no account and no key.
+every question. When it is done, `uv run ayl ask "..."` answers with no account and no key.
 `--no-demo`, `--hosted` (the OpenRouter answering model, which needs a key you set yourself),
 `--yes` and `--help` are the rest of it. It never runs
 `sudo`. What reaches the network is the package fetches through `brew`, `uv` and `ollama` and,
@@ -55,7 +55,7 @@ comparison is in [Known limits](known-limits.md).
 
 The ingest is staged and cached in `data/`, so it is safe to interrupt and re-run:
 `--stage prepare-text|prepare-audio|prepare-canaries|ingest|cards` runs one stage, `--book <substring>`
-re-ingests a single book in place (`ayl-add --doctor` reports whether the index and its book ledger agree). Sources are checksum-pinned in `corpus/manifest.yaml`
+re-ingests a single book in place (`ayl doctor` reports whether the index and its book ledger agree). Sources are checksum-pinned in `corpus/manifest.yaml`
 (`--no-verify` to skip). The text path works on any OS; two books come from LibriVox audio and
 their Whisper transcripts are committed under `corpus/prepared-audio/`, so the full corpus
 builds everywhere. Running the transcription itself (`--retranscribe`) needs macOS with MLX
@@ -65,22 +65,24 @@ Your own books instead of (or beside) the demo corpus — see
 [Add your own books](add-your-own-books.md):
 
 ```bash
-LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books
-LIBRARY_DB_PATH=~/ayl-index uv run ask-library "..."
+LIBRARY_DB_PATH=~/ayl-index uv run ayl add ~/books
+LIBRARY_DB_PATH=~/ayl-index uv run ayl ask "..."
 ```
 
 ## Ask a question, run the UI, run the evals
 
 ```bash
-uv run ask-library "What does Marcus Aurelius say about anger?"
-uv run ask-library                       # interactive chat with conversation memory
-uv run ask-library --verbose "..."        # plus every evidence item with the passage it was checked against
+uv run ayl ask "What does Marcus Aurelius say about anger?"
+uv run ayl ask                           # interactive chat with conversation memory
+uv run ayl ask --verbose "..."           # plus every evidence item with the passage it was checked against
+uv run ayl books                         # what the index holds, listed by code: no model call, $0
+uv run ayl doctor                        # the environment and the index, both halves, nothing written
 
 # web UI (Chainlit, same core as the CLI), bound to loopback; throwaway local demo, admin / change-me:
 # the login form's first field is labelled "Email address"; type the username there
-AYL_ALLOW_DEFAULT_LOGIN=1 uv run --extra ui chainlit run ui.py -w --host 127.0.0.1
+AYL_ALLOW_DEFAULT_LOGIN=1 uv run --extra ui ayl ui -w
 # with a real password (the UI refuses to start on the placeholder one):
-CHAINLIT_USERNAME=... CHAINLIT_PASSWORD=... uv run --extra ui chainlit run ui.py -w --host 127.0.0.1
+CHAINLIT_USERNAME=... CHAINLIT_PASSWORD=... uv run --extra ui ayl ui -w
 
 # evals
 uv run eval/run_retrieval_eval.py        # no LLM calls, free
@@ -94,3 +96,9 @@ uv run playwright install chromium      # once: the browser tests/ui drives (not
 uv run --group dev --extra ui pytest -q tests/ui  # the web UI's release walkthrough in a browser,
                                         # desktop and phone, against a scripted backend (no model, no index)
 ```
+
+`ayl --help` lists the commands and `ayl <command> --help` prints what one of them accepts;
+`ayl add`, `ayl backup`, `ayl restore` and `ayl doctor` take the flags of
+[Add your own books](add-your-own-books.md) and [Upgrading](upgrading.md). The two names `ayl`
+replaced — `ask-library` and `ayl-add` — are still installed and still run the same code; each
+prints one deprecation line and is removed at `0.6.0`.

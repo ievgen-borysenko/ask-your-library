@@ -1,8 +1,11 @@
 """Ask Your Library — command-line interface.
 
-  uv run ask-library                        # chat: question after question, with memory
-  uv run ask-library "What did X say about Y?"   # single question (scripts, evals)
-  uv run ask-library --help / --version     # no API key, no index needed
+  uv run ayl ask                        # chat: question after question, with memory
+  uv run ayl ask "What did X say about Y?"   # single question (scripts, evals)
+  uv run ayl ask --help / --version     # no API key, no index needed
+
+`ask-library` is the same run under the name this had before `ayl` (#30); it
+prints one deprecation line and is removed at 0.6.0.
 
 The web UI (ui.py, Chainlit) shares the same core: runner.run_question.
 Answering a question requires an answering model and an embedding backend —
@@ -226,15 +229,18 @@ def _seconds(value: str) -> int:
     return seconds
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(prog: str = "ask-library") -> argparse.ArgumentParser:
+    """`prog` is what the usage line and the errors call this command. The
+    dispatcher passes "ayl ask", so a reader who typed `ayl ask --help` is not
+    answered by a program with another name (#30)."""
     parser = argparse.ArgumentParser(
-        prog="ask-library",
+        prog=prog,
         description="Agentic RAG over your own book library.",
         epilog="Without a question the CLI opens an interactive chat with memory "
                "(`exit`, `quit` or Ctrl-D leaves it). Everything else is configured "
                "through environment variables; see .env.example.")
     parser.add_argument("--version", action="version",
-                        version=f"ask-library {package_version()}")
+                        version=f"{prog} {package_version()}")
     # ASK_LANG is otherwise the only way to switch language, and it is a process
     # default; this is the same switch for a single run.
     parser.add_argument("--lang", choices=sorted(SUPPORTED_LANGS),
@@ -253,10 +259,10 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None, prog: str = "ask-library") -> None:
     # Parsing first: --help and --version must work in a fresh clone with no API
     # key and no index, so nothing may touch the environment before this.
-    args = build_parser().parse_args(argv)
+    args = build_parser(prog).parse_args(argv)
     if args.lang:
         set_lang(args.lang)
     RUN["verbose"] = bool(args.verbose)
@@ -317,6 +323,18 @@ def main(argv: list[str] | None = None) -> None:
         history.append(history_entry(question, result.answer, result.catalog or None))
 
     say(t("cli_bye"))
+
+
+def ask_library_main(argv: list[str] | None = None) -> None:
+    """The `ask-library` console script: this same run under the name it had
+    before `ayl ask` (#30).
+
+    The notice lives here and not in `main` so that `ayl ask`, which is the
+    same code, says nothing; it goes to stderr so a script reading the answer
+    off stdout is unaffected. Removed at 0.6.0."""
+    say("ask-library is deprecated and will be removed in 0.6.0 — run `ayl ask` instead.",
+        error=True)
+    main(argv)
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ the hosted lines ship commented out with what they cost written beside them.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `LIBRARY_DB_PATH` | `data/lancedb` | LanceDB with `cards_<backend>` / `transcripts_<backend>`, the `books` ledger and the `_index_meta` stamps. It is a directory, so a backup of it is a file copy — `ayl-add --backup <dir>` is the one that says when a copy is safe ([upgrading](upgrading.md)). While an ingest runs it holds an `flock` on `.ayl-ingest-<name>.lock` BESIDE this directory (`data/.ayl-ingest-lancedb.lock` for the default); a second `ayl-add`, a backup or a restore is refused until it finishes. The lock is the operating system's, so it is released the moment the holder ends, however it ends — there is nothing to clear by hand |
+| `LIBRARY_DB_PATH` | `data/lancedb` | LanceDB with `cards_<backend>` / `transcripts_<backend>`, the `books` ledger and the `_index_meta` stamps. It is a directory, so a backup of it is a file copy — `ayl backup <dir>` is the one that says when a copy is safe ([upgrading](upgrading.md)). While an ingest runs it holds an `flock` on `.ayl-ingest-<name>.lock` BESIDE this directory (`data/.ayl-ingest-lancedb.lock` for the default); a second `ayl add`, a backup or a restore is refused until it finishes. The lock is the operating system's, so it is released the moment the holder ends, however it ends — there is nothing to clear by hand |
 | `AYL_HOME` | `~/AskYourLibrary` | The reader's own folder for what is built on this machine and never shared, outside any checkout: today the engineer's shelf's local cards (`$AYL_HOME/cards/tech/`, [corpus-tech](../corpus-tech/README.md#local-cards-and-ayl_home)), later the private shelf of your own books (ADR-026). Writing there is refused when it resolves inside a git work tree — `.gitignore` is not a boundary |
 | `EMBED_BACKEND` | `ollama` | `ollama` (local bge-m3) or `openrouter`; also selects the table suffix |
 | `OLLAMA_URL` | `http://localhost:11434` | Local Ollama endpoint |
@@ -36,7 +36,7 @@ the hosted lines ship commented out with what they cost written beside them.
 | `MAX_CLARIFY_CANDIDATES` | `5` | Longest list of books a clarify question offers; at most 5, the ordinals the reply resolver understands |
 | `LLM_TIMEOUT_S` | `600` (the default backend is local; `120` with `LLM_BACKEND=openrouter`) | Per-attempt read/write timeout of one model call (the SDK's default was 600 s; connect stays 5 s) |
 | `LLM_MAX_RETRIES` | `2` | Extra attempts on a timeout or a transient provider error, made by `llm_invoke`'s own loop with the SDK's retries switched off, so every attempt is re-bounded by what is left of the question; an uncapped call then takes up to timeout x (1 + retries) plus backoff, a capped one stops when the budget does (see [Known limits](known-limits.md): a slowly streaming response is not bounded) |
-| `QUESTION_DEADLINE_S` | `1200` (the default backend is local; `300` with `LLM_BACKEND=openrouter`) | Time budget per question, checked before each next decision: the loop stops searching and answers from what it found, stop reason shown; a model call that runs out of time inside the budget ends the loop the same way, not the run; clarify waiting time excluded; `0` = none; `ask-library --deadline` overrides it for a run. Like `LLM_TIMEOUT_S` this is `config.py`'s default and a copied `.env` overrides it — `.env.example` and `scripts/install-mac.sh` write the same `1200` for the local mode and `300` for the hosted one |
+| `QUESTION_DEADLINE_S` | `1200` (the default backend is local; `300` with `LLM_BACKEND=openrouter`) | Time budget per question, checked before each next decision: the loop stops searching and answers from what it found, stop reason shown; a model call that runs out of time inside the budget ends the loop the same way, not the run; clarify waiting time excluded; `0` = none; `ayl ask --deadline` overrides it for a run. Like `LLM_TIMEOUT_S` this is `config.py`'s default and a copied `.env` overrides it — `.env.example` and `scripts/install-mac.sh` write the same `1200` for the local mode and `300` for the hosted one |
 | `PRICE_IN_PER_MTOK` / `PRICE_OUT_PER_MTOK` | `0.06` / `0.12` (`3.0` / `15.0` until 2026-09-18) | USD per 1M tokens, for the cost estimate; read only when `LLM_BACKEND=openrouter`. The default local backend prices at `OLLAMA_PRICE_*` (0), so its cost lines read $0.0000 |
 | `ASK_LANG` | `en` | UI language: `en` or `ua` |
 | `ASK_SCRATCH_DIR` | `.scratch` | Where raw-hit scratchpads are written (a human-readable log; `validate` does not read it) |
@@ -47,7 +47,7 @@ the hosted lines ship commented out with what they cost written beside them.
 | `LANGCHAIN_TRACING_V2` / `LANGSMITH_TRACING_V2` | (unset) | Set both to `false` to keep tracing off whatever the environment inherited: `LANGSMITH_TRACING_V2` is read first, then `LANGCHAIN_TRACING_V2`, then the legacy `*_TRACING` flags |
 | `CHAINLIT_USERNAME` / `CHAINLIT_PASSWORD` | `admin` / `change-me` | Web UI login |
 | `CHAINLIT_AUTH_SECRET` | generated | Signs login tokens; persisted to `.chainlit/auth-secret` |
-| `AYL_CHAINLIT_DIR` | `.chainlit/` next to `ui.py` | Where the UI writes its chat db and auth secret; tests and the canary point it at a temp dir. `ayl-add --backup` / `--restore` read the same variable to find `chat.db` (and `--chat-db <path>` overrides it) |
+| `AYL_CHAINLIT_DIR` | `.chainlit/` next to `ui.py` | Where the UI writes its chat db and auth secret; tests and the canary point it at a temp dir. `ayl backup` / `ayl restore` read the same variable to find `chat.db` (and `--chat-db <path>` overrides it) |
 | `AYL_ALLOW_DEFAULT_LOGIN` | (unset) | `1` allows the placeholder password (local demo only) |
 | `AYL_ALLOW_START_WITHOUT_KEY` | (unset) | `1` lets `ui.py` be imported without an OpenRouter key (tests, the injection canary). The gate it bypasses only exists when a key is needed at all, so it does nothing in the default local configuration; with a hosted answering model or hosted embeddings the server otherwise refuses to start, before anyone can log in |
 | `AYL_CLARIFY_TIMEOUT_S` | `300` | How long the web UI's ask-back waits for the reader before the agent goes on without an answer. The default is five minutes, for a person reading a numbered list; `tests/ui` shortens it so a test can watch one expire. A value that is not a whole number above 0 is refused at startup rather than rounded |
@@ -55,7 +55,7 @@ the hosted lines ship commented out with what they cost written beside them.
 | `AYL_UI_FAKE_BACKEND_CONFIRM` | (unset) | The second half of the pair above: it must read exactly `this-server-answers-from-a-script`, spelled out rather than `1` so nobody sets it by habit. On its own it names no script and does nothing. **Neither of these two may live in a `.env`**: Chainlit loads `<cwd>/.env` at its own import, before `ui.py` runs at all, so a file there would arm the seam as surely as an exported variable — which is why the seam refuses to start when either name is a key in that file or in the nearest `.env` above it. Export them for the one command instead; see [Security](../SECURITY.md) |
 | `ASK_DEBUG` | (unset) | `1` re-raises CLI errors instead of printing a message |
 
-`ask-library --help` and `ask-library --version` need none of it: they print and exit before
+`ayl ask --help` and `ayl ask --version` need none of it: they print and exit before
 the preflight, so they work in a fresh clone with no key and no index.
 
 Changing `EMBED_BACKEND` or `OLLAMA_EMBED_MODEL` after an index is built points the agent at
@@ -63,7 +63,7 @@ vectors another model produced: the index is stamped with the model that made it
 the web UI **refuse to start** against a mismatch rather than answering from a search that means
 nothing. Changing the code's chunker does not refuse a read — it warns, once per table, and shows
 the same line as a startup notice, because differently-cut text still retrieves; the refusal there
-is on the next `ayl-add`. Either way the remedy is a rebuild — `ayl-add <folder> --rebuild
+is on the next `ayl add`. Either way the remedy is a rebuild — `ayl add <folder> --rebuild
 --backup <dir>`, which takes the copy first — and a rebuild discards what it replaces:
 [`docs/upgrading.md`](upgrading.md) is what each case costs.
 
@@ -74,7 +74,7 @@ compared with the ones that are there and the difference is warned about by name
 ### Exit codes
 
 The preflight runs before every question and prints each problem with its remedy. The status it
-exits with names the one to fix first, so a script wrapping `ask-library` does not have to match
+exits with names the one to fix first, so a script wrapping `ayl ask` does not have to match
 on translated prose:
 
 | Code | Meaning |
@@ -82,7 +82,7 @@ on translated prose:
 | `0` | an answer |
 | `1` | the environment is not ready for a reason with no remedy of its own (an index built by another embedding model), or the run itself failed |
 | `2` | a bad command line (argparse's own) |
-| `3` | no index yet — build the demo corpus, run `ayl-add`, or point `LIBRARY_DB_PATH` at one |
+| `3` | no index yet — build the demo corpus, run `ayl add`, or point `LIBRARY_DB_PATH` at one |
 | `4` | a hosted backend is configured and has no key |
 | `5` | Ollama is not reachable, does not answer as Ollama, or a configured model is not pulled |
 
@@ -96,13 +96,13 @@ nothing exported. Where this section says "this README" it means the project
 [README](../README.md), and the numbers it means are the ones in that page's
 [Measured](../README.md#measured) table — measured on the hosted configuration, not on this one.
 
-Indexing needs no account either: `ayl-add` chunks locally and embeds with Ollama's `bge-m3`.
+Indexing needs no account either: `ayl add` chunks locally and embeds with Ollama's `bge-m3`.
 So the whole system runs on this machine, and there is nothing to set:
 
 ```bash
 ollama pull qwen2.5:14b                   # the default OLLAMA_LLM_MODEL; or any chat model
-uv run ask-library "..."                  # no key, cost lines read $0.0000
-uv run --extra ui chainlit run ui.py -w --host 127.0.0.1   # the UI's key gate is off in this mode
+uv run ayl ask "..."                      # no key, cost lines read $0.0000
+uv run --extra ui ayl ui                  # the web chat; its key gate is off in this mode
 ```
 
 `bash scripts/install-mac.sh` does the pulls and writes this `.env` for you. Nothing in either

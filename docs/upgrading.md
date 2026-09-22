@@ -8,22 +8,28 @@ it needs and leaves the index answering until you decide to spend the rebuild.
 **Before any upgrade, take a backup.** It is the only copy that survives a rebuild:
 
 ```bash
-uv run ayl-add --backup ~/ayl-backups --db ~/ayl-index
+uv run ayl backup ~/ayl-backups --db ~/ayl-index
 ```
+
+`ayl backup`, `ayl restore`, `ayl doctor` and `ayl add` are one program under four verbs, so
+every flag on this page is one of its flags. Upgrading from a version before `ayl`: the two names
+it replaced, `ask-library` and `ayl-add`, are still installed and still run the same code — each
+prints one deprecation line and is removed at `0.6.0`, so a script of your own has one minor
+release to change the name it types.
 
 ## What an upgrade may change, and what each costs you
 
 | What changed | What it costs | How you find out |
 |---|---|---|
 | **The chunker** (what a chunk *is*) | a full rebuild: every row is re-chunked and re-embedded | `_index_meta.chunker` differs from this code's — **warned** on every read, **refused** on the next write. Compared per table kind: the sentence packer for transcripts, the card chunker for cards, because they are two rules and a bump to one says nothing about the other |
-| **The row schema** (what a row *holds*) | usually nothing: `ayl-add` migrates the table in place, re-embedding no row | nothing to see. A *newer* schema than this code knows is warned and refused, which means you downgraded |
+| **The row schema** (what a row *holds*) | usually nothing: `ayl add` migrates the table in place, re-embedding no row | nothing to see. A *newer* schema than this code knows is warned and refused, which means you downgraded |
 | **The embedding model or its width** | a full rebuild: a query vector from one model against document vectors from another is not a search | **fatal on read** — the CLI and the web UI refuse to start against it |
 | **The chat database's schema** (the web UI's history) | nothing, usually: SQLite leaves an existing table alone, so an older `chat.db` keeps its columns | the web UI checks the columns it writes against the ones that are there at every start and **warns**, naming the missing ones; the file is stamped with a chat-schema version |
 
 The three are enforced differently on purpose. A wrong embedder makes retrieval meaningless with
 nothing to see, so nothing may read the index. A wrong chunker makes it *worse*, not meaningless —
 the same text, cut differently, still retrieves and still quotes verbatim — so a read is allowed
-and a write is not: one `ayl-add` into such a table leaves two chunkers' rows in it with nothing
+and a write is not: one `ayl add` into such a table leaves two chunkers' rows in it with nothing
 to tell them apart, and the only repair after that is rebuilding all of it. That is the whole
 policy, in one line each: **warn on read, refuse on write** ([ADR-020](adr/README.md)).
 
@@ -42,16 +48,16 @@ re-chunked.
 
 **What your index does until you rebuild it.** It answers. Every read logs one warning line and
 the CLI and the web UI show a startup notice; retrieval and the quote check work exactly as
-before, on the chunks the index already holds. The next `ayl-add` write refuses, because one
+before, on the chunks the index already holds. The next `ayl add` write refuses, because one
 append would leave two chunkers' rows in one table.
 
 **Your own library, in order:**
 
 ```bash
-uv run ayl-add --backup ~/ayl-backups --db ~/ayl-index          # 1. the copy that survives step 3
-uv run ayl-add --doctor --db ~/ayl-index                        # 2. read the stamps; exits non-zero on the mismatch
-uv run ayl-add ~/books --rebuild --backup ~/ayl-backups --db ~/ayl-index   # 3. re-chunk and re-embed
-uv run ayl-add ~/more-books --db ~/ayl-index                    # 4. every OTHER folder, plain
+uv run ayl backup ~/ayl-backups --db ~/ayl-index    # 1. the copy that survives step 3
+uv run ayl doctor --db ~/ayl-index                  # 2. read the stamps; exits non-zero on the mismatch
+uv run ayl add ~/books --rebuild --backup ~/ayl-backups --db ~/ayl-index   # 3. re-chunk and re-embed
+uv run ayl add ~/more-books --db ~/ayl-index        # 4. every OTHER folder, plain
 ```
 
 Step 3 takes its own backup first and then replaces every row, so step 1 is only belt-and-braces
@@ -63,13 +69,13 @@ took (about half an hour for the demo corpus on an M3 Pro, longer for a large li
 **`--rebuild` goes once, whatever the number of folders.** It drops the whole transcripts table,
 so it rebuilds the INDEX and not a folder — running it once per folder would leave only the folder
 that ran last, each run dropping what the one before it wrote. After the rebuild there is no
-mismatch left to refuse, so every other folder goes in with a plain `ayl-add <folder>`, which
+mismatch left to refuse, so every other folder goes in with a plain `ayl add <folder>`, which
 appends. A `--rebuild` that would drop another folder's books stops before it drops anything and
 says exactly this, naming them; `--rebuild --force` goes ahead and reports every book it orphaned
 (their ids are kept and their rows are not, so they go back to `requested` until you re-add their
 folder).
 
-**The demo corpus** has its own rebuild and does not go through `ayl-add`:
+**The demo corpus** has its own rebuild and does not go through `ayl add`:
 
 ```bash
 uv run scripts/ingest_demo_corpus.py --stage ingest
@@ -90,7 +96,7 @@ Once per table per process, in the log, and as a startup notice in the CLI and t
 ```
 transcripts_ollama was built by chunker 'sentence-pack-1', this code chunks as
 'sentence-pack-2'. The index still answers, from the chunks it already holds. The way out
-is a rebuild, which replaces every row: `uv run ayl-add <folder> --rebuild --backup <dir>`
+is a rebuild, which replaces every row: `uv run ayl add <folder> --rebuild --backup <dir>`
 takes a copy first, drops the table and re-indexes (`--rebuild --force` skips the copy).
 For the demo corpus, `uv run scripts/ingest_demo_corpus.py --stage ingest` is already a
 full rebuild.
@@ -98,7 +104,7 @@ full rebuild.
 
 ### What the refusal looks like
 
-`ayl-add` stops before it embeds or deletes anything, so a refused run leaves the index exactly as
+`ayl add` stops before it embeds or deletes anything, so a refused run leaves the index exactly as
 it was:
 
 ```
@@ -106,15 +112,15 @@ refusing to write transcripts_ollama: transcripts_ollama was built by chunker
 'sentence-pack-1', this code chunks as 'sentence-pack-2'. A write would leave one table
 holding rows from two chunkers, and nothing afterwards can tell which rows came from
 which — unlike a read, that cannot be undone except by rebuilding the whole table.
-The way out is a rebuild, which replaces every row: `uv run ayl-add <folder> --rebuild
+The way out is a rebuild, which replaces every row: `uv run ayl add <folder> --rebuild
 --backup <dir>` ...
 ```
 
-A plain `ayl-add <folder>` would hit that same refusal — a rebuild is what gets past it,
+A plain `ayl add <folder>` would hit that same refusal — a rebuild is what gets past it,
 and it is one command:
 
 ```bash
-uv run ayl-add ~/books --rebuild --backup ~/ayl-backups --db ~/ayl-index
+uv run ayl add ~/books --rebuild --backup ~/ayl-backups --db ~/ayl-index
 ```
 
 It takes the backup **first** (a failed backup stops the rebuild), drops the transcripts
@@ -123,7 +129,7 @@ keeps the id it was minted with — re-minting them would turn the whole library
 books, which is the defect the ledger exists to prevent. Books the ledger holds that this
 folder does **not** (another folder's, or the demo corpus's) lose their rows with the
 table: they are put back to `requested` and named at the end of the run, so you know to
-re-run `ayl-add` over their folders too. `--rebuild --force` goes ahead without a backup.
+re-run `ayl add` over their folders too. `--rebuild --force` goes ahead without a backup.
 
 ### A cards table is rebuilt on its own
 
@@ -145,7 +151,7 @@ The first is the demo corpus; the second is the engineer's shelf, with its own i
 `--doctor` reads every stamp out, agreeing or not, and exits non-zero on a mismatch:
 
 ```bash
-uv run ayl-add --doctor --db ~/ayl-index
+uv run ayl doctor --db ~/ayl-index
 ```
 
 ```
@@ -201,7 +207,7 @@ stamps. Leave it off if you are not sure.
 ## Backup
 
 ```bash
-uv run ayl-add --backup ~/ayl-backups --db ~/ayl-index
+uv run ayl backup ~/ayl-backups --db ~/ayl-index
 ```
 
 writes `~/ayl-backups/<timestamp>/` holding
@@ -220,7 +226,7 @@ writes `~/ayl-backups/<timestamp>/` holding
 **When a copy is safe.** This is the part a plain `cp -r` cannot give you, and it is the reason
 the command exists rather than a line in the README:
 
-1. **No ingest is running.** Both write paths (`ayl-add`, the demo corpus's ingest stages) hold an
+1. **No ingest is running.** Both write paths (`ayl add`, the demo corpus's ingest stages) hold an
    **`flock`** for the length of a run, on a file **beside** the index directory and named after it
    (`.ayl-ingest-<name>.lock`); `--backup` and `--restore` take the same lock. Beside rather than
    inside, because a restore publishes by renaming the directory and a lock living in it would
@@ -273,7 +279,7 @@ that are actually there and warns, naming them:
 version writes. SQLite leaves an existing table alone, so an older chat database keeps its
 old shape and fails on the first insert that names one of them. Move the file aside and let
 the UI create a new one (the conversation history in it is lost — back it up first with
-`uv run ayl-add --backup <dir>`), or add the column(s) by hand.
+`uv run ayl backup <dir>`), or add the column(s) by hand.
 ```
 
 A warning and not a refusal: the UI works for everything that does not touch the missing column,
@@ -284,8 +290,8 @@ release is recognisable as one rather than discovered column by column.
 ## Restore
 
 ```bash
-uv run ayl-add --restore ~/ayl-backups/20260917-051244 --db ~/ayl-index          # fresh location
-uv run ayl-add --restore ~/ayl-backups/20260917-051244 --db ~/ayl-index --force  # over an index
+uv run ayl restore ~/ayl-backups/20260917-051244 --db ~/ayl-index          # fresh location
+uv run ayl restore ~/ayl-backups/20260917-051244 --db ~/ayl-index --force  # over an index
 ```
 
 The backup is verified against its manifest first, every time. Three things are refused, and
@@ -311,36 +317,36 @@ put the restored one on whichever volume the link lives on.
 Then check what you have:
 
 ```bash
-uv run ayl-add --doctor --db ~/ayl-index
+uv run ayl doctor --db ~/ayl-index
 ```
 
 ## The procedure, end to end
 
 ```bash
 # 1. before pulling: know what you have, and keep it
-uv run ayl-add --doctor --db ~/ayl-index
-uv run ayl-add --backup ~/ayl-backups --db ~/ayl-index
+uv run ayl doctor --db ~/ayl-index
+uv run ayl backup ~/ayl-backups --db ~/ayl-index
 
 # 2. upgrade
 git pull && uv sync
 
 # 3. what does the new code think of the old index?
-uv run ayl-add --doctor --db ~/ayl-index
+uv run ayl doctor --db ~/ayl-index
 
 # 4a. no mismatch: nothing to do. A newer ROW SCHEMA is migrated in place by the next run:
-uv run ayl-add ~/books --db ~/ayl-index
+uv run ayl add ~/books --db ~/ayl-index
 
 # 4b. a chunker or embedder mismatch: rebuild, which discards every row it replaces
-uv run ayl-add ~/books --db ~/ayl-index                       # refused, and it names --rebuild
-uv run ayl-add ~/books --rebuild --backup ~/ayl-backups --db ~/ayl-index   # copy, drop, re-index
+uv run ayl add ~/books --db ~/ayl-index                       # refused, and it names --rebuild
+uv run ayl add ~/books --rebuild --backup ~/ayl-backups --db ~/ayl-index   # copy, drop, re-index
 # for the demo corpus, a full rebuild is the repair (it replaces every row):
 uv run scripts/ingest_demo_corpus.py --stage ingest
 
 # 5. only now, and only if step 4b succeeded, is the index what the stamp would claim
-uv run ayl-add --doctor --db ~/ayl-index
+uv run ayl doctor --db ~/ayl-index
 
 # 6. if the rebuild goes wrong, the backup is the way back
-uv run ayl-add --restore ~/ayl-backups/<timestamp> --db ~/ayl-index --force
+uv run ayl restore ~/ayl-backups/<timestamp> --db ~/ayl-index --force
 ```
 
 Run steps 4b and 5 from a **script** rather than pasting them into a terminal, so that a failing
@@ -351,7 +357,7 @@ line ends the run instead of the next line going ahead on top of it:
 set -euo pipefail                  # any failing line ends the run
 
 uv run scripts/ingest_demo_corpus.py --stage ingest
-uv run ayl-add --doctor --db ~/ayl-index
+uv run ayl doctor --db ~/ayl-index
 ```
 
 **A failed ingest stops the chain: never stamp after one.** `scripts/ingest_demo_corpus.py --stage ingest`
@@ -368,7 +374,7 @@ interactive shell that closes the window. The script above is the version that s
 
 ## See also
 
-- [`docs/add-your-own-books.md`](add-your-own-books.md) — `ayl-add` itself, the ledger, `--prune`
+- [`docs/add-your-own-books.md`](add-your-own-books.md) — `ayl add` itself, the ledger, `--prune`
 - [`docs/known-limits.md`](known-limits.md) — what a rebuild costs, and what the lock does not cover
 - [`docs/adr/README.md`](adr/README.md) — ADR-020 (what is stamped and how it is enforced),
   ADR-024 (the ledger and the row schema)

@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+- **One command, `ayl`, over everything that already ran** (#30). `ayl ask`, `ayl add`,
+  `ayl doctor`, `ayl backup`, `ayl restore`, `ayl books` and `ayl ui`. It is a router, not a
+  second implementation: `ask` is the CLI's own `main` and the four ingest verbs are the ingest
+  parser with one flag prefixed, each handed the arguments written after the command name unread —
+  so `ayl add ~/books --rebuild --backup ~/b` is the command line that parser always took, every
+  flag keeps working verbatim, and the exit codes (the preflight's 3/4/5 among them) pass straight
+  through. `ayl <command> --help` prints that parser's own help under the name that was typed, and
+  `ayl --help` / `ayl --version` answer before anything touches the environment, as the CLI's
+  always have.
+
+  Two of them are new. **`ayl books`** lists what the index holds from the index alone —
+  `list_books` then `render_catalog`, the pair a catalogue question reaches today only after a
+  planner call decides it is one — so the listing costs nothing and needs no model. **`ayl doctor`**
+  runs both halves of "is this machine ready": the preflight environment report the CLI prints
+  before it refuses a question, and then the ledger-against-index reconciliation that was
+  `ayl-add --doctor`. Both always run, because an unreachable Ollama must not hide index drift; the
+  status is the preflight's classification when the environment is the problem, else the doctor's
+  own. **`ayl ui`** is the `chainlit run ui.py --host 127.0.0.1` the docs told a reader to type,
+  and says so plainly when the package was installed as a wheel, which has no `ui.py` in it yet.
+
+  **`ask-library` and `ayl-add` are deprecated, not removed.** Both console scripts still run the
+  same code and print one line to stderr naming what to type instead; they go at `0.6.0`. Nothing a
+  reader has written down stops working in this release — including `scripts/install-mac.sh`, which
+  still prints the old names. The docs now lead with the `ayl` forms
+  ([quick start](quick-start.md), [add your own books](add-your-own-books.md),
+  [upgrading](upgrading.md), [configuration](configuration.md), the README), and the docs-as-code
+  check of #72 learnt the new spellings: a `--flag` written after `ayl add`, `ayl doctor`,
+  `ayl backup` or `ayl restore` is still compared against the parser that would receive it.
 - **A chapter read aimed at one word lands where the word is thickest, not on the first mention with
   silence after it** (#81). `best_match_span` ranks the runs of query words that fit in the window
   by how many distinct query words they cover, and between equals took the SHORTER run. At chapter
