@@ -153,7 +153,9 @@ def verb_flag(argument: str) -> str | None:
 
     A prefix that is ALSO the prefix of an ordinary option (`--back` is one of
     `--backup` and of `--backend`) is refused here rather than passed on, which
-    costs nothing: argparse would call it ambiguous and exit 2 anyway."""
+    costs nothing: with abbreviations off argparse would reject it as
+    unrecognized and exit 2 anyway, and this way the reader is told which
+    command the prefix was reaching for."""
     name = argument.split("=")[0]
     if not name.startswith("--") or name == "--":
         return None
