@@ -144,15 +144,23 @@ def check_environment(index_only: bool = False, db_path: Path | None = None,
     ingest.
 
     The key is still checked when the EMBEDDER is the hosted one, because the
-    fingerprint check builds that embedder and cannot without it."""
+    fingerprint check builds that embedder and cannot without it — the
+    EFFECTIVE embedder, the one `backend` names when it is given. Deriving it
+    from the configured pair instead demanded a key for an index that needs
+    none: a local answering model, OpenRouter embeddings in the `.env` and
+    `ayl doctor --backend ollama` over a healthy local index exited 4."""
     problems = []
     notices = []
     kinds = []
     db = DB_PATH if db_path is None else Path(db_path)
     embed_backend = EMBED_BACKEND if backend is None else backend
     tables = TABLES if backend is None else tables_for(backend)
-    needs_key = ((embed_backend == "openrouter") if index_only
-                 else (OPENROUTER_NEEDS_KEY or embed_backend == "openrouter"))
+    # The two halves that can need the key, each asked about separately, and the
+    # embedding one asked about the backend THIS call is checking.
+    # `OPENROUTER_NEEDS_KEY` is the configured pair collapsed into one answer,
+    # which cannot be taken apart again once `backend` overrides half of it.
+    needs_key = embed_backend == "openrouter" or (not index_only
+                                                  and LLM_BACKEND != "ollama")
     checks_local_runtime = not index_only and (embed_backend == "ollama"
                                                or LLM_BACKEND == "ollama")
 

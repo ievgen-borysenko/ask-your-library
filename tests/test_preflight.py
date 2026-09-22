@@ -268,6 +268,66 @@ def test_index_only_leaves_out_the_key_and_the_model_server(monkeypatch, tmp_pat
     assert set(preflight.check_environment().kinds) == {"no_key", "no_ollama"}
 
 
+def local_pair(monkeypatch, tmp_path, tables):
+    """A healthy machine answering on a LOCAL model, with both backends' tables
+    in the index and both models pulled — so the only thing left to decide the
+    key is which embedder the call is about."""
+    from ask_your_library import preflight as pf
+    preflight = healthy(monkeypatch, tmp_path, tables)
+    monkeypatch.setattr(preflight, "LLM_BACKEND", "ollama")
+    monkeypatch.setattr(preflight, "ORCHESTRATOR_MODEL", "qwen3.6")
+    monkeypatch.setattr(preflight, "openrouter_api_key",
+                        lambda: (_ for _ in ()).throw(RuntimeError("no key")))
+
+    class Up:
+        def get(self, *a, **k):
+            return Tags({"models": [{"name": "bge-m3:latest"}, {"name": "qwen3.6:latest"}]})
+    monkeypatch.setattr(preflight, "requests", Up())
+    return preflight
+
+
+BOTH_SUFFIXES = ["transcripts_ollama", "cards_ollama",
+                 "transcripts_openrouter", "cards_openrouter"]
+
+
+def test_an_overriding_backend_is_what_decides_whether_a_key_is_needed(monkeypatch, tmp_path):
+    """`--backend openrouter` means the fingerprint check builds the hosted
+    embedder, and that constructor reads the key — whatever the `.env` says the
+    configured embedder is."""
+    preflight = local_pair(monkeypatch, tmp_path, BOTH_SUFFIXES)
+    monkeypatch.setattr(preflight, "EMBED_BACKEND", "ollama")     # configured: local
+
+    assert preflight.check_environment() == []                    # nothing hosted, no key wanted
+    assert preflight.check_environment(backend="openrouter").kinds == ["no_key"]
+
+
+def test_an_overriding_backend_can_also_take_the_key_requirement_away(monkeypatch, tmp_path):
+    """The other direction, and the one that was wrong: a local answering model,
+    OpenRouter embeddings in the `.env`, and `--backend ollama` over a local
+    index. Nothing in that run touches OpenRouter, and it exited 4."""
+    preflight = local_pair(monkeypatch, tmp_path, BOTH_SUFFIXES)
+    monkeypatch.setattr(preflight, "EMBED_BACKEND", "openrouter")  # configured: hosted
+    # what config derives from that pair, and what the check used to read
+    monkeypatch.setattr(preflight, "OPENROUTER_NEEDS_KEY", True)
+
+    assert preflight.check_environment().kinds == ["no_key"]       # the configured embedder
+    assert preflight.check_environment(backend="ollama") == []     # the one asked about
+    assert preflight.check_environment(backend="ollama", index_only=True) == []
+
+
+def test_a_hosted_answering_model_needs_its_key_whatever_the_embedder_is(monkeypatch,
+                                                                        tmp_path):
+    """The key has two reasons to be wanted and they are asked about apart: an
+    override of the embedding half cannot excuse the answering half."""
+    preflight = local_pair(monkeypatch, tmp_path, BOTH_SUFFIXES)
+    monkeypatch.setattr(preflight, "LLM_BACKEND", "openrouter")
+    monkeypatch.setattr(preflight, "EMBED_BACKEND", "openrouter")
+
+    assert preflight.check_environment(backend="ollama").kinds == ["no_key"]
+    # ...and `ayl books` over that same index still needs none: it answers nothing
+    assert preflight.check_environment(backend="ollama", index_only=True) == []
+
+
 def test_index_only_still_checks_the_key_the_embedder_itself_needs(monkeypatch, tmp_path):
     """With EMBED_BACKEND=openrouter the fingerprint check builds a hosted
     embedder, and that constructor reads the key: leaving the key check out

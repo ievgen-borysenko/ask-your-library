@@ -19,7 +19,10 @@
   `--rebuild`) is refused under a verb that is not its own, naming what to type instead: the ingest
   parser answers `--doctor` first, so `ayl backup <dir> --doctor` took no copy, reported a clean
   index and exited 0. Anything after a bare `--` still reaches the ingest command verbatim, for a
-  flag the verb does not declare — screened for those four.
+  flag the verb does not declare — screened for those four **by prefix**, because argparse resolves
+  an unambiguous long option by its prefix and `--doct` was `--doctor` to the parser on the other
+  side of the hatch. The ingest parser is built with `allow_abbrev=False` as well: either fix alone
+  closes it, and a flag worth typing is worth typing out.
 
   **`--db` aims the whole of `ayl doctor`, not half of it.** The environment half read
   `LIBRARY_DB_PATH` while the index half read `--db`, so `ayl doctor --db ~/other` over a healthy
@@ -27,7 +30,11 @@
   reader to act on — and exited 3. `preflight.check_environment` takes `db_path` and `backend`
   (parameters, not a write to `config`, because a process-wide setting changed for one check is
   changed for everything after it), and `backend` selects the table names and the embedder the
-  fingerprint is compared against, exactly as it does for an ingest.
+  fingerprint is compared against, exactly as it does for an ingest — and whether a key is wanted.
+  The key has two reasons to be needed and they are now asked about apart, each about the backend
+  the call is actually checking: a local answering model with OpenRouter embeddings in the `.env`
+  and `ayl doctor --backend ollama` over a healthy local index exited 4 for a key nothing in that
+  run would have used.
 
   Two of them are new. **`ayl books`** lists what the index holds from the index alone —
   `list_books` then `render_catalog`, the pair a catalogue question reaches today only after a
