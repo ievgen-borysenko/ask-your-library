@@ -336,12 +336,18 @@ def run_ui(rest: list[str]) -> int:
                         help=f"the address to bind (default: CHAINLIT_HOST, now "
                              f"{launcher.default_host()}; anything else serves the chat to "
                              f"the network)")
-    parser.add_argument("--port", type=int, default=launcher.default_port(),
+    parser.add_argument("--port", type=launcher.checked_port,
+                        default=launcher.default_port(),
                         help=f"the port to serve on (default: CHAINLIT_PORT, now "
                              f"{launcher.default_port()})")
     args, extra = parser.parse_known_args(rest)
+    # Only the `chainlit` executable being missing is this sentence. Around the
+    # whole call it would also answer for a FileNotFoundError raised while the
+    # app root was being prepared — a packaged file gone from the wheel — by
+    # naming an extra that IS installed.
+    root = launcher.prepare(args.host, args.port)
     try:
-        return launcher.run(args.host, args.port, extra)
+        return launcher.start(root, args.host, args.port, extra)
     except FileNotFoundError:
         cli.say("chainlit is not installed: it is the `ui` extra — "
                 "`uv run --extra ui ayl ui`, or `uv sync --extra ui` once.", error=True)

@@ -16,6 +16,7 @@ on every machine that installed one.
 No Chainlit import: the launcher writes files and starts a subprocess, and
 this file must run on a clone without the `ui` extra.
 """
+import os
 import subprocess
 import sys
 import tomllib
@@ -171,6 +172,39 @@ def test_a_template_that_lost_its_origins_line_is_a_refusal_and_not_a_guess(root
 
 # --- and it is the app root the server is actually pointed at -----------------
 
+def test_a_host_that_is_not_a_host_is_refused_before_it_reaches_the_file(root):
+    """`render_config` interpolates the host into TOML, and the host can come
+    from a `.env` Chainlit loads before anything of ours runs: `evil"]` would
+    close the `allow_origins` array and write keys of its own into the file
+    that decides this server's CORS list, its HTML policy and whether MCP is
+    on. Refused, and — the second half — quoted even so."""
+    for hostile in ('evil"]', 'x"]\n[features.mcp]\nenabled = true\n#', "a b", "-lead",
+                    "e" * 254, "http://books.local", "books.local:8000"):
+        with pytest.raises(SystemExit, match="host"):
+            launcher.render_config(hostile, 8000)
+
+    # A name and an address still land, and a blank host is "none named" (the
+    # wildcard branch), not a refusal: `ayl ui` always passes a host.
+    launcher.prepare("books.example.com", 8000)
+    assert "http://books.example.com:8000" in written_config(root)["project"]["allow_origins"]
+    launcher.prepare("192.168.1.9", 8000)
+    assert "http://192.168.1.9:8000" in written_config(root)["project"]["allow_origins"]
+    launcher.prepare("", 8000)
+    assert written_config(root)["project"]["allow_origins"] == ["http://localhost:8000",
+                                                                "http://127.0.0.1:8000"]
+
+
+def test_a_host_with_a_quote_in_it_could_not_write_a_key_even_if_it_got_through(root,
+                                                                                monkeypatch):
+    """Belt and braces: with the check disabled, the quoting alone still has to
+    leave one `allow_origins` string and no new key."""
+    monkeypatch.setattr(launcher, "checked_host", lambda host: host)
+    launcher.prepare('evil"]\n[features.mcp]\nenabled = true\n#', 8000)
+    config = written_config(root)
+    assert config["features"]["mcp"]["enabled"] is False
+    assert len(config["project"]["allow_origins"]) == 3
+
+
 def test_the_prepared_root_is_the_one_chainlit_is_told_to_read(root, monkeypatch):
     seen = {}
     monkeypatch.setattr(launcher.subprocess, "call",
@@ -225,6 +259,46 @@ def test_every_packaged_file_the_launcher_reads_is_named_in_pyproject():
         assert source.is_file(), source
 
 
+def test_the_chat_db_and_the_auth_secret_never_default_to_the_working_directory(tmp_path):
+    """The wheel this slice makes possible, started anywhere: `<cwd>/.chainlit`
+    is a directory anyone can create first, and an `auth-secret` planted there
+    would be the signing key of every login token the server issues. So with no
+    checkout the fallback is the app root under AYL_HOME, and the working
+    directory is never consulted.
+
+    Asked in a child, because both modules resolve this at import, and from a
+    COPY of the package with no pyproject.toml above it — which is what makes
+    `paths.REPO_ROOT` empty exactly as it is in a wheel. `ingest/backup.py` is
+    asked in the same child: `ayl backup` copies that file and `ayl restore`
+    writes it, so the two must not disagree about which file it is."""
+    import shutil
+
+    package = Path(launcher.__file__).resolve().parents[1]
+    staged = tmp_path / "site-packages"
+    shutil.copytree(package, staged / "ask_your_library",
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    cwd = tmp_path / "started-here"
+    cwd.mkdir()
+    home = tmp_path / "AskYourLibrary"
+
+    code = ("from ask_your_library import paths\n"
+            "from ask_your_library.ui import launcher\n"
+            "from ask_your_library.ingest.backup import default_chat_db\n"
+            "assert paths.REPO_ROOT == '', paths.REPO_ROOT\n"
+            "print(launcher.app_root())\n"
+            "print(default_chat_db())\n")
+    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                          cwd=str(cwd),
+                          env={**os.environ, "PYTHONPATH": str(staged),
+                               "AYL_HOME": str(home), "AYL_CHAINLIT_DIR": ""})
+    assert done.returncode == 0, done.stderr
+
+    app_root, chat_db = (Path(line) for line in done.stdout.split())
+    assert app_root == (home / "ui").resolve()
+    assert chat_db == (home / "ui" / ".chainlit" / "chat.db").resolve()
+    assert not (cwd / ".chainlit").exists()
+
+
 def test_chainlits_own_host_and_port_are_read_and_a_nonsense_port_refused(monkeypatch):
     """`ayl ui` always passes `--host` and `--port`, so Chainlit's CLI never
     gets to read these itself; a variable a reader set that the command
@@ -243,6 +317,10 @@ def test_chainlits_own_host_and_port_are_read_and_a_nonsense_port_refused(monkey
         monkeypatch.setenv("CHAINLIT_PORT", nonsense)
         with pytest.raises(SystemExit, match="CHAINLIT_PORT"):
             launcher.default_port()
+        # `ayl ui --port` is the same rule under its own name; argparse's
+        # type=int would have taken every one of these but "eight".
+        with pytest.raises(SystemExit, match="--port"):
+            launcher.checked_port(nonsense)
 
 
 def test_the_launcher_does_not_need_the_ui_extra_to_be_imported():

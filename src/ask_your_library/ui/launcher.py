@@ -26,6 +26,8 @@ What is NOT decided here: the chat database and the auth secret, which
 Moving that default under `AYL_HOME` is one decision with the index and the
 scratch directory, and it is made in one place, not here.
 """
+import ipaddress
+import json
 import os
 import re
 import shutil
@@ -51,7 +53,15 @@ DEFAULT_PORT = 8000
 ALLOW_ORIGINS = re.compile(r"^allow_origins\s*=.*$", re.M)
 
 # A bind address is not an origin: no browser sends `Origin: http://0.0.0.0:…`.
-WILDCARD_HOSTS = {"", "0.0.0.0", "::", "*"}
+# `0` and `::0` are the same wildcard written shorter, and `inet_aton` accepts
+# both where a server binds.
+WILDCARD_HOSTS = {"", "0.0.0.0", "0", "::", "::0", "*"}
+
+# A DNS hostname, label by label: letters, digits and inner hyphens, 63 octets
+# a label and 253 in total, with one optional trailing dot. Deliberately not a
+# superset of what a resolver would take — what this admits is written into a
+# TOML file and into a command line.
+HOSTNAME = re.compile(r"(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*\.?")
 
 
 def default_host() -> str:
@@ -62,19 +72,25 @@ def default_host() -> str:
     return os.environ.get("CHAINLIT_HOST", "").strip() or DEFAULT_HOST
 
 
+def checked_port(raw, named: str = "--port") -> int:
+    """`raw` as a port number, or a refusal naming where it came from.
+
+    Digits only, anything else refused rather than rounded — the rule `app.py`
+    applies to its own numeric knob. One function for the variable and for the
+    flag, because they end in the same two places: the command line of the
+    server, and the `allow_origins` line of the file that decides its CORS
+    list. `argparse`'s `type=int` would take `-1`, `+8000` and `0x1f90`."""
+    text = str(raw).strip()
+    if not re.fullmatch(r"[0-9]+", text) or not 0 < int(text) < 65536:
+        raise SystemExit(f"{named} must be digits only, a port number between 1 and 65535")
+    return int(text)
+
+
 def default_port() -> int:
     """`CHAINLIT_PORT`, else 8000, on the same reasoning as `default_host`.
-
-    Digits only, blank meaning unset, anything else refused rather than
-    rounded — the rule `app.py` applies to its own numeric knob. A port this
-    process guessed at would be written into `allow_origins` as well as passed
-    to the server."""
+    Blank means unset, as blank does for every other knob here."""
     raw = os.environ.get("CHAINLIT_PORT", "").strip()
-    if not raw:
-        return DEFAULT_PORT
-    if not re.fullmatch(r"[0-9]+", raw) or not 0 < int(raw) < 65536:
-        raise SystemExit("CHAINLIT_PORT must be digits only, a port number between 1 and 65535")
-    return int(raw)
+    return checked_port(raw, "CHAINLIT_PORT") if raw else DEFAULT_PORT
 
 
 def app_root() -> Path:
@@ -83,9 +99,17 @@ def app_root() -> Path:
 
     `AYL_CHAINLIT_DIR` names the `.chainlit/` directory itself — `app.py` reads
     it for the chat database and the auth secret — and Chainlit derives its own
-    `.chainlit/` from the root above it, so taking the parent is what keeps the
+    `.chainlit/` from the root above it, so taking the parent is what puts the
     config, the translations, the chat db and the secret in one directory
-    instead of two.
+    rather than two.
+
+    Unset, this is also where the chat database and the auth secret land when
+    there is no checkout to hold them (`app.py`): a wheel's web chat writes
+    under `AYL_HOME` and never into the working directory, which is a place
+    anyone can prepare in advance. In a checkout the two part company by
+    design — the app root is here, the chat db stays in the checkout's
+    `.chainlit/` — until that default moves with the index and the scratch
+    directory.
 
     `home.ayl_home()`, deliberately not `home.private_dir()`. That refusal
     guards what may never leave the machine — a model-written card of a work
@@ -100,6 +124,30 @@ def app_root() -> Path:
     if named:
         return Path(named).expanduser().resolve().parent
     return home.ayl_home() / "ui"
+
+
+def checked_host(host: str) -> str:
+    """`host` if it is an address a server could bind and a browser could be
+    pointed at — an IPv4 or IPv6 literal, or a DNS hostname — else a refusal.
+
+    Validated because of where it goes: `render_config` writes it into a TOML
+    file, and the value can arrive from a `.env` that Chainlit loads before
+    anything here runs. `CHAINLIT_HOST=evil"]` would close the `allow_origins`
+    array and let whatever follows it be read as further TOML — new keys, in
+    the file that decides this server's CORS list, its HTML policy and whether
+    MCP is on. Quoting alone (`json.dumps`, below) closes the injection; this
+    refuses the value as well, because a host nobody can reach is not a thing
+    to start a server on quietly."""
+    name = (host or "").strip()
+    try:
+        ipaddress.ip_address(name)
+        return name
+    except ValueError:
+        pass
+    if len(name) > 253 or not HOSTNAME.fullmatch(name):
+        raise SystemExit(f"{name!r} is not a host: --host / CHAINLIT_HOST takes an IPv4 or "
+                         f"IPv6 address, or a DNS name")
+    return name
 
 
 def _origin(host: str, port: int) -> str:
@@ -120,7 +168,10 @@ def allow_origins(host: str, port: int) -> list[str]:
     anyone passed `--port`."""
     origins = [_origin("localhost", port), _origin("127.0.0.1", port)]
     name = (host or "").strip()
-    if name not in WILDCARD_HOSTS and _origin(name, port) not in origins:
+    if name in WILDCARD_HOSTS:
+        return origins
+    name = checked_host(name)
+    if _origin(name, port) not in origins:
         origins.append(_origin(name, port))
     return origins
 
@@ -132,9 +183,14 @@ def render_config(host: str, port: int) -> str:
     the configuration this project makes — so the substitution is a line
     rewrite rather than a placeholder. Exactly one line must match: the day the
     template loses that key or grows a second one, this is a refusal to start
-    and not a server running on origins nobody wrote."""
-    line = "allow_origins = [" + ", ".join(f'"{origin}"'
-                                           for origin in allow_origins(host, port)) + "]"
+    and not a server running on origins nobody wrote.
+
+    The list is built with `json.dumps` and the host is checked before it gets
+    here: a TOML array of basic strings is JSON's array of strings, and the
+    value being interpolated can come from a `.env` (`CHAINLIT_HOST=evil"]`
+    would otherwise close the array and write keys of its own into this
+    file)."""
+    line = "allow_origins = " + json.dumps(allow_origins(host, port))
     rendered, replaced = ALLOW_ORIGINS.subn(lambda _: line,
                                             CONFIG_TEMPLATE.read_text(encoding="utf-8"))
     if replaced != 1:
@@ -153,6 +209,13 @@ def prepare(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> Path:
     with it, and a copy left behind by an older version — or edited by hand —
     is a server running on decisions nobody made in this release, MCP among
     them.
+
+    `write_text`, not `home.write_private`: that writer is the one rule for
+    what may never be shared, and it refuses a path inside a git work tree —
+    which is not this file. What it also buys, an atomic rename, this does not
+    need: a half-written `config.toml` is not valid TOML, and Chainlit refuses
+    to start on it rather than serving half a policy. The next start rewrites
+    it from the template either way.
 
     The translation and the welcome page are copied only when they are absent:
     neither carries a decision the code depends on, and Chainlit itself would
@@ -183,13 +246,23 @@ def chainlit_command() -> str:
     return str(beside) if beside.exists() else "chainlit"
 
 
-def run(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, extra: list[str] | None = None) -> int:
-    """`chainlit run` against the packaged app, in the app root this prepared.
+def start(root: Path, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT,
+          extra: list[str] | None = None) -> int:
+    """`chainlit run` against the packaged app, in the app root `root`.
 
     `CHAINLIT_APP_ROOT` is set for the child rather than exported here or
     leaned on through a working directory: it is the one name that decides
     which `.chainlit/` Chainlit reads, and the child is the only process that
-    should be affected by it."""
-    environment = {**os.environ, "CHAINLIT_APP_ROOT": str(prepare(host, port))}
+    should be affected by it.
+
+    Apart from `prepare` so that a caller can tell the two failures apart: the
+    only FileNotFoundError this raises is the `chainlit` executable, which
+    `ayl ui` answers by naming the extra."""
+    environment = {**os.environ, "CHAINLIT_APP_ROOT": str(root)}
     return subprocess.call([chainlit_command(), "run", str(APP), "--host", host,
                             "--port", str(port), *(extra or [])], env=environment)
+
+
+def run(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, extra: list[str] | None = None) -> int:
+    """The whole of what `ayl ui` does: prepare the app root, then serve."""
+    return start(prepare(host, port), host, port, extra)

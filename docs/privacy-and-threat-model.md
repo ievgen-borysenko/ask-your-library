@@ -61,7 +61,8 @@ than assumed away. Details below.
   `CHAPTER_HIT_CHARS` in the environment set the two cuts) to `.scratch/` (gitignored,
   never cleaned up automatically).
 - The Chainlit UI stores chats, questions and answers included, in `chat.db` under
-  `AYL_CHAINLIT_DIR` (by default `.chainlit/` in the checkout), a SQLite file.
+  `AYL_CHAINLIT_DIR` (by default `.chainlit/` in the checkout, or `$AYL_HOME/ui/.chainlit/`
+  where there is no checkout — never the directory the server was started in), a SQLite file.
 - Optional LangSmith tracing (`LANGCHAIN_API_KEY`, or `LANGSMITH_API_KEY` with `LANGSMITH_TRACING`)
   sends prompts and retrieved text to LangSmith; `LANGSMITH_TRACING_V2=false` and
   `LANGCHAIN_TRACING_V2=false` together keep it off.

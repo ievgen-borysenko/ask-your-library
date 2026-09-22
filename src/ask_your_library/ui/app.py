@@ -69,6 +69,7 @@ from ask_your_library.i18n import (LANG, get_lang, set_lang, source_word,  # noq
 from ask_your_library.preflight import check_api_key, check_environment  # noqa: E402
 from ask_your_library.bookkey import split_read_query, unescape_marker  # noqa: E402
 from ask_your_library.paths import REPO_ROOT                        # noqa: E402
+from ask_your_library.ui import launcher                           # noqa: E402
 from ask_your_library.provenance import match_span                  # noqa: E402
 from ask_your_library.runner import failed_result, history_entry, run_question  # noqa: E402
 from ask_your_library.sanitize import LINE_BREAK_RE                 # noqa: E402
@@ -113,8 +114,16 @@ SCRATCH_DIR = Path(os.environ.get("ASK_SCRATCH_DIR", ".scratch"))
 # now be the installed package's own folder. The rule is written out the same
 # way in ingest/backup.py (default_chat_db), which is what `ayl backup` copies;
 # the two move together, under AYL_HOME, with the index and the scratch dir.
+#
+# WITHOUT a checkout — the wheel this slice makes possible — the fallback is
+# the app root launcher.py prepares, never the working directory. `<cwd>/.chainlit`
+# is a directory anyone can create first: an `auth-secret` planted in /tmp/.chainlit
+# would be read below as THE signing key of every login token this server issues,
+# and the chat database would be a file someone else owns. AYL_HOME is the
+# reader's own folder, and it is where the launcher already put the config.
 CHAINLIT_DIR = Path(os.environ.get("AYL_CHAINLIT_DIR")
-                    or (Path(REPO_ROOT) if REPO_ROOT else Path.cwd()) / ".chainlit")
+                    or (Path(REPO_ROOT) / ".chainlit" if REPO_ROOT
+                        else launcher.app_root() / ".chainlit"))
 CHAT_DB_PATH = CHAINLIT_DIR / "chat.db"
 
 

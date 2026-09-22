@@ -75,16 +75,25 @@ def default_chat_db() -> Path:
     """Where the web UI keeps its chat database.
 
     The same rule `ui/app.py` applies (`AYL_CHAINLIT_DIR`, else `.chainlit/` in
-    the checkout), re-derived here rather than imported: importing that module
-    pulls in Chainlit, which is an optional extra, and `ayl-add` must run
-    without it. Resolved at CALL time, not at import, because the UI resolves it
-    at import and the tests set that variable per test.
+    the checkout, else the app root the launcher prepares), re-derived here
+    rather than imported: importing that module pulls in Chainlit, which is an
+    optional extra, and `ayl-add` must run without it. `ui.launcher` is not
+    Chainlit — it writes files and starts a subprocess — so the app-root branch
+    IS shared, and the two cannot disagree about where the database is.
+    Resolved at CALL time, not at import, because the UI resolves it at import
+    and the tests set that variable per test.
+
+    Never the working directory: a `.chainlit/` there is a directory anyone can
+    create first, and this function also names the file a restore WRITES.
 
     An absent file is not an error anywhere below — plenty of installations
     never start the web UI."""
     from ..paths import REPO_ROOT
+    from ..ui.launcher import app_root
     named = os.environ.get("AYL_CHAINLIT_DIR")
-    base = Path(named) if named else (Path(REPO_ROOT) if REPO_ROOT else Path.cwd()) / ".chainlit"
+    if named:
+        return Path(named) / "chat.db"
+    base = Path(REPO_ROOT) / ".chainlit" if REPO_ROOT else app_root() / ".chainlit"
     return base / "chat.db"
 
 

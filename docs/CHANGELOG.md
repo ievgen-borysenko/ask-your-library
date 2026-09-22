@@ -103,7 +103,20 @@
   empty afterwards: a `.chainlit/` appearing there is a server configured by where it was started
   rather than by the app root. What did NOT move: the chat database and the auth secret still come
   from `AYL_CHAINLIT_DIR`, defaulting to the checkout's `.chainlit/` as before — that default
-  belongs with the index and the scratch directory, and moves once, with them.
+  belongs with the index and the scratch directory, and moves once, with them. Where there is no
+  checkout, which is new here, they fall back to the app root under `$AYL_HOME` and never to the
+  working directory: `<cwd>/.chainlit` is a directory anyone can create first, and an
+  `auth-secret` waiting in it would be the signing key of every login token the server issues.
+  `ayl backup` and `ayl restore` derive the same three-branch rule, so they cannot end up copying
+  a different file than the one the UI writes.
+
+  **The host and the port are validated before they are written into that config.** Both can
+  arrive from a `.env` — Chainlit loads one at its own import — and the config is TOML being
+  generated: `CHAINLIT_HOST=evil"]` would have closed the `allow_origins` array and let what
+  followed it be read as further keys, in the file that decides this server's CORS list, its HTML
+  policy and whether MCP is on. A host must now be an IPv4 or IPv6 literal or a DNS name, the
+  list is built with `json.dumps`, and `--port` takes the digits-only rule `CHAINLIT_PORT`
+  already had (argparse's `type=int` accepts `-1` and `0x1f90`).
 - **A chapter read aimed at one word lands where the word is thickest, not on the first mention with
   silence after it** (#81). `best_match_span` ranks the runs of query words that fit in the window
   by how many distinct query words they cover, and between equals took the SHORTER run. At chapter
