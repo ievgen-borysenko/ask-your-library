@@ -13,9 +13,12 @@ from pathlib import Path
 
 import lancedb
 import pytest
+import requests
 
 from ask_your_library import ayl, cli, library
 from ask_your_library.catalog import render_catalog, run_catalog
+from ask_your_library.embeddings import OllamaEmbedder
+from ask_your_library.i18n import t
 from ask_your_library.ingest import add_folder
 from ask_your_library.library import TITLE_SEPARATOR
 from ask_your_library.preflight import PreflightResult
@@ -26,7 +29,7 @@ def no_environment(monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("OPENROUTER_ENV_FILE", raising=False)
 
-    def forbidden():
+    def forbidden(index_only=False):
         raise AssertionError("check_environment() was called for --help/--version")
     monkeypatch.setattr(ayl, "check_environment", forbidden)
     monkeypatch.setattr(cli, "check_environment", forbidden)
@@ -184,8 +187,8 @@ def test_an_add_exit_status_passes_through(monkeypatch, code):
 def test_doctor_runs_both_halves_and_reports_the_environment_first(monkeypatch, capsys):
     order = []
 
-    def preflight():
-        order.append("preflight")
+    def preflight(index_only=False):
+        order.append(("preflight", index_only))
         return PreflightResult([], (), [])
     monkeypatch.setattr(ayl, "check_environment", preflight)
 
@@ -195,7 +198,8 @@ def test_doctor_runs_both_halves_and_reports_the_environment_first(monkeypatch, 
     monkeypatch.setattr(add_folder, "main", doctor)
 
     assert ayl.main(["doctor", "--db", "~/i"]) == 0
-    assert order == ["preflight", ("doctor", ["--doctor", "--db", "~/i"], "ayl doctor")]
+    assert order == [("preflight", False),          # the doctor reports the whole environment
+                     ("doctor", ["--doctor", "--db", "~/i"], "ayl doctor")]
 
 
 def test_a_broken_environment_still_runs_the_index_doctor_and_sets_the_status(monkeypatch,
@@ -204,7 +208,8 @@ def test_a_broken_environment_still_runs_the_index_doctor_and_sets_the_status(mo
     which is what the reader opened this command for. The status is the
     preflight's classification, the same number `ayl ask` would exit with."""
     monkeypatch.setattr(ayl, "check_environment",
-                        lambda: PreflightResult(["ollama is not there"], (), ["no_ollama"]))
+                        lambda index_only=False: PreflightResult(["ollama is not there"], (),
+                                                                  ["no_ollama"]))
     seen = []
     monkeypatch.setattr(add_folder, "main",
                         lambda argv=None, prog=None: seen.append(list(argv)) or 0)
@@ -215,7 +220,8 @@ def test_a_broken_environment_still_runs_the_index_doctor_and_sets_the_status(mo
 
 
 def test_a_healthy_environment_leaves_the_doctors_own_status(monkeypatch):
-    monkeypatch.setattr(ayl, "check_environment", lambda: PreflightResult([], (), []))
+    monkeypatch.setattr(ayl, "check_environment",
+                        lambda index_only=False: PreflightResult([], (), []))
     monkeypatch.setattr(add_folder, "main", lambda argv=None, prog=None: 1)
     assert ayl.main(["doctor"]) == 1
 
@@ -251,7 +257,8 @@ def index(tmp_path, monkeypatch):
     monkeypatch.setattr(library, "DB_PATH", tmp_path / "db")
     db = lancedb.connect(str(tmp_path / "db"))
     db.create_table(library.TABLES["transcripts"], [row(MOBY), row(GULLIVER, "pg:829")])
-    monkeypatch.setattr(ayl, "check_environment", lambda: PreflightResult([], (), []))
+    monkeypatch.setattr(ayl, "check_environment",
+                        lambda index_only=False: PreflightResult([], (), []))
 
 
 def test_books_lists_the_index_and_calls_no_model(index, monkeypatch, capsys):
@@ -272,7 +279,7 @@ def test_books_lists_the_index_and_calls_no_model(index, monkeypatch, capsys):
 def test_books_without_an_index_is_the_preflights_status_and_not_a_traceback(monkeypatch,
                                                                             capsys):
     monkeypatch.setattr(ayl, "check_environment",
-                        lambda: PreflightResult(["no index yet"], (), ["no_db"]))
+                        lambda index_only=False: PreflightResult(["no index yet"], (), ["no_db"]))
     assert ayl.main(["books"]) == 3
     assert "no index yet" in capsys.readouterr().err
 
@@ -282,6 +289,67 @@ def test_books_takes_no_arguments_and_says_so(capsys):
         ayl.main(["books", "--everything"])
     assert exit_info.value.code == 2
     assert "ayl books" in capsys.readouterr().err
+
+
+# --- books over the real preflight: no Ollama, no key -------------------------
+
+def embedded_row(book, source="pg:1"):
+    """A row whose vector is as wide as the configured embedder declares, so
+    the real fingerprint check reads this index as one that embedder built —
+    the two-dimensional vectors above are for `list_books`, which reads two
+    metadata columns and no vector at all."""
+    return {**row(book, source), "vector": [0.0] * OllamaEmbedder.dims}
+
+
+@pytest.fixture
+def unreachable_everything(tmp_path, monkeypatch):
+    """A real index, and the REAL preflight over it, in the environment a
+    reader most often has: a hosted answering model whose key is not set, and
+    an Ollama that nothing answers on. Returns the index path."""
+    from ask_your_library import preflight
+
+    monkeypatch.setattr(ayl, "check_environment", preflight.check_environment)
+    monkeypatch.setattr(preflight, "LLM_BACKEND", "openrouter")
+    monkeypatch.setattr(preflight, "EMBED_BACKEND", "ollama")
+    monkeypatch.setattr(preflight, "OPENROUTER_NEEDS_KEY", True)
+    monkeypatch.setattr(preflight, "openrouter_api_key",
+                        lambda: (_ for _ in ()).throw(RuntimeError("no key")))
+
+    class Dead:
+        def get(self, *a, **k):
+            raise requests.ConnectionError("nothing on that port")
+    monkeypatch.setattr(preflight, "requests", Dead())
+
+    db_path = tmp_path / "db"
+    monkeypatch.setattr(preflight, "DB_PATH", db_path)
+    monkeypatch.setattr(library, "DB_PATH", db_path)
+    lancedb.connect(str(db_path)).create_table(
+        library.TABLES["transcripts"], [embedded_row(MOBY), embedded_row(GULLIVER, "pg:829")])
+    return db_path
+
+
+def test_books_lists_the_index_with_no_ollama_and_no_key(unreachable_everything, capsys):
+    """The listing is two metadata columns of a table that is already on this
+    disk. Nothing about it needs a model server or an account, so neither may
+    stand between the reader and it."""
+    assert ayl.main(["books"]) == 0
+    out = capsys.readouterr()
+    assert MOBY in out.out and GULLIVER in out.out
+    assert t("pf_header") not in out.err          # nothing is wrong with THIS run
+
+
+def test_doctor_still_reports_the_unreachable_ollama(unreachable_everything, capsys):
+    """The other half of the same decision: `ayl doctor` answers "is this
+    machine ready", so it keeps checking everything and keeps the status that
+    says which to fix first."""
+    from ask_your_library import preflight
+
+    assert ayl.main(["doctor", "--db", str(unreachable_everything)]) == 5
+    err = capsys.readouterr().err
+    assert t("pf_header") in err
+    assert t("pf_no_ollama", url=preflight.OLLAMA_URL,
+             pulls=preflight.pull_commands()) in err
+    assert t("pf_no_key") in err
 
 
 # --- ui -----------------------------------------------------------------------

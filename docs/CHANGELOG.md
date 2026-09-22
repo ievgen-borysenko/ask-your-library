@@ -14,7 +14,12 @@
 
   Two of them are new. **`ayl books`** lists what the index holds from the index alone —
   `list_books` then `render_catalog`, the pair a catalogue question reaches today only after a
-  planner call decides it is one — so the listing costs nothing and needs no model. **`ayl doctor`**
+  planner call decides it is one — so the listing costs nothing and needs no model. Its preflight
+  is the index half only (`check_environment(index_only=True)`, the same code reporting the same
+  kinds): the command reads two metadata columns of a table already on the disk, so a model server
+  that is not running and an unset key are not its problems and are not its exit status, while a
+  missing index is still exit 3. The key is still checked when the EMBEDDER is the hosted one,
+  because the fingerprint check builds that embedder. **`ayl doctor`**
   runs both halves of "is this machine ready": the preflight environment report the CLI prints
   before it refuses a question, and then the ledger-against-index reconciliation that was
   `ayl-add --doctor`. Both always run, because an unreachable Ollama must not hide index drift; the
@@ -30,6 +35,8 @@
   [upgrading](upgrading.md), [configuration](configuration.md), the README), and the docs-as-code
   check of #72 learnt the new spellings: a `--flag` written after `ayl add`, `ayl doctor`,
   `ayl backup` or `ayl restore` is still compared against the parser that would receive it.
+  Deliberately left for follow-ups: the macOS installer, the ingest command's own printed hints
+  and the reference pages beyond the five above still write the old names.
 - **A chapter read aimed at one word lands where the word is thickest, not on the first mention with
   silence after it** (#81). `best_match_span` ranks the runs of query words that fit in the window
   by how many distinct query words they cover, and between equals took the SHORTER run. At chapter

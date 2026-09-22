@@ -118,12 +118,26 @@ def pull_commands() -> str:
     return ", ".join(f"`ollama pull {model}`" for model in models)
 
 
-def check_environment() -> PreflightResult:
+def check_environment(index_only: bool = False) -> PreflightResult:
     """Human-readable problems (empty = good to go), with `.notices` for
-    non-fatal degradations and `.kinds` for what each problem was."""
+    non-fatal degradations and `.kinds` for what each problem was.
+
+    `index_only` leaves out the two halves a command that merely READS the
+    index cannot be stopped by: the answering model's key, and the local model
+    server. `ayl books` lists the book keys the tables hold — no vector is
+    computed, no model is called — so an Ollama that is not running is not that
+    command's problem and must not become its exit status. The index half below
+    is the same code either way, reporting the same kinds, so "no index" is
+    exit 3 here exactly as it is for a question.
+
+    The key is still checked when the EMBEDDER is the hosted one, because the
+    fingerprint check builds that embedder and cannot without it."""
     problems = []
     notices = []
     kinds = []
+    needs_key = (EMBED_BACKEND == "openrouter") if index_only else OPENROUTER_NEEDS_KEY
+    checks_local_runtime = not index_only and (EMBED_BACKEND == "ollama"
+                                               or LLM_BACKEND == "ollama")
 
     def problem(kind: str, message: str) -> None:
         """One problem, recorded twice: the sentence a reader gets, and the
@@ -133,13 +147,13 @@ def check_environment() -> PreflightResult:
         problems.append(message)
         kinds.append(kind)
 
-    if OPENROUTER_NEEDS_KEY:
+    if needs_key:
         try:
             openrouter_api_key()
         except RuntimeError:
             problem("no_key", t("pf_no_key"))
 
-    if EMBED_BACKEND == "ollama" or LLM_BACKEND == "ollama":
+    if checks_local_runtime:
         tags = None
         try:
             tags = requests.get(f"{OLLAMA_URL}/api/tags", timeout=3)

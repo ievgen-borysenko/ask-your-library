@@ -247,6 +247,68 @@ def test_a_hosted_llm_never_asks_for_a_pulled_chat_model(monkeypatch, tmp_path):
     assert preflight.check_environment() == []
 
 
+# --- the index half alone (`ayl books`) --------------------------------------
+
+def test_index_only_leaves_out_the_key_and_the_model_server(monkeypatch, tmp_path):
+    """A command that only READS the index — `ayl books` lists the book keys
+    the tables hold — calls no model and embeds nothing, so neither a missing
+    key nor a dead Ollama is its problem. The full check on the same
+    environment reports both."""
+    from ask_your_library import preflight as pf
+    preflight = healthy(monkeypatch, tmp_path, list(pf.TABLES.values()))
+    monkeypatch.setattr(preflight, "openrouter_api_key",
+                        lambda: (_ for _ in ()).throw(RuntimeError("no key")))
+
+    class Dead:
+        def get(self, *a, **k):
+            raise requests.ConnectionError("nothing on that port")
+    monkeypatch.setattr(preflight, "requests", Dead())
+
+    assert preflight.check_environment(index_only=True) == []
+    assert set(preflight.check_environment().kinds) == {"no_key", "no_ollama"}
+
+
+def test_index_only_still_checks_the_key_the_embedder_itself_needs(monkeypatch, tmp_path):
+    """With EMBED_BACKEND=openrouter the fingerprint check builds a hosted
+    embedder, and that constructor reads the key: leaving the key check out
+    here would report the missing key as an unreadable index."""
+    from ask_your_library import preflight as pf
+    preflight = healthy(monkeypatch, tmp_path, list(pf.TABLES.values()))
+    monkeypatch.setattr(preflight, "EMBED_BACKEND", "openrouter")
+    monkeypatch.setattr(preflight, "openrouter_api_key",
+                        lambda: (_ for _ in ()).throw(RuntimeError("no key")))
+
+    assert preflight.check_environment(index_only=True).kinds == ["no_key"]
+
+
+def test_index_only_keeps_the_status_a_missing_index_always_had(monkeypatch, tmp_path):
+    """The index half is the same code, so its kinds and its exit code are the
+    same: no database is still 3, and a wrapper script reads one table."""
+    from ask_your_library import preflight as pf
+    preflight = healthy(monkeypatch, tmp_path, list(pf.TABLES.values()))
+    monkeypatch.setattr(preflight, "DB_PATH", tmp_path / "not-built-yet")
+
+    result = preflight.check_environment(index_only=True)
+    assert result.kinds == ["no_db"] and pf.exit_code(result) == pf.EXIT_NO_INDEX
+
+    preflight = healthy(monkeypatch, tmp_path, [pf.TABLES["cards"]])
+    result = preflight.check_environment(index_only=True)
+    assert result.kinds == ["no_tables"] and pf.exit_code(result) == pf.EXIT_NO_INDEX
+
+
+def test_index_only_still_reports_the_degradations_the_reader_should_know(monkeypatch,
+                                                                         tmp_path):
+    """The notices belong to the index, not to the model server: an index
+    without book cards is the shape `ayl add` builds, and saying so is as
+    useful under `ayl books` as under a question."""
+    from ask_your_library import preflight as pf
+    preflight = healthy(monkeypatch, tmp_path, [pf.TABLES["transcripts"]])
+
+    result = preflight.check_environment(index_only=True)
+    assert result == [] and len(result.notices) == 1
+    assert pf.TABLES["cards"] in result.notices[0]
+
+
 def test_a_repo_env_file_cannot_hand_the_suite_a_provider_key(tmp_path):
     """The suite must not be able to reach a provider, whatever is on the
     machine — and `config.load_dotenv()` runs at the first package import and

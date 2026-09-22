@@ -79,12 +79,15 @@ def split_argv(argv: list[str]) -> tuple[list[str], list[str]]:
     return argv, []
 
 
-def report_environment() -> PreflightResult:
+def report_environment(index_only: bool = False) -> PreflightResult:
     """The preflight block, printed the way `ayl ask` prints it before it
     refuses to run: every problem, then the non-fatal notices. Returns the
     result so the caller can turn it into an exit status; printing is all this
-    does."""
-    problems = check_environment()
+    does.
+
+    `index_only` is the half a command that only reads the index can fail on —
+    see `preflight.check_environment`."""
+    problems = check_environment(index_only=index_only)
     if problems:
         cli.say(t("pf_header"), error=True)
         for problem in problems:
@@ -160,12 +163,15 @@ def run_books(rest: list[str]) -> int:
     planner call.
 
     The preflight still runs, which is what makes a missing index exit 3 and a
-    sentence rather than a traceback out of LanceDB."""
+    sentence rather than a traceback out of LanceDB — but only its index half:
+    this command calls no model and embeds nothing, so an Ollama that is not
+    running and an unset key are not its problems and must not be its exit
+    status."""
     argparse.ArgumentParser(
         prog="ayl books",
         description="List the books in the index, as the agent's catalogue answer "
-                    "lists them: no model call, nothing paid.").parse_args(rest)
-    problems = report_environment()
+                    "lists them: no model call, no key, nothing paid.").parse_args(rest)
+    problems = report_environment(index_only=True)
     if problems:
         return exit_code(problems)
     # Titles are index metadata, i.e. data: printed through `say`, as every
