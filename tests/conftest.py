@@ -88,7 +88,14 @@ TRACING_OFF = {"LANGCHAIN_TRACING_V2": "false", "LANGSMITH_TRACING_V2": "false",
 
 # Credentials and the opt-in key file: pinned BLANK, so no test can reach a
 # provider or a tracing endpoint even by accident, whatever the shell holds.
-BLANKED = ("OPENROUTER_API_KEY", "LANGCHAIN_API_KEY", "LANGSMITH_API_KEY", "OPENROUTER_ENV_FILE")
+# Blank, not absent, for the reason spelled out in pin_environment below. The
+# two CHAINLIT_ names are here because this project reads them now (#30):
+# CHAINLIT_HOST is added to the web chat's trusted-host list at its import, so
+# a developer who exports one would be running the whole suite against a server
+# that answers to a name no test named — test_a_foreign_host_header_is_refused
+# is the one that notices. Every reader treats blank as unset.
+BLANKED = ("OPENROUTER_API_KEY", "LANGCHAIN_API_KEY", "LANGSMITH_API_KEY", "OPENROUTER_ENV_FILE",
+           "CHAINLIT_HOST", "CHAINLIT_PORT")
 
 
 def pin_environment() -> None:
@@ -182,12 +189,6 @@ SCRUBBED = frozenset(DEFAULTS) | frozenset(TRACING_OFF) | frozenset(BLANKED) | {
     "LITERAL_API_KEY",
     "CHAINLIT_AUTH_SECRET", "CHAINLIT_USERNAME", "CHAINLIT_PASSWORD",
     "CHAINLIT_COOKIE_SAMESITE",
-    # Chainlit's own two, which this project now reads as well (#30): they are
-    # the defaults of `ayl ui --host` / `--port`, the port goes into the
-    # generated `allow_origins`, and the host is added to the web chat's
-    # trusted-host list. A developer's exported CHAINLIT_HOST would otherwise
-    # decide what a child reports about any of the three.
-    "CHAINLIT_HOST", "CHAINLIT_PORT",
 } | {name for base in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY")
      for name in (base, base.lower())}
 

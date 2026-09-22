@@ -131,7 +131,7 @@ ALLOWED_HOSTS = ["localhost", "127.0.0.1"] + _bound_host()
 # Absolute, and decided by the launcher for a server it starts (`scratch_dir`):
 # `config`'s relative default put the retrieved passages of the first answered
 # question in a `.scratch/` beside whatever directory the command was typed in.
-SCRATCH_DIR = Path(os.environ.get("ASK_SCRATCH_DIR") or launcher.scratch_dir())
+SCRATCH_DIR = launcher.scratch_dir()
 # AYL_CHAINLIT_DIR exists so tests can import this module without touching the
 # checkout's .chainlit/ (the import creates the chat db and the auth secret
 # there). Its default is the checkout's, not this file's directory: the module

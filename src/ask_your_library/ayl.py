@@ -333,9 +333,11 @@ def run_ui(rest: list[str]) -> int:
         epilog="Every other argument goes to `chainlit run` verbatim (`-w` to reload "
                "on edit). Needs the `ui` extra: `uv sync --extra ui` once.")
     parser.add_argument("--host", default=launcher.default_host(),
-                        help=f"the address to bind (default: CHAINLIT_HOST, now "
-                             f"{launcher.default_host()}; anything else serves the chat to "
-                             f"the network)")
+                        help=f"the address to bind — an IPv4 address or a DNS name (default: "
+                             f"CHAINLIT_HOST, now {launcher.default_host()}; anything but "
+                             f"loopback serves the chat to the network). An IPv6 literal is "
+                             f"refused: the server's own Host check cannot match a bracketed "
+                             f"one, so it would answer 400 to every browser")
     parser.add_argument("--port", type=launcher.checked_port,
                         default=launcher.default_port(),
                         help=f"the port to serve on (default: CHAINLIT_PORT, now "

@@ -127,6 +127,15 @@
   nothing: `0.0.0.0` is no name a browser sends, and any OTHER host is still 400, which is what
   closes DNS rebinding.
 
+  Two limits of that check, both now decided rather than met at runtime. The host is **lowercased**
+  before it is used: the middleware compares the `Host` header to the list exactly and a browser
+  sends the name lowercased, so `--host Books.local` refused the one name it had been told to
+  serve. And an **IPv6 literal is refused** with the reason, because that middleware reads the
+  host as `headers["host"].split(":")[0]` — which is `[` for the `[::1]:8000` a browser sends, and
+  matches nothing. `--host ::1` would have bound the address and then answered 400 to every
+  request that reached it; the refusal says so at the one moment it can still be acted on. `::`
+  and `::0` are unaffected — a wildcard bind is not a name.
+
   **Nothing the server writes lands in the directory it was started in.** `ASK_SCRATCH_DIR`
   defaulted to a relative `.scratch`, which was right while the web chat could only be started
   from the checkout; from a wheel the first answered question would have dropped retrieved

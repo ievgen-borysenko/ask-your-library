@@ -706,6 +706,40 @@ def test_the_host_the_server_was_bound_to_answers_and_nothing_else_does(tmp_path
     assert foreign == "400"
 
 
+def test_the_bound_host_is_matched_whatever_case_it_was_typed_in(tmp_path):
+    """The middleware compares the `Host` header to the list exactly, and a
+    browser sends the name lowercased: `ayl ui --host Books.local` answered 400
+    to the one name it had been told to serve. The fold happens in
+    `checked_host`, so the CORS list gets it too."""
+    code = ("from starlette.testclient import TestClient\n"
+            "import ask_your_library.ui.app as ui\n"
+            "from chainlit.server import app\n"
+            "print(ui.ALLOWED_HOSTS)\n"
+            "print(TestClient(app).get('/', headers={'host': 'books.local'}).status_code)\n")
+    allowed, status = _out(
+        code, CHAINLIT_HOST="Books.LOCAL", CHAINLIT_AUTH_SECRET="test-secret",
+        AYL_ALLOW_DEFAULT_LOGIN="1", AYL_ALLOW_START_WITHOUT_KEY="1",
+        LLM_BACKEND="ollama", EMBED_BACKEND="ollama",
+        AYL_CHAINLIT_DIR=str(tmp_path / "chainlit")).splitlines()
+
+    assert allowed == "['localhost', '127.0.0.1', 'books.local']"
+    assert status == "200"
+
+
+def test_an_ipv6_host_refuses_to_start_rather_than_serving_400_to_everyone(tmp_path):
+    """The middleware reads the host as `headers["host"].split(":")[0]`, which
+    is `[` for the `[::1]:8000` a browser sends. Binding it and then refusing
+    every request is the worst of the three options; the refusal says so where
+    it can still be acted on."""
+    result = _run("import ask_your_library.ui.app", check=False,
+                  CHAINLIT_HOST="::1", CHAINLIT_AUTH_SECRET="test-secret",
+                  AYL_ALLOW_DEFAULT_LOGIN="1", AYL_ALLOW_START_WITHOUT_KEY="1",
+                  LLM_BACKEND="ollama", EMBED_BACKEND="ollama",
+                  AYL_CHAINLIT_DIR=str(tmp_path / "chainlit"))
+    assert result.returncode != 0
+    assert "Host header" in result.stderr and "127.0.0.1" in result.stderr
+
+
 def test_a_wildcard_bind_adds_no_host_and_a_bad_one_refuses_to_start(monkeypatch, tmp_path):
     """`0.0.0.0` names no host a browser sends, so it adds nothing and the
     loopback pair stands — serving a LAN under a name means passing that name.
@@ -716,7 +750,7 @@ def test_a_wildcard_bind_adds_no_host_and_a_bad_one_refuses_to_start(monkeypatch
     monkeypatch.setenv("AYL_ALLOW_START_WITHOUT_KEY", "1")
     monkeypatch.setenv("AYL_CHAINLIT_DIR", str(tmp_path / "chainlit"))
 
-    for wildcard in ("0.0.0.0", "::", ""):
+    for wildcard in ("0.0.0.0", "::", "::0", ""):
         monkeypatch.setenv("CHAINLIT_HOST", wildcard)
         sys.modules.pop(UI_MODULE, None)
         assert importlib.import_module(UI_MODULE).ALLOWED_HOSTS == ["localhost", "127.0.0.1"]

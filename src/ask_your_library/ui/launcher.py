@@ -170,8 +170,9 @@ def scratch_dir() -> Path:
 
 
 def checked_host(host: str) -> str:
-    """`host` if it is an address a server could bind and a browser could be
-    pointed at — an IPv4 or IPv6 literal, or a DNS hostname — else a refusal.
+    """`host` if it is an address a server could bind AND a browser could be
+    pointed at — an IPv4 literal or a DNS hostname, lowercased — else a
+    refusal.
 
     Validated because of where it goes: `render_config` writes it into a TOML
     file, and the value can arrive from a `.env` that Chainlit loads before
@@ -180,21 +181,49 @@ def checked_host(host: str) -> str:
     the file that decides this server's CORS list, its HTML policy and whether
     MCP is on. Quoting alone (`json.dumps`, below) closes the injection; this
     refuses the value as well, because a host nobody can reach is not a thing
-    to start a server on quietly."""
+    to start a server on quietly.
+
+    Lowercased because the `Host` check it feeds compares strings exactly
+    (`starlette.middleware.trustedhost`) and a browser sends the name
+    lowercased: `--host Books.local` was a server that answered 400 to the
+    name it had just been told to serve. A DNS name is case-insensitive, so
+    this loses nothing; an IPv4 literal has no case to lose.
+
+    An IPv6 LITERAL is refused, and that is a real limit rather than an
+    oversight. A browser asks for `[::1]:8000`, and the middleware reads the
+    host as `headers["host"].split(":")[0]` — which is `[` for every bracketed
+    address there is. Accepting `--host ::1` would therefore bind the address
+    and then refuse every request that reached it, with 400 and no explanation.
+    Refusing it says the same thing at the one moment it can still be acted on.
+    Matching both sides would mean parsing the `Host` header ourselves in place
+    of that middleware, which is a bigger decision than this flag. `::` and
+    `::0` are unaffected: they are a wildcard BIND, not a name, and never reach
+    here."""
     name = (host or "").strip()
     try:
-        ipaddress.ip_address(name)
-        return name
+        address = ipaddress.ip_address(name)
     except ValueError:
-        pass
+        address = None
+    if address is not None and address.version == 6:
+        raise SystemExit(f"{name!r} cannot be served: an IPv6 address reaches this server as the "
+                         f"bracketed Host header `[{name}]`, which the host check cannot match, "
+                         f"so every browser request would be refused. Use a DNS name that "
+                         f"resolves to it, or 127.0.0.1")
+    if address is not None:
+        return name
     if len(name) > 253 or not HOSTNAME.fullmatch(name):
-        raise SystemExit(f"{name!r} is not a host: --host / CHAINLIT_HOST takes an IPv4 or "
-                         f"IPv6 address, or a DNS name")
-    return name
+        raise SystemExit(f"{name!r} is not a host: --host / CHAINLIT_HOST takes an IPv4 "
+                         f"address or a DNS name")
+    return name.lower()
 
 
 def _origin(host: str, port: int) -> str:
-    """`http://host:port`, with an IPv6 address in the brackets a URL needs."""
+    """`http://host:port`, with an IPv6 address in the brackets a URL needs.
+
+    Nothing reaches the bracket branch today — `checked_host` refuses IPv6
+    literals and the wildcards never get this far — and it stays because the
+    day that refusal is lifted, an origin written without the brackets is a
+    silently wrong CORS entry, not a syntax error anything would catch."""
     return f"http://[{host}]:{port}" if ":" in host else f"http://{host}:{port}"
 
 

@@ -115,9 +115,32 @@ def test_a_host_a_browser_could_be_pointed_at_is_added_and_a_bind_address_is_not
                                                                 "http://127.0.0.1:8000"]
 
 
-def test_an_ipv6_host_is_written_as_a_url_and_not_as_three_colons(root):
-    launcher.prepare("::1", 8000)
-    assert "http://[::1]:8000" in written_config(root)["project"]["allow_origins"]
+def test_an_ipv6_literal_is_refused_because_the_host_check_cannot_match_one(root):
+    """A browser asks for `[::1]:8000`, and Starlette's trusted-host middleware
+    reads the host as `headers["host"].split(":")[0]` — `[`, for every
+    bracketed address there is. `--host ::1` would have bound the address and
+    then answered 400 to every request that reached it. Refused at the one
+    moment it can still be acted on, with the reason in the sentence.
+
+    `::` and `::0` are a wildcard BIND, not a name, and are unaffected."""
+    for literal in ("::1", "fe80::1", "2001:db8::1"):
+        with pytest.raises(SystemExit, match="Host header"):
+            launcher.render_config(literal, 8000)
+
+    for wildcard in ("::", "::0"):
+        launcher.prepare(wildcard, 8000)
+        assert written_config(root)["project"]["allow_origins"] == ["http://localhost:8000",
+                                                                    "http://127.0.0.1:8000"]
+
+
+def test_a_host_is_lowercased_because_the_check_that_reads_it_compares_exactly(root):
+    """A browser sends the name lowercased and the trusted-host middleware
+    compares strings exactly, so `--host Books.local` was a server that refused
+    the name it had just been told to serve. A DNS name is case-insensitive:
+    folding it loses nothing."""
+    assert launcher.checked_host("Books.LOCAL") == "books.local"
+    launcher.prepare("Books.LOCAL", 8000)
+    assert "http://books.local:8000" in written_config(root)["project"]["allow_origins"]
 
 
 def test_a_hand_edited_config_is_overwritten_on_the_next_start(root):
