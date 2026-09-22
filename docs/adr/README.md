@@ -1015,13 +1015,20 @@ reveal, and lowering it would cut text out of a chunk the retriever ranked whole
 *(B) For `read_chapter`, the window is cut around the match.* `reflect` may say what it is opening
 the chapter for (`looking_for`); `act` reads the chapter as far as `CHAPTER_SCAN_CHARS` (120,000 —
 1,243 of the 1,246 sections whole) and cuts a `CHAPTER_HIT_CHARS` window around the best lexical
-match inside it, scored by how many DISTINCT words of the query a run covers, then by density,
-then by position. No stop-word list: the library is not one language, and "distinct words covered"
-already prices a common word at what it is worth. A request that names no query, and a query whose
+match inside it, scored by how many DISTINCT words of the query a run covers, then by its per-term
+occurrence counts compared rarest-first, then by the shorter run, then by the earlier one. No
+stop-word list: the library is not one language, and the key prices a common word rather than
+banning it — one word out of several for coverage, and rarest-first so that its repetitions cannot
+decide between runs that cover as much. A request that names no query, and a query whose
 words the chapter does not carry, get the head of the chapter exactly as before — nothing is
 invented in place of a missing field, and a window centred on the wrong words is worse than an
 honest beginning. What the window leaves out is said in band at both ends, because a passage from
-the middle of a chapter read as its opening is a new way to be wrong.
+the middle of a chapter read as its opening is a new way to be wrong. Two limits of a lexical
+aim, measured on the 19.09 runs (#81): a passage that answers without spelling the query's word is
+not a candidate at all (`cannibals` occurs three times in its section, none near the answer), and
+counting spellings cannot tell a noun from a verb (one-word `watch` lands where people watch each
+other, not on the stolen watch). Reaching the first needs the window chosen by something other than
+the spelling of `looking_for`.
 
 **Why B is not also the answer for search, and why A had to come first.** Reading around the
 matching span at retrieval time needs the offsets of what matched, and neither retriever returns

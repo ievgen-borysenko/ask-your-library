@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+- **A chapter read aimed at one word lands where the word is thickest, not on the first mention with
+  silence after it** (#81). `best_match_span` ranks the runs of query words that fit in the window
+  by how many distinct query words they cover, and between equals took the SHORTER run. At chapter
+  scale a run is every hit that fits in a 12,000-character window from its first one, so the
+  shortest run is a hit with nothing after it for a window's length — the end of a cluster or a
+  stray mention — and the earliest such won: `black spot` centred the window on one stray mention at
+  41246 of a 69,686-character section while the five mentions that tell the scene sat at
+  24450–28953, and `execution` opened at 25744 of 73,853 with the answering sentence at 63588.
+  A run's occurrence counts are now a rank key between distinct coverage and the existing
+  tie-breaks: between runs covering the same number of query words, the per-term counts are sorted
+  ascending and compared position by position, so the rarest of the covered words decides first —
+  a run with 204 "the"s and one "spot" profiles as (1, …) and loses to a run with six of each,
+  (6, 6, …). Then the shorter run, then the earlier one. For a one-word query this is simply the
+  occurrence count. A plain total of occurrences would instead hand a phrase-shaped query to
+  whichever stretch of prose repeats "the" most. Replayed over the 22 aimed reads of long sections
+  in the 19.09 runs, 9 have an anchor to judge them by: 2 fixed (`execution` and `black spot`, the
+  two above), 1 lost (one-word `watch`), 6 unchanged — `cannibals` and a multi-word read of the
+  `execution` section missed their answer before and after, while `pardon`, `watch stolen returned`
+  and two verbatim phrases were inside their window before and stay inside it. The rest moved or
+  stayed with nothing to judge them by. What it does not fix, measured in the same replay:
+  `cannibals` occurs three times in its section, none after 8198, and the passage that answers
+  (18023) never spells the word, so no lexical aim reaches it; and `watch` moves from the page with
+  the stolen watch (25582) to the pages where people watch each other — density cannot tell a noun
+  from a verb. Distinct-first is unchanged, the scan stays linear in the hits, the window
+  construction, the head-cut fallback and the markers are untouched, and a query the section does
+  not carry still returns the head of the chapter character for character.
 - **The chunker stamp is checked against the rows before it is written, and `--doctor` measures
   them** (#75, [upgrading](upgrading.md)). `--stage stamp-meta --chunker current` claims the
   version this code chunks at; it now samples the table first and refuses, with the numbers, when
