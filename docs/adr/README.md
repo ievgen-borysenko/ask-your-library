@@ -1030,6 +1030,41 @@ counting spellings cannot tell a noun from a verb (one-word `watch` lands where 
 other, not on the stolen watch). Reaching the first needs the window chosen by something other than
 the spelling of `looking_for`.
 
+**Amended 2026-09-22 (#81): the window is chosen by the RETRIEVER first, lexically second, and by
+the head of the chapter last.** The order is the whole of the amendment. `act` asks
+`provenance.window_by_retrieval` for a window: the section's own already-indexed chunks, ranked
+against the QUESTION by the retriever that indexed them (`library.search_section` — vector + BM25
+under a `book AND section` filter, fused by RRF; no new table, nothing re-embedded, one query
+embedding), with the window centred on the top chunk, located in the section text by `match_span`.
+The question, not `looking_for`: a word the model chose to hunt for is exactly what cannot reach an
+A2 passage. When that cannot be done — no question, no rows under either form of the section's
+name, a top chunk not findable in the text read, or a section that fits the budget whole — the
+function returns None and the lexical aim of (B) runs unchanged, and a lexical aim that lands on
+nothing still returns the head character for character. Which of the three decided is logged per
+read as `aimed_by`. Nothing else moves: the window is still computed ONCE in `act`, both aims go
+through one piece of arithmetic (`_window_at`), and what `window_span`, `hits_log`, the scratchpad
+and `observe` read is the one string that came out of it.
+
+**And the measurement refuses it.** Replayed over the 22 aimed reads of long sections in the 19.09
+runs against the same index (the window-retrieval replay kept beside that run's data, outside this
+repository): the retrieval aim lands on 18 reads and falls to the head on 4, and on every
+hand-checked anchor it is not better than the lexical aim it would replace. c04 — the case this
+variable exists for — still misses: the
+hybrid ranks the chunk holding "what authority or call I had… judge and executioner" 17th of the 18
+chunks of its own section, so the window centres on chunk 1 and opens at the head, which is where
+the lexical aim opens it too. h14 (the execution at 63588) and h17 (the watch returned to Holmes at
+46598) go from covered to missed; h10 (the black spot scene) goes from covered to missed under the
+hybrid, while the same aim with the BM25 list removed keeps it. The diagnostic under all four is
+one thing: inside ONE section the BM25 list is two dozen chunks of a single topic, and fusing it
+with the vector list demotes the answering chunk rather than confirming it (h10: vector rank 1,
+fused rank 4; c04: vector rank 4, fused rank 17). RRF is written for two lists that disagree about
+which DOCUMENT is relevant; asked which PARAGRAPH of one already-chosen document answers, its BM25
+half is measuring topic, which every paragraph shares. So this amendment records a mechanism and a
+negative result: `window_by_retrieval` is in the tree with its tests, the call site is applied
+separately, and the next variable — the same aim vector-only, or a window that COVERS the
+top-ranked chunks instead of centring on one — is measured against these four anchors before
+anything is wired.
+
 **Why B is not also the answer for search, and why A had to come first.** Reading around the
 matching span at retrieval time needs the offsets of what matched, and neither retriever returns
 them — LanceDB's vector search returns a distance and BM25 a score, not a span — so the span would

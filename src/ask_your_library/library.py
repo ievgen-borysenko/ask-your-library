@@ -129,12 +129,20 @@ def search(corpus: str, query: str, k: int = 4, book: str | None = None) -> list
 
 
 def _search_corpus(table, corpus: str, query: str, vector: list[float],
-                   k: int, book: str | None) -> list[dict]:
+                   k: int, book: str | None, section: str | None = None) -> list[dict]:
     """One corpus, on a table the caller has already opened and a query it has
     already embedded — so `search_both` pays for the connection and the
     embedding once for both corpora instead of twice per agent step. Everything
-    below is what `search` always did."""
-    where = f"book = '{_sql_quote(book)}'" if book else None
+    below is what `search` always did.
+
+    `section` narrows the same two lists to one section of one book, which is
+    what `search_section` (the chapter read's window aim) asks for. It is only
+    ever passed together with a `book`: a section name is not an identity — a
+    "Chapter 1" exists in most books in the library."""
+    clauses = [f"book = '{_sql_quote(book)}'"] if book else []
+    if section:
+        clauses.append(f"section = '{_sql_quote(section)}'")
+    where = " AND ".join(clauses) if clauses else None
 
     vector_query = table.search(vector)
     if where:
@@ -189,6 +197,45 @@ def search_both(query: str, k: int = 4, book: str | None = None) -> list[dict]:
     for corpus, table in tables:
         hits += _search_corpus(table, corpus, query, vector, k, book)
     return hits
+
+
+def search_section(book: str, section: str, query: str, k: int = 1) -> list[dict]:
+    """The hybrid retriever, restricted to the chunks of ONE section of ONE
+    book, ranked against `query` — the same vector + BM25 + RRF that ranked the
+    whole library, over rows that are already indexed and already embedded.
+    Nothing new is written and nothing is re-embedded: one query embedding, the
+    filter, the two candidate lists, the fusion.
+
+    This exists for the chapter read's window (#81, ADR-025): a lexical aim on
+    `looking_for` can only reach a passage that SPELLS the word it was given,
+    and the passage that answers a question often does not ("cannibals" occurs
+    three times in Crusoe's cave chapter, none of them near the scruple that
+    answers). The section's own chunks, ranked against the question by the
+    retriever that indexed them, do not have that limit. The one caller is
+    `window_by_retrieval` in `provenance`; it takes the top chunk and centres
+    the window on it.
+
+    Returns hits in `search`'s shape (best first), or [] when the section has
+    no rows under either of its name forms — which is the caller's signal to
+    fall back to the lexical aim. The section variants are the ones
+    `read_chapter` resolves the text with, so the two agree on what "this
+    section" means; the second form costs a second pair of filtered scans and
+    is only reached when the first finds nothing. A blank book is refused
+    outright rather than widened into a search of every book that has a section
+    by this name: a section name is not an identity.
+    """
+    if not book or not section:
+        return []
+    db = lancedb.connect(DB_PATH)
+    if not has_table(db, TABLES["transcripts"]):
+        return []
+    table = open_table(db, TABLES["transcripts"])
+    vector = embed_query(query)      # once, whichever section name resolves
+    for variant in section_variants(section):
+        hits = _search_corpus(table, "transcripts", query, vector, k, book, section=variant)
+        if hits:
+            return hits
+    return []
 
 
 def _sql_quote(value: str) -> str:
@@ -370,6 +417,20 @@ def chapter_is_cut(text: str) -> bool:
     return bool(text.strip().endswith(CUT_MARKER_SUFFIX) or HEAD_MARKER_RE.match(text))
 
 
+def section_variants(section: str) -> list[str]:
+    """The name forms one section is asked for under, in the order they are
+    tried. Section naming differs between books ("Chapter 59" vs "59"), and the
+    model names a chapter the way the question does.
+
+    Shared, rather than spelled twice: `read_chapter` resolves the TEXT of a
+    section and `search_section` ranks its CHUNKS, and a window aimed at chunks
+    of a section the text came from under another name would be aimed at
+    nothing."""
+    if section.lower().startswith("chapter "):
+        return [section, section[8:]]
+    return [section, f"Chapter {section}"]
+
+
 def read_chapter(book: str, section: str, max_chars: int = 12000) -> tuple[str, str, str]:
     """Drill-down: the full text of one chapter, i.e. all transcript chunks with
     this (book, section) joined in order, and the index key of the book the
@@ -389,14 +450,8 @@ def read_chapter(book: str, section: str, max_chars: int = 12000) -> tuple[str, 
         return "", "", "missing"    # the caller unpacks three values
     table = open_table(db, TABLES["transcripts"])
 
-    # Section naming differs between books ("Chapter 59" vs "59"): try both forms.
-    variants = [section]
-    if section.lower().startswith("chapter "):
-        variants.append(section[8:])
-    else:
-        variants.append(f"Chapter {section}")
     rows: list[dict] = []
-    for variant in variants:
+    for variant in section_variants(section):
         candidates, candidates_cut = _chapter_candidates(table, book, variant)
         if candidates_cut:
             # The bare-title query came back at the cap: other books sharing the

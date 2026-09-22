@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+- **A chapter read can be aimed by the retriever instead of by spelling, and the replay says the
+  aim is worse than the lexical one** (#81, class A2). `provenance.window_by_retrieval` ranks the
+  section's OWN already-indexed chunks against the QUESTION with the search the library already
+  answers with (`library.search_section`: vector + BM25 over a `book AND section` filter, fused by
+  RRF — no new table, nothing re-embedded, one query embedding) and centres the window on the top
+  chunk, located in the section text by `match_span`. It returns None — no question, no rows under
+  either form of the section name, a top chunk not found in the text read, or a section that fits
+  the budget whole — and the caller then uses `window_around` exactly as before, so the lexical aim
+  is the fallback and the head of the chapter is still what both fall back to. The window arithmetic
+  is now one function (`_window_at`) for both aims: same markers, same budget, same snapping, and
+  `window_span` reads either back unchanged, because the window is the provenance haystack
+  (ADR-004/025) and is still computed once, in `act`. **The call site is not in this change**: `act`
+  still aims lexically, so nothing in a run moves until the `aimed_by` patch is applied.
+  **Measured** by replaying the 22 aimed reads of long sections in the 19.09 runs against the same
+  index (the window-retrieval replay kept beside that run's data, outside this repository): the
+  retrieval aim
+  lands on 18 of 22 reads and falls to the head on 4 — and on every anchor it is not better. c04,
+  the case the variable was built for, still misses: the hybrid ranks the chunk holding "what
+  authority or call I had… judge and executioner" 17th of 18 chunks in its own section, so the
+  window centres on chunk 1 and opens at the head, exactly as the lexical aim does. h14 (execution,
+  63588) and h17 (the stolen watch, 46598) go from covered to missed, and h10 (the black spot scene)
+  goes from covered to missed under the hybrid while a vector-only variant of the same aim keeps it.
+  The diagnostic under all four: within ONE section the BM25 list is two dozen chunks of one topic,
+  and fusing it with the vector list demotes the answering chunk (h10: vector rank 1, fused rank 4;
+  c04: vector rank 4, fused rank 17). The mechanism, its tests and the replay are recorded here so
+  the next variable — a vector-only aim, or a window that covers the top-ranked chunks rather than
+  centring on one — is measured against the same anchors. One correction to the entry below: the
+  h17 offset 25582 it calls the stolen watch is Velmont glancing at his own watch; Holmes's watch is
+  returned to him at 46598, and one-word `watch` covers that.
+
 - **A chapter read aimed at one word lands where the word is thickest, not on the first mention with
   silence after it** (#81). `best_match_span` ranks the runs of query words that fit in the window
   by how many distinct query words they cover, and between equals took the SHORTER run. At chapter

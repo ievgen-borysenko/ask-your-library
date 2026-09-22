@@ -22,7 +22,16 @@ own outcome and never counted as traced to the book (design critique 16.09 §1.1
 ADR-002's recorded consequence, "interfaces still do not label evidence by
 source type"). The three older counts keep exactly the meaning they had, now
 over the book text alone.
+
+The chapter read's window lives here too — `window_around`, and since #81
+`window_by_retrieval` — because the window IS the haystack the gates check
+against (ADR-025), and its markers and budget arithmetic must not exist in two
+places. `window_by_retrieval` is the one function in this module that reads the
+index (`library.search_section`); it decides where to LOOK, never what counts
+as evidence, and the check that follows it is the same code-only check it
+always was. Still no LLM anywhere in this module.
 """
+import logging
 import os
 import re
 import unicodedata
@@ -33,10 +42,12 @@ from .config import SEARCH_HIT_CHARS
 from .i18n import t
 from .bookkey import author_of, title_of
 from .library import (CUT_MARKER_RE, HEAD_MARKER_RE, BookEntry, cut_marker,
-                      head_marker)
+                      head_marker, search_section)
 from . import llm
 from .sanitize import LINE_BREAK_RE, strip_control_chars
 from .state import AgentState
+
+log = logging.getLogger(__name__)
 
 MAX_QUOTE_CHARS = SEARCH_HIT_CHARS   # a quote cannot exceed the hit it was copied from
 
@@ -603,10 +614,15 @@ def best_match_span(passage: str, query: str, width: int) -> tuple[int, int] | N
 
     This is a LEXICAL match over the raw text, not the retrieval the index
     does: no vectors, no BM25 statistics, nothing but the query's own words.
-    That is the whole of what is available here — neither retriever returns the
-    offsets of what it matched (ADR-025) — and it is honest about what it
-    cannot do: a window chosen for a query whose words the passage never spells
-    is no window at all, and the caller falls back to the head."""
+    Neither retriever returns the offsets of what it matched (ADR-025), so this
+    is the only thing that can turn a string into a place. It is honest about
+    what it cannot do: a window chosen for a query whose words the passage
+    never spells is no window at all. Since #81 that is the SECOND aim, not the
+    first — `window_by_retrieval` ranks the section's own chunks against the
+    question and locates the winner by `match_span`, which is the same trick
+    from the other end (the retriever picks the text, this module finds where
+    it is) — and when it declines, this runs and the caller still falls back to
+    the head."""
     terms = set(_normalize(query).split())
     if not terms:
         return None
@@ -716,14 +732,36 @@ def window_around(text: str, query: str, budget: int) -> str:
     # an earlier cut said it left out, and the characters that cut wrote its own
     # marker over. len(body) + hidden_beyond is the chapter as it was.
     body, hidden_beyond = _body_and_tail(text)
-    # Both markers live INSIDE the budget, like `join_chapter`'s does, so every
-    # later cut at the same limit (the scratchpad, the observe prompt) still
-    # shows them. Their length depends on numbers the window has not been
-    # chosen yet, so the room reserved is an upper bound on both: the digits of
-    # a count that cannot be larger than the chapter itself.
+    span = best_match_span(body, query, _window_width(body, hidden_beyond, budget))
+    return _window_at(body, span, budget, hidden_beyond)
+
+
+def _window_width(body: str, hidden_beyond: int, budget: int) -> int:
+    """How many characters of the chapter a window of `budget` can hold.
+
+    Both markers live INSIDE the budget, like `join_chapter`'s does, so every
+    later cut at the same limit (the scratchpad, the observe prompt) still
+    shows them. Their length depends on numbers the window has not been chosen
+    yet, so the room reserved is an upper bound on both: the digits of a count
+    that cannot be larger than the chapter itself."""
     reserve = len(head_marker(len(body))) + len(cut_marker(len(body) + hidden_beyond))
-    width = max(1, budget - reserve)
-    span = best_match_span(body, query, width)
+    return max(1, budget - reserve)
+
+
+def _window_at(body: str, span: tuple[int, int] | None, budget: int, hidden_beyond: int) -> str:
+    """`budget` characters of `body` around `span`, with the in-band markers.
+
+    The arithmetic of a window, once, for both aims: `window_around` hands it
+    the best LEXICAL span and `window_by_retrieval` the span of the chunk the
+    RETRIEVER ranked first. The two must produce the same kind of string down
+    to the byte — same markers, same counts, same snapping — because
+    `window_span` reads the offsets back off it and the provenance gate
+    (ADR-004) checks quotes against it. A second copy of this would agree only
+    until somebody edited one.
+
+    `span is None` means no aim landed: the head of the chapter, character for
+    character as an unaimed read produces it."""
+    width = _window_width(body, hidden_beyond, budget)
     if span is None:
         start = 0
     elif span[1] - span[0] >= width:
@@ -746,6 +784,111 @@ def window_around(text: str, query: str, budget: int) -> str:
     hidden_after = (len(body) - end) + hidden_beyond
     return f"{head_marker(start)}{body[start:end]}" \
            f"{cut_marker(hidden_after) if hidden_after else ''}"
+
+
+# How much of a chunk has to be found again in the section text before the
+# window is centred on it, in whitespace-separated words of the raw chunk. The
+# whole chunk first, because that is what the index stores and what
+# `join_chapter` joined; the two prefixes are for the one chunk a scan budget
+# may have cut in half. Twelve words is about seventy characters — long enough
+# that a run of them is the chunk and not a stock phrase of the book.
+CHUNK_PROBE_WORDS = (40, 12)
+
+
+def _locate_chunk(body: str, chunk: str) -> tuple[int, int] | None:
+    """Where an indexed chunk sits in the section text, or None.
+
+    `match_span` does the work, so this finds the chunk by the same normalized
+    token comparison the quote check uses: whitespace, Unicode composition and
+    the punctuation rules cannot separate a chunk from the text it was cut out
+    of, and the chunk joiner is a barrier here exactly as it is there.
+
+    The whole chunk is tried first and is the case that normally holds — the
+    text came from these rows. A prefix is tried only after that fails, which
+    happens to the one chunk the scan budget cut: `read_chapter` stops at
+    `CHAPTER_SCAN_CHARS` mid-chunk, so the row's tail is not in `body`.
+    Chunks overlap by a sentence or so, so a prefix can match inside the
+    PREVIOUS chunk instead; that moves the centre by less than a chunk — a
+    fifth of the window — and is why the whole chunk is tried first.
+    """
+    span = match_span(body, chunk)
+    if span:
+        return span
+    words = chunk.split()
+    for size in CHUNK_PROBE_WORDS:
+        if len(words) <= size:
+            continue                     # already tried: that prefix IS the chunk
+        span = match_span(body, " ".join(words[:size]))
+        if span:
+            return span
+    return None
+
+
+def window_by_retrieval(text: str, book_key: str, section: str, question: str,
+                        budget: int) -> str | None:
+    """The chapter read's window, aimed by the RETRIEVER instead of by
+    spelling: `budget` characters of `text` around the chunk of this section
+    that the index ranks first for `question`. None when it cannot be done, and
+    the caller falls back to `window_around`.
+
+    Why this exists (#81, the A2 class of the 19.09 measurement). A lexical aim
+    can only reach a passage that spells the word it was given, and the passage
+    that ANSWERS often does not: Crusoe's cave chapter spells `cannibals` three
+    times, and the scruple that answers the question — "what authority or call
+    I had… judge and executioner" — is 10,000 characters past the last of them.
+    No rank key over the query's own words reaches that, whatever the key. The
+    section's own chunks are already indexed and already embedded, and the
+    retriever that ranked the whole library ranks them against the QUESTION —
+    vector and BM25, fused as everywhere else (`library.search_section`). What
+    it returns is a chunk, so the window is centred on the chunk.
+
+    The QUESTION, not `looking_for`: `looking_for` is a word the model chose to
+    hunt for, which is the very thing that cannot reach an A2 passage, while
+    the question is what the run has to answer. `looking_for` remains the
+    fallback aim, so a section with no indexed rows — or a chunk that cannot be
+    found again in the text — reads exactly as it did before this existed.
+
+    It returns None, rather than a head cut, when it cannot aim. "Cannot" is
+    three things and all three fall through to the lexical aim: no question, no
+    rows under either name form of the section, or a top chunk that
+    `_locate_chunk` does not find in `text`. A chapter that fits the budget
+    whole is a fourth: there is no window to choose, so the caller's fallback
+    returns the chapter, and nothing is spent on a retrieval that decides
+    nothing.
+
+    Deterministic, and computed ONCE. Same index and same question, same
+    embedding, same two candidate lists, same RRF, same chunk, same offsets —
+    which is what lets a window be replayed and tested. And like
+    `window_around` it is called exactly once per read, in `act`: the window IS
+    the provenance haystack (ADR-004, ADR-025), so what this returns is what
+    goes into `hits_log`, the scratchpad and the observe prompt, and nothing
+    downstream recomputes it. A window recomputed later would turn quotes
+    honestly copied out of one window into quotes broken against another.
+    """
+    if not question or not question.strip():
+        return None
+    if len(text) <= budget and not CUT_MARKER_RE.search(text):
+        return None                      # the whole chapter fits; nothing to aim
+    try:
+        hits = search_section(book_key, section, question, k=1)
+    except Exception as error:
+        # Degrade to the lexical aim rather than fail a read the index has
+        # already answered — the same trade `_search_corpus` makes for a
+        # missing FTS index — but never silently: an aim that quietly stopped
+        # working would look like a window that simply chose differently.
+        log.warning("window retrieval failed for %r | %r (%s: %s) — falling back to the "
+                    "lexical aim", book_key, section, type(error).__name__, error)
+        return None
+    if not hits:
+        return None
+    body, hidden_beyond = _body_and_tail(text)
+    span = _locate_chunk(body, hits[0]["text"])
+    if span is None:
+        log.warning("window retrieval ranked a chunk of %r | %r that is not in the text read "
+                    "(%d characters scanned) — falling back to the lexical aim",
+                    book_key, section, len(body))
+        return None
+    return _window_at(body, span, budget, hidden_beyond)
 
 
 def window_span(window: str, scanned: str) -> dict:

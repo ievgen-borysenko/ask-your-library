@@ -20,11 +20,12 @@ import json
 import sys
 from pathlib import Path
 
+import lancedb
 import pytest
 
 from ask_your_library import config, library, llm, nodes, provenance
 from ask_your_library.bookkey import chapter_marker, split_read_query, unescape_marker
-from ask_your_library.ingest import pack_sentences, split_sentences
+from ask_your_library.ingest import build_fts_index, pack_sentences, split_sentences
 from ask_your_library.ingest.chunking import (MAX_SENTENCE_CHARS, TRANSCRIPT_MAX_CHARS,
                                               TRANSCRIPT_TARGET_CHARS, cap_sentence)
 from ask_your_library.provenance import best_match_span, window_around
@@ -748,3 +749,234 @@ def test_a_book_that_talks_about_chapters_beginning_earlier_is_not_service_text(
     exact = library.head_marker(40) + "and the keeper slept."
     assert library.chapter_is_cut(exact)
     assert "begins earlier" not in provenance._segments(exact)[0]
+
+
+# --- the window aimed by the retriever (#81, class A2) ----------------------
+# The limit a lexical aim cannot pass: the passage that ANSWERS need not spell
+# the word the read was opened for. Crusoe's cave chapter says `cannibals`
+# three times and answers ten thousand characters past the last of them, in
+# words the question never used. Here the same shape as a fixture, over a REAL
+# LanceDB table — the filter and the vector ranking are LanceDB's, not a mock's
+# idea of them — with a fake embedder so nothing reaches a network.
+
+BAIT = "The savages they called cannibals had left the shore before dawn. "
+ANSWER = "What authority or call had I to pretend to be judge and executioner upon these men? "
+CHUNK_CHARS = 4000
+SECTION = "CHAPTER XII. A CAVE RETREAT"
+BOOK = "The Cave — D. Crusoe"
+# The question a run would ask, and the word the model would open the chapter
+# for. The word is in the section three times, all of them in the first chunk;
+# the sentence that answers the question is in the fifth and never spells it.
+QUESTION = "by what right did he decide the fate of the men who came ashore"
+LOOKING_FOR = "cannibals"
+# Questions for the two fixtures whose winner is not the answering chunk. Both
+# lists have to agree on the winner for a test to be about the window rather
+# than about a fusion tie, so each names its chunk in words that chunk carries.
+HEAD_QUESTION = "what did the savages leave on the shore before dawn"
+STRANGER_QUESTION = "which edition of the book was never opened"
+
+
+def section_chunks() -> list[str]:
+    """Six chunks of one section: the bait in the first, the answering sentence
+    in the fifth, filler everywhere else. Joined, they are twice a read."""
+    chunks = []
+    for index in range(6):
+        seed = {0: BAIT * 3, 4: ANSWER}.get(index, "")
+        body = (seed + FILLER * 60)[:CHUNK_CHARS]
+        chunks.append(body)
+    return chunks
+
+
+@pytest.fixture
+def indexed_section(tmp_path, monkeypatch):
+    """One section of one book in a real LanceDB, plus a decoy row in another
+    book and another section, and a fake embedder whose "nearest" chunk the
+    test names. Returns (the joined section text, embed-call counter).
+
+    The vectors are basis vectors, one per row: a question embedded as the nth
+    of them ranks the nth chunk first by L2 distance and the rest in a fixed
+    order. Nothing about the ranking is left to a model, which is what makes
+    the window assertions below assertions about the WINDOW."""
+    def build(nearest: int, chunks=None, rows_extra=(), section: str = SECTION):
+        chunks = section_chunks() if chunks is None else chunks
+        dims = len(chunks) + 1
+
+        def basis(n):
+            return [1.0 if i == n else 0.0 for i in range(dims)]
+
+        rows = [{"book": BOOK, "section": section, "text": text,
+                 "chunk_id": f"{BOOK}/{section}/{n}", "vector": basis(n)}
+                for n, text in enumerate(chunks)]
+        # A decoy: the SAME vector as the chunk the question is nearest to, in
+        # another book and another section. A filter that is not both is a
+        # window opened on the wrong book's text.
+        rows += [{"book": "Another Book — B. Else", "section": "CHAPTER I",
+                  "text": "A decoy passage about nothing in particular. " * 40,
+                  "chunk_id": "decoy/1", "vector": basis(nearest)},
+                 {"book": BOOK, "section": "CHAPTER XIII", "text": "A later chapter. " * 200,
+                  "chunk_id": f"{BOOK}/CHAPTER XIII/0", "vector": basis(nearest)}]
+        rows += list(rows_extra)
+
+        db = lancedb.connect(str(tmp_path / "db"))
+        table = db.create_table("transcripts", rows)
+        # A real FTS index, built by the function the ingest builds it with,
+        # so the ranking under test is the HYBRID the library runs and not the
+        # vector half of it: `_search_corpus` degrades to vector-only when the
+        # index is missing, which would quietly test half of production.
+        build_fts_index(db, "transcripts")
+        counts = {"embed": 0}
+
+        def embed(text):
+            counts["embed"] += 1
+            return basis(nearest)
+
+        monkeypatch.setattr(library, "lancedb",
+                            type("L", (), {"connect": staticmethod(lambda path: object())})())
+        monkeypatch.setattr(library, "has_table", lambda db, name: True)
+        monkeypatch.setattr(library, "open_table", lambda db, name: table)
+        monkeypatch.setattr(library, "embed_query", embed)
+        text = library.join_chapter(
+            [{"chunk_id": f"b/c/{n}", "text": chunk} for n, chunk in enumerate(chunks)],
+            config.CHAPTER_SCAN_CHARS)
+        return text, counts
+    return build
+
+
+def test_the_retrieval_window_reaches_what_the_lexical_aim_cannot(indexed_section):
+    """Class A2 in one assertion, both halves of it. The word the read was
+    opened for is in the section, so the lexical aim lands — on the wrong page;
+    the chunk the retriever ranks first for the QUESTION is the one that
+    answers, and the window opens there."""
+    text, _ = indexed_section(nearest=4)
+
+    lexical = window_around(text, LOOKING_FOR, config.CHAPTER_HIT_CHARS)
+    aimed = provenance.window_by_retrieval(text, BOOK, SECTION, QUESTION,
+                                           config.CHAPTER_HIT_CHARS)
+
+    assert BAIT.strip() in lexical and ANSWER.strip() not in lexical
+    assert aimed is not None
+    assert ANSWER.strip() in aimed
+
+
+def test_the_window_is_the_same_kind_of_string_whichever_aim_chose_it(indexed_section):
+    """`window_span` must work on it unchanged (it is the #81 log), the budget
+    is the same number, and both markers are written the same way — because
+    everything downstream reads this string and nothing recomputes it."""
+    text, _ = indexed_section(nearest=4)
+
+    aimed = provenance.window_by_retrieval(text, BOOK, SECTION, QUESTION,
+                                           config.CHAPTER_HIT_CHARS)
+
+    assert len(aimed) <= config.CHAPTER_HIT_CHARS
+    assert aimed.startswith(library.HEAD_MARKER_PREFIX)
+    assert aimed.rstrip().endswith(library.CUT_MARKER_SUFFIX)
+    assert library.chapter_is_cut(aimed)
+    span = provenance.window_span(aimed, text)
+    assert span["section_chars"] == span["scanned_chars"] == len(text)
+    # the offsets the log reports are where the window's characters really are
+    assert text[span["start"]:span["end"]] == aimed.split("characters not shown]\n", 1)[1] \
+        .rsplit("\n[chapter continues:", 1)[0]
+
+
+def test_a_retrieval_window_at_the_head_is_the_head_cut_byte_for_byte(indexed_section):
+    """The invariant `window_around` is held to, held to here as well: a window
+    that opens where the chapter does IS the head cut, not a head cut minus the
+    room reserved for a marker nobody writes."""
+    text, _ = indexed_section(nearest=0)
+
+    aimed = provenance.window_by_retrieval(text, BOOK, SECTION, HEAD_QUESTION,
+                                           config.CHAPTER_HIT_CHARS)
+
+    assert aimed == library.join_chapter([{"chunk_id": "b/c/1", "text": text}],
+                                         config.CHAPTER_HIT_CHARS)
+    assert library.HEAD_MARKER_PREFIX not in aimed
+
+
+def test_the_retrieval_window_is_deterministic(indexed_section):
+    """Same index, same question, same window — five times. A window that moved
+    between runs could not be replayed, measured or regression-tested, and the
+    text it produces is the provenance haystack for that step."""
+    text, _ = indexed_section(nearest=4)
+
+    windows = {provenance.window_by_retrieval(text, BOOK, SECTION, QUESTION,
+                                              config.CHAPTER_HIT_CHARS) for _ in range(5)}
+
+    assert len(windows) == 1
+
+
+def test_a_section_with_no_indexed_rows_falls_back_to_the_lexical_aim(indexed_section):
+    """The documented fallback: None, and the caller reads exactly what it read
+    before this existed."""
+    text, _ = indexed_section(nearest=4)
+
+    assert provenance.window_by_retrieval(text, BOOK, "CHAPTER XCIX", QUESTION,
+                                          config.CHAPTER_HIT_CHARS) is None
+    assert provenance.window_by_retrieval(text, "No Such Book — Nobody", SECTION, QUESTION,
+                                          config.CHAPTER_HIT_CHARS) is None
+
+
+def test_a_top_chunk_that_is_not_in_the_text_read_falls_back_and_says_so(indexed_section,
+                                                                        caplog):
+    """A section re-ingested under the same name, a scan that never reached the
+    chunk: the row ranks first and its text is nowhere in what was read. That
+    is not a window, it is a wrong one, so the aim declines — and warns, because
+    an aim that quietly stopped working looks like one that chose differently."""
+    stranger = {"book": BOOK, "section": SECTION, "chunk_id": f"{BOOK}/{SECTION}/9",
+                "text": "A paragraph from an edition this read never opened. " * 40,
+                "vector": [0.0] * 6 + [1.0]}
+    text, _ = indexed_section(nearest=6, rows_extra=[stranger])   # basis(6): only the stranger
+
+    with caplog.at_level("WARNING"):
+        assert provenance.window_by_retrieval(text, BOOK, SECTION, STRANGER_QUESTION,
+                                              config.CHAPTER_HIT_CHARS) is None
+    assert "not in the text read" in caplog.text
+
+
+def test_a_chapter_that_fits_the_budget_whole_is_not_ranked_at_all(indexed_section):
+    """There is no window to choose, so nothing is spent choosing one: no
+    embedding, no query, and the caller's fallback returns the chapter."""
+    short = ["A short chapter. " * 20]
+    text, counts = indexed_section(nearest=0, chunks=short)
+
+    assert provenance.window_by_retrieval(text, BOOK, SECTION, QUESTION,
+                                          config.CHAPTER_HIT_CHARS) is None
+    assert counts["embed"] == 0
+    assert window_around(text, LOOKING_FOR, config.CHAPTER_HIT_CHARS) == text
+
+
+def test_a_read_that_names_no_question_is_not_aimed_by_retrieval(indexed_section):
+    text, counts = indexed_section(nearest=4)
+
+    assert provenance.window_by_retrieval(text, BOOK, SECTION, "  ",
+                                          config.CHAPTER_HIT_CHARS) is None
+    assert counts["embed"] == 0
+
+
+# --- what `search_section` is allowed to return -----------------------------
+
+def test_the_ranking_is_restricted_to_this_book_and_this_section(indexed_section):
+    """Both halves of the filter, against the two decoy rows that carry the
+    same vector as the winner: a section name is not an identity ("CHAPTER I"
+    exists in most books), and a book is not a section."""
+    indexed_section(nearest=4)
+
+    hits = library.search_section(BOOK, SECTION, QUESTION, k=8)
+
+    assert hits and all(h["book"] == BOOK and h["section"] == SECTION for h in hits)
+    assert hits[0]["text"].startswith(ANSWER.strip()[:30])
+
+
+def test_the_section_name_is_tried_in_both_its_forms(indexed_section):
+    """`read_chapter` resolves "Chapter 4" and "4" alike, and the ranking has
+    to resolve the same section, or the window is aimed at nothing. One
+    embedding either way: the second form costs a second pair of scans, never a
+    second call to the embedder."""
+    _, counts = indexed_section(nearest=4, section="4")
+
+    assert library.section_variants("Chapter 4") == ["Chapter 4", "4"]
+    assert library.section_variants("4") == ["4", "Chapter 4"]
+
+    hits = library.search_section(BOOK, "Chapter 4", QUESTION)
+
+    assert hits and hits[0]["section"] == "4"
+    assert counts["embed"] == 1
