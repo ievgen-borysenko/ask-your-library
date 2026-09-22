@@ -188,6 +188,41 @@ def test_the_escape_hatch_does_not_carry_a_verb_flag_either(flag, verb, recorded
     assert flag in err and verb in err          # and it names what to type instead
 
 
+@pytest.mark.parametrize("abbreviation, verb", [
+    ("--doct", "ayl doctor"), ("--back", "ayl backup"),
+    ("--rest", "ayl restore"), ("--rebu", "ayl add <folder> --rebuild"),
+    ("--doctor=1", "ayl doctor"),          # and the `=value` spelling of one
+])
+def test_an_abbreviated_verb_flag_does_not_get_through_the_hatch(abbreviation, verb,
+                                                                 recorded, capsys):
+    """argparse resolves an unambiguous long option by its PREFIX, so `--doct`
+    reached `--doctor` on the other side of the hatch: `ayl backup /dest --
+    --doct` ran the doctor, exited 0 and copied nothing. The screen matches by
+    prefix now, and the ingest parser refuses abbreviations outright."""
+    with pytest.raises(SystemExit) as exit_info:
+        ayl.main(["backup", "/dest", "--", abbreviation])
+    err = capsys.readouterr().err
+    assert exit_info.value.code == 2
+    assert recorded == [] and abbreviation in err and verb in err
+
+
+@pytest.mark.parametrize("abbreviation", ["--doct", "--rest", "--rebu"])
+def test_the_ingest_parser_refuses_an_abbreviated_flag_on_its_own(abbreviation, capsys):
+    """The second half of the same fix, at the parser rather than at the hatch:
+    `ayl add ~/books --doct` is a bad command line, not a doctor run."""
+    with pytest.raises(SystemExit) as exit_info:
+        add_folder.build_parser().parse_args([abbreviation])
+    assert exit_info.value.code == 2
+    assert abbreviation in capsys.readouterr().err
+
+
+def test_a_flag_that_is_not_a_verbs_keeps_working_in_full(recorded):
+    """`--backend` starts like `--backup` and is not one: the prefix screen
+    reads the VERB flag's name, not the other way round."""
+    assert ayl.main(["backup", "/b", "--", "--backend", "openrouter"]) == 0
+    assert recorded == [("add", ["--backup", "/b", "--backend", "openrouter"], "ayl backup")]
+
+
 def test_the_escape_hatch_passes_an_undeclared_flag_through(recorded):
     """The documented way out: a flag of the ingest parser that this verb does
     not declare (`ayl backup` has no `--backend`, the copy is of a directory)

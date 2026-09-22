@@ -140,6 +140,26 @@ HATCH = ("Anything after a bare `--` is passed to the ingest command verbatim, "
          "for a flag this verb does not declare; `ayl add --help` lists them all.")
 
 
+def verb_flag(argument: str) -> str | None:
+    """The VERB_FLAGS entry `argument` would reach, or None.
+
+    A PREFIX match, not an exact one: argparse resolves an unambiguous long
+    option by its prefix, so `--doct` reaches the same `--doctor` on the other
+    side of the hatch and an exact-match screen let it straight through. The
+    ingest parser is built with `allow_abbrev=False` as well — either fix alone
+    closes this, and neither is worth relying on by itself: turning the
+    abbreviation back on somewhere would silently change what
+    `ayl backup <dir> -- --doct` does.
+
+    A prefix that is ALSO the prefix of an ordinary option (`--back` is one of
+    `--backup` and of `--backend`) is refused here rather than passed on, which
+    costs nothing: argparse would call it ambiguous and exit 2 anyway."""
+    name = argument.split("=")[0]
+    if not name.startswith("--") or name == "--":
+        return None
+    return next((flag for flag in VERB_FLAGS if flag.startswith(name)), None)
+
+
 def split_hatch(prog: str, rest: list[str]) -> tuple[list[str], list[str]]:
     """(this verb's arguments, the escape hatch) — everything after a bare `--`
     goes to the ingest command untouched.
@@ -150,10 +170,14 @@ def split_hatch(prog: str, rest: list[str]) -> tuple[list[str], list[str]]:
     at = rest.index("--") if "--" in rest else len(rest)
     extra = rest[at + 1:]
     for argument in extra:
-        verb = VERB_FLAGS.get(argument.split("=")[0])
-        if verb:
-            cli.say(f"{argument} is a command of its own, not an option of `{prog}`: "
-                    f"run `{verb}` instead", error=True)
+        flag = verb_flag(argument)
+        if flag:
+            # The flag is named in full as well when it was abbreviated: the
+            # reader typed four characters and has to see which command those
+            # four reach before the sentence about it makes sense.
+            spelled = "" if argument.split("=")[0] == flag else f" reads as `{flag}`, which"
+            cli.say(f"{argument}{spelled} is a command of its own, not an option of "
+                    f"`{prog}`: run `{VERB_FLAGS[flag]}` instead", error=True)
             # 2 is what argparse gives a bad command line, and this is one.
             raise SystemExit(2)
     return rest[:at], extra

@@ -986,7 +986,14 @@ def build_parser(prog: str = "ayl-add") -> argparse.ArgumentParser:
     which are the names a reader typed (#30)."""
     parser = argparse.ArgumentParser(
         prog=prog,
-        description="Index a folder of .txt / .md books into the Ask Your Library LanceDB.")
+        description="Index a folder of .txt / .md books into the Ask Your Library LanceDB.",
+        # No long-option abbreviations. `--doctor`, `--backup`, `--restore` and
+        # `--rebuild` each decide WHICH command this run is, and argparse
+        # resolves an unambiguous prefix to the option itself: `--doct` was
+        # `--doctor`, so `ayl backup <dir> -- --doct` reported a clean index and
+        # exited 0 having copied nothing (#30). A flag worth typing is worth
+        # typing out.
+        allow_abbrev=False)
     # Optional only because --doctor reads the index and needs no folder; a
     # run without either is the argparse error it always was.
     parser.add_argument("folder", type=Path, nargs="?",
