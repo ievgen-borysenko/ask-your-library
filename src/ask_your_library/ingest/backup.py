@@ -251,7 +251,7 @@ def backup(db_path: Path, dest: Path, chat_db: Path | None = None,
                           f"wait a second and run it again")
     chat_db = Path(chat_db) if chat_db is not None else default_chat_db()
 
-    with ingest_lock(db_path, command="ayl-add --backup", doing="back up"):
+    with ingest_lock(db_path, command="ayl backup", doing="back up"):
         # Before anything is written: a tree that cannot be copied faithfully
         # must not produce a directory that looks like a backup of it.
         _refuse_symlinks(resolved_db, "back up")
@@ -324,7 +324,7 @@ def read_manifest(backup_dir: Path) -> dict:
         return json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         raise BackupError(f"{path} is not there — {backup_dir} is not a backup taken by "
-                          f"`ayl-add --backup` (each backup is one timestamped directory "
+                          f"`ayl backup` (each backup is one timestamped directory "
                           f"inside the one you named)") from None
     except ValueError as error:
         raise BackupError(f"{path} is not readable JSON ({error})") from None
@@ -434,7 +434,7 @@ def restore(backup_dir: Path, db_path: Path, chat_db: Path | None = None,
     # directory, so it survives the renames below; one that lived inside would
     # travel with the rename and leave the name it guards unguarded exactly
     # while it is being swapped.
-    with ingest_lock(target_dir, command="ayl-add --restore", doing="restore over"):
+    with ingest_lock(target_dir, command="ayl restore", doing="restore over"):
         stamp = time.strftime("%Y%m%d-%H%M%S")
         staged = target_dir.with_name(f"{target_dir.name}.restoring-{stamp}")
         shutil.rmtree(staged, ignore_errors=True)
