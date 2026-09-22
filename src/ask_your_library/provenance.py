@@ -589,10 +589,9 @@ def best_match_span(passage: str, query: str, width: int) -> tuple[int, int] | N
     span and not a set of equally good ones, because a retrieval this
     deterministic is the only kind that can be tested and re-run.
 
-    What density cannot do is said in the same breath: it counts spellings, so
-    a chapter where people "watch" each other outweighs the page with the
-    stolen watch, and a passage that answers without spelling the word is not
-    a candidate at all.
+    What density cannot do is said in the same breath: it counts spellings,
+    so a passage that answers without spelling the word is not a candidate
+    at all.
 
     There is no stop-word list: the corpus is not one language (the demo
     library holds Ukrainian), and a list per language is a thing to maintain
