@@ -17,15 +17,15 @@
   (6, 6, …). Then the shorter run, then the earlier one. For a one-word query this is simply the
   occurrence count. A plain total of occurrences would instead hand a phrase-shaped query to
   whichever stretch of prose repeats "the" most. Replayed over the 22 aimed reads of long sections
-  in the 19.09 runs, 9 have an anchor to judge them by: 2 fixed (`execution` and `black spot`, the
-  two above), 1 lost (one-word `watch`), 6 unchanged — `cannibals` and a multi-word read of the
-  `execution` section missed their answer before and after, while `pardon`, `watch stolen returned`
-  and two verbatim phrases were inside their window before and stay inside it. The rest moved or
-  stayed with nothing to judge them by. What it does not fix, measured in the same replay:
-  `cannibals` occurs three times in its section, none after 8198, and the passage that answers
-  (18023) never spells the word, so no lexical aim reaches it; and `watch` moves from the page with
-  the stolen watch (25582) to the pages where people watch each other — density cannot tell a noun
-  from a verb. Distinct-first is unchanged, the scan stays linear in the hits, the window
+  in the 19.09 runs, 9 have an anchor to judge them by: 3 fixed (`execution`, `black spot` and
+  one-word `watch`, whose window now holds the parcel that returns the stolen watch, 46598), 0
+  lost, 6 unchanged — `cannibals`, a multi-word read of the `execution` section and `watch stolen
+  returned` missed their answer before and after, while `pardon` and two verbatim phrases were
+  inside their window before and stay inside it. The rest moved or stayed with nothing to judge
+  them by. (First written as "2 fixed, 1 lost": the `watch` anchor had been taken at 25582, where a
+  character looks at his own watch; corrected on the next replay.) What it does not fix, measured
+  in the same replay: `cannibals` occurs three times in its section, none after 8198, and the
+  passage that answers (18023) never spells the word, so no lexical aim reaches it. Distinct-first is unchanged, the scan stays linear in the hits, the window
   construction, the head-cut fallback and the markers are untouched, and a query the section does
   not carry still returns the head of the chapter character for character.
 - **The chunker stamp is checked against the rows before it is written, and `--doctor` measures
