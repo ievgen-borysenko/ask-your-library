@@ -2,7 +2,7 @@
 
 Loaded by `ask_your_library.fake_backend.install_fake_backend()` inside the
 server process (AYL_UI_FAKE_BACKEND points at this file), which calls
-`install()` below before `ui.py` binds anything. From then on the server has:
+`install()` below before `app.py` binds anything. From then on the server has:
 
   * a model that answers from a table instead of a provider — patched at
     `llm.llm`, the ChatOpenAI factory, so `llm_invoke` itself still runs: the
@@ -347,7 +347,7 @@ def healthy_environment() -> preflight.PreflightResult:
 
 def install() -> None:
     """Replace the backend in THIS process. Called by fake_backend.py before
-    ui.py binds these names, so the module-level `from ... import` lines there
+    app.py binds these names, so the module-level `from ... import` lines there
     pick up what is set here."""
     llm.llm = lambda role="", capped=None: MODEL
     nodes.search_both = search_both

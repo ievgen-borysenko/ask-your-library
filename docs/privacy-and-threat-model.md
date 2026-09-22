@@ -60,7 +60,8 @@ than assumed away. Details below.
   cut to 2,500 characters per search hit and 12,000 per chapter read; `SEARCH_HIT_CHARS` and
   `CHAPTER_HIT_CHARS` in the environment set the two cuts) to `.scratch/` (gitignored,
   never cleaned up automatically).
-- The Chainlit UI stores chats, questions and answers included, in `.chainlit/chat.db` (SQLite).
+- The Chainlit UI stores chats, questions and answers included, in `chat.db` under
+  `AYL_CHAINLIT_DIR` (by default `.chainlit/` in the checkout), a SQLite file.
 - Optional LangSmith tracing (`LANGCHAIN_API_KEY`, or `LANGSMITH_API_KEY` with `LANGSMITH_TRACING`)
   sends prompts and retrieved text to LangSmith; `LANGSMITH_TRACING_V2=false` and
   `LANGCHAIN_TRACING_V2=false` together keep it off.
@@ -130,9 +131,10 @@ is configured with*. It is not a claim about the machine, and not about every wa
 can be started:
 
 - **Chainlit is not exercised.** The `ui` extra is not installed in the CI legs that run this
-  file, so `ui.py`, its server, its SQLite persistence and its own HTTP stack are outside these
-  assertions — and that extra's tree brings `grpcio` and an OTLP gRPC exporter, which network from
-  C, so a Chainlit process is one this guard could not speak for even if it ran there.
+  file, so the web chat (`src/ask_your_library/ui/app.py`), its server, its SQLite persistence
+  and its own HTTP stack are outside these assertions — and that extra's tree brings `grpcio` and
+  an OTLP gRPC exporter, which network from C, so a Chainlit process is one this guard could not
+  speak for even if it ran there.
 - **Native code is the blind spot.** Only calls through Python's socket module raise the audit
   events; a C extension with its own sockets, or `ctypes` into libc, does not. Pinned by an
   `xfail(strict)` control, and bounded by a test that asserts no known native-networking package
@@ -159,14 +161,16 @@ Designed for **localhost, single user**. Not designed for internet exposure:
   to `127.0.0.1` (it only has to guess the port), and a name it controls that resolves to
   `127.0.0.1` (DNS rebinding) makes those requests same-origin for the browser, carrying that
   name in the `Host` header. That is why the quick start's placeholder login is unsafe even with
-  no port forwarding at all: such a page could post it and then read every thread. `ui.py`
-  registers Starlette's `TrustedHostMiddleware`, so the server answers only to the Host headers
-  `localhost` and `127.0.0.1` and returns 400 to anything else, which closes the rebinding route;
-  the login cookie is `SameSite=strict`, which `ui.py` sets on Chainlit's cookie module itself
-  (`CHAINLIT_COOKIE_SAMESITE` is read before `ui.py` is loaded under `chainlit run`, so neither
-  the environment nor `.env` decides it). Set `CHAINLIT_PASSWORD` anyway. `allow_origins` in
-  `.chainlit/config.toml` is a CORS list, i.e. what a cross-origin page may *read*, and never a
-  substitute for either.
+  no port forwarding at all: such a page could post it and then read every thread.
+  The web chat registers Starlette's `TrustedHostMiddleware`, so the server answers only to the
+  Host headers `localhost` and `127.0.0.1` and returns 400 to anything else, which closes the
+  rebinding route;
+  the login cookie is `SameSite=strict`, which it sets on Chainlit's cookie module itself
+  (`CHAINLIT_COOKIE_SAMESITE` is read before the module is loaded under `chainlit run`, so neither
+  the environment nor `.env` decides it). Set `CHAINLIT_PASSWORD` anyway. `allow_origins` in the
+  Chainlit configuration is a CORS list, i.e. what a cross-origin page may *read*, and never a
+  substitute for either; `ayl ui` writes it with the port the server was actually given, because
+  an entry naming a port this server is not on is a page there allowed to read its threads.
 - The injection layers cover instructions embedded in the *corpus*. They do not protect against
   a hostile *user*, do not cover paraphrased or non-EN/UA injections, and do not make the
   XML-like data blocks a boundary.

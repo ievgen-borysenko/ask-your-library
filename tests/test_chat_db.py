@@ -1,12 +1,12 @@
 """The chat database's schema version and the startup column check (#27).
 
-`ui.py` creates its tables with `CREATE TABLE IF NOT EXISTS`, which by design
+`app.py` creates its tables with `CREATE TABLE IF NOT EXISTS`, which by design
 leaves an existing table exactly as it is. So a `chat.db` written by an older
 release keeps its old columns, looks healthy, and fails on the first insert
 naming a column it does not have — in the middle of somebody's question.
 
 These tests run against plain SQLite and the schema string itself: no Chainlit,
-no server, no `ui.py` import (which needs the optional `ui` extra).
+no server, no `app.py` import (which needs the optional `ui` extra).
 """
 import re
 import sqlite3
@@ -19,7 +19,7 @@ from ask_your_library.chat_db import (SCHEMA_VERSION, VERSION_TABLE, actual_colu
                                       declared_columns, record_version,
                                       stored_version)
 
-# A miniature of `ui.py`'s schema: the two shapes that matter are a plain
+# A miniature of `app.py`'s schema: the two shapes that matter are a plain
 # column list and a table with a constraint line after it.
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -59,7 +59,7 @@ def connection(tmp_path):
 
 
 def test_the_declared_columns_are_read_from_the_schema_not_a_second_list():
-    """Written out again here, a column added to `ui.py` would be checked for
+    """Written out again here, a column added to `app.py` would be checked for
     only if somebody remembered to add it twice."""
     declared = declared_columns(SCHEMA)
     assert declared["users"] == {"id", "identifier", "metadata"}
@@ -120,10 +120,11 @@ def test_an_unreadable_database_is_a_line_and_not_a_traceback(tmp_path):
 
 
 def shipped_schema() -> str:
-    """`ui.py`'s own CHAT_DB_SCHEMA, read out of the file rather than imported:
-    importing `ui.py` pulls in Chainlit, which is an optional extra this suite
-    runs without."""
-    source = (Path(__file__).resolve().parents[1] / "ui.py").read_text(encoding="utf-8")
+    """The web chat's own CHAT_DB_SCHEMA, read out of the file rather than
+    imported: importing `app.py` pulls in Chainlit, which is an optional extra
+    this suite runs without."""
+    source = (Path(__file__).resolve().parents[1] / "src" / "ask_your_library" / "ui"
+              / "app.py").read_text(encoding="utf-8")
     return re.search(r'CHAT_DB_SCHEMA = """(.*?)"""', source, re.S).group(1)
 
 

@@ -4,9 +4,10 @@ Until now this path was walked by hand before every release (docs/backlog.md,
 "Release status"): first start, login, the starters on the empty chat screen, a
 question, the live agent steps, the quote-provenance badge, an evidence passage
 readable in the browser, the catalogue answer, a reload that restores the
-conversation, and a clarify nobody answers. That is what this file does, against a real `chainlit run ui.py
---headless` — the real server, the real graph, the real rendering — with the
-model and the index replaced by `scripted_backend.py` (see
+conversation, and a clarify nobody answers. That is what this file does, against a real
+server started the way `ayl ui` starts one — `ask_your_library.ui.launcher`, which prepares a
+Chainlit app root and runs `chainlit run` against the packaged app — with the model and the
+index replaced by `scripted_backend.py` (see
 `ask_your_library.fake_backend`). Nothing here needs Ollama, a key or an index,
 and every run answers the same way.
 
@@ -37,7 +38,6 @@ from urllib.parse import urljoin
 import pytest
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[1]
 SCRIPTED_BACKEND = HERE / "scripted_backend.py"
 
 # Login of the throwaway demo server (docs/quick-start.md); the placeholder
@@ -179,8 +179,9 @@ class Server:
 
 @pytest.fixture
 def chainlit_server(tmp_path_factory) -> Server:
-    """`chainlit run ui.py --headless` on a free loopback port, with the
-    scripted backend and its own state directory.
+    """The web chat on a free loopback port, started through
+    `ask_your_library.ui.launcher` with the scripted backend and its own state
+    directory as the Chainlit app root.
 
     One server PER TEST, not per session, and the extra start is the point: the
     chat db IS the thread history, and a second test sharing it would find the
@@ -202,14 +203,18 @@ def chainlit_server(tmp_path_factory) -> Server:
     url = f"http://127.0.0.1:{port}"
     environment = {
         **os.environ,
-        # A throwaway demo login, and its state well away from the checkout's
-        # .chainlit/ (the import writes an auth secret and a chat db).
+        # A throwaway demo login, and its state well away from the checkout
+        # (the import writes an auth secret and a chat db).
         "AYL_ALLOW_DEFAULT_LOGIN": "1",
         "CHAINLIT_USERNAME": USERNAME,
         "CHAINLIT_PASSWORD": PASSWORD,
-        "AYL_CHAINLIT_DIR": str(state / "chainlit"),
+        # The app root is the directory ABOVE this one (launcher.app_root), so
+        # the config the launcher writes, the translations, the chat db and the
+        # auth secret all land under `state` and nothing is read from — or
+        # written into — the checkout.
+        "AYL_CHAINLIT_DIR": str(state / ".chainlit"),
         "ASK_SCRATCH_DIR": str(state / "scratch"),
-        # Pinned, not inherited: with a hosted backend ui.py refuses to start
+        # Pinned, not inherited: with a hosted backend app.py refuses to start
         # without a key, and this server has no backend at all.
         "LLM_BACKEND": "ollama",
         "EMBED_BACKEND": "ollama",
@@ -224,11 +229,28 @@ def chainlit_server(tmp_path_factory) -> Server:
         # are not theirs to upload. Blank, not removed — dotenv fills a free name.
         "LITERAL_API_KEY": "",
     }
+    # Started through the launcher, not with a `chainlit run` of our own: the
+    # thing under test is the server a reader gets from `ayl ui`, configuration
+    # included. `launcher.run` blocks (it is a subprocess.call), so the child is
+    # a small python parent with chainlit under it — and the process group below
+    # covers both.
+    #
+    # It runs in an empty directory, which is the assertion after the wait: the
+    # app root Chainlit reads is `CHAINLIT_APP_ROOT or os.getcwd()`, so a
+    # `.chainlit/` appearing HERE is a server that was configured by whatever
+    # was (or was not) in the working directory. The empty directory also keeps
+    # a developer's `.env` out of it — chainlit's own import calls
+    # `load_dotenv(<cwd>/.env)`, and this server's environment is the pinned
+    # one below.
+    elsewhere = state / "elsewhere"
+    elsewhere.mkdir()
+    launch = (f"from ask_your_library.ui import launcher\n"
+              f"raise SystemExit(launcher.run('127.0.0.1', {port}, ['--headless']))\n")
     log_path = state / "chainlit-server.log"
     with log_path.open("w") as log:
         process = subprocess.Popen(
-            [str(chainlit), "run", "ui.py", "--headless", "--host", "127.0.0.1", "--port", str(port)],
-            cwd=str(REPO), env=environment, stdout=log, stderr=subprocess.STDOUT,
+            [sys.executable, "-c", launch],
+            cwd=str(elsewhere), env=environment, stdout=log, stderr=subprocess.STDOUT,
             start_new_session=True)      # its own process group: uvicorn's children die with it
     try:
         try:
@@ -236,6 +258,16 @@ def chainlit_server(tmp_path_factory) -> Server:
         except RuntimeError as error:
             raise RuntimeError(f"{error}\n--- server log ---\n"
                                f"{log_path.read_text(errors='replace')}") from None
+        # A running server, and the directory it was started in is still empty.
+        # Chainlit writes a default config.toml, a .files/ and a chainlit.md
+        # into its app root when it finds none there, so these appearing in the
+        # working directory is exactly what an app root the launcher did NOT
+        # prepare looks like — and a config Chainlit wrote is one without
+        # `unsafe_allow_html`, without `auto_tag_thread = false` and with MCP
+        # back on.
+        stray = sorted(path.name for path in elsewhere.iterdir())
+        assert not stray, f"the server was configured from its working directory: {stray}"
+        assert (state / ".chainlit" / "config.toml").is_file()
         yield Server(url, log_path)
     finally:
         if process.poll() is None:
@@ -263,7 +295,7 @@ def body(page):
 
 def step(page, name: str):
     """One agent step's collapse trigger. Chainlit ids them `step-<name>`, and
-    the name is the label ui.py writes, so the second step is
+    the name is the label app.py writes, so the second step is
     `step-searched the library #1` — spaces and a hash in an id, hence the
     attribute selector."""
     return page.locator(f'[id="step-{name}"]')
@@ -424,7 +456,7 @@ def walk_through_the_release_check(page, chainlit_server) -> None:
     expect(body(page)).not_to_contain_text("counts the quotes traced", timeout=RENDER_MS)
 
     # --- a research question: the live steps, then the answer. The step labels
-    # are the product's own words, not "Used act #1": the name ui.py writes is
+    # are the product's own words, not "Used act #1": the name app.py writes is
     # the whole label, because the project's en-US.json empties Chainlit's
     # prefix (design critique 16.09 §1.6).
     ask(page, RESEARCH_QUESTION)

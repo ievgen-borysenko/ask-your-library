@@ -200,10 +200,11 @@ def run_fresh(code: str, cwd=None, check=True, **env) -> subprocess.CompletedPro
     `uv run --group dev pytest -q` runs right after it — so every child that
     reads configuration goes through here, never a subprocess.run of its own."""
     base = {k: v for k, v in os.environ.items() if k not in SCRUBBED}
-    # REPO for `import ui` (the package itself is installed); this directory so a
-    # child can `from conftest import pin_environment` and start from exactly the
-    # environment the suite starts from.
-    base["PYTHONPATH"] = os.pathsep.join([str(REPO), str(Path(__file__).resolve().parent)])
+    # This directory, so a child can `from conftest import pin_environment` and
+    # start from exactly the environment the suite starts from. The checkout
+    # root used to be here as well, for `import ui`; the web chat is inside the
+    # package now (#30) and comes from the installation like everything else.
+    base["PYTHONPATH"] = str(Path(__file__).resolve().parent)
     with tempfile.TemporaryDirectory() as empty:
         return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                               check=check, env={**base, **env}, cwd=cwd or empty)

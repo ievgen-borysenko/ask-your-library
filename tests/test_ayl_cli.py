@@ -9,6 +9,7 @@ graph that explode if anything touches them. A router that quietly grew an
 environment read would pass every other test in this file.
 """
 import argparse
+import tomllib
 from pathlib import Path
 
 import lancedb
@@ -22,6 +23,7 @@ from ask_your_library.i18n import t
 from ask_your_library.ingest import add_folder
 from ask_your_library.library import TITLE_SEPARATOR
 from ask_your_library.preflight import PreflightResult
+from ask_your_library.ui import launcher
 from test_add_folder import PARA, fake_embedder, write  # noqa: F401
 
 
@@ -514,65 +516,58 @@ def test_doctor_reports_a_healthy_index_the_configured_path_does_not_hold(monkey
 
 # --- ui -----------------------------------------------------------------------
 
-def test_ui_runs_chainlit_against_the_checkouts_script_on_loopback(monkeypatch, tmp_path):
-    script = tmp_path / "ui.py"
-    script.write_text("")
-    monkeypatch.setattr(ayl, "REPO_ROOT", str(tmp_path))
+def test_ui_runs_chainlit_against_the_packaged_app_on_loopback(monkeypatch, tmp_path):
+    """The web chat is in the wheel now: the app that runs is this package's
+    own `ui/app.py`, whatever directory the command was typed in."""
+    monkeypatch.setenv("AYL_CHAINLIT_DIR", str(tmp_path / "root" / ".chainlit"))
     seen = []
-    monkeypatch.setattr(ayl.subprocess, "call",
-                        lambda command, cwd=None: seen.append((command, cwd)) or 0)
+    monkeypatch.setattr(launcher.subprocess, "call",
+                        lambda command, env=None: seen.append((command, env)) or 0)
 
     assert ayl.main(["ui", "-w", "--port", "8123"]) == 0
-    assert seen == [(["chainlit", "run", str(script), "--host", "127.0.0.1", "-w",
-                      "--port", "8123"], tmp_path)]
+    command, environment = seen[0]
+    assert command == [launcher.chainlit_command(), "run", str(launcher.APP),
+                       "--host", "127.0.0.1", "--port", "8123", "-w"]
+    assert environment["CHAINLIT_APP_ROOT"] == str((tmp_path / "root").resolve())
 
 
-def test_ui_starts_chainlit_in_the_checkout_so_the_committed_config_is_the_one_that_loads(
-        monkeypatch, tmp_path):
-    """Chainlit derives its app root from `CHAINLIT_APP_ROOT or os.getcwd()`
-    and WRITES a default `.chainlit/config.toml` where it finds none. Started
-    anywhere else, the committed config is not the one that loads:
-    `unsafe_allow_html`, `auto_tag_thread = false`, the narrowed
-    `allow_origins` and the MCP disable SECURITY.md names are all silently back
-    at Chainlit's defaults, and a `.chainlit/` appears in the caller's
-    directory."""
-    script = tmp_path / "ui.py"
-    script.write_text("")
-    monkeypatch.setattr(ayl, "REPO_ROOT", str(tmp_path))
-    seen = {}
-    monkeypatch.setattr(ayl.subprocess, "call",
-                        lambda command, cwd=None: seen.update(cwd=cwd) or 0)
+def test_ui_writes_the_projects_config_into_the_app_root_before_starting(monkeypatch, tmp_path):
+    """Chainlit reads its settings from the app root's `.chainlit/config.toml`
+    and WRITES A DEFAULT ONE where it finds none. That default has no
+    `unsafe_allow_html` (the provenance badge and the metrics footer),
+    `auto_tag_thread` back on, a wide `allow_origins` and MCP enabled — so the
+    file has to be there, with the port that was typed, before the server
+    starts. tests/test_ui_launcher.py pins the contents; this pins that `ayl
+    ui` is what puts them there."""
+    monkeypatch.setenv("AYL_CHAINLIT_DIR", str(tmp_path / "root" / ".chainlit"))
+    monkeypatch.setattr(launcher.subprocess, "call", lambda command, env=None: 0)
 
-    assert ayl.main(["ui"]) == 0
-    assert seen["cwd"] == script.parent == tmp_path
+    assert ayl.main(["ui", "--port", "8123"]) == 0
 
-
-def test_ui_without_a_checkout_names_what_is_missing(monkeypatch, capsys):
-    """Installed as a wheel there is no repository above the package and no
-    ui.py in it: the web chat is not in the distribution yet."""
-    monkeypatch.setattr(ayl, "REPO_ROOT", "")
-    monkeypatch.setattr(ayl.subprocess, "call",
-                        lambda command, cwd=None: pytest.fail("chainlit was started anyway"))
-
-    assert ayl.main(["ui"]) == 1
-    assert "ui.py" in capsys.readouterr().err
+    config = tomllib.loads((tmp_path / "root" / ".chainlit" / "config.toml")
+                           .read_text(encoding="utf-8"))
+    assert config["features"]["unsafe_allow_html"] is True
+    assert config["features"]["mcp"]["enabled"] is False
+    assert config["project"]["allow_origins"] == ["http://localhost:8123",
+                                                  "http://127.0.0.1:8123"]
 
 
 def test_ui_without_chainlit_names_the_extra(monkeypatch, tmp_path, capsys):
-    (tmp_path / "ui.py").write_text("")
-    monkeypatch.setattr(ayl, "REPO_ROOT", str(tmp_path))
+    monkeypatch.setenv("AYL_CHAINLIT_DIR", str(tmp_path / "root" / ".chainlit"))
 
-    def missing(command, cwd=None):
+    def missing(command, env=None):
         raise FileNotFoundError(command[0])
-    monkeypatch.setattr(ayl.subprocess, "call", missing)
+    monkeypatch.setattr(launcher.subprocess, "call", missing)
 
     assert ayl.main(["ui"]) == 1
     assert "--extra ui" in capsys.readouterr().err
 
 
 def test_ui_help_does_not_start_a_server(monkeypatch, capsys):
-    monkeypatch.setattr(ayl.subprocess, "call",
-                        lambda command, cwd=None: pytest.fail("chainlit was started for --help"))
+    monkeypatch.setattr(launcher.subprocess, "call",
+                        lambda command, env=None: pytest.fail("chainlit was started for --help"))
+    monkeypatch.setattr(launcher, "prepare",
+                        lambda host, port: pytest.fail("an app root was prepared for --help"))
     with pytest.raises(SystemExit) as exit_info:
         ayl.main(["ui", "--help"])
     assert exit_info.value.code == 0
@@ -613,10 +608,3 @@ def test_build_parser_returns_a_parser_that_knows_every_command():
     assert isinstance(parser, argparse.ArgumentParser)
     assert set(ayl.SUMMARY) == set(ayl.DISPATCH)
     assert parser.parse_args(["books"]).command == "books"
-
-
-def test_ui_script_is_the_repository_root_walk(monkeypatch, tmp_path):
-    monkeypatch.setattr(ayl, "REPO_ROOT", str(tmp_path))
-    assert ayl.ui_script() is None                      # a root without a ui.py
-    (tmp_path / "ui.py").write_text("")
-    assert ayl.ui_script() == Path(tmp_path) / "ui.py"

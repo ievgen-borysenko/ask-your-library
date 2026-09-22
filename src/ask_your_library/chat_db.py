@@ -2,7 +2,7 @@
 
 The index has a fingerprint and a policy (`index_meta`); the web UI's SQLite
 chat database had neither, and it has exactly the failure that argument was
-about. `ui.py` creates its tables with `CREATE TABLE IF NOT EXISTS`, which by
+about. The web chat creates its tables with `CREATE TABLE IF NOT EXISTS`, which by
 design does nothing to a table that is already there — so a `chat.db` written
 by an older release keeps its old columns for ever, and the data layer's first
 `INSERT` naming a column that table does not have fails in the middle of
@@ -18,7 +18,7 @@ be recreated) throws away every past conversation and must be the reader's
 decision, not a startup assertion.
 
 This module holds no SQL of its own beyond the version table: the schema is
-`ui.py`'s, because that is what the data layer was configured against, and a
+the UI's, because that is what the data layer was configured against, and a
 second copy here would be a second thing to keep true. What is checked is the
 schema it is HANDED.
 """
@@ -28,7 +28,7 @@ import time
 
 log = logging.getLogger(__name__)
 
-# The shape of the chat database as `ui.py` declares it. 1 is that schema as it
+# The shape of the chat database as `ui/app.py` declares it. 1 is that schema as it
 # has stood since the UI shipped; bump it whenever a column is added, removed
 # or retyped, so that a database written by a newer release is recognisable as
 # one rather than discovered column by column.
@@ -57,7 +57,7 @@ def declared_columns(ddl: str) -> dict[str, set[str]]:
     """`table -> column names`, read from the CREATE TABLE statements of `ddl`.
 
     Read from the schema rather than written out again here, so that a column
-    added to `ui.py` is checked for from the moment it is added and cannot be
+    added to `ui/app.py` is checked for from the moment it is added and cannot be
     forgotten in a second list."""
     return {name: set(_COLUMN.findall(body)) for name, body in _CREATE_TABLE.findall(ddl)}
 

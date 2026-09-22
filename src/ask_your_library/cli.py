@@ -7,7 +7,7 @@
 `ask-library` is the same run under the name this had before `ayl` (#30); it
 prints one deprecation line and is removed at 0.6.0.
 
-The web UI (ui.py, Chainlit) shares the same core: runner.run_question.
+The web UI (ui/app.py, Chainlit) shares the same core: runner.run_question.
 Answering a question requires an answering model and an embedding backend —
 both a local Ollama by default (qwen2.5:14b and bge-m3), so a fresh clone needs
 no account and no key — plus a LanceDB built by scripts/ingest_demo_corpus.py or

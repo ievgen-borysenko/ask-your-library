@@ -1631,7 +1631,7 @@ else
     printf '      billed per question (docs/cost.md). The fully local mode, which needs\n'
     printf '      neither, is what this script sets up without --hosted.\n'
 fi
-printf '  AYL_ALLOW_DEFAULT_LOGIN=1 uv run --extra ui chainlit run ui.py -w --host 127.0.0.1\n'
+printf '  AYL_ALLOW_DEFAULT_LOGIN=1 uv run --extra ui ayl ui\n'
 printf '      the web chat on 127.0.0.1, login admin / change-me (the form asks for an\n'
 printf '      "Email address": type the username there). That variable is what\n'
 printf '      allows the placeholder password; set CHAINLIT_USERNAME and CHAINLIT_PASSWORD\n'

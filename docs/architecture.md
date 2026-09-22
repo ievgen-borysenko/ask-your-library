@@ -106,8 +106,9 @@ says nothing about whether an answer is faithful or correct); it named one hoste
 locally with no account ([`configuration.md`](configuration.md)); and it priced a question at
 `~$0.02-0.08` against the author's private 169-book library, where the figure measured on the demo
 corpus is $0.04-0.05 at v0.2.0-rc1 ([`cost.md`](cost.md)). Its canvas also named an `MCP server
-(future)`, which `.chainlit/config.toml` declines by policy, and wrote `CODE = deterministic
-code`, the phrasing 0.3.1 replaced with "no answering-model call" because `act` embeds its query.
+(future)`, which the Chainlit configuration this project ships declines by policy, and wrote
+`CODE = deterministic code`, the phrasing 0.3.1 replaced with "no answering-model call" because
+`act` embeds its query.
 
 The decisions behind this shape, and the alternative each one replaced, are recorded as ADRs
 in [`adr/README.md`](adr/README.md), each with the measurement that settled it.
@@ -242,6 +243,9 @@ src/ask_your_library/  agent package: graph, nodes, model client (llm.py), promp
   ingest/              chapter splitting, chunking, LanceDB rows, FTS index, staged and
                        per-book publishing, ledger.py (the books ledger), doctor.py
                        (ledger vs index), and add_folder.py - the `ayl-add` folder ingest
+  ui/                  Chainlit web chat (app.py), launcher.py (writes the app root
+                       Chainlit reads, then starts it), and the packaged config,
+                       translation and welcome page
 scripts/               ingest_demo_corpus.py - staged, cached corpus build
 corpus/                manifest.yaml (checksums), book cards, canaries, audio transcripts,
                        toc/ (committed chapter titles; the card-grounding test uses them)
@@ -250,5 +254,4 @@ tests/                 unit tests and the golden-set / manifest CI guard
 docs/                  backlog.md (known gaps, v0.2), CHANGELOG.md, adr/ (decision records),
                        eval-results/, examples/
 .github/workflows/     CI: unit tests on every push, UI contracts with the chainlit extra
-ui.py                  Chainlit web chat
 ```

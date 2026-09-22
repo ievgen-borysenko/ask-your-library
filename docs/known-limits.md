@@ -384,7 +384,7 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   table and re-indexes — it keeps the ledger's minted ids, but the books the ledger holds that
   this folder does not lose their rows with the table and are reported as `requested`, to be
   re-indexed from their own folders.
-- **The web UI's chat database is checked, not migrated.** `ui.py` creates its tables with
+- **The web UI's chat database is checked, not migrated.** `src/ask_your_library/ui/app.py` creates its tables with
   `CREATE TABLE IF NOT EXISTS`, so a `chat.db` written by an older release keeps its old columns
   for ever. At startup the columns the schema declares are compared with the ones that are there
   and the difference is **warned** about, naming the missing columns; the file carries a

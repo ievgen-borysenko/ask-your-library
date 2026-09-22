@@ -18,6 +18,12 @@ pytest.importorskip("chainlit")
 
 from ask_your_library.sanitize import LINE_BREAK_RE      # noqa: E402  (after the skip)
 
+# The Chainlit application, now inside the package (#30). Imported by name
+# rather than as a module of the checkout: `chainlit run` still loads the file
+# as a top-level `app`, but this suite imports the installed package, which is
+# what an installation actually has.
+UI_MODULE = "ask_your_library.ui.app"
+
 # A blank line ends the HTML block a message is; CommonMark ends a line on more
 # than LF, so every one of these opens the same hole in a badge or a footer.
 BLANK_LINES = ("\n\n", "\r\r", "\r\n\r\n", "\u2028\u2028", "\x85\x85")
@@ -25,7 +31,7 @@ BLANK_LINES = ("\n\n", "\r\r", "\r\n\r\n", "\u2028\u2028", "\x85\x85")
 
 @pytest.fixture(autouse=True)
 def hosted_backend(monkeypatch):
-    """ui.py's startup gate asks preflight, which read the backend from the
+    """app.py's startup gate asks preflight, which read the backend from the
     environment once, at import time: a developer whose shell (or .env) says
     LLM_BACKEND=ollama would otherwise test a server whose key gate is off.
     Every test here describes the default backend, except the local-mode one,
@@ -35,16 +41,15 @@ def hosted_backend(monkeypatch):
 
 @pytest.fixture
 def ui(monkeypatch, tmp_path):
-    # ui.py refuses the placeholder password unless the demo login is acknowledged,
+    # app.py refuses the placeholder password unless the demo login is acknowledged,
     # refuses to start without an OpenRouter key, mints a secret file on import and
-    # creates the chat db: all of that goes to tmp, never to the repo's .chainlit/.
+    # creates the chat db: all of that goes to tmp, never to the checkout's .chainlit/.
     monkeypatch.setenv("CHAINLIT_AUTH_SECRET", "test-secret")
     monkeypatch.setenv("AYL_ALLOW_DEFAULT_LOGIN", "1")
     monkeypatch.setenv("AYL_ALLOW_START_WITHOUT_KEY", "1")
     monkeypatch.setenv("AYL_CHAINLIT_DIR", str(tmp_path / "chainlit"))
-    sys.modules.pop("ui", None)
-    monkeypatch.syspath_prepend(str(REPO))
-    module = importlib.import_module("ui")
+    sys.modules.pop(UI_MODULE, None)
+    module = importlib.import_module(UI_MODULE)
     monkeypatch.setattr(module.cl, "run_sync", lambda value: value)
     return module
 
@@ -318,11 +323,10 @@ def test_empty_password_refuses_to_start(monkeypatch, tmp_path):
     monkeypatch.setenv("AYL_ALLOW_START_WITHOUT_KEY", "1")
     monkeypatch.setenv("AYL_CHAINLIT_DIR", str(tmp_path / "chainlit"))
     monkeypatch.setenv("CHAINLIT_PASSWORD", "")
-    monkeypatch.syspath_prepend(str(REPO))
-    sys.modules.pop("ui", None)
+    sys.modules.pop(UI_MODULE, None)
     with pytest.raises(SystemExit):
-        importlib.import_module("ui")
-    sys.modules.pop("ui", None)
+        importlib.import_module(UI_MODULE)
+    sys.modules.pop(UI_MODULE, None)
 
 
 def test_missing_key_refuses_to_start_before_anyone_logs_in(monkeypatch, tmp_path):
@@ -337,32 +341,31 @@ def test_missing_key_refuses_to_start_before_anyone_logs_in(monkeypatch, tmp_pat
     # config.OPENROUTER_ENV_FILE was resolved at import time; the key lookup must
     # find nothing whatever the developer running the tests has configured.
     monkeypatch.setattr("ask_your_library.embeddings.OPENROUTER_ENV_FILE", None)
-    monkeypatch.syspath_prepend(str(REPO))
-    sys.modules.pop("ui", None)
+    sys.modules.pop(UI_MODULE, None)
     with pytest.raises(SystemExit) as exit_info:
-        importlib.import_module("ui")
-    sys.modules.pop("ui", None)
+        importlib.import_module(UI_MODULE)
+    sys.modules.pop(UI_MODULE, None)
     message = str(exit_info.value)
     assert "OPENROUTER_API_KEY" in message and "AYL_ALLOW_START_WITHOUT_KEY" in message
 
     # ...and the escape hatch really is the only thing standing in the way.
     monkeypatch.setenv("AYL_ALLOW_START_WITHOUT_KEY", "1")
-    sys.modules.pop("ui", None)
-    assert importlib.import_module("ui").CHAINLIT_DIR == tmp_path / "chainlit"
-    sys.modules.pop("ui", None)
+    sys.modules.pop(UI_MODULE, None)
+    assert importlib.import_module(UI_MODULE).CHAINLIT_DIR == tmp_path / "chainlit"
+    sys.modules.pop(UI_MODULE, None)
 
 
 def test_the_fully_local_mode_starts_with_no_key_at_all(tmp_path):
     """The mirror of the test above: LLM_BACKEND=ollama with local embeddings
     needs no OpenRouter account, so the same keyless server must come up —
-    without the escape hatch, which is for importing ui.py, not for serving.
+    without the escape hatch, which is for importing app.py, not for serving.
 
     Driven by the environment in a subprocess, not by pinning the derived
     OPENROUTER_NEEDS_KEY: config resolves the backends once, at import time, so
     pinning the flag would test the gate against a value this test wrote itself
     and would survive config deciding the local mode needs a key after all."""
     chainlit_dir = tmp_path / "chainlit"
-    code = "import ui; print(ui.CHAINLIT_DIR)"
+    code = f"import {UI_MODULE} as ui; print(ui.CHAINLIT_DIR)"
     # No key of any kind, and no AYL_ALLOW_START_WITHOUT_KEY: the backends alone
     # must carry the import past the gate. check=True => a SystemExit fails here.
     done = _run(code, LLM_BACKEND="ollama", EMBED_BACKEND="ollama",
@@ -398,13 +401,12 @@ def test_a_key_from_the_env_file_alone_starts_the_server(monkeypatch, tmp_path, 
         return real_read_text(self, *args, **kwargs)
     monkeypatch.setattr(Path, "read_text", counting_read_text)
 
-    monkeypatch.syspath_prepend(str(REPO))
-    sys.modules.pop("ui", None)
+    sys.modules.pop(UI_MODULE, None)
     try:
-        module = importlib.import_module("ui")      # no SystemExit: the gate is satisfied
+        module = importlib.import_module(UI_MODULE)      # no SystemExit: the gate is satisfied
         assert module.CHAINLIT_DIR == tmp_path / "chainlit"
     finally:
-        sys.modules.pop("ui", None)
+        sys.modules.pop(UI_MODULE, None)
 
     assert len(reads) == 1, f"the key file was read {len(reads)} times, expected once"
     captured = capsys.readouterr()
@@ -695,7 +697,7 @@ def test_badge_broken_quotes_are_neutralized_and_single_line(ui):
 
 # --- chat persistence: the thread insert that carries the title -----------------
 
-CHAINLIT_CONFIG = REPO / ".chainlit" / "config.toml"
+CHAINLIT_CONFIG = REPO / "src" / "ask_your_library" / "ui" / "chainlit_config.toml"
 
 
 def _tags_as_the_emitter_sends_them(profile: str) -> list[str] | None:
@@ -727,7 +729,7 @@ def _insert_and_read(layer, thread_id: str, tags) -> dict | None:
 
 
 def test_first_message_persists_the_chat_title(ui):
-    """The data layer as ui.py builds it, the schema as ui.py creates it, the
+    """The data layer as app.py builds it, the schema as app.py creates it, the
     title-carrying insert of a chat's first message with the tags the shipped
     config makes the emitter send (the emitter also passes the user; that
     needs a session and changes nothing about the tags column): the title must
@@ -767,11 +769,12 @@ def test_config_pins_allow_origins_to_the_serving_port_only():
 
 # --- the New Chat dialog: one reworded string, over Chainlit's own file ---------
 
-PROJECT_TRANSLATION = REPO / ".chainlit" / "translations" / "en-US.json"
+PROJECT_TRANSLATION = (REPO / "src" / "ask_your_library" / "ui" /
+                       "translations" / "en-US.json")
 NEW_CHAT_DESCRIPTION = "navigation.newChat.dialog.description"
 OUR_WORDING = "This starts a new chat. The current chat stays in your history."
 # Every value of the vendored file this project changed, and why it had to be
-# changed here rather than in ui.py. NOTICE and .chainlit/translations/README.md
+# changed here rather than in app.py. NOTICE and the README beside the file
 # carry the same list in prose (Apache-2.0 §4(b)); this is the enforcement.
 STEP_PREFIXES = ("chat.messages.status.used", "chat.messages.status.using")
 WATERMARK = "chat.watermark"
@@ -799,7 +802,7 @@ def _shipped_translation() -> dict:
 
 def test_the_project_translation_carries_the_whole_key_set_of_the_installed_one():
     """chainlit.config.ChainlitConfig.load_translation returns the file for the
-    effective language WHOLE, out of .chainlit/translations/ alone: there is no
+    effective language WHOLE, out of the app root's translations/ alone: there is no
     per-key merge with the package's copy, so a key missing from our file is a
     label missing from the page, not a fallback. The installed en-US.json is the
     ground truth, and the day a Chainlit bump adds or renames a key this fails
@@ -811,7 +814,7 @@ def test_the_project_translation_carries_the_whole_key_set_of_the_installed_one(
 
 
 def test_exactly_four_values_are_ours_and_the_rest_stays_upstreams():
-    """Four strings are this project's, and each one is a claim ui.py cannot
+    """Four strings are this project's, and each one is a claim app.py cannot
     make for itself:
 
     - the New Chat warning: chats are persisted by the data layer and stay in
@@ -819,7 +822,7 @@ def test_exactly_four_values_are_ours_and_the_rest_stays_upstreams():
       app this is not;
     - the two step prefixes: Chainlit prints "Used"/"Using" in front of a step
       name, and "Used act #1" is a framework log line, not the product's voice.
-      Emptied, the name ui.py writes is the whole label;
+      Emptied, the name app.py writes is the whole label;
     - the watermark: "LLMs can make mistakes. Check important info." sits under
       a badge reporting a code-only check and says less than this app knows.
       The replacement claims exactly what `validate` does: the provenance of
@@ -844,10 +847,10 @@ def test_exactly_four_values_are_ours_and_the_rest_stays_upstreams():
 
 def test_startup_seeds_the_other_languages_and_leaves_ours_alone(tmp_path, monkeypatch):
     """chainlit.config.init_config runs on every import of chainlit.config and
-    copies each language the package ships into .chainlit/translations/ — but
+    copies each language the package ships into the app root's translations/ — but
     only where no file exists yet. That `if not os.path.exists(dst)` is the whole
-    reason a tracked en-US.json survives a start; without it the repo's file
-    would be replaced by upstream's on the first `chainlit run`."""
+    reason the copy launcher.py puts there survives a start; without it our
+    file would be replaced by upstream's on the first `chainlit run`."""
     import shutil
     from chainlit import config as chainlit_config
     project = tmp_path / ".chainlit"
@@ -875,7 +878,7 @@ def test_the_notice_attributes_the_vendored_chainlit_file():
     from importlib.metadata import version
     notice = (REPO / "NOTICE").read_text(encoding="utf-8")
     if PROJECT_TRANSLATION.exists():
-        assert ".chainlit/translations/en-US.json" in notice
+        assert "src/ask_your_library/ui/translations/en-US.json" in notice
         assert f"Chainlit {version('chainlit')}" in notice
         assert "Apache License" in notice
         readme = (PROJECT_TRANSLATION.parent / "README.md").read_text(encoding="utf-8")
@@ -884,22 +887,22 @@ def test_the_notice_attributes_the_vendored_chainlit_file():
             assert path in notice, path
             assert path in readme, path
     else:
-        assert ".chainlit/translations/en-US.json" not in notice
+        assert "src/ask_your_library/ui/translations/en-US.json" not in notice
 
 
 # --- the login cookie, in the process shape `chainlit run` really produces ------
 
 def test_the_login_cookie_is_really_strict_under_chainlit_run(tmp_path):
-    """CHAINLIT_COOKIE_SAMESITE cannot deliver this. `chainlit run ui.py` starts
-    at the console script, which imports chainlit.cli; that reaches
+    """CHAINLIT_COOKIE_SAMESITE cannot deliver this. `chainlit run app.py`
+    starts at the console script, which imports chainlit.cli; that reaches
     chainlit.auth.cookie (through ensure_jwt_secret) and the module reads the
-    variable ONCE, there, before ui.py is loaded at all — and a .env entry is
-    later still, because load_dotenv runs inside the package import. So ui.py
+    variable ONCE, there, before app.py is loaded at all — and a .env entry is
+    later still, because load_dotenv runs inside the package import. So app.py
     sets the two module globals the cookie writer reads at request time.
 
     The child imports in the console script's order, and the assertion is on the
     header a browser would actually receive, not only on the globals."""
-    code = ("import chainlit.cli, ui\n"
+    code = (f"import chainlit.cli, {UI_MODULE}\n"
             "import chainlit.auth.cookie as cookie\n"
             "from fastapi import Request, Response\n"
             "response = Response()\n"
@@ -1079,11 +1082,11 @@ def test_a_scripted_backend_without_its_confirmation_refuses_to_serve(tmp_path):
     what makes one of them safe to have in a shell: a path alone stops the
     server from coming up, rather than quietly serving scripted answers.
 
-    Asserted in a child, at ui.py's own import, because that is where the call
+    Asserted in a child, at app.py's own import, because that is where the call
     sits and where an operator would meet it."""
     script = tmp_path / "backend.py"
     script.write_text("def install():\n    raise AssertionError('this must never run')\n")
-    result = _run("import ui", check=False,
+    result = _run(f"import {UI_MODULE}", check=False,
                   CHAINLIT_AUTH_SECRET="test-secret", AYL_ALLOW_DEFAULT_LOGIN="1",
                   AYL_ALLOW_START_WITHOUT_KEY="1", AYL_CHAINLIT_DIR=str(tmp_path / "chainlit"),
                   AYL_UI_FAKE_BACKEND=str(script))
@@ -1101,7 +1104,7 @@ def test_the_clarify_timeout_is_five_minutes_unless_a_test_shortens_it(tmp_path)
     `1_0` as ten, which is a typo to everyone but Python."""
     environment = dict(CHAINLIT_AUTH_SECRET="test-secret", AYL_ALLOW_DEFAULT_LOGIN="1",
                        AYL_ALLOW_START_WITHOUT_KEY="1", AYL_CHAINLIT_DIR=str(tmp_path / "chainlit"))
-    code = "import ui; print(ui.CLARIFY_TIMEOUT_SECONDS)"
+    code = f"import {UI_MODULE} as ui; print(ui.CLARIFY_TIMEOUT_SECONDS)"
     assert _out(code, **environment) == "300"
     assert _out(code, **environment, AYL_CLARIFY_TIMEOUT_S="25") == "25"
     assert _out(code, **environment, AYL_CLARIFY_TIMEOUT_S=" 25 ") == "25"   # a .env keeps its spaces

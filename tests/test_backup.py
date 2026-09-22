@@ -378,7 +378,7 @@ def test_the_cli_turns_a_refusal_into_one_line(built, tmp_path, capsys):
 
 
 def test_the_default_chat_db_follows_the_variable_the_ui_reads(tmp_path, monkeypatch):
-    """Resolved at call time, not at import: `ui.py` reads the same variable at
+    """Resolved at call time, not at import: the web chat reads the same variable at
     ITS import, and the tests set it per test."""
     monkeypatch.setenv("AYL_CHAINLIT_DIR", str(tmp_path / "elsewhere"))
     assert backup_module.default_chat_db() == tmp_path / "elsewhere" / "chat.db"

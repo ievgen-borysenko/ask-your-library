@@ -74,11 +74,11 @@ class BackupError(Exception):
 def default_chat_db() -> Path:
     """Where the web UI keeps its chat database.
 
-    The same rule `ui.py` applies (`AYL_CHAINLIT_DIR`, else `.chainlit/` in the
-    checkout), re-derived here rather than imported: importing `ui.py` pulls in
-    Chainlit, which is an optional extra, and `ayl-add` must run without it.
-    Resolved at CALL time, not at import, because `ui.py` resolves it at import
-    and the tests set that variable per test.
+    The same rule `ui/app.py` applies (`AYL_CHAINLIT_DIR`, else `.chainlit/` in
+    the checkout), re-derived here rather than imported: importing that module
+    pulls in Chainlit, which is an optional extra, and `ayl-add` must run
+    without it. Resolved at CALL time, not at import, because the UI resolves it
+    at import and the tests set that variable per test.
 
     An absent file is not an error anywhere below — plenty of installations
     never start the web UI."""

@@ -270,7 +270,7 @@ def test_every_internal_link_resolves_and_every_fragment_names_a_heading():
 DOC_PATH = re.compile(r"\b(?:src|tests|eval|scripts|docs|ingest|\.github)"
                       r"/[A-Za-z0-9_./-]+\.(?:py|md|yaml|yml|sh|toml|txt|json)\b")
 # A file named without any directory in front of it. Most of what a reader is
-# told to open lives at the root — `ui.py`, `pyproject.toml`, `SECURITY.md`,
+# told to open lives at the root — `pyproject.toml`, `SECURITY.md`,
 # `.env.example`, `LICENSE`, `NOTICE` — and the pattern above cannot see any of
 # them. The lookarounds keep this from firing on the tail of a longer path
 # (`eval/golden/en-demo.yaml` names no root file).
@@ -307,6 +307,11 @@ FILES_THIS_TREE_IS_RIGHT_NOT_TO_HOLD = {
                     "never committed",
     "*-pick-second.md": "targeted second-candidate runs made in the development repository; the "
                         "reports that cite them say so where they do it",
+    "ui.py": "the web chat's module at the repository root until #30 moved it into the package; "
+             "the released changelog entries that name it describe the trees that had it there",
+    "chainlit.md": "Chainlit's welcome page: written into the app root from the packaged "
+                   "src/ask_your_library/ui/welcome.md, and at the repository root until #30 "
+                   "made it that package file — the entries that name it are those trees'",
 }
 # The ingest package lives at src/ask_your_library/ingest/, and the docs name its
 # modules by the shorthand a developer uses in conversation — `ingest/chapters.py`
@@ -381,8 +386,9 @@ def documented_paths(text: str) -> list[tuple[int, str]]:
 
 
 def test_every_file_path_named_in_the_docs_exists():
-    """`eval/run_agent_eval.py`, `docs/eval-results/...`, `scripts/...`, `ui.py`:
-    a path written as something to type is a file this tree holds."""
+    """`eval/run_agent_eval.py`, `docs/eval-results/...`, `scripts/...`,
+    `pyproject.toml`: a path written as something to type is a file this tree
+    holds."""
     problems: list[str] = []
     checked = 0
     for path in tracked_markdown():
@@ -402,12 +408,13 @@ def test_a_path_the_tree_does_not_hold_is_reported():
     root file name, which the directory pattern cannot see at all."""
     document = ("Run `scripts/no-such-script.sh` first.\n"
                 "\n"
-                "Then open `not-a-real-module.py` and read `ui.py`.\n")
+                "Then open `not-a-real-module.py` and read `pyproject.toml`.\n")
     assert missing_paths(document) == [(1, "scripts/no-such-script.sh"),
                                        (3, "not-a-real-module.py")]
     # And the real files beside them are not reported.
-    assert ("ui.py" in [token for _, token in documented_paths(document)]
-            and path_exists("ui.py") and path_exists("src/ask_your_library/config.py"))
+    assert ("pyproject.toml" in [token for _, token in documented_paths(document)]
+            and path_exists("pyproject.toml")
+            and path_exists("src/ask_your_library/config.py"))
 
 
 GOLDEN_SET = re.compile(r"\beval/golden/[A-Za-z0-9_.-]+\.yaml\b")
@@ -603,10 +610,11 @@ def test_every_adr_written_out_as_its_own_file_is_linked_from_the_index():
 
 CONFIGURATION = REPO / "docs" / "configuration.md"
 CONFIG_PY = REPO / "src" / "ask_your_library" / "config.py"
-# Where a setting may be read from. config.py is the main one, but the UI, the
-# ingest package and the eval harness read their own, and a reader does not care
-# which file it is in — only that something in this tree acts on the name.
-SOURCE_ROOTS = ("src", "eval", "scripts", "ui.py")
+# Where a setting may be read from. config.py is the main one, but the UI
+# (src/ask_your_library/ui/), the ingest package and the eval harness read their
+# own, and a reader does not care which file it is in — only that something in
+# this tree acts on the name.
+SOURCE_ROOTS = ("src", "eval", "scripts")
 # config.py wraps os.environ in three helpers that all take the variable name
 # first, so a read through one of them is a read. The list is pinned rather than
 # guessed, and the test below fails if config.py grows a fourth.

@@ -278,7 +278,8 @@ open ones often refer to them.
   as a link behind that toggle, and reloading the page a phone is actually showing opens an empty
   chat. `tests/ui/test_ui_smoke.py` handles both shapes (it opens the sidebar and reads the link),
   which is how the difference was found; what it cannot decide is whether losing the conversation
-  on a phone reload is acceptable, a Chainlit setting, or something `ui.py` should do for itself.
+  on a phone reload is acceptable, a Chainlit setting, or something the web chat should do for
+  itself.
 - Rate limits and budgets only matter if the UI ever leaves localhost; before any hosted or
   multi-user deployment: isolation, budgets, retention, deployment security, a separate SCA.
 - A shorter README and a first-answer path that does not start with a 30-minute ingest (a small
@@ -483,7 +484,7 @@ open ones often refer to them.
 - **The web UI's release walkthrough was a manual pass before every release** (the release-status
   item above): first start, login, a question, the live steps, the badge, an evidence passage
   opened, the catalogue answer, a reload that restores the chat, a clarify left unanswered. Closed
-  on 2026-09-15 by `tests/ui/test_ui_smoke.py`, which drives a real `chainlit run ui.py --headless`
+  on 2026-09-15 by `tests/ui/test_ui_smoke.py`, which drives a real headless server
   with Playwright at 1280x800 and 390x844, and by the `ui-smoke` CI job that installs the browser
   and uploads a screenshot of any failing page. It needs no model, no key and no index: the seam
   is `AYL_UI_FAKE_BACKEND` plus its spelled-out confirmation

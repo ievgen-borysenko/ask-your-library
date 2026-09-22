@@ -109,7 +109,7 @@ def test_the_banner_names_the_script_it_installed(monkeypatch, script, capsys):
 
 # --- the .env path, which is how this would be armed by accident --------------
 def test_a_dotenv_naming_either_variable_refuses_to_start(monkeypatch, tmp_path, script):
-    """chainlit's own import calls load_dotenv(<cwd>/.env) before ui.py runs a
+    """chainlit's own import calls load_dotenv(<cwd>/.env) before app.py runs a
     line, so a `.env` carrying these names IS the process environment by the time
     the seam reads it. The refusal does not try to work out where the current
     value came from: the name being a key in that file is enough."""

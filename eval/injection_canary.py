@@ -36,7 +36,7 @@ mocked models only, and prove MECHANICS rather than a hosted model's resistance:
                      (the test can see a leak), a benign output BLOCKED.
   5 UI render path   the answer and the clarify question, carrying the marker
                      plus a markdown image, a reference image and raw HTML, go
-                     through ui.py's neutralization: nothing loads. The two
+                     through the UI's neutralization: nothing loads. The two
                      fragments the UI builds as HTML itself are checked whole,
                      on a broken quote and a stop reason that carry a blank line
                      and an image reference: the provenance badge (headline and
@@ -79,8 +79,6 @@ from ask_your_library import llm
 from ask_your_library.i18n import t
 from ask_your_library.nodes import clarify, observe, reflect, synthesize
 from ask_your_library.sanitize import LINE_BREAK_RE, sanitize_context
-
-REPO = Path(__file__).resolve().parents[1]
 
 MARKER = "CANARY-42"
 POISONED_TEXT = """The hero walked into the room and looked around slowly.
@@ -470,11 +468,14 @@ def detection_stage(_payloads: dict) -> tuple[str, None]:
 
 
 # ----------------------------------------------------- stage 5: UI path
+UI_MODULE = "ask_your_library.ui.app"
+
+
 @contextlib.contextmanager
 def ui_module():
-    """Import ui.py with the demo-login guards satisfied and everything it
-    writes (secret file, chat db) pointed at a temp dir, never the repo's
-    .chainlit/. Mirrors the fixture in tests/test_ui.py.
+    """Import the web chat with the demo-login guards satisfied and everything
+    it writes (secret file, chat db) pointed at a temp dir, never the
+    checkout's .chainlit/. Mirrors the fixture in tests/test_ui.py.
 
     A context manager because this file is also imported by the test suite: the
     environment, sys.path and sys.modules go back to what they were, and the
@@ -487,14 +488,11 @@ def ui_module():
                   "AYL_CHAINLIT_DIR": str(Path(tmp) / "chainlit")}
         before = {name: os.environ.get(name) for name in wanted}
         os.environ.update(wanted)
-        sys.path.insert(0, str(REPO))
-        sys.modules.pop("ui", None)
+        sys.modules.pop(UI_MODULE, None)
         try:
-            yield importlib.import_module("ui")
+            yield importlib.import_module(UI_MODULE)
         finally:
-            sys.modules.pop("ui", None)
-            with contextlib.suppress(ValueError):
-                sys.path.remove(str(REPO))
+            sys.modules.pop(UI_MODULE, None)
             for name, value in before.items():
                 if value is None:
                     os.environ.pop(name, None)

@@ -94,7 +94,7 @@ def check_api_key() -> str | None:
     """The key half of check_environment alone: no database, no embedding
     backend, no network. Returns a human-readable problem, or None when a key
     is available. Interfaces that must refuse *before* a user is in front of
-    them (ui.py's startup gate) use this; the full check still runs later."""
+    them (the web chat's startup gate) use this; the full check still runs later."""
     if not OPENROUTER_NEEDS_KEY:
         return None          # local model AND local embeddings: no key by design
     try:
