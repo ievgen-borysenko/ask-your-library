@@ -124,13 +124,16 @@ name = "Ask Your Library"
 # If not set, the browser's language will be used
 # language = "en-US"
 #
-# Left unset on purpose, and .chainlit/translations/en-US.json is tracked with it.
+# Left unset on purpose, and this project's en-US.json travels with it — as
+# package data (src/ask_your_library/ui/translations/en-US.json), which
+# launcher.py copies into the app root before the server starts. Nothing in the
+# app root is versioned; the copy there is the one Chainlit reads.
 # How the two meet (chainlit 2.12.0, config.py):
 #   - init_config() runs on every import of chainlit.config and copies each
-#     language the package ships into .chainlit/translations/, but only where no
-#     file exists yet. So the tracked en-US.json is never overwritten by a start,
-#     by `chainlit init` or by `chainlit lint-translations`, and the other 22
-#     copies land there unversioned (.gitignore keeps only ours).
+#     language the package ships into <app root>/.chainlit/translations/, but
+#     only where no file exists yet. So the copy launcher.py put there first is
+#     never overwritten by a start, by `chainlit init` or by
+#     `chainlit lint-translations`, and the other 22 land beside it.
 #   - load_translation() then serves the file for the effective language WHOLE,
 #     out of that directory alone. There is no per-key merge with the package's
 #     copy, which is why our file is a full copy of upstream's with one string
