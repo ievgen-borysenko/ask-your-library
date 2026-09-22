@@ -687,7 +687,8 @@ Status: reserved, 2026-09-16 — to be written when the code is next touched.
 The web UI's test seam installs a scripted backend only when a script path and a spelled-out
 confirmation are both set, refuses outright when either name is a key in a `.env` file Chainlit has
 already loaded, exits rather than half-installing, and prints a banner to stderr when it is armed
-(`fake_backend.py`, called at `ui.py:52` before the imports it replaces): two variables reduce
+(`fake_backend.py`, called at `src/ask_your_library/ui/app.py:53` before the imports it replaces):
+two variables reduce
 accidental activation and the dotenv check rejects the one activation path nobody chose, but the
 gate reads `os.environ` and cannot tell an exported variable from an inherited one — a process that
 inherits both is armed (the environment is read at `fake_backend.py:123`), and anything able to set
@@ -781,8 +782,8 @@ manifest before it puts anything back. The remedy sentence is one constant, so t
 the refusal cannot drift into recommending two different things.
 
 *The chat database got the same pair* (#27's second bullet): a `schema_version` row written into
-`chat.db` itself, and a startup check of the columns `ui.py`'s schema declares against the columns
-that are there. `CREATE TABLE IF NOT EXISTS` leaves an older table exactly as it was, so the
+`chat.db` itself, and a startup check of the columns the web chat's schema declares against the
+columns that are there. `CREATE TABLE IF NOT EXISTS` leaves an older table exactly as it was, so the
 failure it prevents is an insert naming a column that does not exist, mid-question, as an SQLite
 error in a log. A warning, not a refusal, and for a reason the index policy does not have: the
 remedy is to move the file aside, and that throws away every past conversation.
@@ -845,8 +846,8 @@ Status: accepted; recorded 2026-09-16, after the fact. Deliberate for the scratc
 (`runner.py:88-99`); it enters the state as text (`state.py:16`, `runner.py:72-86`) and the planner
 and `synthesize` read it as text. The one exception is the shape ADR-016 forced: a catalogue answer
 is kept as its operation and counts, never as the titles. The web UI does not hold that list across
-a restart — `on_chat_resume` rebuilds it from Chainlit's persisted chat steps (`ui.py:658-706`),
-pairing a user message with the assistant message after it, skipping badge HTML by its `<div` prefix
+a restart — `on_chat_resume` rebuilds it from Chainlit's persisted chat steps
+(`src/ask_your_library/ui/app.py:658-706`), pairing a user message with the assistant message after it, skipping badge HTML by its `<div` prefix
 and the welcome message by its first words, un-escaping what was escaped for rendering, and reading
 the catalogue shape from the message's metadata. The scratchpad is a Markdown log written per step
 (`nodes.py:412`) that no code parses, stated where it is written (`:400`): ADR-004 removed the

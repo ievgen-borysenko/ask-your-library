@@ -35,7 +35,10 @@ Homepage = "https://github.com/ievgen-borysenko/ask-your-library"
 Issues = "https://github.com/ievgen-borysenko/ask-your-library/issues"
 
 [project.optional-dependencies]
-# Chainlit web chat (ui.py) and its SQLite persistence layer.
+# The web chat (src/ask_your_library/ui/) and its SQLite persistence layer.
+# `chainlit` is what `ayl ui` runs, not only what app.py imports: the launcher
+# starts `chainlit run` as a subprocess and `ayl ui` says so when the console
+# script is not on PATH.
 ui = ["chainlit>=2.12", "sqlalchemy>=2.0", "aiosqlite>=0.20", "greenlet>=3.0"]
 
 [project.scripts]
@@ -67,6 +70,18 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ask_your_library"]
+# The web chat's package data. The rule above already takes every file under
+# the package, but these three are named as artifacts so that no exclusion —
+# a .gitignore line, a future `exclude` — can drop them: they are what
+# launcher.py writes into the Chainlit app root on every start, and a wheel
+# without them is an `ayl ui` serving Chainlit's own default configuration:
+# `allow_origins = ["*"]`, no `unsafe_allow_html`, `auto_tag_thread` back on.
+# tests/test_ui_launcher.py opens the built wheel and looks.
+artifacts = [
+    "src/ask_your_library/ui/chainlit_config.toml",
+    "src/ask_your_library/ui/translations/en-US.json",
+    "src/ask_your_library/ui/welcome.md",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

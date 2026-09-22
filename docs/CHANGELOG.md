@@ -48,14 +48,8 @@
   before it refuses a question, and then the ledger-against-index reconciliation that was
   `ayl-add --doctor`. Both always run, because an unreachable Ollama must not hide index drift; the
   status is the preflight's classification when the environment is the problem, else the doctor's
-  own. **`ayl ui`** is the `chainlit run ui.py --host 127.0.0.1` the docs told a reader to type,
-  and says so plainly when the package was installed as a wheel, which has no `ui.py` in it yet.
-  It runs IN the checkout, which is not cosmetic: Chainlit derives its app root from
-  `CHAINLIT_APP_ROOT or os.getcwd()` and writes a default `config.toml` where it finds none, so
-  started from anywhere else the committed config is not the one that loads — `unsafe_allow_html`
-  (the provenance badge and the metrics footer), `auto_tag_thread = false`, the narrowed
-  `allow_origins` and the MCP disable `SECURITY.md` names are all back at Chainlit's defaults, and
-  a `.chainlit/` appears in whatever directory the reader was in.
+  own. **`ayl ui`** is the `chainlit run --host 127.0.0.1` the docs told a reader to type, against
+  the web chat that now ships inside the package (the entry below).
 
   **`ask-library` and `ayl-add` are deprecated, not removed.** Both console scripts still run the
   same code and print one line to stderr naming what to type instead; they go at `0.6.0`. Nothing a
@@ -72,6 +66,91 @@
   first run cannot be told to type a command that answers with a deprecation notice. Deliberately
   left for follow-ups: the macOS installer and the reference pages beyond the five above still
   write the old names.
+- **The web chat is in the package, and its Chainlit configuration is written by code** (#30).
+  The module that was ui.py at the repository root is now `src/ask_your_library/ui/app.py`, and
+  the Chainlit settings, the reworded `en-US.json` and the welcome page moved with it, as package
+  data (`chainlit_config.toml`, `translations/en-US.json`, `welcome.md`). `ayl ui` no longer needs
+  a checkout: it prepares an app root — `AYL_CHAINLIT_DIR`'s parent, else `$AYL_HOME/ui` — writes
+  the configuration into it on **every start**, copies the translation and the welcome page if
+  they are absent, and then runs `chainlit run` against the packaged app with `CHAINLIT_APP_ROOT`
+  naming that root.
+
+  **Why every start, overwriting what is there.** Chainlit writes ITS OWN default configuration
+  into an app root that has none and then serves from it, silently: `allow_origins = ["*"]`
+  against the two loopback origins this project narrows it to, `unsafe_allow_html` false where the
+  provenance badge and the metrics footer are HTML, `auto_tag_thread` true where it loses every
+  chat title on SQLite. Its `[features.mcp] enabled` agrees with ours in 2.12.0, which is
+  Chainlit's decision to revisit at any release rather than one this project would hear about —
+  and [SECURITY](../SECURITY.md) names that line as what keeps MCP off. That is what made the web
+  chat startable only from the checkout, where the committed file happened to be the app root's.
+  Generated output whose security-relevant half has to match the code that ships with it is not a
+  file to preserve edits in: a stale copy — an older version's, or one somebody edited — is a
+  server running on decisions nobody made in this release. `tests/test_ui_launcher.py` reads the written file and
+  pins every one of those keys, pins that a hand-edited config is overwritten, and opens the built
+  wheel to check the three data files are in it at all.
+
+  **`allow_origins` now names the port the server is actually on.** It shipped with `:8000`
+  written into it, so any other `--port` left a page served on `:8000` allowed to read this
+  server's thread endpoints with the login cookie — the page this server serves is same-origin
+  and never needed the entry. `ayl ui` parses `--host` and `--port` for this reason and passes
+  everything else to `chainlit run` verbatim; their defaults are Chainlit's own `CHAINLIT_HOST`
+  and `CHAINLIT_PORT`, which the command would otherwise have overridden in silence, and a
+  `CHAINLIT_PORT` that is not a port number is refused rather than rounded. A host that is neither loopback nor a bind address (`0.0.0.0`) is added to the list;
+  `0.0.0.0` is not, because no browser sends it as an `Origin`.
+
+  The repository no longer tracks a `.chainlit/` at all. `tests/ui/test_ui_smoke.py` starts its
+  server through the launcher, in an empty working directory, and asserts that directory is still
+  empty afterwards: a `.chainlit/` appearing there is a server configured by where it was started
+  rather than by the app root. What did NOT move: the chat database and the auth secret still come
+  from `AYL_CHAINLIT_DIR`, defaulting to the checkout's `.chainlit/` as before — that default
+  belongs with the index and the scratch directory, and moves once, with them. Where there is no
+  checkout, which is new here, they fall back to the app root under `$AYL_HOME` and never to the
+  working directory: `<cwd>/.chainlit` is a directory anyone can create first, and an
+  `auth-secret` waiting in it would be the signing key of every login token the server issues.
+  `ayl backup` and `ayl restore` derive the same three-branch rule, so they cannot end up copying
+  a different file than the one the UI writes.
+
+  **A `~` in `AYL_CHAINLIT_DIR` is expanded, once, in one place.** No shell expands a value read
+  out of a `.env`, and `Path("~/x")` is a directory literally named `~` under the working
+  directory — so the recommended `AYL_CHAINLIT_DIR=~/AskYourLibrary/ui/.chainlit` would have had
+  the server mint its auth secret in one `~` folder and `ayl backup` look for the chat database in
+  another. `ui.launcher.chainlit_dir()` is now the single rule, expanded and resolved, and the web
+  chat, the launcher's app root and `ayl backup` / `ayl restore` all ask it.
+
+  **`ayl ui --host <name>` is now answered, not refused.** The launcher accepts an address or a
+  DNS name and puts it in `allow_origins`, but the web chat's `Host` check still allowed only the
+  loopback pair, so `ayl ui --host books.local` bound the interface asked for and then served HTTP
+  400 to every browser that used that name — while `--help` said a non-loopback host serves the
+  chat to the network. The bound host joins the trusted-host list, taken from Chainlit's own
+  `CHAINLIT_HOST` (which `chainlit run --host` exports before it loads the application) and put
+  through the same check again, since the module can be started by hand. A wildcard bind adds
+  nothing: `0.0.0.0` is no name a browser sends, and any OTHER host is still 400, which is what
+  closes DNS rebinding.
+
+  Two limits of that check, both now decided rather than met at runtime. The host is **lowercased**
+  before it is used: the middleware compares the `Host` header to the list exactly and a browser
+  sends the name lowercased, so `--host Books.local` refused the one name it had been told to
+  serve. And an **IPv6 literal is refused** with the reason, because that middleware reads the
+  host as `headers["host"].split(":")[0]` — which is `[` for the `[::1]:8000` a browser sends, and
+  matches nothing. `--host ::1` would have bound the address and then answered 400 to every
+  request that reached it; the refusal says so at the one moment it can still be acted on. `::`
+  and `::0` are unaffected — a wildcard bind is not a name.
+
+  **Nothing the server writes lands in the directory it was started in.** `ASK_SCRATCH_DIR`
+  defaulted to a relative `.scratch`, which was right while the web chat could only be started
+  from the checkout; from a wheel the first answered question would have dropped retrieved
+  passages wherever the terminal happened to be. The launcher now hands the server an absolute
+  `$AYL_HOME/scratch` unless the reader named one — the folder the index and the CLI's own scratch
+  move to as well — and the browser walkthrough asserts its working directory is still empty after
+  the questions, not only after the start.
+
+  **The host and the port are validated before they are written into that config.** Both can
+  arrive from a `.env` — Chainlit loads one at its own import — and the config is TOML being
+  generated: `CHAINLIT_HOST=evil"]` would have closed the `allow_origins` array and let what
+  followed it be read as further keys, in the file that decides this server's CORS list, its HTML
+  policy and whether MCP is on. A host must now be an IPv4 or IPv6 literal or a DNS name, the
+  list is built with `json.dumps`, and `--port` takes the digits-only rule `CHAINLIT_PORT`
+  already had (argparse's `type=int` accepts `-1` and `0x1f90`).
 - **A chapter read aimed at one word lands where the word is thickest, not on the first mention with
   silence after it** (#81). `best_match_span` ranks the runs of query words that fit in the window
   by how many distinct query words they cover, and between equals took the SHORTER run. At chapter

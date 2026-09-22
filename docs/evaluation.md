@@ -154,8 +154,8 @@ Scoring is heuristic, no LLM judge -
 into a report with a per-question correctness checkbox.
 
 **`tests/ui` - the web UI's release walkthrough, in a browser (2026-09-15).** Not an eval: a test,
-and the one that replaced a manual pass. `pytest tests/ui` starts a real `chainlit run ui.py
---headless` on a free loopback port and drives it with Playwright at two viewports (1280x800 and
+and the one that replaced a manual pass. `pytest tests/ui` starts a real headless server the
+way `ayl ui` does, on a free loopback port and drives it with Playwright at two viewports (1280x800 and
 390x844): first start and login, a research question with its live `plan` / `act` / `observe`
 steps, the quote-provenance badge with its numbers, an evidence passage opened and readable, the
 catalogue answer with its count, a reload that restores the conversation, and a clarify left
@@ -629,8 +629,9 @@ identify the measured trees in that history, they are not commits you can check 
 they are kept as recorded because rewriting them would suggest that a different code was
 measured. What you can check instead: the first commit of this repository carries the eval
 harness (`eval/*.py`) and `scripts/ingest_demo_corpus.py` byte-identical to the measured
-`33dba3f`, `src/` and `ui.py` identical up to one comment line each (a review credit removed; the
-launch command in the `ui.py` docstring completed with `--host 127.0.0.1`), and
+`33dba3f`, `src/` and the web chat module identical up to one comment line each (a review credit
+removed; the launch command in its docstring completed with `--host 127.0.0.1`) — that module sat
+at the repository root as ui.py until it moved into the package (#30), and
 `eval/golden/en-demo.yaml` identical except for one editorial note on c09 (a review credit removed
 after the run; the questions are unchanged, and the core report's header records the resulting
 checksum change); the other differences are documentation, the eval reports themselves and the

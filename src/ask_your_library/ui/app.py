@@ -1,6 +1,7 @@
 """Ask Your Library — web chat (Chainlit) over the same core as cli.py.
 
-  uv run --extra ui chainlit run ui.py -w --host 127.0.0.1
+  uv run --extra ui ayl ui            # the way in: launcher.py prepares the app root
+  uv run --extra ui chainlit run src/ask_your_library/ui/app.py -w --host 127.0.0.1
 
 Login: env CHAINLIT_USERNAME / CHAINLIT_PASSWORD (defaults admin / change-me;
 override them for anything beyond local use).
@@ -67,6 +68,7 @@ from ask_your_library.i18n import (LANG, get_lang, set_lang, source_word,  # noq
                                    status_word, t)
 from ask_your_library.preflight import check_api_key, check_environment  # noqa: E402
 from ask_your_library.bookkey import split_read_query, unescape_marker  # noqa: E402
+from ask_your_library.ui import launcher                           # noqa: E402
 from ask_your_library.provenance import match_span                  # noqa: E402
 from ask_your_library.runner import failed_result, history_entry, run_question  # noqa: E402
 from ask_your_library.sanitize import LINE_BREAK_RE                 # noqa: E402
@@ -74,9 +76,9 @@ from ask_your_library.sanitize import LINE_BREAK_RE                 # noqa: E402
 # A single-user local app never needs the login cookie on a cross-site request;
 # strict keeps it off one, and Chainlit's own default is lax. CHAINLIT_COOKIE_SAMESITE
 # cannot deliver that here: chainlit.auth.cookie reads it once, at ITS import
-# time, and under `chainlit run ui.py` that has already happened before this
+# time, and under `chainlit run app.py` that has already happened before this
 # file is loaded at all — the console script imports chainlit.cli, which reaches
-# chainlit.auth.cookie through ensure_jwt_secret, and calls load_module(ui.py)
+# chainlit.auth.cookie through ensure_jwt_secret, and calls load_module(app.py)
 # afterwards. A .env entry is later still (config.load_dotenv runs on the import
 # above). So the two module globals are set directly; they are read at request
 # time, where the cookie is written, not captured at import.
@@ -101,12 +103,55 @@ PROFILE_UA = "Українська"
 # to /login and the thread endpoints. It is the Host check, not allow_origins:
 # CORS governs what a page may READ cross-origin, and a login POST does not
 # need to be read to have happened.
-ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
+#
+# The address this server was actually bound to is the third, when it is one a
+# browser can be pointed at. `chainlit run --host X` exports X as CHAINLIT_HOST
+# before it loads this module, so the name here is the name uvicorn is
+# listening on and `ayl ui` has already refused anything that is not an
+# address or a DNS name (launcher.checked_host, which is applied again below
+# because this module can be started by hand). Without it `ayl ui --host
+# books.local` bound the interface the reader asked for and then answered 400
+# to every browser that used that name — the CLI's own help says a non-loopback
+# host serves the chat to the network, and it did not.
+#
+# A wildcard bind is not a name: `0.0.0.0` names no host a browser sends, so it
+# adds nothing here and the loopback pair stands. Serving a LAN under a name
+# means passing that name.
+def _bound_host() -> list[str]:
+    """`CHAINLIT_HOST` as a one-item list, when it is a host a browser can send
+    and not already in the pair above; `[]` otherwise."""
+    name = os.environ.get("CHAINLIT_HOST", "").strip()
+    if name in launcher.WILDCARD_HOSTS or name in ("localhost", "127.0.0.1"):
+        return []
+    return [launcher.checked_host(name)]
 
-SCRATCH_DIR = Path(os.environ.get("ASK_SCRATCH_DIR", ".scratch"))
+
+ALLOWED_HOSTS = ["localhost", "127.0.0.1"] + _bound_host()
+
+# Absolute, and decided by the launcher for a server it starts (`scratch_dir`):
+# `config`'s relative default put the retrieved passages of the first answered
+# question in a `.scratch/` beside whatever directory the command was typed in.
+SCRATCH_DIR = launcher.scratch_dir()
 # AYL_CHAINLIT_DIR exists so tests can import this module without touching the
-# repo's .chainlit/ (the import creates the chat db and the auth secret there).
-CHAINLIT_DIR = Path(os.environ.get("AYL_CHAINLIT_DIR", Path(__file__).parent / ".chainlit"))
+# checkout's .chainlit/ (the import creates the chat db and the auth secret
+# there). Its default is the checkout's, not this file's directory: the module
+# moved into the package (#30) and `Path(__file__).parent / ".chainlit"` would
+# now be the installed package's own folder. The rule is written out the same
+# way in ingest/backup.py (default_chat_db), which is what `ayl backup` copies;
+# the two move together, under AYL_HOME, with the index and the scratch dir.
+#
+# WITHOUT a checkout — the wheel this slice makes possible — the fallback is
+# the app root launcher.py prepares, never the working directory. `<cwd>/.chainlit`
+# is a directory anyone can create first: an `auth-secret` planted in /tmp/.chainlit
+# would be read below as THE signing key of every login token this server issues,
+# and the chat database would be a file someone else owns. AYL_HOME is the
+# reader's own folder, and it is where the launcher already put the config.
+#
+# The rule itself lives in `launcher.chainlit_dir`, which `ingest/backup.py`
+# reads as well: `ayl backup` copies the file named here and `ayl restore`
+# writes it, and two spellings of one rule disagreed the moment one of them
+# learnt to expand a `~`.
+CHAINLIT_DIR = launcher.chainlit_dir()
 CHAT_DB_PATH = CHAINLIT_DIR / "chat.db"
 
 
@@ -150,8 +195,8 @@ log = logging.getLogger("ask_your_library.ui")
 if not any(m.cls is TrustedHostMiddleware for m in chainlit_app.user_middleware):
     chainlit_app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
 
-# Before anything is written into it: the repo's .chainlit/ exists (config.toml
-# is committed), but AYL_CHAINLIT_DIR points somewhere that usually does not.
+# Before anything is written into it: AYL_CHAINLIT_DIR, and the app root
+# launcher.py prepares, usually point somewhere that does not exist yet.
 CHAINLIT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Login tokens need a stable secret, or every server restart logs everyone
@@ -185,7 +230,7 @@ if (_password == "change-me"
 # Chainlit's login page cannot carry custom text, so the refusal happens here,
 # at startup, next to the password guard. Only the key is checked: the index and
 # the embedding backend can legitimately come up later, and this must not touch
-# them. AYL_ALLOW_START_WITHOUT_KEY=1 is for importing ui.py as a module
+# them. AYL_ALLOW_START_WITHOUT_KEY=1 is for importing app.py as a module
 # (tests, the injection canary's UI stage), not for serving.
 #
 # check_api_key() returns None whenever no key is needed, which the shipped

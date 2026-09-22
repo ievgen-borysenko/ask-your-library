@@ -11,14 +11,14 @@ add`, `doctor`, `backup` and `restore` are `ingest.add_folder.main`, which is
 one parser with a flag per verb. Each subcommand hands that parser the
 arguments written after the command name, unread, so every flag those two
 accept keeps working verbatim under the new name and their exit codes are this
-command's exit codes. `books` is the only new code here, and `ui` is a
-`chainlit run` of the repository's ui.py.
+command's exit codes. `books` is the only new code here, and `ui` is
+`ui.launcher`, which prepares the Chainlit app root and starts the server
+against the packaged `ui/app.py`.
 
 `ask-library` and `ayl-add` are still installed and still run the same code;
 each prints one deprecation line to stderr and goes at 0.6.0.
 """
 import argparse
-import subprocess
 import sys
 from pathlib import Path
 
@@ -27,8 +27,8 @@ from .catalog import render_catalog, run_catalog
 from .config import DB_PATH, EMBED_BACKEND
 from .i18n import t
 from .ingest import add_folder
-from .paths import REPO_ROOT
 from .preflight import PreflightResult, check_environment, exit_code
+from .ui import launcher
 
 # The command names, and the one-line summary `ayl --help` lists each under.
 SUMMARY = {
@@ -309,53 +309,47 @@ def run_books(rest: list[str]) -> int:
     return 0
 
 
-def ui_script() -> Path | None:
-    """`ui.py` of the checkout this package is being run from, or None.
-
-    The walk `paths._repo_root` makes, for the same reason: installed as a
-    wheel there is no repository above the package, and the web chat is not in
-    the distribution — `src/ask_your_library` is (pyproject). Saying so is more
-    use than letting `chainlit` fail on a path that is not there."""
-    if not REPO_ROOT:
-        return None
-    script = Path(REPO_ROOT) / "ui.py"
-    return script if script.is_file() else None
-
-
 def run_ui(rest: list[str]) -> int:
-    """`chainlit run <repo>/ui.py --host 127.0.0.1`, which is what the docs
-    have told a reader to type by hand.
+    """The web chat, through `ui.launcher`: the app root is prepared, then
+    `chainlit run` is started against the packaged `ui/app.py`.
 
     Loopback is written into the command rather than left to Chainlit's
     default, because this is a single-user local demo with no authorization
-    model behind its login form (SECURITY.md). The arguments a reader adds go
-    after it, so exposing the server is still something they have to type out
-    themselves.
+    model behind its login form (SECURITY.md). A reader who wants another host
+    still has to type it out.
 
-    It runs IN the checkout, and that is not cosmetic: Chainlit derives its app
-    root from `CHAINLIT_APP_ROOT or os.getcwd()` and WRITES a default
-    `.chainlit/config.toml` when it finds none there. Started from anywhere
-    else, the committed config is not the one that loads — `unsafe_allow_html`
-    (the provenance badge and the metrics footer), `auto_tag_thread = false`,
-    the narrowed `allow_origins` and the `[features.mcp] enabled = false` that
-    SECURITY.md names are all silently back at Chainlit's defaults, and a
-    `.chainlit/` appears in whatever directory the reader happened to be in."""
+    `--host` and `--port` are parsed HERE rather than passed through, and that
+    is not cosmetic: Chainlit reads its settings from the app root's
+    `.chainlit/config.toml`, and one of them — `allow_origins` — names the
+    port the server is on. Passed through unread, the config would keep saying
+    `:8000` for a server started anywhere else, which is a page on :8000
+    allowed to read this one's thread endpoints. Everything else still reaches
+    `chainlit run` verbatim."""
     parser = argparse.ArgumentParser(
         prog="ayl ui",
-        description="Run the Chainlit web chat against this library, bound to 127.0.0.1.",
+        description="Run the Chainlit web chat against this library, bound to 127.0.0.1. "
+                    "Its Chainlit configuration is written into the app root "
+                    "(AYL_CHAINLIT_DIR's parent, else $AYL_HOME/ui) on every start.",
         epilog="Every other argument goes to `chainlit run` verbatim (`-w` to reload "
-               "on edit, `--port` for another port). Needs the `ui` extra and a "
-               "checkout: the web chat is not in the wheel yet.")
-    _, extra = parser.parse_known_args(rest)
-    script = ui_script()
-    if script is None:
-        cli.say("`ayl ui` runs the repository's ui.py, and this installation has none: "
-                "the wheel ships src/ask_your_library only. Clone the repository and run "
-                "`uv run --extra ui ayl ui` from it.", error=True)
-        return 1
+               "on edit). Needs the `ui` extra: `uv sync --extra ui` once.")
+    parser.add_argument("--host", default=launcher.default_host(),
+                        help=f"the address to bind — an IPv4 address or a DNS name (default: "
+                             f"CHAINLIT_HOST, now {launcher.default_host()}; anything but "
+                             f"loopback serves the chat to the network). An IPv6 literal is "
+                             f"refused: the server's own Host check cannot match a bracketed "
+                             f"one, so it would answer 400 to every browser")
+    parser.add_argument("--port", type=launcher.checked_port,
+                        default=launcher.default_port(),
+                        help=f"the port to serve on (default: CHAINLIT_PORT, now "
+                             f"{launcher.default_port()})")
+    args, extra = parser.parse_known_args(rest)
+    # Only the `chainlit` executable being missing is this sentence. Around the
+    # whole call it would also answer for a FileNotFoundError raised while the
+    # app root was being prepared — a packaged file gone from the wheel — by
+    # naming an extra that IS installed.
+    root = launcher.prepare(args.host, args.port)
     try:
-        return subprocess.call(["chainlit", "run", str(script), "--host", "127.0.0.1", *extra],
-                               cwd=script.parent)
+        return launcher.start(root, args.host, args.port, extra)
     except FileNotFoundError:
         cli.say("chainlit is not installed: it is the `ui` extra — "
                 "`uv run --extra ui ayl ui`, or `uv sync --extra ui` once.", error=True)

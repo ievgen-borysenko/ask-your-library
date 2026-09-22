@@ -10,7 +10,7 @@ This product includes one file from Chainlit
 (https://github.com/Chainlit/chainlit), licensed under the Apache License,
 Version 2.0:
 
-    .chainlit/translations/en-US.json
+    src/ask_your_library/ui/translations/en-US.json
 
 That file is Chainlit 2.12.0's own en-US.json, copied byte for byte and then
 MODIFIED. Four values differ from the upstream copy; no other value, key or
@@ -40,7 +40,7 @@ No copyright line is quoted here because the installed chainlit 2.12.0
 distribution carries none: it ships neither a LICENSE nor a NOTICE file, and
 its package metadata declares only "License: Apache-2.0" and "Author: Willy
 Douhard, Dan Andre Constantini". The same provenance is recorded beside the
-file, in .chainlit/translations/README.md.
+file, in src/ask_your_library/ui/translations/README.md.
 
 --------------------------------------------------------------------------------
 

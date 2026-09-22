@@ -9,7 +9,7 @@ makes in-process — a scripted model behind `llm.llm`, the two library readers
 missing index — made inside a server process, by the server itself, before the
 graph is built.
 
-The seam is one call, `install_fake_backend()`, near the top of `ui.py`. It is
+The seam is one call, `install_fake_backend()`, near the top of `ui/app.py`. It is
 inert unless BOTH of these are set:
 
     AYL_UI_FAKE_BACKEND          path of a Python file that defines install()

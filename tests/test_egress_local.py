@@ -42,7 +42,7 @@ It is not a claim about the machine, and not even a claim about every way this
 repository can be started:
 
   * **Chainlit is not exercised here.** The `ui` extra is not installed in the
-    legs that run this file, so `ui.py` is not imported and its server, its
+    legs that run this file, so the web chat is not imported and its server, its
     SQLite persistence and its own HTTP stack are outside these assertions. And
     it is not only that they are untested: that extra's dependency tree brings
     `grpcio` and `opentelemetry-exporter-otlp-proto-grpc`, which do their own

@@ -71,7 +71,7 @@ jobs:
         # was skipped, so an all-skipped green run is visible in the log.
         run: uv run pytest -q tests/test_ui.py tests/test_injection_canary.py -rs
       - name: Injection canary, mechanics only (no LLM call, no API key)
-        # The canary's UI stage imports ui.py, which refuses to start a server
+        # The canary's UI stage imports the web chat, which refuses to start a server
         # without a key; here it is a module under test, not a server.
         env:
           AYL_ALLOW_START_WITHOUT_KEY: "1"
@@ -86,10 +86,10 @@ jobs:
         run: uv run eval/injection_canary.py --scope --no-live
 
   ui-smoke:
-    # The release walkthrough of the web UI, in a browser: a real
-    # `chainlit run ui.py --headless` with a scripted backend instead of a model
-    # and an index (tests/ui). Until now this path was walked by hand before
-    # every release.
+    # The release walkthrough of the web UI, in a browser: a real headless
+    # server started the way `ayl ui` starts one, with a scripted backend
+    # instead of a model and an index (tests/ui). Until now this path was
+    # walked by hand before every release.
     #
     # Its own job, not a step of `test-ui`: it needs a browser binary, which is
     # not a Python package and is not in the lockfile, and it is minutes rather

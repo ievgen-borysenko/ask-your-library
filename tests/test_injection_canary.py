@@ -32,7 +32,7 @@ def no_network(monkeypatch):
         raise AssertionError("the test tried to build a real LLM client")
 
     monkeypatch.setattr(llm, "llm", forbidden)
-    # The UI stage imports ui.py as a module; ui.py refuses to start a server
+    # The UI stage imports app.py as a module; it refuses to start a server
     # without an OpenRouter key, and these stages are exactly the part that must
     # keep running without one.
     monkeypatch.setenv("AYL_ALLOW_START_WITHOUT_KEY", "1")
@@ -258,7 +258,7 @@ def test_ui_stage_fails_when_the_metrics_footer_stops_being_neutralized(monkeypa
 
 @pytest.mark.skipif(importlib.util.find_spec("chainlit") is None, reason="ui extra not installed")
 def test_the_ui_stage_leaves_the_process_as_it_found_it():
-    """The stage imports ui.py, which writes a chat db and reads three
+    """The stage imports the web chat, which writes a chat db and reads three
     variables. Run inside the test suite, it used to keep them for the rest of
     the session and leave a temp directory behind on every call."""
     watched = ("CHAINLIT_AUTH_SECRET", "AYL_ALLOW_DEFAULT_LOGIN", "AYL_CHAINLIT_DIR")
@@ -268,7 +268,7 @@ def test_the_ui_stage_leaves_the_process_as_it_found_it():
         assert (chainlit_dir / "chat.db").exists()
     assert {name: os.environ.get(name) for name in watched} == before
     assert not chainlit_dir.exists(), "the canary left its temp directory behind"
-    assert "ui" not in sys.modules
+    assert canary.UI_MODULE not in sys.modules
 
 
 # ------------------------------------------------------------ the driver

@@ -74,18 +74,21 @@ class BackupError(Exception):
 def default_chat_db() -> Path:
     """Where the web UI keeps its chat database.
 
-    The same rule `ui.py` applies (`AYL_CHAINLIT_DIR`, else `.chainlit/` in the
-    checkout), re-derived here rather than imported: importing `ui.py` pulls in
-    Chainlit, which is an optional extra, and `ayl-add` must run without it.
-    Resolved at CALL time, not at import, because `ui.py` resolves it at import
+    `ui.launcher.chainlit_dir` is THE rule (`AYL_CHAINLIT_DIR` expanded, else
+    the checkout's `.chainlit/`, else the app root's) and this asks it rather
+    than spelling it out a second time — the two spellings disagreed the moment
+    one of them learnt to expand a `~`, and this function names the file
+    `ayl backup` copies AND the file `ayl restore` writes. Importing the
+    launcher is safe where importing the web chat is not: it writes files and
+    starts a subprocess, and `ayl-add` must run without the Chainlit extra.
+
+    Asked at CALL time, not at import, because the UI resolves it at ITS import
     and the tests set that variable per test.
 
     An absent file is not an error anywhere below — plenty of installations
     never start the web UI."""
-    from ..paths import REPO_ROOT
-    named = os.environ.get("AYL_CHAINLIT_DIR")
-    base = Path(named) if named else (Path(REPO_ROOT) if REPO_ROOT else Path.cwd()) / ".chainlit"
-    return base / "chat.db"
+    from ..ui.launcher import chainlit_dir
+    return chainlit_dir() / "chat.db"
 
 
 def _sha256(path: Path) -> str:

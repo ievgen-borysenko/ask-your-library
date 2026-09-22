@@ -269,9 +269,9 @@ not cleaned) and `.env` (a backup of secrets is a second place to lose them from
 
 ## The chat database
 
-The web UI's history has the same two things the index has, for the same reason. `ui.py` creates
-its tables with `CREATE TABLE IF NOT EXISTS`, which by design does nothing to a table that is
-already there — so a `chat.db` written by an older release keeps its old columns, looks healthy,
+The web UI's history has the same two things the index has, for the same reason. The web chat
+creates its tables with `CREATE TABLE IF NOT EXISTS`, which by design does nothing to a table
+that is already there — so a `chat.db` written by an older release keeps its old columns, looks healthy,
 and fails on the first insert naming a column it does not have, in the middle of somebody's
 question. At every start the UI now compares the columns its schema declares against the columns
 that are actually there and warns, naming them:

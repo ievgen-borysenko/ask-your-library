@@ -22,21 +22,16 @@ __pycache__/
 *.pyc
 .venv/
 
-# Chainlit runtime state (config.toml IS tracked: the UI needs unsafe_allow_html)
-.chainlit/chat.db
-.chainlit/chat.db-*
-.chainlit/auth-secret
-# Chainlit seeds this directory with a copy of every language it ships, and
-# never overwrites a file that is already there — so en-US.json is ours and is
-# tracked (it rewords the New Chat dialog), while the other 22 copies are not.
-# The directory itself must stay unignored, or git would not descend into it to
-# see the exception.
-.chainlit/translations/*
-!.chainlit/translations/en-US.json
-# Where that copy came from and what was changed in it, next to the file itself;
-# NOTICE in the repository root carries the same record.
-!.chainlit/translations/README.md
+# Chainlit runtime state. Nothing under .chainlit/ is tracked any more (#30):
+# the configuration and the reworded en-US.json are package data under
+# src/ask_your_library/ui/, and launcher.py writes them into the app root it
+# prepares. A .chainlit/ (and a .files/, and a chainlit.md) in the checkout is
+# now what a `chainlit run` typed by hand there leaves behind — and what any
+# import of chainlit in this directory leaves behind, the test suite's included:
+# chainlit.config creates .files/ and seeds .chainlit/ at import time.
+.chainlit/
 .files/
+chainlit.md
 
 # SQLite sidecars wherever they land: AYL_CHAINLIT_DIR moves the chat db out of
 # .chainlit/, and a write-ahead log holds messages the .db file does not yet

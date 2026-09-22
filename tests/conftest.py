@@ -88,7 +88,14 @@ TRACING_OFF = {"LANGCHAIN_TRACING_V2": "false", "LANGSMITH_TRACING_V2": "false",
 
 # Credentials and the opt-in key file: pinned BLANK, so no test can reach a
 # provider or a tracing endpoint even by accident, whatever the shell holds.
-BLANKED = ("OPENROUTER_API_KEY", "LANGCHAIN_API_KEY", "LANGSMITH_API_KEY", "OPENROUTER_ENV_FILE")
+# Blank, not absent, for the reason spelled out in pin_environment below. The
+# two CHAINLIT_ names are here because this project reads them now (#30):
+# CHAINLIT_HOST is added to the web chat's trusted-host list at its import, so
+# a developer who exports one would be running the whole suite against a server
+# that answers to a name no test named — test_a_foreign_host_header_is_refused
+# is the one that notices. Every reader treats blank as unset.
+BLANKED = ("OPENROUTER_API_KEY", "LANGCHAIN_API_KEY", "LANGSMITH_API_KEY", "OPENROUTER_ENV_FILE",
+           "CHAINLIT_HOST", "CHAINLIT_PORT")
 
 
 def pin_environment() -> None:
@@ -200,10 +207,11 @@ def run_fresh(code: str, cwd=None, check=True, **env) -> subprocess.CompletedPro
     `uv run --group dev pytest -q` runs right after it — so every child that
     reads configuration goes through here, never a subprocess.run of its own."""
     base = {k: v for k, v in os.environ.items() if k not in SCRUBBED}
-    # REPO for `import ui` (the package itself is installed); this directory so a
-    # child can `from conftest import pin_environment` and start from exactly the
-    # environment the suite starts from.
-    base["PYTHONPATH"] = os.pathsep.join([str(REPO), str(Path(__file__).resolve().parent)])
+    # This directory, so a child can `from conftest import pin_environment` and
+    # start from exactly the environment the suite starts from. The checkout
+    # root used to be here as well, for `import ui`; the web chat is inside the
+    # package now (#30) and comes from the installation like everything else.
+    base["PYTHONPATH"] = str(Path(__file__).resolve().parent)
     with tempfile.TemporaryDirectory() as empty:
         return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                               check=check, env={**base, **env}, cwd=cwd or empty)

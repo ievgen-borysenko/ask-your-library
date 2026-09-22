@@ -3,15 +3,17 @@
 ## Scope
 
 Ask Your Library is a local, single-user tool. The CLI runs on your machine. The web UI is meant
-to run on loopback: every launch command in `docs/quick-start.md`, `docs/configuration.md` and in
-`ui.py` passes `--host 127.0.0.1`, because Chainlit's own default binds to all interfaces and the
-UI does not override it; it asks for a password and is not designed to be exposed to a network or
-run for several users. Loopback is not by itself a boundary against the browser on the same
-machine, so `ui.py` also refuses every `Host` header other than `localhost` and `127.0.0.1`
-(Starlette's `TrustedHostMiddleware`) and sets its login cookie to `SameSite=strict` on Chainlit's
-cookie module, `CHAINLIT_COOKIE_SAMESITE` being already read by the time `chainlit run` loads
-`ui.py`; see "Threat model" in `docs/privacy-and-threat-model.md`. Prompts, retrieved passages and
-answers leave the machine only as calls to the providers you configure: the answering model
+to run on loopback: `ayl ui` and every launch command in `docs/quick-start.md` and
+`docs/configuration.md` pass `--host 127.0.0.1`, because Chainlit's own default binds to all
+interfaces and the UI does not override it; it asks for a password and is not designed to be
+exposed to a network or run for several users. Loopback is not by itself a boundary against the
+browser on the same machine, so `src/ask_your_library/ui/app.py` also refuses every `Host`
+header other than `localhost` and `127.0.0.1` (Starlette's `TrustedHostMiddleware`) and sets its
+login cookie to
+`SameSite=strict` on Chainlit's cookie module, `CHAINLIT_COOKIE_SAMESITE` being already read by
+the time `chainlit run` loads it; see "Threat model" in `docs/privacy-and-threat-model.md`.
+Prompts, retrieved passages and answers leave the machine only as calls to the providers you
+configure: the answering model
 (`LLM_BACKEND`), the embedding model (`EMBED_BACKEND`) and, if a LangSmith key and tracing flag
 are in the environment (either the `LANGCHAIN_` or the `LANGSMITH_` prefix), tracing. **The
 shipped configuration configures none of them**: `LLM_BACKEND` and `EMBED_BACKEND` both default to
@@ -23,8 +25,8 @@ a LangSmith key is the third path, and `LANGSMITH_TRACING_V2=false` plus
 "Threat model" in `docs/privacy-and-threat-model.md` for what is protected and what is not.
 
 One environment knob loads and runs code by design, and it is a test seam, not a feature:
-`AYL_UI_FAKE_BACKEND` names a Python file that `ui.py` executes at startup, which is how
-`tests/ui/test_ui_smoke.py` drives a real server with no model and no index
+`AYL_UI_FAKE_BACKEND` names a Python file that `src/ask_your_library/ui/app.py` executes at
+startup, which is how `tests/ui/test_ui_smoke.py` drives a real server with no model and no index
 (`src/ask_your_library/fake_backend.py`). It does nothing unless `AYL_UI_FAKE_BACKEND_CONFIRM`
 also reads exactly `this-server-answers-from-a-script`; set alone it stops the server from coming
 up, rather than letting one serve scripted answers that look real. The pair raises no privilege —
@@ -33,9 +35,9 @@ so the guard is against accident, not against an attacker. With neither set, whi
 ordinary start, nothing is loaded and nothing is patched.
 
 **A `.env` in the directory the server is started from is part of that environment**, and earlier
-than it looks: `chainlit`'s own import calls `load_dotenv(<cwd>/.env)` before `ui.py` runs a line
-of its own, so a `.env` carrying both names would arm the seam without anyone typing them — the
-operator chooses the working directory, not just the exported variables. Because of that,
+than it looks: `chainlit`'s own import calls `load_dotenv(<cwd>/.env)` before the web chat runs a
+line of its own, so a `.env` carrying both names would arm the seam without anyone typing them —
+the operator chooses the working directory, not just the exported variables. Because of that,
 `install_fake_backend()` refuses outright when either name appears as a key in `<cwd>/.env` or in
 the nearest `.env` above it, whatever the value there: these two are exported for one command by
 the person starting the server, or they are not set at all. Neither belongs in a `.env`, a shell
@@ -102,7 +104,9 @@ advisory database moves: three advisories against httpx2 2.10.0 were published o
 advisory carries an exception: `osv-scanner.toml` holds no `[[IgnoredVulns]]` entry. Chainlit
 2.11.1 carried two advisories about its MCP transports (command injection over stdio, SSRF over
 HTTP/SSE); this repository never enabled MCP, and the upgrade to Chainlit 2.12.0 closed both. MCP
-stays disabled (`[features.mcp] enabled = false` in `.chainlit/config.toml`, which is what makes
-every transport unreachable; user-connected servers are off as well); enabling MCP is a deliberate
-change that starts with re-reading this file. The OSV-Scanner job in
-`.github/workflows/security.yml` reports any new advisory.
+stays disabled (`[features.mcp] enabled = false` in
+`src/ask_your_library/ui/chainlit_config.toml`, the configuration `ayl ui` writes into the
+Chainlit app root on every start — which is what makes every transport unreachable;
+user-connected servers are off as well; `tests/test_ui_launcher.py` reads the written file and
+fails if either goes back on). Enabling MCP is a deliberate change that starts with re-reading
+this file. The OSV-Scanner job in `.github/workflows/security.yml` reports any new advisory.
