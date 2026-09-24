@@ -199,6 +199,44 @@ def test_a_part_lead_in_before_the_first_chapter_does_not_shield_a_contents_left
     assert [t for t, _ in chapters] == ["PART ONE — CHAPTER I.", "PART ONE — CHAPTER II."]
 
 
+# --- the contents leftover whose period the contents page dropped -------------
+
+EITHER_RE = r"^CHAPTER [IVX]+\.?$"
+PREFACE = "The translator's preface, his introduction and the dedication. " * 6
+
+
+def test_a_contents_line_without_the_headings_period_is_still_a_leftover():
+    """Don Quixote: the contents page's last line is "CHAPTER LII" and every
+    real heading is "CHAPTER LII." — on an exact comparison the front matter
+    stayed as a 115,506-character section named after the last chapter, listed
+    before chapter one, and a request for chapter LII landed on the preface."""
+    text = ("CONTENTS\nCHAPTER I\nCHAPTER II\n" + PREFACE
+            + "\nCHAPTER I.\n" + BODY + "\nCHAPTER II.\n" + BODY + "\n")
+    chapters = ingest.split_chapters(text, EITHER_RE)
+    assert chapters == [("CHAPTER I.", BODY.strip()), ("CHAPTER II.", BODY.strip())]
+
+
+def test_a_contents_line_with_a_period_the_heading_lacks_is_still_a_leftover():
+    """The mirror shape, which the strictly-longer branch already caught: the
+    contents page punctuates "CHAPTER II." and the book prints "CHAPTER II"."""
+    text = ("CONTENTS\nCHAPTER I.\nCHAPTER II.\n" + PREFACE
+            + "\nCHAPTER I\n" + BODY + "\nCHAPTER II\n" + BODY + "\n")
+    chapters = ingest.split_chapters(text, EITHER_RE)
+    assert chapters == [("CHAPTER I", BODY.strip()), ("CHAPTER II", BODY.strip())]
+
+
+def test_the_generic_path_keeps_the_front_matter_the_demo_path_drops():
+    """`drop_toc_leftovers=False` drops nothing, period or no period: in a
+    stranger's file the leading section is text, not a contents artifact."""
+    text = ("CONTENTS\nCHAPTER I\nCHAPTER II\n" + PREFACE
+            + "\nCHAPTER I.\n" + BODY + "\nCHAPTER II.\n" + BODY + "\n")
+    chapters = ingest.split_chapters(text, EITHER_RE, min_chapter_chars=0,
+                                     keep_preamble=True, drop_toc_leftovers=False)
+    assert [t for t, _ in chapters] == [
+        "", "CHAPTER I", "CHAPTER II", "CHAPTER I.", "CHAPTER II."]
+    assert dict(chapters)["CHAPTER II"] == PREFACE.strip()
+
+
 # --- back matter: the manifest's end_regex (#82) -------------------------------
 
 NOTES = "[1] The footstool kept bare feet off a floor that was often wet. " * 4

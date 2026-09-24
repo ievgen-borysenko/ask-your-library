@@ -80,7 +80,11 @@ def split_chapters(text: str, heading_re: str, part_re: str | None = None,
     dropped. Titles may legitimately repeat (several treatises restarting at
     CHAPTER I.), so there is no dedupe; the one residual TOC artifact — the
     LAST contents line, whose body is the front matter before chapter one —
-    is removed by dropping a leading heading whose title reappears later.
+    is removed by dropping a leading heading whose title reappears later. That
+    comparison ignores a trailing period on either side: a Gutenberg contents
+    page lists "CHAPTER LII" for a heading the book prints as "CHAPTER LII."
+    (Don Quixote), and with an exact test the front matter stayed as a section
+    named after the last chapter, ahead of chapter one.
 
     Both of those are contents-page heuristics: right for the curated demo
     corpus, wrong for a stranger's file, where a two-line chapter is a chapter
@@ -165,8 +169,13 @@ def split_chapters(text: str, heading_re: str, part_re: str | None = None,
             # a contents line identical to a real heading survives only as the
             # book's LAST heading duplicated up front (e.g. "CHAPTER 135."
             # before "CHAPTER 1.") — ascending repeats (Seneca's treatises
-            # restarting at CHAPTER I.) never trip this
-            or kept[0][0] == kept[-1][0]):
+            # restarting at CHAPTER I.) never trip this. A trailing period is
+            # ignored on both sides: a contents page prints "CHAPTER LII" for a
+            # heading the book prints as "CHAPTER LII." (Don Quixote), and the
+            # strictly-longer branch above only catches the reverse shape.
+            # Only the demo path comes here; drop_toc_leftovers=False (the
+            # generic `ayl add`) still keeps every section it always kept.
+            or kept[0][0].rstrip(".") == kept[-1][0].rstrip(".")):
         kept.pop(0)
 
     # A part heading is a section boundary too, not only a title prefix: an

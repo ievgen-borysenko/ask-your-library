@@ -141,10 +141,10 @@ CHAPTER_HIT_CHARS = _positive_int("CHAPTER_HIT_CHARS", "12000")
 # window is cut around the best lexical match inside it, and what the model
 # sees is still CHAPTER_HIT_CHARS — so this is a scan budget, not an
 # observation budget: no more text reaches a prompt because of it. 120,000
-# characters covers 1,243 of the 1,246 sections of the demo corpus whole
-# (median 14,821, the longest 245,244; measured 22.09, after #80 and #82 moved
-# the boundaries). A read that names no query never scans:
-# it takes the head, as it always did.
+# characters covers 1,242 of the 1,245 sections of the demo corpus whole
+# (median 14,804, the longest 245,244; measured 24.09, after #80 and #82 moved
+# the boundaries and Don Quixote's front matter stopped being a section). A
+# read that names no query never scans: it takes the head, as it always did.
 CHAPTER_SCAN_CHARS = _positive_int("CHAPTER_SCAN_CHARS", "120000")
 if CHAPTER_SCAN_CHARS < CHAPTER_HIT_CHARS:
     # A scan narrower than the window is not a window at all: it would cut the
