@@ -2,6 +2,46 @@
 
 ## Unreleased
 
+- **Don Quixote's front matter was a section, and it was called CHAPTER LII** (found while closing
+  #82). Project Gutenberg's contents page for PG 5921 ends its list with `CHAPTER LII` — no period
+  — where every heading the book prints is `CHAPTER LII.`. The demo splitter's contents-leftover
+  test compared the first surviving title with the last for exact equality, and that one character
+  was enough to miss: 115,506 characters of Ormsby's translator's preface, his introduction and
+  Cervantes's dedication survived as a section named `CHAPTER LII`, listed ahead of `CHAPTER I.`.
+  A chapter read that named the bare `CHAPTER LII` landed on the preface instead of the last
+  chapter — the [local-model report of 2026-09-10](eval-results/2026-09-10-local-models.md) records
+  one, answered out of Ormsby's criticism rather than the novel — and the preface was chunked,
+  retrieved and cited as chapter text. The other branch of the same heuristic could not help: it
+  catches a contents line that repeats a heading with something appended to it, and here the
+  contents line is the SHORTER string.
+
+  The fix is one manifest line, as Napoleon's misprinted chapter number was fixed in #82: Don
+  Quixote carries a `chapter_regex` that takes the punctuated headings only, so the contents line
+  matches nothing and the front matter before `CHAPTER I.` is the preamble the demo path discards
+  for every book. The splitter is not changed. A period-insensitive leftover rule was measured
+  first and gives the same 52 sections, but it cannot tell that contents line from the real first
+  chapter of a restart-numbered work whose contents page has no preface after it, or from a short
+  real first chapter, and no structural evidence separates the two shapes; the per-book regex
+  states the edition's convention instead of guessing it. All 31 Gutenberg texts were re-split
+  from the pinned raw files with the old manifest and the new one and compared: only Don Quixote
+  differs, 53 sections → 52, and the 52 are byte-identical to what were sections 2 to 53. The
+  front matter is dropped the way every demo book's front matter already was, and the generic
+  `ayl add` path, which has no manifest, is untouched.
+
+  The corpus is 1,245 sections after this change (1,246 before). The places that quote that number
+  in running text — `CHAPTER_SCAN_CHARS` in `config.py`, [configuration](configuration.md),
+  [known limits](known-limits.md) and [ADR-025](adr/README.md) — are re-measured with it: 1,242 of
+  the 1,245 fit whole inside the 120,000-character scan budget, the median section is 14,804
+  characters (14,821 before), the longest is still 245,244, and 62% of the sections are still
+  longer than one 12,000-character read. Records of earlier measurements keep their own numbers.
+
+  **Re-prepare and re-ingest Don Quixote.**
+  `uv run scripts/ingest_demo_corpus.py --stage prepare-text --book "Don Quixote"` and then
+  `--stage ingest --book "Don Quixote"`; an index built before this still holds the bogus section
+  and answers out of it. `corpus/toc/` and the book-identity fixture are regenerated here.
+  `CHUNKER_VERSION` is unchanged, for the reason the #82 entry gives: it names how a section is
+  packed into chunks, not where a section begins, and the demo corpus is rebuilt from the manifest
+  rather than detected as stale.
 - **One command, `ayl`, over everything that already ran** (#30). `ayl ask`, `ayl add`,
   `ayl doctor`, `ayl backup`, `ayl restore`, `ayl books` and `ayl ui`. It is a router, not a
   second implementation: `ask` and `add` are the CLI's own `main` and the ingest command's,

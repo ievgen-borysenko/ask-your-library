@@ -343,6 +343,25 @@ def test_a_positional_call_written_before_end_re_still_means_what_it_meant():
         ("", "Front matter of this edition."), ("CHAPTER I.", "One short line.")]
 
 
+def test_the_don_quixote_regex_reads_only_the_punctuated_headings():
+    """The contents page of PG 5921 ends its list with "CHAPTER LII" and the
+    book prints "CHAPTER LII.", so the contents-leftover test, which compares
+    the leading title with the last one exactly, let the translator's preface
+    and introduction survive as a section named CHAPTER LII ahead of chapter
+    one. The manifest regex takes the punctuated headings only: the contents
+    line matches nothing, and the front matter before "CHAPTER I." is the
+    preamble the demo path discards for every book. The splitter itself is
+    unchanged: a period-insensitive leftover rule cannot tell that contents
+    line from a real first chapter of a restart-numbered work."""
+    regex = book_entry("don-quixote")["chapter_regex"]
+    text = ("CONTENTS\nCHAPTER I\nCHAPTER II\n"
+            + "The translator's preface, his introduction and the dedication. " * 6
+            + "\nCHAPTER I.\n" + BODY + "\nCHAPTER II.\n" + BODY + "\n")
+    assert [t for t, _ in ingest.split_chapters(text, regex)] == ["CHAPTER I.", "CHAPTER II."]
+    assert not re.search(regex, "CHAPTER LII", re.M)
+    assert re.search(regex, "CHAPTER LII.", re.M)
+
+
 def test_the_napoleon_regex_reads_the_editions_misprinted_chapter_number():
     """The source prints "CHAPTER XXYI." for XXVI, which no chapter regex
     matched, so volume II's chapters XXV and XXVI were one section. The
