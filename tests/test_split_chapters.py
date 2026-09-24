@@ -225,6 +225,25 @@ def test_a_contents_line_with_a_period_the_heading_lacks_is_still_a_leftover():
     assert chapters == [("CHAPTER I", BODY.strip()), ("CHAPTER II", BODY.strip())]
 
 
+def test_a_restarted_first_chapter_with_no_contents_page_before_it_is_kept():
+    """A work whose treatises restart at CHAPTER I, printed "CHAPTER I" at the
+    top and "CHAPTER I." in the last one, has nothing to do with a contents
+    page: no heading line was dropped before its first chapter, so the
+    period-insensitive comparison does not apply and the chapter stays."""
+    text = ("CHAPTER I\n" + BODY + "\nCHAPTER II\n" + BODY
+            + "\nTREATISE TWO\nCHAPTER I.\n" + BODY + "\n")
+    chapters = ingest.split_chapters(text, EITHER_RE)
+    assert [t for t, _ in chapters] == ["CHAPTER I", "CHAPTER II", "CHAPTER I."]
+    # The same three chapters behind a contents page that lists them: the
+    # leading section is then the contents leftover it looks like, the exact
+    # rule already dropped it before this change (first == last), and the
+    # real "CHAPTER I" behind it follows a KEPT heading, so the drop does not
+    # cascade onto it.
+    listed = "CONTENTS\nCHAPTER I\nCHAPTER II\nCHAPTER I.\n" + PREFACE + "\n"
+    chapters = ingest.split_chapters(listed + text, EITHER_RE)
+    assert [t for t, _ in chapters] == ["CHAPTER I", "CHAPTER II", "CHAPTER I."]
+
+
 def test_the_generic_path_keeps_the_front_matter_the_demo_path_drops():
     """`drop_toc_leftovers=False` drops nothing, period or no period: in a
     stranger's file the leading section is text, not a contents artifact."""

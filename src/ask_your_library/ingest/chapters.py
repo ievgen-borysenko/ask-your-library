@@ -81,10 +81,13 @@ def split_chapters(text: str, heading_re: str, part_re: str | None = None,
     CHAPTER I.), so there is no dedupe; the one residual TOC artifact — the
     LAST contents line, whose body is the front matter before chapter one —
     is removed by dropping a leading heading whose title reappears later. That
-    comparison ignores trailing periods on either side: a Gutenberg contents
-    page lists "CHAPTER LII" for a heading the book prints as "CHAPTER LII."
-    (Don Quixote), and with an exact test the front matter stayed as a section
-    named after the last chapter, ahead of chapter one.
+    comparison ignores trailing periods on either side when the leading
+    heading follows a dropped contents line: a Gutenberg contents page lists
+    "CHAPTER LII" for a heading the book prints as "CHAPTER LII." (Don
+    Quixote), and with an exact test the front matter stayed as a section
+    named after the last chapter, ahead of chapter one. With no contents lines
+    before it the exact test stands, so a restart-numbered work that opens
+    with "CHAPTER I" and ends with "CHAPTER I." keeps its first chapter.
 
     Both of those are contents-page heuristics: right for the curated demo
     corpus, wrong for a stranger's file, where a two-line chapter is a chapter
@@ -164,18 +167,38 @@ def split_chapters(text: str, heading_re: str, part_re: str | None = None,
     # contents lines, and the first heading that survives both is the first
     # real chapter.
     kept = split([])
+    kept_starts = {pos for _, _, pos in kept}
+
+    def after_a_contents_line(section: tuple[str, str, int]) -> bool:
+        """Whether the heading match right before this section's heading was
+        dropped as too short — the shape of a contents page, whose lines match
+        the heading regex and have no body, so the last of them is the one
+        section that follows a dropped line. A book with no contents page
+        opens with its first real heading and nothing precedes it; a real
+        first chapter after a contents leftover follows a KEPT heading, so
+        dropping the leftover never cascades onto it."""
+        before = [m.start() for m in matches if m.start() < section[2]]
+        return bool(before) and before[-1] not in kept_starts
+
     while drop_toc_leftovers and len(kept) > 1 and (
             any(is_toc_leftover(kept[0][0], t) for t, _, _ in kept[1:])
             # a contents line identical to a real heading survives only as the
             # book's LAST heading duplicated up front (e.g. "CHAPTER 135."
             # before "CHAPTER 1.") — ascending repeats (Seneca's treatises
-            # restarting at CHAPTER I.) never trip this. Trailing periods are
-            # ignored on both sides: a contents page prints "CHAPTER LII" for a
-            # heading the book prints as "CHAPTER LII." (Don Quixote), and the
-            # strictly-longer branch above only catches the reverse shape.
-            # Only the demo path comes here; drop_toc_leftovers=False (the
-            # generic `ayl add`) still keeps every section it always kept.
-            or kept[0][0].rstrip(".") == kept[-1][0].rstrip(".")):
+            # restarting at CHAPTER I.) never trip this
+            or kept[0][0] == kept[-1][0]
+            # Trailing periods are ignored in that comparison, but only when
+            # the leading section follows a dropped contents line: a contents
+            # page prints "CHAPTER LII" for a heading the book prints as
+            # "CHAPTER LII." (Don Quixote), and the strictly-longer branch
+            # above only catches the reverse shape. Without that evidence the
+            # exact rule stands, so a restart-numbered work with no contents
+            # page whose first heading is "CHAPTER I" and whose last is
+            # "CHAPTER I." keeps its first chapter. Only the demo path comes
+            # here; drop_toc_leftovers=False (the generic `ayl add`) still
+            # keeps every section it always kept.
+            or (after_a_contents_line(kept[0])
+                and kept[0][0].rstrip(".") == kept[-1][0].rstrip("."))):
         kept.pop(0)
 
     # A part heading is a section boundary too, not only a title prefix: an

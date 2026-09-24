@@ -17,7 +17,11 @@
 
   The fix is that one comparison: the leftover test now ignores trailing periods on either side,
   so a contents page that punctuates a heading differently from the book is still read as a
-  contents page. All 31 Gutenberg texts were re-split from the pinned raw files with the old code
+  contents page — but only when the leading section follows a heading line that was dropped as
+  too short, which is what a contents page looks like. Without that evidence the exact rule
+  stands: a restart-numbered work with no contents page that opens with `CHAPTER I` and ends with
+  `CHAPTER I.` keeps its first chapter, and a real first chapter behind a dropped leftover follows
+  a kept heading, so the drop never cascades onto it. All 31 Gutenberg texts were re-split from the pinned raw files with the old code
   and the new one and compared: only Don Quixote differs, 53 sections → 52, and the 52 are
   byte-identical to what were sections 2 to 53. The front matter is dropped the way every demo
   book's front matter already was, and the generic `ayl add` path is untouched — it calls the
