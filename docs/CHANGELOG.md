@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **The weekly pin check was red on one book: Journey to the Interior of the Earth had drifted.**
+  Project Gutenberg regenerated PG 3748 on 2026-09-22, and the `pins` job of `corpus.yml` has
+  failed on every branch since. The drift is cosmetic — the "Most recently updated" header line,
+  the transcriber's e-mail dropped from the credit, and one fix in chapter XVII, where a stray
+  `46;` becomes the `β` of "β Ursa minor" — and the corpus is unchanged where it matters:
+  `corpus/toc/journey-interior-earth.json` regenerates byte-identical from the new file, so the
+  book-identity fixture stays as it is. The entry is re-pinned with the date and the drift, as the
+  five of 2026-09-10 were.
+
 - **Don Quixote's front matter was a section, and it was called CHAPTER LII** (found while closing
   #82). Project Gutenberg's contents page for PG 5921 ends its list with `CHAPTER LII` — no period
   — where every heading the book prints is `CHAPTER LII.`. The demo splitter's contents-leftover

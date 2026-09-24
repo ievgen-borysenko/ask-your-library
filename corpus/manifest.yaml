@@ -226,7 +226,10 @@ books:
     pg_id: 103
 
   - id: journey-interior-earth
-    sha256: b9fc950f4178315b4574304225380620ce4314d02b89be2e09204fc25ccfe03e
+    sha256: 30a835c7c42a5ce55a0393d252c2248555fbac8eeb8a2de16ea9d149e8cae3c5
+    # re-pinned 2026-09-24: PG regenerated the file — updated-date header line, the
+    # transcriber's e-mail dropped from the credit, and one fix in chapter XVII (a
+    # stray "46;" restored to "β," before "Ursa minor"); the chapter split is unchanged
     title: "A Journey to the Interior of the Earth"
     author: "Jules Verne"
     source: gutenberg
