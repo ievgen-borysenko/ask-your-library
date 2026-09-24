@@ -276,6 +276,10 @@ books:
     author: "Miguel de Cervantes"
     source: gutenberg
     pg_id: 5921
+    # Every heading this edition prints ends with a period; the contents page's
+    # last line, "CHAPTER LII" without one, otherwise survives the contents
+    # heuristics with the translator's preface and introduction as its body.
+    chapter_regex: "^CHAPTER [IVXLCDM]+\\.$"
 
   - id: romeo-and-juliet
     sha256: 5a2037a19e60cccb67b3f5fc93a12cb65c58694ce6a1dc61d0d67d0d2502b3b4

@@ -199,63 +199,6 @@ def test_a_part_lead_in_before_the_first_chapter_does_not_shield_a_contents_left
     assert [t for t, _ in chapters] == ["PART ONE — CHAPTER I.", "PART ONE — CHAPTER II."]
 
 
-# --- the contents leftover whose period the contents page dropped -------------
-
-EITHER_RE = r"^CHAPTER [IVX]+\.?$"
-PREFACE = "The translator's preface, his introduction and the dedication. " * 6
-
-
-def test_a_contents_line_without_the_headings_period_is_still_a_leftover():
-    """Don Quixote: the contents page's last line is "CHAPTER LII" and every
-    real heading is "CHAPTER LII." — on an exact comparison the front matter
-    stayed as a 115,506-character section named after the last chapter, listed
-    before chapter one, and a request for chapter LII landed on the preface."""
-    text = ("CONTENTS\nCHAPTER I\nCHAPTER II\n" + PREFACE
-            + "\nCHAPTER I.\n" + BODY + "\nCHAPTER II.\n" + BODY + "\n")
-    chapters = ingest.split_chapters(text, EITHER_RE)
-    assert chapters == [("CHAPTER I.", BODY.strip()), ("CHAPTER II.", BODY.strip())]
-
-
-def test_a_contents_line_with_a_period_the_heading_lacks_is_still_a_leftover():
-    """The mirror shape, which the strictly-longer branch already caught: the
-    contents page punctuates "CHAPTER II." and the book prints "CHAPTER II"."""
-    text = ("CONTENTS\nCHAPTER I.\nCHAPTER II.\n" + PREFACE
-            + "\nCHAPTER I\n" + BODY + "\nCHAPTER II\n" + BODY + "\n")
-    chapters = ingest.split_chapters(text, EITHER_RE)
-    assert chapters == [("CHAPTER I", BODY.strip()), ("CHAPTER II", BODY.strip())]
-
-
-def test_a_restarted_first_chapter_with_no_contents_page_before_it_is_kept():
-    """A work whose treatises restart at CHAPTER I, printed "CHAPTER I" at the
-    top and "CHAPTER I." in the last one, has nothing to do with a contents
-    page: no heading line was dropped before its first chapter, so the
-    period-insensitive comparison does not apply and the chapter stays."""
-    text = ("CHAPTER I\n" + BODY + "\nCHAPTER II\n" + BODY
-            + "\nTREATISE TWO\nCHAPTER I.\n" + BODY + "\n")
-    chapters = ingest.split_chapters(text, EITHER_RE)
-    assert [t for t, _ in chapters] == ["CHAPTER I", "CHAPTER II", "CHAPTER I."]
-    # The same three chapters behind a contents page that lists them: the
-    # leading section is then the contents leftover it looks like, the exact
-    # rule already dropped it before this change (first == last), and the
-    # real "CHAPTER I" behind it follows a KEPT heading, so the drop does not
-    # cascade onto it.
-    listed = "CONTENTS\nCHAPTER I\nCHAPTER II\nCHAPTER I.\n" + PREFACE + "\n"
-    chapters = ingest.split_chapters(listed + text, EITHER_RE)
-    assert [t for t, _ in chapters] == ["CHAPTER I", "CHAPTER II", "CHAPTER I."]
-
-
-def test_the_generic_path_keeps_the_front_matter_the_demo_path_drops():
-    """`drop_toc_leftovers=False` drops nothing, period or no period: in a
-    stranger's file the leading section is text, not a contents artifact."""
-    text = ("CONTENTS\nCHAPTER I\nCHAPTER II\n" + PREFACE
-            + "\nCHAPTER I.\n" + BODY + "\nCHAPTER II.\n" + BODY + "\n")
-    chapters = ingest.split_chapters(text, EITHER_RE, min_chapter_chars=0,
-                                     keep_preamble=True, drop_toc_leftovers=False)
-    assert [t for t, _ in chapters] == [
-        "", "CHAPTER I", "CHAPTER II", "CHAPTER I.", "CHAPTER II."]
-    assert dict(chapters)["CHAPTER II"] == PREFACE.strip()
-
-
 # --- back matter: the manifest's end_regex (#82) -------------------------------
 
 NOTES = "[1] The footstool kept bare feet off a floor that was often wet. " * 4
@@ -398,6 +341,25 @@ def test_a_positional_call_written_before_end_re_still_means_what_it_meant():
     text = "Front matter of this edition.\n\nCHAPTER I.\nOne short line.\n"
     assert ingest.split_chapters(text, CHAPTER_RE, None, 0, True, False) == [
         ("", "Front matter of this edition."), ("CHAPTER I.", "One short line.")]
+
+
+def test_the_don_quixote_regex_reads_only_the_punctuated_headings():
+    """The contents page of PG 5921 ends its list with "CHAPTER LII" and the
+    book prints "CHAPTER LII.", so the contents-leftover test, which compares
+    the leading title with the last one exactly, let the translator's preface
+    and introduction survive as a section named CHAPTER LII ahead of chapter
+    one. The manifest regex takes the punctuated headings only: the contents
+    line matches nothing, and the front matter before "CHAPTER I." is the
+    preamble the demo path discards for every book. The splitter itself is
+    unchanged: a period-insensitive leftover rule cannot tell that contents
+    line from a real first chapter of a restart-numbered work."""
+    regex = book_entry("don-quixote")["chapter_regex"]
+    text = ("CONTENTS\nCHAPTER I\nCHAPTER II\n"
+            + "The translator's preface, his introduction and the dedication. " * 6
+            + "\nCHAPTER I.\n" + BODY + "\nCHAPTER II.\n" + BODY + "\n")
+    assert [t for t, _ in ingest.split_chapters(text, regex)] == ["CHAPTER I.", "CHAPTER II."]
+    assert not re.search(regex, "CHAPTER LII", re.M)
+    assert re.search(regex, "CHAPTER LII.", re.M)
 
 
 def test_the_napoleon_regex_reads_the_editions_misprinted_chapter_number():

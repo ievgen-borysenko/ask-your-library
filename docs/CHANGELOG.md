@@ -11,21 +11,22 @@
   A chapter read that named the bare `CHAPTER LII` landed on the preface instead of the last
   chapter — the [local-model report of 2026-09-10](eval-results/2026-09-10-local-models.md) records
   one, answered out of Ormsby's criticism rather than the novel — and the preface was chunked,
-  retrieved and cited as chapter text. The other branch of the same
-  heuristic could not help: it catches a contents line that repeats a heading with something
-  appended to it, and here the contents line is the SHORTER string.
+  retrieved and cited as chapter text. The other branch of the same heuristic could not help: it
+  catches a contents line that repeats a heading with something appended to it, and here the
+  contents line is the SHORTER string.
 
-  The fix is that one comparison: the leftover test now ignores trailing periods on either side,
-  so a contents page that punctuates a heading differently from the book is still read as a
-  contents page — but only when the leading section follows a heading line that was dropped as
-  too short, which is what a contents page looks like. Without that evidence the exact rule
-  stands: a restart-numbered work with no contents page that opens with `CHAPTER I` and ends with
-  `CHAPTER I.` keeps its first chapter, and a real first chapter behind a dropped leftover follows
-  a kept heading, so the drop never cascades onto it. All 31 Gutenberg texts were re-split from the pinned raw files with the old code
-  and the new one and compared: only Don Quixote differs, 53 sections → 52, and the 52 are
-  byte-identical to what were sections 2 to 53. The front matter is dropped the way every demo
-  book's front matter already was, and the generic `ayl add` path is untouched — it calls the
-  splitter with `drop_toc_leftovers=False` and still drops nothing of a stranger's file.
+  The fix is one manifest line, as Napoleon's misprinted chapter number was fixed in #82: Don
+  Quixote carries a `chapter_regex` that takes the punctuated headings only, so the contents line
+  matches nothing and the front matter before `CHAPTER I.` is the preamble the demo path discards
+  for every book. The splitter is not changed. A period-insensitive leftover rule was measured
+  first and gives the same 52 sections, but it cannot tell that contents line from the real first
+  chapter of a restart-numbered work whose contents page has no preface after it, or from a short
+  real first chapter, and no structural evidence separates the two shapes; the per-book regex
+  states the edition's convention instead of guessing it. All 31 Gutenberg texts were re-split
+  from the pinned raw files with the old manifest and the new one and compared: only Don Quixote
+  differs, 53 sections → 52, and the 52 are byte-identical to what were sections 2 to 53. The
+  front matter is dropped the way every demo book's front matter already was, and the generic
+  `ayl add` path, which has no manifest, is untouched.
 
   The corpus is 1,245 sections after this change (1,246 before). The places that quote that number
   in running text — `CHAPTER_SCAN_CHARS` in `config.py`, [configuration](configuration.md),
