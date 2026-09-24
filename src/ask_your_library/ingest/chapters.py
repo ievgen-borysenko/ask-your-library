@@ -81,7 +81,7 @@ def split_chapters(text: str, heading_re: str, part_re: str | None = None,
     CHAPTER I.), so there is no dedupe; the one residual TOC artifact — the
     LAST contents line, whose body is the front matter before chapter one —
     is removed by dropping a leading heading whose title reappears later. That
-    comparison ignores a trailing period on either side: a Gutenberg contents
+    comparison ignores trailing periods on either side: a Gutenberg contents
     page lists "CHAPTER LII" for a heading the book prints as "CHAPTER LII."
     (Don Quixote), and with an exact test the front matter stayed as a section
     named after the last chapter, ahead of chapter one.
@@ -169,7 +169,7 @@ def split_chapters(text: str, heading_re: str, part_re: str | None = None,
             # a contents line identical to a real heading survives only as the
             # book's LAST heading duplicated up front (e.g. "CHAPTER 135."
             # before "CHAPTER 1.") — ascending repeats (Seneca's treatises
-            # restarting at CHAPTER I.) never trip this. A trailing period is
+            # restarting at CHAPTER I.) never trip this. Trailing periods are
             # ignored on both sides: a contents page prints "CHAPTER LII" for a
             # heading the book prints as "CHAPTER LII." (Don Quixote), and the
             # strictly-longer branch above only catches the reverse shape.
