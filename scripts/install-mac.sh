@@ -1361,7 +1361,18 @@ if [ -z "${db_path//[[:space:]]/}" ]; then
     else
         ayl_home="$(effective_value AYL_HOME)"
         [ -n "${ayl_home//[[:space:]]/}" ] || ayl_home="$HOME/AskYourLibrary"
-        # config.py expands a leading ~ in AYL_HOME (it does not in LIBRARY_DB_PATH)
+        # config.py expands a leading ~ in AYL_HOME (it does not in LIBRARY_DB_PATH).
+        # Python's expanduser also expands ~user; this script does not look up
+        # other users' home folders, so that spelling is refused rather than
+        # emulated — guessing it would name a different index than the app opens.
+        case "$ayl_home" in
+            "~"[!/]*)
+                fail "AYL_HOME=$ayl_home names a home folder by user (~user), which this"
+                fail "script does not resolve the way the application does. Write it as an"
+                fail "absolute path or as ~/..., then re-run."
+                exit 2
+                ;;
+        esac
         case "$ayl_home" in
             "~") ayl_home="$HOME" ;;
             "~/"*) ayl_home="$HOME/${ayl_home#"~/"}" ;;

@@ -1691,3 +1691,21 @@ def test_a_blank_ayl_home_is_the_default_home(sandbox, tmp_path, exported):
     env["AYL_HOME"] = exported
     out = dry_run(sandbox)
     assert f"Demo corpus: an index at {tmp_path}/reader/AskYourLibrary/index" in out
+
+
+@mac_only
+@pytest.mark.parametrize("named_user", ["~someone", "~someone/books"])
+def test_an_ayl_home_named_by_user_is_refused_not_guessed(sandbox, tmp_path, named_user):
+    """config.py's expanduser turns ~someone/books into that user's home; the
+    script cannot resolve it the same way, and a literal `~someone/books/index`
+    would be an index the app never opens. Refused with the value named, and
+    the configuration error's exit status (2)."""
+    root, _, env = sandbox
+    env["HOME"] = str(tmp_path / "reader")
+    env["AYL_HOME"] = named_user
+    result = subprocess.run([BASH, "scripts/install-mac.sh", "--dry-run"], cwd=root, env=env,
+                            capture_output=True, text=True)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert f"AYL_HOME={named_user} names a home folder by user" in result.stderr
+    assert "absolute path or as ~/..." in result.stderr
+    assert "Demo corpus: an index at" not in result.stdout
