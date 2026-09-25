@@ -74,8 +74,10 @@ The index a command opens, when no `--db` names one, is decided by three rules i
 
    (one line on the terminal, wrapped here), and never when a command is only asked for its help
    or its version. **This rule is kept for one minor release: from 0.5.0 an index found there is
-   an error naming the same two commands.** A web chat that finds a `chat.db` in the checkout's
-   `.chainlit/` does the same for it, once, when it starts.
+   an error naming the same two commands.** The chat database has a rule of its own with the same
+   sunset: when `AYL_CHAINLIT_DIR` is unset and the checkout the package runs from — not the
+   working directory — has any `chat.db` file in its `.chainlit/`, the web chat reads that file
+   where it is and says so once when it starts.
 3. **Otherwise** — `$AYL_HOME/index`, created by the first write.
 
 `$AYL_HOME/index` is refused when `AYL_HOME` resolves inside a git work tree — the index holds the

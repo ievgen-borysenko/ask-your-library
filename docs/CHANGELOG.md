@@ -18,8 +18,10 @@
   backend's `transcripts_<backend>` table keeps being read there, and the first command that uses
   it prints one line to stderr with the new default and the move as commands (`ayl backup <dir>`,
   then `ayl restore <dir>/<timestamp> --db … --chat-db …`) — never on `--help` or `--version`;
-  otherwise `$AYL_HOME/index`, created by the first write. A checkout's existing
-  `.chainlit/chat.db` is read where it is the same way, with one line at the web chat's start.
+  otherwise `$AYL_HOME/index`, created by the first write. The chat database has a rule of its
+  own: with `AYL_CHAINLIT_DIR` unset, any `chat.db` file in the `.chainlit/` of the checkout the
+  package runs from (not the working directory) is read where it is, with one line at the web
+  chat's start.
   **Both old places are honoured until 0.5.0, when finding one becomes an error naming the same
   two commands.** `ayl doctor` now opens with the index it checks and the rule that chose it.
   [Upgrading](upgrading.md#the-index-moved-to-ayl_homeindex) has the move, end to end.
@@ -35,14 +37,19 @@
   it holds the full text of the books it was built from. The refusal names `LIBRARY_DB_PATH`, the
   one-line way to keep an index in a checkout on purpose, where it used to say only "set
   `AYL_HOME` elsewhere". It is a preflight problem (exit 1) for `ayl ask`, `ayl doctor`, `ayl books`
-  and the web chat, and one line from `ayl add` / `backup` / `restore` and the demo ingest. The
-  scratchpads and the web chat's state go through `AYL_HOME` without that check, as `ayl ui`'s app
-  root already did: refusing to answer, or to start the web chat, because the home folder sits in
-  a checkout would guard nothing the reader asked for.
+  and the web chat (where `ayl doctor` then stops, rather than print it twice), and one line from
+  `ayl add` / `backup` / `restore` and the demo ingest. When only `$AYL_HOME/index` is a symlink
+  into a checkout, it names that folder, not `AYL_HOME`. The scratchpads and the web chat's state
+  go through `AYL_HOME` without that check, as `ayl ui`'s app root already did: refusing to answer,
+  or to start the web chat, because the home folder sits in a checkout would guard nothing the
+  reader asked for — although a scratchpad holds retrieved passages verbatim, which ADR-026 records
+  as the argument against. A blank or whitespace-only `AYL_HOME` now means the default.
 
-  The test suite pins `AYL_HOME` to a per-process temporary folder, as it pins `LIBRARY_DB_PATH`,
-  and scrubs it from `run_fresh` children, which each get a folder of their own — unpinned, the
-  suite would have read and written the developer's own `~/AskYourLibrary`.
+  The test suite pins `AYL_HOME` and `AYL_CHAINLIT_DIR` to per-process temporary folders, as it
+  pins `LIBRARY_DB_PATH`, and scrubs them from `run_fresh` children, which each get an `AYL_HOME`
+  of their own — unpinned, the suite would have read and written the developer's own
+  `~/AskYourLibrary`, and the backup tests would have copied and restored over the chat history
+  in the checkout they run from.
 
 - **The weekly pin check was red on one book: Journey to the Interior of the Earth had drifted.**
   Project Gutenberg regenerated PG 3748 on 2026-09-22, and the `pins` job of `corpus.yml` has

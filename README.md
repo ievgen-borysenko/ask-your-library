@@ -101,9 +101,10 @@ for what the index holds, `ayl doctor` for whether this machine is ready, `ayl b
 at `0.6.0`.
 
 What this machine builds for you — the index, the scratchpads, the web chat's history — lives in
-`~/AskYourLibrary` (`AYL_HOME`), outside the clone, whichever directory a command is typed in. An
-index an earlier version built in the clone's `data/lancedb` is still read there, with a notice,
-until `0.5.0`; [upgrading](docs/upgrading.md#the-index-moved-to-ayl_homeindex) has the two
+`~/AskYourLibrary` (`AYL_HOME`) by default, outside the clone, rather than in the directory a
+command is typed in (a relative `LIBRARY_DB_PATH` you set is still read against that directory).
+An index an earlier version built in `data/lancedb` is still read there, with a notice, when a
+command runs in the directory that holds it, until `0.5.0`; [upgrading](docs/upgrading.md#the-index-moved-to-ayl_homeindex) has the two
 commands that move it.
 
 **Local is slower, and it quotes less reliably: both halves are the trade.** The quoting half is

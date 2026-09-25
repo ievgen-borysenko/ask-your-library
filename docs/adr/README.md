@@ -1145,8 +1145,12 @@ the checkout's own manifest, not something built for the reader; moving them is 
    count.
 3. Otherwise → `$AYL_HOME/index`, created by the first write.
 
-A checkout's `.chainlit/chat.db` gets the same second clause (`ui.launcher.legacy_chat_db`): read
-where it is, one line when the web chat starts. **Nothing is copied, moved or deleted by the
+The chat database has a second clause of its own (`ui.launcher.legacy_chat_db`), and it is not the
+index's: it is keyed on the checkout **the package runs from** (`paths.REPO_ROOT`), not on the
+working directory — a wheel has none, so it never applies there — and **any** `chat.db` file in
+that checkout's `.chainlit/` counts, whatever it holds; a `.chainlit/` without one, which is what
+importing Chainlit leaves behind, does not. `AYL_CHAINLIT_DIR` unset and that file present, it is
+read where it is, with one line when the web chat starts. **Nothing is copied, moved or deleted by the
 code.** An index of hundreds of megabytes, and a reader's chat history, are not things a startup
 path relocates on its own; the supported move is `ayl backup` then `ayl restore`, which verify what they
 copy. **Clause 2 has a sunset: it is honoured through 0.4.x, and from 0.5.0 finding an index or a
@@ -1170,10 +1174,29 @@ through `home.ayl_home` without the refusal, as #94 decided for the app root: th
 files of a run, and refusing to answer a question or to start the web chat because the home folder
 is under version control would be the rule applied where it protects nothing the reader asked for.
 The alternative — the refusal only for never-shared content and none for the index — was rejected
-because the index is exactly that content once `ayl add` has run over a private folder. The known
+because the index is exactly that content once `ayl add` has run over a private folder.
+
+The plan for this slice (#30, 22.09.2026) recommended the other way round: keep the refusal for
+the index, the scratchpads and the chat state alike, with `LIBRARY_DB_PATH`, `ASK_SCRATCH_DIR`
+and `AYL_CHAINLIT_DIR` as the explicit escapes. **That was declined for the scratchpads and the
+chat state**, and followed for the index. They are working files of a run, written on every
+question; refusing to answer — or to start the web chat — because the home folder is under
+version control guards nothing the reader asked for, and it is the precedent #94 set for the web
+chat's app root. The counter-argument is real and is recorded with it: a scratchpad holds the
+retrieved passages verbatim, and a chat database holds answers that quote them, so a home folder
+inside a checkout can put book text one `git add` away from a commit. Both stay outside the
+checkout by default; what is not enforced is the case where the reader moved `AYL_HOME` into one.
+Revisit if the private shelf makes those passages the reader's own books by default.
+
+When only a folder under `AYL_HOME` is a symlink into a checkout — `$AYL_HOME/index` linked into
+one, `AYL_HOME` itself outside — the refusal names that folder and what it resolves to rather than
+claiming `AYL_HOME` does. The known
 blind spot stays: a bare-repository dotfiles setup leaves no `.git` in `$HOME` and is not detected.
 
-**Consequences.** The same command opens the same index from any directory. An `.env` copied from
+**Consequences.** Once no old index is left in the working directory and `LIBRARY_DB_PATH` is
+either unset or absolute, the same command opens the same index from any directory; clause 2 is
+cwd-dependent by design until 0.5.0, and a relative `LIBRARY_DB_PATH` is still resolved against
+the working directory, as it always was. An `.env` copied from
 any earlier `.env.example` carries `LIBRARY_DB_PATH=data/lancedb`, which clause 1 obeys — silently,
 by design — so the changelog and the upgrade page tell the reader to delete that line;
 `.env.example` now ships it commented out. `scripts/install-mac.sh` can no longer read one default
