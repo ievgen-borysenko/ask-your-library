@@ -13,7 +13,7 @@ Nothing is copied, moved or deleted by the code, in any clause.
 """
 import pytest
 
-from ask_your_library import ayl, config, preflight
+from ask_your_library import ayl, config, home, preflight
 from ask_your_library.ingest import add_folder
 from ask_your_library.preflight import PreflightResult
 from conftest import run_fresh
@@ -254,4 +254,23 @@ def test_doctor_with_db_says_it_was_named(monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(add_folder, "main", lambda argv=None, prog=None: 0)
     assert ayl.main(["doctor", "--db", str(tmp_path / "i")]) == 0
     assert f"index: {tmp_path / 'i'} — named with --db" in capsys.readouterr().out
+
+
+# --- the scratchpads: the web chat's rule, for the CLI too -------------------------
+
+def test_the_cli_scratch_directory_is_under_ayl_home_and_absolute(tmp_path):
+    out = run_fresh("from ask_your_library import cli\nprint(cli.SCRATCH_DIR)",
+                    AYL_HOME=str(tmp_path / "reader-home"))
+    assert out.stdout.strip() == str((tmp_path / "reader-home").resolve() / "scratch")
+
+
+def test_the_cli_scratch_variable_wins_and_a_tilde_is_expanded(tmp_path):
+    out = run_fresh("from ask_your_library import cli\nprint(cli.SCRATCH_DIR)",
+                    HOME=str(tmp_path), ASK_SCRATCH_DIR="~/pads")
+    assert out.stdout.strip() == str(tmp_path.resolve() / "pads")
+
+
+def test_the_cli_and_the_web_chat_share_one_rule():
+    from ask_your_library.ui import launcher
+    assert launcher.scratch_dir() == home.scratch_dir()
 

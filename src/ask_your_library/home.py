@@ -84,6 +84,21 @@ def private_dir(*parts: str) -> Path:
     return folder
 
 
+def scratch_dir() -> Path:
+    """`ASK_SCRATCH_DIR` when set, else `$AYL_HOME/scratch` — absolute either
+    way, and never `.scratch` in whatever directory the reader typed the
+    command in.
+
+    The CLI's default was the relative `.scratch`, right while every command
+    was run from the checkout. From anywhere else the first answered question
+    dropped a `.scratch/` with retrieved passages in it wherever the terminal
+    happened to be. One function for the CLI and for the server `ayl ui`
+    starts (`ui.launcher` hands its answer to the child), so the two cannot
+    disagree. Read when called: nothing is created here."""
+    named = os.environ.get("ASK_SCRATCH_DIR", "").strip()
+    return Path(named).expanduser().resolve() if named else ayl_home() / "scratch"
+
+
 def private_file(path: Path) -> Path:
     """A file about to be written under `AYL_HOME`, refused when it is a symlink
     or when its resolved target lies inside a git work tree. `write_text`

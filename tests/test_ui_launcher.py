@@ -362,11 +362,11 @@ def test_a_tilde_in_the_variable_is_expanded_everywhere_it_is_read(tmp_path, mon
 
 
 def test_the_scratch_directory_is_absolute_and_not_beside_the_caller(tmp_path, monkeypatch):
-    """`config`'s default is the relative `.scratch`, which was right while the
+    """The old default was the relative `.scratch`, which was right while the
     web chat could only be started from the checkout. From a wheel the first
     answered question would have dropped retrieved passages in a `.scratch/`
-    wherever the terminal happened to be. `$AYL_HOME/scratch` is where the
-    index and the CLI's own scratch go when they move."""
+    wherever the terminal happened to be. `$AYL_HOME/scratch` is the CLI's
+    default too since ADR-026 (`home.scratch_dir`, tests/test_db_path.py)."""
     monkeypatch.delenv("ASK_SCRATCH_DIR", raising=False)
     monkeypatch.setattr("ask_your_library.config.AYL_HOME", tmp_path / "AskYourLibrary")
     assert launcher.scratch_dir() == (tmp_path / "AskYourLibrary" / "scratch").resolve()

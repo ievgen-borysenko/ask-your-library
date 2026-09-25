@@ -155,18 +155,10 @@ def chainlit_dir() -> Path:
 
 
 def scratch_dir() -> Path:
-    """`ASK_SCRATCH_DIR` when set, else `$AYL_HOME/scratch` — absolute either
-    way, and never `.scratch` in whatever directory the reader typed the
-    command in.
-
-    `config`'s own default is the relative `.scratch`, which was right while
-    the web chat could only be started from the checkout. From a wheel the
-    first answered question would drop a `.scratch/` with retrieved passages
-    in it wherever the terminal happened to be. Only the launcher decides this,
-    and only for the server it starts: the CLI's default is the CLI's, and both
-    move to this same folder with the index in the slice that moves them."""
-    named = os.environ.get("ASK_SCRATCH_DIR", "").strip()
-    return Path(named).expanduser().resolve() if named else home.ayl_home() / "scratch"
+    """`home.scratch_dir`: the one rule for where scratchpads go, which the CLI
+    reads too. Kept under this name because `start` hands its answer to the
+    server it starts, and callers and tests reach it here."""
+    return home.scratch_dir()
 
 
 def checked_host(host: str) -> str:
