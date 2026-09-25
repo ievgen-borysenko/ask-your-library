@@ -31,7 +31,7 @@ def legacy_index(where, backend="ollama"):
 
 def test_clause_1_an_explicit_path_is_obeyed_even_over_an_old_index(tmp_path):
     legacy_index(tmp_path)
-    choice = config.resolve_db_path({"LIBRARY_DB_PATH": "somewhere/else"}, cwd=tmp_path,
+    choice = config.resolve_db_path("somewhere/else", cwd=tmp_path,
                                     backend="ollama", home=tmp_path / "home")
     assert choice.clause == 1
     assert choice.path == config.Path("somewhere/else")      # as written, not resolved
@@ -41,14 +41,14 @@ def test_clause_1_an_explicit_path_is_obeyed_even_over_an_old_index(tmp_path):
 def test_a_blank_variable_is_unset_and_not_the_working_directory(tmp_path):
     """`Path("")` is `.`: a copied `.env` line with nothing after the `=` used
     to open the working directory itself as the index."""
-    choice = config.resolve_db_path({"LIBRARY_DB_PATH": "  "}, cwd=tmp_path, backend="ollama",
+    choice = config.resolve_db_path("  ", cwd=tmp_path, backend="ollama",
                                     home=tmp_path / "home")
     assert choice.clause == 3
 
 
 def test_clause_2_an_old_index_in_the_working_directory_is_read_where_it_is(tmp_path):
     old = legacy_index(tmp_path)
-    choice = config.resolve_db_path({}, cwd=tmp_path, backend="ollama", home=tmp_path / "home")
+    choice = config.resolve_db_path("", cwd=tmp_path, backend="ollama", home=tmp_path / "home")
     assert choice.clause == 2
     assert choice.path == old and choice.path.is_absolute()
     assert "transcripts_ollama" in choice.reason and config.LEGACY_DB_SUNSET in choice.reason
@@ -61,17 +61,17 @@ def test_clause_2_needs_the_transcripts_table_of_this_backend(tmp_path):
     backend's — and does not keep the reader at the old default."""
     legacy_index(tmp_path, backend="openrouter")
     (tmp_path / "data" / "lancedb" / "cards_ollama.lance").mkdir()
-    choice = config.resolve_db_path({}, cwd=tmp_path, backend="ollama", home=tmp_path / "home")
+    choice = config.resolve_db_path("", cwd=tmp_path, backend="ollama", home=tmp_path / "home")
     assert choice.clause == 3
     assert choice.path == (tmp_path / "home").resolve() / "index"
     assert "has no transcripts_ollama table" in choice.reason
     # the same folder IS the index for the backend that built it
-    assert config.resolve_db_path({}, cwd=tmp_path, backend="openrouter",
+    assert config.resolve_db_path("", cwd=tmp_path, backend="openrouter",
                                   home=tmp_path / "home").clause == 2
 
 
 def test_clause_3_the_default_is_under_ayl_home_and_absolute(tmp_path):
-    choice = config.resolve_db_path({}, cwd=tmp_path, backend="ollama", home=tmp_path / "home")
+    choice = config.resolve_db_path("", cwd=tmp_path, backend="ollama", home=tmp_path / "home")
     assert choice.clause == 3
     assert choice.path == (tmp_path / "home").resolve() / "index"
     assert "no data/lancedb in the working directory" in choice.reason
@@ -82,7 +82,7 @@ def test_clause_3_the_default_is_under_ayl_home_and_absolute(tmp_path):
 
 def test_the_notice_names_the_new_default_the_path_and_the_move(tmp_path):
     old = legacy_index(tmp_path)
-    choice = config.resolve_db_path({}, cwd=tmp_path, backend="ollama", home=tmp_path / "home")
+    choice = config.resolve_db_path("", cwd=tmp_path, backend="ollama", home=tmp_path / "home")
     notice = config.legacy_db_notice(choice, home=tmp_path / "home")
     new = (tmp_path / "home").resolve() / "index"
     assert str(old) in notice
@@ -186,7 +186,7 @@ def test_a_default_index_inside_a_checkout_is_refused_naming_the_variable(tmp_pa
     repo = fake_checkout(tmp_path)
     monkeypatch.setattr(config, "AYL_HOME", repo / "ayl")
     monkeypatch.setattr(config, "DB_CHOICE",
-                        config.resolve_db_path({}, cwd=tmp_path, backend="ollama",
+                        config.resolve_db_path("", cwd=tmp_path, backend="ollama",
                                                home=repo / "ayl"))
     monkeypatch.setattr(config, "_db_confirmed", False)
     with pytest.raises(RuntimeError, match="inside the git work tree") as refused:
@@ -226,7 +226,7 @@ def test_an_explicit_path_inside_a_checkout_is_not_refused(tmp_path, monkeypatch
     repo = fake_checkout(tmp_path)
     monkeypatch.setattr(config, "AYL_HOME", repo / "ayl")
     monkeypatch.setattr(config, "DB_CHOICE",
-                        config.resolve_db_path({"LIBRARY_DB_PATH": str(repo / "idx")},
+                        config.resolve_db_path(str(repo / "idx"),
                                                cwd=tmp_path, backend="ollama"))
     monkeypatch.setattr(config, "_db_confirmed", False)
     assert config.confirm_db_path() == config.DB_PATH

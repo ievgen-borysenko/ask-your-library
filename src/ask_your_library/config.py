@@ -7,7 +7,6 @@ library instead.
 """
 import os
 import sys
-from collections.abc import Mapping
 from pathlib import Path
 from typing import NamedTuple
 
@@ -69,7 +68,7 @@ class DbPathChoice(NamedTuple):
     reason: str
 
 
-def resolve_db_path(environ: Mapping[str, str] | None = None, cwd: Path | None = None,
+def resolve_db_path(named: str | None = None, cwd: Path | None = None,
                     backend: str | None = None, home: Path | None = None) -> DbPathChoice:
     """The three-clause rule, in order. Pure: it reads, and prints and creates
     nothing, so it can run at import — `--help` and `--version` included.
@@ -84,9 +83,12 @@ def resolve_db_path(environ: Mapping[str, str] | None = None, cwd: Path | None =
 
     A blank `LIBRARY_DB_PATH` (a copied `.env` line with nothing after the
     `=`) is unset: `Path("")` is the working directory itself, which is no
-    index anybody meant."""
-    environ = os.environ if environ is None else environ
-    named = environ.get("LIBRARY_DB_PATH") or ""
+    index anybody meant.
+
+    `named` is the variable's value; None reads it from the environment. The
+    others default to the working directory, `EMBED_BACKEND` and `AYL_HOME`."""
+    if named is None:
+        named = os.environ.get("LIBRARY_DB_PATH") or ""
     if named.strip():
         return DbPathChoice(Path(named), 1, "LIBRARY_DB_PATH is set, and an explicit path is "
                                             "always obeyed")
