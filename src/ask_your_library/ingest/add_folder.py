@@ -1036,7 +1036,8 @@ def build_parser(prog: str = "ayl-add") -> argparse.ArgumentParser:
                              "the check that another folder's books are about to lose their rows")
     parser.add_argument("--chat-db", type=Path, default=None, metavar="PATH",
                         help="--backup / --restore: the web UI's chat database "
-                             "(default: AYL_CHAINLIT_DIR or .chainlit/chat.db)")
+                             "(default: AYL_CHAINLIT_DIR, else "
+                             "$AYL_HOME/ui/.chainlit/chat.db)")
     parser.add_argument("--cards", action="store_true",
                         help="not implemented (see the message it prints)")
     return parser

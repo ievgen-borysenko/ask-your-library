@@ -21,10 +21,10 @@ into the app root on EVERY start — so the configuration a server runs under is
 the one shipped with the code that reads it, wherever the package is
 installed, and a hand-edited copy in the app root cannot quietly put MCP back.
 
-What is NOT decided here: the chat database and the auth secret, which
-`app.py` still resolves from `AYL_CHAINLIT_DIR` (else the checkout, as before).
-Moving that default under `AYL_HOME` is one decision with the index and the
-scratch directory, and it is made in one place, not here.
+The chat database and the auth secret are `app.py`'s, but WHERE they live is
+decided here (`chainlit_dir`), for the web chat and for `ayl backup` alike: under
+`$AYL_HOME/ui/.chainlit/`, beside the config this module writes (ADR-026), with a
+checkout's older `.chainlit/chat.db` still read where it is until the sunset.
 """
 import ipaddress
 import json
@@ -35,7 +35,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .. import home
+from .. import config, home
 from ..paths import REPO_ROOT
 
 PACKAGE = Path(__file__).resolve().parent
@@ -104,13 +104,12 @@ def app_root() -> Path:
     config, the translations, the chat db and the secret in one directory
     rather than two.
 
-    Unset, this is also where the chat database and the auth secret land when
-    there is no checkout to hold them (`app.py`): a wheel's web chat writes
-    under `AYL_HOME` and never into the working directory, which is a place
-    anyone can prepare in advance. In a checkout the two part company by
-    design — the app root is here, the chat db stays in the checkout's
-    `.chainlit/` — until that default moves with the index and the scratch
-    directory.
+    Unset, this is also where the chat database and the auth secret land
+    (`chainlit_dir`): under `AYL_HOME` and never in the working directory,
+    which is a place anyone can prepare in advance. The one exception is a
+    checkout whose web chat already wrote a `.chainlit/chat.db` before the
+    default moved: that history is read where it is until the sunset, and the
+    app root stays here.
 
     `home.ayl_home()`, deliberately not `home.private_dir()`. That refusal
     guards what may never leave the machine — a model-written card of a work
@@ -127,10 +126,38 @@ def app_root() -> Path:
     return home.ayl_home() / "ui"
 
 
+def legacy_chat_db() -> Path | None:
+    """The checkout's `.chainlit/chat.db`, when the web chat wrote one there
+    before its default moved under `AYL_HOME` (ADR-026), else None.
+
+    The same rule as the index's clause 2 (`config.resolve_db_path`): a
+    reader's chat history is read where it is, with a notice, and never moved,
+    copied or deleted by code. Only a FILE counts — a `.chainlit/` with no
+    chat database in it is what any import of Chainlit in the checkout leaves
+    behind, and it holds nothing to keep."""
+    if REPO_ROOT:
+        old = Path(REPO_ROOT) / ".chainlit" / "chat.db"
+        if old.is_file():
+            return old
+    return None
+
+
+def legacy_chat_db_notice(old: Path) -> str:
+    """The one line the web chat prints at its start when `legacy_chat_db` is
+    what it reads."""
+    new = app_root() / ".chainlit"
+    return (f"note: the web chat's history is read from {old}, the old default. The default "
+            f"is now {new}; the old place is read until {config.LEGACY_DB_SUNSET}, when it "
+            f"becomes an error. Nothing is moved for you: with the web chat stopped, move "
+            f"chat.db (and a chat.db-wal / chat.db-shm beside it) into {new}, or set "
+            f"AYL_CHAINLIT_DIR={old.parent} to keep it where it is.")
+
+
 def chainlit_dir() -> Path:
     """The directory the web chat keeps its chat database and its auth secret
     in, as an ABSOLUTE path: `AYL_CHAINLIT_DIR` when set, else the checkout's
-    `.chainlit/`, else the app root's.
+    `.chainlit/` when it already holds a chat database (`legacy_chat_db`), else
+    the app root's — `$AYL_HOME/ui/.chainlit/`.
 
     One function, imported by `app.py` (which reads it at its import) and by
     `ingest/backup.py` (which reads it per call, for `ayl backup` and for the
@@ -149,8 +176,9 @@ def chainlit_dir() -> Path:
     named = os.environ.get("AYL_CHAINLIT_DIR")
     if named:
         return Path(named).expanduser().resolve()
-    if REPO_ROOT:
-        return Path(REPO_ROOT) / ".chainlit"
+    legacy = legacy_chat_db()
+    if legacy is not None:
+        return legacy.parent
     return app_root() / ".chainlit"
 
 

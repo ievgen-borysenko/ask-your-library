@@ -198,7 +198,7 @@ def _backend_option(parser: argparse.ArgumentParser) -> None:
 def _chat_db_option(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--chat-db", type=Path, default=None, metavar="PATH",
                         help="the web UI's chat database (default: AYL_CHAINLIT_DIR, "
-                             "else .chainlit/chat.db)")
+                             "else $AYL_HOME/ui/.chainlit/chat.db)")
 
 
 def _forwarded(args) -> list[str]:

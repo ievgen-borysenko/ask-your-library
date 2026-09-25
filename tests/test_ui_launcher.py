@@ -329,6 +329,46 @@ def test_the_chat_db_and_the_auth_secret_never_default_to_the_working_directory(
     assert not (cwd / ".chainlit").exists()
 
 
+def test_in_a_checkout_the_chat_db_defaults_under_ayl_home_too(tmp_path, monkeypatch):
+    """ADR-026: the checkout's `.chainlit/` is no longer the default. A
+    `.chainlit/` with no chat database in it — what any import of Chainlit in
+    the checkout leaves behind — holds nothing to keep and does not count."""
+    checkout = tmp_path / "checkout"
+    (checkout / ".chainlit").mkdir(parents=True)
+    monkeypatch.setattr(launcher, "REPO_ROOT", str(checkout))
+    monkeypatch.delenv("AYL_CHAINLIT_DIR", raising=False)
+    monkeypatch.setattr("ask_your_library.config.AYL_HOME", tmp_path / "AskYourLibrary")
+    wanted = (tmp_path / "AskYourLibrary" / "ui" / ".chainlit").resolve()
+    assert launcher.legacy_chat_db() is None
+    assert launcher.chainlit_dir() == wanted
+    assert backup.default_chat_db() == wanted / "chat.db"
+
+
+def test_a_checkouts_existing_chat_history_is_read_where_it_is(tmp_path, monkeypatch):
+    """The index's clause 2, for the chat database: a history the web chat
+    already wrote into the checkout is read there — by the server and by `ayl
+    backup` alike — with one line saying so, and nothing moves it."""
+    checkout = tmp_path / "checkout"
+    (checkout / ".chainlit").mkdir(parents=True)
+    (checkout / ".chainlit" / "chat.db").write_bytes(b"")
+    monkeypatch.setattr(launcher, "REPO_ROOT", str(checkout))
+    monkeypatch.delenv("AYL_CHAINLIT_DIR", raising=False)
+    monkeypatch.setattr("ask_your_library.config.AYL_HOME", tmp_path / "AskYourLibrary")
+    assert launcher.legacy_chat_db() == checkout / ".chainlit" / "chat.db"
+    assert launcher.chainlit_dir() == checkout / ".chainlit"
+    assert backup.default_chat_db() == checkout / ".chainlit" / "chat.db"
+
+    notice = launcher.legacy_chat_db_notice(launcher.legacy_chat_db())
+    assert str(checkout / ".chainlit" / "chat.db") in notice
+    assert str((tmp_path / "AskYourLibrary" / "ui" / ".chainlit").resolve()) in notice
+    assert f"AYL_CHAINLIT_DIR={checkout / '.chainlit'}" in notice
+    assert "Nothing is moved for you" in notice
+
+    # the variable still wins over both
+    monkeypatch.setenv("AYL_CHAINLIT_DIR", str(tmp_path / "named"))
+    assert launcher.chainlit_dir() == (tmp_path / "named").resolve()
+
+
 def test_a_tilde_in_the_variable_is_expanded_everywhere_it_is_read(tmp_path, monkeypatch):
     """`.env.example` recommends `AYL_CHAINLIT_DIR=~/AskYourLibrary/ui/.chainlit`,
     and no shell expands a value read out of a file. `Path("~/x")` is a
