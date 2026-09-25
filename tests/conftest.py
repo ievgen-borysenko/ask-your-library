@@ -74,6 +74,14 @@ DEFAULTS = {
     # and per-process so two suites at once cannot meet in it.
     "LIBRARY_DB_PATH": os.path.join(tempfile.gettempdir(),
                                     f"ayl-tests-have-no-index-{os.getpid()}"),
+    # The reader's own folder, and since ADR-026 the default of everything this
+    # machine builds: the index when LIBRARY_DB_PATH is unset, the scratchpads,
+    # the web chat's app root and chat database, the local cards. Unpinned, the
+    # suite would read and write the developer's real ~/AskYourLibrary. The
+    # same shape as the index above: absolute, under the system temp dir (not
+    # inside any git work tree, which `home.private_dir` would refuse), and
+    # per-process.
+    "AYL_HOME": os.path.join(tempfile.gettempdir(), f"ayl-tests-home-{os.getpid()}"),
 }
 
 # Tracing is switched off outright, not defaulted: an inherited flag is exactly
@@ -213,6 +221,12 @@ def run_fresh(code: str, cwd=None, check=True, **env) -> subprocess.CompletedPro
     # package now (#30) and comes from the installation like everything else.
     base["PYTHONPATH"] = str(Path(__file__).resolve().parent)
     with tempfile.TemporaryDirectory() as empty:
+        # AYL_HOME is scrubbed like every pinned name, and then given a folder of
+        # its own inside the empty directory: its real default is the
+        # developer's ~/AskYourLibrary, where the index, the scratchpads and the
+        # chat database now default to (ADR-026), and no child may write there.
+        # A test about that default passes HOME (tests/test_home.py).
+        base["AYL_HOME"] = os.path.join(empty, "AskYourLibrary")
         return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                               check=check, env={**base, **env}, cwd=cwd or empty)
 
