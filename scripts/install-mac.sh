@@ -1345,17 +1345,33 @@ else
 fi
 
 # --- 11. demo corpus --------------------------------------------------------
+# Where the index is, by the rule config.resolve_db_path applies (ADR-026):
+# LIBRARY_DB_PATH when it is set, exported or in the .env this run reads; else
+# the old default, data/lancedb here, when it holds this backend's transcripts
+# table (read where it is until 0.5.0); else $AYL_HOME/index, which is
+# ~/AskYourLibrary/index unless AYL_HOME says otherwise. The demo build below
+# writes to the same place, because it asks config.py the same question.
 db_path="$(setting LIBRARY_DB_PATH)"
 if [ -z "$db_path" ]; then
-    fail "could not read LIBRARY_DB_PATH from src/ask_your_library/config.py."
-    fail "export LIBRARY_DB_PATH, then re-run."
-    exit 1
+    if [ -d "data/lancedb/transcripts_${loaded_embed_backend}.lance" ]; then
+        db_path="$PWD/data/lancedb"
+    else
+        ayl_home="$(setting AYL_HOME)"
+        [ -n "$ayl_home" ] || ayl_home="$HOME/AskYourLibrary"
+        # config.py expands a leading ~ in AYL_HOME (it does not in LIBRARY_DB_PATH)
+        case "$ayl_home" in
+            "~") ayl_home="$HOME" ;;
+            "~/"*) ayl_home="$HOME/${ayl_home#"~/"}" ;;
+        esac
+        db_path="$ayl_home/index"
+    fi
 fi
-# Used exactly as the package uses it: config.py is Path(os.environ.get(...)) with
-# no expanduser, so a literal "~/index" is a directory called "~" for the app and
-# has to be one here too — expanding it here would have the two halves of one run
-# looking in different places. The ayl-add lines printed below are command lines,
-# where the shell expands the tilde long before the package sees the value.
+# LIBRARY_DB_PATH is used exactly as the package uses it: config.py takes it as
+# written, with no expanduser, so a literal "~/index" is a directory called "~"
+# for the app and has to be one here too — expanding it here would have the two
+# halves of one run looking in different places. The ayl-add lines printed below
+# are command lines, where the shell expands the tilde long before the package
+# sees the value.
 demo_ready=0
 for table in "$db_path"/transcripts_*.lance; do
     [ -e "$table" ] || continue

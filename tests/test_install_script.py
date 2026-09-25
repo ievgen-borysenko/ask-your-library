@@ -1606,3 +1606,55 @@ def test_no_demo_closes_on_the_reader_s_own_books_not_the_demo_build(sandbox):
     out = dry_run(sandbox, "--no-demo")
     assert "index your books first" in out
     assert "build the demo corpus first" not in out
+
+
+# --- where the demo index goes (ADR-026) --------------------------------------
+# Step 11 answers the question config.resolve_db_path answers, in bash, because
+# nothing is installed yet when it asks: LIBRARY_DB_PATH when set, else an old
+# data/lancedb that holds this backend's transcripts table, else $AYL_HOME/index.
+
+@mac_only
+def test_the_demo_index_defaults_under_the_home_folder_not_the_checkout(sandbox, tmp_path):
+    root, _, env = sandbox
+    env["HOME"] = str(tmp_path / "reader")
+    out = dry_run(sandbox)
+    assert f"Demo corpus: an index at {tmp_path}/reader/AskYourLibrary/index" in out
+    assert str(root / "data") not in out
+
+
+@mac_only
+def test_the_demo_index_follows_ayl_home_with_its_tilde_expanded(sandbox, tmp_path):
+    _, _, env = sandbox
+    env["HOME"] = str(tmp_path / "reader")
+    env["AYL_HOME"] = "~/elsewhere"
+    out = dry_run(sandbox)
+    assert f"Demo corpus: an index at {tmp_path}/reader/elsewhere/index" in out
+
+
+@mac_only
+def test_an_old_index_in_the_checkout_is_found_where_it_is(sandbox):
+    """An install re-run in a clone that built the demo corpus before the move
+    must not offer to build it again somewhere else."""
+    root, _, _ = sandbox
+    (root / "data" / "lancedb" / "transcripts_ollama.lance").mkdir(parents=True)
+    out = dry_run(sandbox)
+    assert f"Demo corpus: an index at {root}/data/lancedb" in out
+    assert "an index is already there; nothing is rebuilt" in out
+
+
+@mac_only
+def test_an_old_folder_without_the_table_is_not_the_index(sandbox, tmp_path):
+    root, _, env = sandbox
+    env["HOME"] = str(tmp_path / "reader")
+    (root / "data" / "lancedb" / "cards_ollama.lance").mkdir(parents=True)
+    out = dry_run(sandbox)
+    assert f"Demo corpus: an index at {tmp_path}/reader/AskYourLibrary/index" in out
+
+
+@mac_only
+def test_an_explicit_index_path_is_used_as_written(sandbox, tmp_path):
+    root, _, env = sandbox
+    (root / "data" / "lancedb" / "transcripts_ollama.lance").mkdir(parents=True)
+    env["LIBRARY_DB_PATH"] = str(tmp_path / "mine")
+    out = dry_run(sandbox)
+    assert f"Demo corpus: an index at {tmp_path}/mine" in out
