@@ -30,6 +30,7 @@ import ipaddress
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -144,13 +145,16 @@ def legacy_chat_db() -> Path | None:
 
 def legacy_chat_db_notice(old: Path) -> str:
     """The one line the web chat prints at its start when `legacy_chat_db` is
-    what it reads."""
+    what it reads. The folder the file moves into and the assignment that
+    keeps it are shell-quoted, like the index's notice (`config.legacy_db_notice`):
+    both are copied into a terminal."""
     new = app_root() / ".chainlit"
     return (f"note: the web chat's history is read from {old}, the old default. The default "
             f"is now {new}; the old place is read until {config.LEGACY_DB_SUNSET}, when it "
             f"becomes an error. Nothing is moved for you: with the web chat stopped, move "
-            f"chat.db (and a chat.db-wal / chat.db-shm beside it) into {new}, or set "
-            f"AYL_CHAINLIT_DIR={old.parent} to keep it where it is.")
+            f"chat.db (and a chat.db-wal / chat.db-shm beside it) into "
+            f"{shlex.quote(str(new))}, or set AYL_CHAINLIT_DIR={shlex.quote(str(old.parent))} "
+            f"to keep it where it is.")
 
 
 def chainlit_dir() -> Path:

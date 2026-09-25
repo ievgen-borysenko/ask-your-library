@@ -360,3 +360,33 @@ def test_an_index_decided_inside_a_checkout_stays_refused_after_the_alias_moves(
     assert verdict.startswith("refused: ") and "inside the git work tree" in verdict
     assert "Set LIBRARY_DB_PATH" in verdict
     assert not decided.exists()
+
+
+def test_every_path_in_the_notices_commands_is_shell_quoted(tmp_path, monkeypatch):
+    """The notices are copied into a terminal. A home folder with a space in
+    its name must stay one argument, and one with a `$` in it must not expand."""
+    import shlex
+    from ask_your_library.ui import launcher
+    home_dir = tmp_path / "my $HOME dir"
+    old = legacy_index(tmp_path / "a checkout")
+    choice = config.resolve_db_path("", cwd=tmp_path / "a checkout", backend="ollama",
+                                    home=home_dir)
+    notice = config.legacy_db_notice(choice, home=home_dir)
+    index = shlex.quote(str(home_dir.resolve() / "index"))
+    chat = shlex.quote(str(home_dir.resolve() / "ui" / ".chainlit" / "chat.db"))
+    assert index.startswith("'") and chat.startswith("'")
+    assert f"--db {index} --chat-db {chat}`" in notice
+    assert f"LIBRARY_DB_PATH={shlex.quote(str(old))} to keep" in notice
+    # and the command, as printed, parses back into exactly those arguments
+    command = notice.split("then `", 1)[1].split("`", 1)[0]
+    assert shlex.split(command)[-4:] == ["--db", str(home_dir.resolve() / "index"),
+                                         "--chat-db",
+                                         str(home_dir.resolve() / "ui" / ".chainlit" / "chat.db")]
+
+    monkeypatch.delenv("AYL_CHAINLIT_DIR", raising=False)
+    monkeypatch.setattr(config, "AYL_HOME", home_dir)
+    chat_old = tmp_path / "a checkout" / ".chainlit" / "chat.db"
+    chat_notice = launcher.legacy_chat_db_notice(chat_old)
+    new = home_dir.resolve() / "ui" / ".chainlit"
+    assert f"into {shlex.quote(str(new))}," in chat_notice
+    assert f"AYL_CHAINLIT_DIR={shlex.quote(str(chat_old.parent))} to keep" in chat_notice

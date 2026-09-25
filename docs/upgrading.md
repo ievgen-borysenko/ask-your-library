@@ -72,7 +72,8 @@ The index a command opens, when no `--db` names one, is decided by three rules i
    LIBRARY_DB_PATH=/…/ask-your-library/data/lancedb to keep the index where it is.
    ```
 
-   (one line on the terminal, wrapped here), and never when a command is only asked for its help
+   (one line on the terminal, wrapped here; a path in a command is shell-quoted when it holds a
+   space or anything a shell would expand), and never when a command is only asked for its help
    or its version. **This rule is kept for one minor release: from 0.5.0 an index found there is
    an error naming the same two commands.** The chat database has a rule of its own with the same
    sunset: when `AYL_CHAINLIT_DIR` is unset and the checkout the package runs from — not the
