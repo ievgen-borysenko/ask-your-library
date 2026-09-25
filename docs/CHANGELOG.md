@@ -2,6 +2,55 @@
 
 ## Unreleased
 
+- **What this machine builds for the reader lives in `AYL_HOME`, not in the directory a command
+  was typed in** (#30, [ADR-026](adr/README.md#adr-026-ayl_home-is-the-home-of-everything-built-on-this-machine-the-index-the-scratchpads-the-chat-database-the-private-shelf)).
+  Three defaults moved: the index from `data/lancedb` (relative, so the same command typed in two
+  directories opened two indexes) to `$AYL_HOME/index`; the CLI's scratchpads from a relative
+  `.scratch` to `$AYL_HOME/scratch`, the rule `ayl ui` already applied to its server; and the web
+  chat's database and auth secret from a checkout's `.chainlit/` to `$AYL_HOME/ui/.chainlit/`,
+  beside the config the launcher writes. `AYL_HOME` is `~/AskYourLibrary` unless set. The demo
+  corpus's downloads and prepared texts stay in the checkout's `data/`.
+
+  **Nothing already built is moved, copied or deleted, and nothing stops answering.** The index is
+  decided by three rules, in order, in `config.resolve_db_path`: `LIBRARY_DB_PATH` set is obeyed as
+  written, always, with no check and no notice (a blank value now counts as unset, where it used
+  to open the working directory itself); unset, a working directory whose `data/lancedb` holds this
+  backend's `transcripts_<backend>` table keeps being read there, and the first command that uses
+  it prints one line to stderr with the new default and the move as commands (`ayl backup <dir>`,
+  then `ayl restore <dir>/<timestamp> --db … --chat-db …`) — never on `--help` or `--version`;
+  otherwise `$AYL_HOME/index`, created by the first write. The chat database has a rule of its
+  own: with `AYL_CHAINLIT_DIR` unset, any `chat.db` file in the `.chainlit/` of the checkout the
+  package runs from (not the working directory) is read where it is, with one line at the web
+  chat's start.
+  **Both old places are honoured until 0.5.0, when finding one becomes an error naming the same
+  two commands.** `ayl doctor` now opens with the index it checks and the rule that chose it.
+  [Upgrading](upgrading.md#the-index-moved-to-ayl_homeindex) has the move, end to end.
+
+  **Check your `.env`.** Every `.env.example` until now carried `LIBRARY_DB_PATH=data/lancedb`
+  uncommented, and `scripts/install-mac.sh` wrote its `.env` from it, so a `.env` made that way
+  keeps the index in the checkout through the first rule, silently. The line is commented out in
+  `.env.example` now; delete it from your `.env` to take the new default. The installer no longer
+  reads the index path out of `config.py` with `sed` (there is no single default to read any
+  more): step 11 applies the same three rules, so a re-run in a clone with an old index finds it.
+
+  **The default index is refused inside a git work tree**, like the engineer's shelf's local cards:
+  it holds the full text of the books it was built from. The refusal names `LIBRARY_DB_PATH`, the
+  one-line way to keep an index in a checkout on purpose, where it used to say only "set
+  `AYL_HOME` elsewhere". It is a preflight problem (exit 1) for `ayl ask`, `ayl doctor`, `ayl books`
+  and the web chat (where `ayl doctor` then stops, rather than print it twice), and one line from
+  `ayl add` / `backup` / `restore` and the demo ingest. When only `$AYL_HOME/index` is a symlink
+  into a checkout, it names that folder, not `AYL_HOME`. The scratchpads and the web chat's state
+  go through `AYL_HOME` without that check, as `ayl ui`'s app root already did: refusing to answer,
+  or to start the web chat, because the home folder sits in a checkout would guard nothing the
+  reader asked for — although a scratchpad holds retrieved passages verbatim, which ADR-026 records
+  as the argument against. A blank or whitespace-only `AYL_HOME` now means the default.
+
+  The test suite pins `AYL_HOME` and `AYL_CHAINLIT_DIR` to per-process temporary folders, as it
+  pins `LIBRARY_DB_PATH`, and scrubs them from `run_fresh` children, which each get an `AYL_HOME`
+  of their own — unpinned, the suite would have read and written the developer's own
+  `~/AskYourLibrary`, and the backup tests would have copied and restored over the chat history
+  in the checkout they run from.
+
 - **The weekly pin check was red on one book: Journey to the Interior of the Earth had drifted.**
   Project Gutenberg regenerated PG 3748 on 2026-09-22, and the `pins` job of `corpus.yml` has
   failed on every branch since. The drift is cosmetic — the "Most recently updated" header line,

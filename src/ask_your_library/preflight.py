@@ -26,7 +26,7 @@ import requests
 from requests import HTTPError, RequestException
 
 from .config import (DB_PATH, EMBED_BACKEND, LLM_BACKEND, OLLAMA_EMBED_MODEL, OLLAMA_URL, OPENROUTER_NEEDS_KEY,
-                     ORCHESTRATOR_MODEL, TABLES, tables_for)
+                     ORCHESTRATOR_MODEL, TABLES, confirm_db_path, tables_for)
 from .embeddings import get_embedder, openrouter_api_key
 from .i18n import t
 from .index_meta import check_index, warn_version_mismatch
@@ -225,6 +225,17 @@ def check_environment(index_only: bool = False, db_path: Path | None = None,
                     # search, which is the least legible place to learn about it.
                     problem("no_embed_model", t("pf_no_embed_model", model=OLLAMA_EMBED_MODEL))
 
+    if db_path is None:
+        # The first real use of the configured index: where the notice of an
+        # index still at the old default is printed (once), and where a default
+        # that would land inside a git work tree is refused, naming
+        # LIBRARY_DB_PATH (ADR-026). Not for an index a command was pointed at
+        # with --db: that path was named, and a named path is obeyed.
+        try:
+            confirm_db_path()
+        except RuntimeError as error:
+            problem("index_in_checkout", str(error))
+            return PreflightResult(problems, notices, kinds)
     if not db.exists():
         problem("no_db", t("pf_no_db", path=db))
     else:

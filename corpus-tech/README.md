@@ -168,8 +168,9 @@ link planted there is replaced, not written through, and the folder is checked a
 the rename. What it detects is a `.git` in the path or above it: a bare-repository
 dotfiles setup (`git --git-dir=~/.dotfiles --work-tree=~`) leaves none in the home directory and is
 not detected, so with one, point `AYL_HOME` at a folder it does not track. `AYL_HOME` is
-also where the private shelf of the reader's own books, their cards and their index will live
-(ADR-026, a later change); for now local cards are all it holds.
+also the default home of the index (`$AYL_HOME/index`, when `LIBRARY_DB_PATH` is unset), the
+scratchpads and the web chat's state, and later of the private shelf of the reader's own books
+([ADR-026](../docs/adr/README.md#adr-026-ayl_home-is-the-home-of-everything-built-on-this-machine-the-index-the-scratchpads-the-chat-database-the-private-shelf)).
 
 Build the local cards (all of them, or `--work` one; a model is called, see below), then index
 them together with the committed ones:

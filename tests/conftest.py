@@ -74,6 +74,22 @@ DEFAULTS = {
     # and per-process so two suites at once cannot meet in it.
     "LIBRARY_DB_PATH": os.path.join(tempfile.gettempdir(),
                                     f"ayl-tests-have-no-index-{os.getpid()}"),
+    # The reader's own folder, and since ADR-026 the default of everything this
+    # machine builds: the index when LIBRARY_DB_PATH is unset, the scratchpads,
+    # the web chat's app root and chat database, the local cards. Unpinned, the
+    # suite would read and write the developer's real ~/AskYourLibrary. The
+    # same shape as the index above: absolute, under the system temp dir (not
+    # inside any git work tree, which `home.private_dir` would refuse), and
+    # per-process.
+    "AYL_HOME": os.path.join(tempfile.gettempdir(), f"ayl-tests-home-{os.getpid()}"),
+    # The web chat's database and auth secret. Unset, `launcher.chainlit_dir`
+    # reads a checkout's `.chainlit/chat.db` where it is (ADR-026) — and the
+    # checkout is the one this suite runs from, so a developer's real chat
+    # history would be what `ayl backup` copies and `ayl restore` writes over in
+    # tests/test_backup.py. Pinned like the index; the tests about the default
+    # unset it (or point `launcher.REPO_ROOT` at a checkout of their own).
+    "AYL_CHAINLIT_DIR": os.path.join(tempfile.gettempdir(),
+                                     f"ayl-tests-chainlit-{os.getpid()}", ".chainlit"),
 }
 
 # Tracing is switched off outright, not defaulted: an inherited flag is exactly
@@ -98,6 +114,18 @@ BLANKED = ("OPENROUTER_API_KEY", "LANGCHAIN_API_KEY", "LANGSMITH_API_KEY", "OPEN
            "CHAINLIT_HOST", "CHAINLIT_PORT")
 
 
+# The two DEFAULTS that are ASSIGNED rather than defaulted. Everything else in
+# DEFAULTS goes through `setdefault` on purpose: CI exports LLM_BACKEND and runs
+# the whole suite a second time under it, and that override has to win. These
+# two are not configuration a run is meant to vary. They are where the suite
+# WRITES — the index's default, the scratchpads, the web chat's database and
+# auth secret — and an inherited value is the developer's real ~/AskYourLibrary
+# or real chat history, which tests/test_backup.py would copy and restore over.
+# So an exported value is overwritten here, before the first package import; a
+# test that needs another value sets it with monkeypatch or run_fresh.
+SAFETY_PATHS = ("AYL_HOME", "AYL_CHAINLIT_DIR")
+
+
 def pin_environment() -> None:
     """Pin every configuration input this suite depends on, in a process that
     has not imported the package yet. Called at the import of this file, and by
@@ -105,6 +133,8 @@ def pin_environment() -> None:
     that test proves is what the whole suite runs under."""
     for name, value in DEFAULTS.items():
         os.environ.setdefault(name, value)
+    for name in SAFETY_PATHS:
+        os.environ[name] = DEFAULTS[name]
     # The two defaults that depend on another knob (a local model is slower and
     # may load cold), kept in step with config.py rather than pinned to a number.
     local = os.environ["LLM_BACKEND"] == "ollama"
@@ -213,6 +243,12 @@ def run_fresh(code: str, cwd=None, check=True, **env) -> subprocess.CompletedPro
     # package now (#30) and comes from the installation like everything else.
     base["PYTHONPATH"] = str(Path(__file__).resolve().parent)
     with tempfile.TemporaryDirectory() as empty:
+        # AYL_HOME is scrubbed like every pinned name, and then given a folder of
+        # its own inside the empty directory: its real default is the
+        # developer's ~/AskYourLibrary, where the index, the scratchpads and the
+        # chat database now default to (ADR-026), and no child may write there.
+        # A test about that default passes HOME (tests/test_home.py).
+        base["AYL_HOME"] = os.path.join(empty, "AskYourLibrary")
         return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                               check=check, env={**base, **env}, cwd=cwd or empty)
 

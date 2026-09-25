@@ -37,6 +37,7 @@ import html
 import json
 import logging
 import os
+import sys
 import re
 import secrets
 import contextlib
@@ -129,29 +130,26 @@ def _bound_host() -> list[str]:
 ALLOWED_HOSTS = ["localhost", "127.0.0.1"] + _bound_host()
 
 # Absolute, and decided by the launcher for a server it starts (`scratch_dir`):
-# `config`'s relative default put the retrieved passages of the first answered
-# question in a `.scratch/` beside whatever directory the command was typed in.
+# a relative default put the retrieved passages of the first answered question
+# in a `.scratch/` beside whatever directory the command was typed in.
 SCRATCH_DIR = launcher.scratch_dir()
 # AYL_CHAINLIT_DIR exists so tests can import this module without touching the
-# checkout's .chainlit/ (the import creates the chat db and the auth secret
-# there). Its default is the checkout's, not this file's directory: the module
-# moved into the package (#30) and `Path(__file__).parent / ".chainlit"` would
-# now be the installed package's own folder. The rule is written out the same
-# way in ingest/backup.py (default_chat_db), which is what `ayl backup` copies;
-# the two move together, under AYL_HOME, with the index and the scratch dir.
-#
-# WITHOUT a checkout — the wheel this slice makes possible — the fallback is
-# the app root launcher.py prepares, never the working directory. `<cwd>/.chainlit`
-# is a directory anyone can create first: an `auth-secret` planted in /tmp/.chainlit
-# would be read below as THE signing key of every login token this server issues,
-# and the chat database would be a file someone else owns. AYL_HOME is the
-# reader's own folder, and it is where the launcher already put the config.
+# reader's own chat history (the import creates the chat db and the auth secret
+# there). Unset, the default is `$AYL_HOME/ui/.chainlit/`, beside the config
+# the launcher writes (ADR-026) — never the working directory: `<cwd>/.chainlit`
+# is a directory anyone can create first, an `auth-secret` planted in
+# /tmp/.chainlit would be read below as THE signing key of every login token
+# this server issues, and the chat database would be a file someone else owns.
+# A checkout whose web chat wrote `.chainlit/chat.db` before the move keeps
+# reading it there, with one line at the start, until the sunset.
 #
 # The rule itself lives in `launcher.chainlit_dir`, which `ingest/backup.py`
 # reads as well: `ayl backup` copies the file named here and `ayl restore`
 # writes it, and two spellings of one rule disagreed the moment one of them
 # learnt to expand a `~`.
 CHAINLIT_DIR = launcher.chainlit_dir()
+if not os.environ.get("AYL_CHAINLIT_DIR") and launcher.legacy_chat_db() is not None:
+    print(launcher.legacy_chat_db_notice(launcher.legacy_chat_db()), file=sys.stderr)
 CHAT_DB_PATH = CHAINLIT_DIR / "chat.db"
 
 

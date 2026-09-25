@@ -53,7 +53,11 @@ per question ([Cost](cost.md)); the local one does not, and quotes less reliably
 Single run, nobody graded the answers, and no hosted run is paired with it; the qualified
 comparison is in [Known limits](known-limits.md).
 
-The ingest is staged and cached in `data/`, so it is safe to interrupt and re-run:
+The index it builds goes to `~/AskYourLibrary/index` — `$AYL_HOME/index`, outside the clone, and
+`LIBRARY_DB_PATH` puts it anywhere else ([configuration](configuration.md)); an index an earlier
+version built in the clone's `data/lancedb` is read where it is until 0.5.0
+([upgrading](upgrading.md#the-index-moved-to-ayl_homeindex)). The downloads and the prepared texts
+are staged and cached in the clone's `data/`, so the build is safe to interrupt and re-run:
 `--stage prepare-text|prepare-audio|prepare-canaries|ingest|cards` runs one stage, `--book <substring>`
 re-ingests a single book in place (`ayl doctor` reports whether the index and its book ledger agree). Sources are checksum-pinned in `corpus/manifest.yaml`
 (`--no-verify` to skip). The text path works on any OS; two books come from LibriVox audio and
