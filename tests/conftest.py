@@ -114,6 +114,18 @@ BLANKED = ("OPENROUTER_API_KEY", "LANGCHAIN_API_KEY", "LANGSMITH_API_KEY", "OPEN
            "CHAINLIT_HOST", "CHAINLIT_PORT")
 
 
+# The two DEFAULTS that are ASSIGNED rather than defaulted. Everything else in
+# DEFAULTS goes through `setdefault` on purpose: CI exports LLM_BACKEND and runs
+# the whole suite a second time under it, and that override has to win. These
+# two are not configuration a run is meant to vary. They are where the suite
+# WRITES — the index's default, the scratchpads, the web chat's database and
+# auth secret — and an inherited value is the developer's real ~/AskYourLibrary
+# or real chat history, which tests/test_backup.py would copy and restore over.
+# So an exported value is overwritten here, before the first package import; a
+# test that needs another value sets it with monkeypatch or run_fresh.
+SAFETY_PATHS = ("AYL_HOME", "AYL_CHAINLIT_DIR")
+
+
 def pin_environment() -> None:
     """Pin every configuration input this suite depends on, in a process that
     has not imported the package yet. Called at the import of this file, and by
@@ -121,6 +133,8 @@ def pin_environment() -> None:
     that test proves is what the whole suite runs under."""
     for name, value in DEFAULTS.items():
         os.environ.setdefault(name, value)
+    for name in SAFETY_PATHS:
+        os.environ[name] = DEFAULTS[name]
     # The two defaults that depend on another knob (a local model is slower and
     # may load cold), kept in step with config.py rather than pinned to a number.
     local = os.environ["LLM_BACKEND"] == "ollama"
