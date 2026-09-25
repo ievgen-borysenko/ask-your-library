@@ -278,3 +278,27 @@ def test_the_cli_and_the_web_chat_share_one_rule():
     from ask_your_library.ui import launcher
     assert launcher.scratch_dir() == home.scratch_dir()
 
+
+
+def test_doctor_says_the_refusal_once_and_skips_the_index_half(tmp_path, monkeypatch, capsys):
+    """The preflight reports a default index inside a checkout; the ledger
+    half would ask for the same folder and print the same refusal again."""
+    repo = fake_checkout(tmp_path)
+    monkeypatch.setattr(config, "AYL_HOME", repo / "ayl")
+    monkeypatch.setattr(config, "DB_CHOICE",
+                        config.DbPathChoice(repo / "ayl" / "index", 3, "clause three"))
+    monkeypatch.setattr(config, "_db_confirmed", False)
+    # the index half of the real preflight only: no model server is asked
+    monkeypatch.setattr(ayl, "check_environment",
+                        lambda index_only=False, db_path=None, backend=None:
+                        preflight.check_environment(index_only=True, db_path=db_path,
+                                                    backend=backend))
+    ledger = []
+    real_main = add_folder.main
+    monkeypatch.setattr(add_folder, "main",
+                        lambda argv=None, prog=None: ledger.append(argv) or real_main(argv, prog))
+    assert ayl.main(["doctor"]) == preflight.EXIT_NOT_READY
+    captured = capsys.readouterr()
+    assert (captured.out + captured.err).count("Set LIBRARY_DB_PATH") == 1
+    assert ledger == []
+    assert not (repo / "ayl").exists()

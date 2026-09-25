@@ -281,14 +281,20 @@ def run_doctor(rest: list[str]) -> int:
     args = parser.parse_args(mine)
 
     db = args.db.expanduser() if args.db is not None else None
-    # Which index, and which rule chose it (ADR-026): an index read at the old
-    # default, one refused inside a checkout and one named by LIBRARY_DB_PATH
-    # are three different situations, and this is the command that says which.
+    # Which index, and which rule chose it (ADR-026): one named by
+    # LIBRARY_DB_PATH, one read at the old default in the working directory and
+    # the default under AYL_HOME are three different situations, and this is
+    # the command that says which. A default refused inside a git work tree is
+    # the preflight's problem, reported below.
     if db is None:
         cli.say(f"index: {DB_CHOICE.path} — {DB_CHOICE.reason}")
     else:
         cli.say(f"index: {db} — named with --db")
     problems = report_environment(db_path=db, backend=args.backend)
+    if "index_in_checkout" in getattr(problems, "kinds", ()):
+        # The index half would ask for the same refused folder and print the
+        # same refusal a second time; there is no index for it to reconcile.
+        return exit_code(problems)
     status = add_folder.main(["--doctor", *_forwarded(args), *extra], prog="ayl doctor")
     return exit_code(problems) if problems else status
 
