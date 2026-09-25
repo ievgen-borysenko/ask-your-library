@@ -140,8 +140,9 @@ def confirm_db_path() -> Path:
     import, so `--help` and `--version` stay silent. Once per process:
 
     - clause 2 prints the notice (stderr, once);
-    - clause 3 asks `home.private_dir` for the folder, which refuses one inside
-      a git work tree and names LIBRARY_DB_PATH as the way out (RuntimeError).
+    - clause 3 checks `DB_PATH` itself — the path resolved at import, the one
+      that will be opened, not `AYL_HOME` read again — and refuses it inside a
+      git work tree, naming LIBRARY_DB_PATH as the way out (RuntimeError).
       The index holds the full text of the books it was built from, and the
       reader's own books are what may never be committed.
 
@@ -152,8 +153,8 @@ def confirm_db_path() -> Path:
     if DB_CHOICE.clause == 2:
         print(legacy_db_notice(DB_CHOICE), file=sys.stderr)
     elif DB_CHOICE.clause == 3:
-        from .home import private_dir      # home imports this module
-        private_dir("index")
+        from .home import refuse_in_work_tree      # home imports this module
+        refuse_in_work_tree(DB_PATH, "index")
     _db_confirmed = True
     return DB_PATH
 

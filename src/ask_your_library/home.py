@@ -70,10 +70,21 @@ def private_dir(*parts: str) -> Path:
     """A folder under `AYL_HOME`, refused if it lies inside a git work tree.
 
     Only the path is returned; the caller creates it when it writes."""
-    folder = ayl_home().joinpath(*parts)
+    return refuse_in_work_tree(ayl_home().joinpath(*parts), parts[0] if parts else None)
+
+
+def refuse_in_work_tree(folder: Path, kind: str | None = None) -> Path:
+    """`folder` itself, refused (RuntimeError) when it lies inside a git work
+    tree; `kind` is the key of OVERRIDES whose variable the refusal names.
+
+    Takes the CONCRETE path rather than recomputing it from `AYL_HOME`, so a
+    caller that decided its path earlier checks the very path it will open.
+    `config.confirm_db_path` is that caller: `DB_PATH` was resolved at import,
+    and an `AYL_HOME` symlink retargeted since then would otherwise have the
+    check look at one folder while the index is written into another."""
     tree = git_work_tree_of(folder)
     if tree is not None:
-        override = OVERRIDES.get(parts[0]) if parts else None
+        override = OVERRIDES.get(kind) if kind else None
         escape = (f"Set {override[0]} to put {override[1]} somewhere else, or set AYL_HOME "
                   if override else "Set AYL_HOME ")
         # Which path is inside the checkout: AYL_HOME itself, or only this

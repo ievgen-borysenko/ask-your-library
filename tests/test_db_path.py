@@ -27,6 +27,15 @@ def legacy_index(where, backend="ollama"):
     return where / "data" / "lancedb"
 
 
+def use_choice(monkeypatch, choice):
+    """What config would have decided at import: the choice, the DB_PATH it
+    set (which `confirm_db_path` checks), and a process that has not confirmed
+    it yet."""
+    monkeypatch.setattr(config, "DB_CHOICE", choice)
+    monkeypatch.setattr(config, "DB_PATH", choice.path)
+    monkeypatch.setattr(config, "_db_confirmed", False)
+
+
 # --- the rule, clause by clause ----------------------------------------------
 
 def test_clause_1_an_explicit_path_is_obeyed_even_over_an_old_index(tmp_path):
@@ -125,9 +134,8 @@ def test_the_preflight_is_where_a_command_first_uses_the_index(tmp_path, monkeyp
     through the preflight, so that is where the notice goes out — once, however
     many times it runs (the web chat runs it per chat)."""
     printed = []
-    monkeypatch.setattr(config, "DB_CHOICE",
-                        config.DbPathChoice(tmp_path / "old", 2, "clause two"))
-    monkeypatch.setattr(config, "_db_confirmed", False)
+    use_choice(monkeypatch,
+               config.DbPathChoice(tmp_path / "old", 2, "clause two"))
     monkeypatch.setattr(config, "legacy_db_notice", lambda choice: printed.append(choice) or "n")
     preflight.check_environment(index_only=True)
     preflight.check_environment(index_only=True)
@@ -189,10 +197,9 @@ def test_a_default_index_inside_a_checkout_is_refused_naming_the_variable(tmp_pa
                                                                            monkeypatch):
     repo = fake_checkout(tmp_path)
     monkeypatch.setattr(config, "AYL_HOME", repo / "ayl")
-    monkeypatch.setattr(config, "DB_CHOICE",
-                        config.resolve_db_path("", cwd=tmp_path, backend="ollama",
-                                               home=repo / "ayl"))
-    monkeypatch.setattr(config, "_db_confirmed", False)
+    use_choice(monkeypatch,
+               config.resolve_db_path("", cwd=tmp_path, backend="ollama",
+                                      home=repo / "ayl"))
     with pytest.raises(RuntimeError, match="inside the git work tree") as refused:
         config.confirm_db_path()
     assert "Set LIBRARY_DB_PATH to put the index somewhere else" in str(refused.value)
@@ -202,9 +209,8 @@ def test_a_default_index_inside_a_checkout_is_refused_naming_the_variable(tmp_pa
 def test_the_refusal_is_a_preflight_problem_not_a_traceback(tmp_path, monkeypatch):
     repo = fake_checkout(tmp_path)
     monkeypatch.setattr(config, "AYL_HOME", repo / "ayl")
-    monkeypatch.setattr(config, "DB_CHOICE",
-                        config.DbPathChoice(repo / "ayl" / "index", 3, "clause three"))
-    monkeypatch.setattr(config, "_db_confirmed", False)
+    use_choice(monkeypatch,
+               config.DbPathChoice(repo / "ayl" / "index", 3, "clause three"))
     problems = preflight.check_environment(index_only=True)
     assert problems.kinds == ["index_in_checkout"]
     assert "LIBRARY_DB_PATH" in problems[0]
@@ -214,9 +220,8 @@ def test_the_refusal_is_a_preflight_problem_not_a_traceback(tmp_path, monkeypatc
 def test_ayl_add_refuses_it_in_one_line(tmp_path, monkeypatch, capsys):
     repo = fake_checkout(tmp_path)
     monkeypatch.setattr(config, "AYL_HOME", repo / "ayl")
-    monkeypatch.setattr(config, "DB_CHOICE",
-                        config.DbPathChoice(repo / "ayl" / "index", 3, "clause three"))
-    monkeypatch.setattr(config, "_db_confirmed", False)
+    use_choice(monkeypatch,
+               config.DbPathChoice(repo / "ayl" / "index", 3, "clause three"))
     books = tmp_path / "books"
     books.mkdir()
     assert add_folder.main([str(books)]) == 1
@@ -229,10 +234,9 @@ def test_an_explicit_path_inside_a_checkout_is_not_refused(tmp_path, monkeypatch
     a checkout names it, and is obeyed."""
     repo = fake_checkout(tmp_path)
     monkeypatch.setattr(config, "AYL_HOME", repo / "ayl")
-    monkeypatch.setattr(config, "DB_CHOICE",
-                        config.resolve_db_path(str(repo / "idx"),
-                                               cwd=tmp_path, backend="ollama"))
-    monkeypatch.setattr(config, "_db_confirmed", False)
+    use_choice(monkeypatch,
+               config.resolve_db_path(str(repo / "idx"),
+                                      cwd=tmp_path, backend="ollama"))
     assert config.confirm_db_path() == config.DB_PATH
 
 
@@ -285,9 +289,8 @@ def test_doctor_says_the_refusal_once_and_skips_the_index_half(tmp_path, monkeyp
     half would ask for the same folder and print the same refusal again."""
     repo = fake_checkout(tmp_path)
     monkeypatch.setattr(config, "AYL_HOME", repo / "ayl")
-    monkeypatch.setattr(config, "DB_CHOICE",
-                        config.DbPathChoice(repo / "ayl" / "index", 3, "clause three"))
-    monkeypatch.setattr(config, "_db_confirmed", False)
+    use_choice(monkeypatch,
+               config.DbPathChoice(repo / "ayl" / "index", 3, "clause three"))
     # the index half of the real preflight only: no model server is asked
     monkeypatch.setattr(ayl, "check_environment",
                         lambda index_only=False, db_path=None, backend=None:
@@ -302,3 +305,58 @@ def test_doctor_says_the_refusal_once_and_skips_the_index_half(tmp_path, monkeyp
     assert (captured.out + captured.err).count("Set LIBRARY_DB_PATH") == 1
     assert ledger == []
     assert not (repo / "ayl").exists()
+
+
+RETARGET = """
+import os, sys
+from ask_your_library import config
+link, then = sys.argv[1], sys.argv[2]
+decided = config.DB_PATH
+os.unlink(link)
+os.symlink(then, link)            # AYL_HOME now names another folder
+try:
+    config.confirm_db_path()
+    verdict = "accepted"
+except RuntimeError as error:
+    verdict = "refused: " + str(error)
+print(decided)
+print(config.DB_PATH)
+print(verdict)
+"""
+
+
+def retarget(tmp_path, first, then):
+    link = tmp_path / "home-link"
+    link.symlink_to(first)
+    child = run_fresh(f"import sys; sys.argv = ['-', {str(link)!r}, {str(then)!r}]\n" + RETARGET,
+                      AYL_HOME=str(link))
+    decided, opened, verdict = child.stdout.strip().split("\n")
+    assert decided == opened, "the path checked is the path that is opened"
+    return config.Path(decided), verdict
+
+
+def test_confirm_judges_the_index_decided_at_import_not_the_current_alias(tmp_path):
+    """AYL_HOME is a symlink to a clean folder when the configuration is read,
+    and is pointed into a checkout before the index is first used. The index
+    that will be opened is the clean one, so that is what is judged — and it
+    is accepted."""
+    clean, repo = tmp_path / "clean", fake_checkout(tmp_path)
+    clean.mkdir()
+    (repo / "inside").mkdir()
+    decided, verdict = retarget(tmp_path, clean, repo / "inside")
+    assert decided == clean.resolve() / "index"
+    assert verdict == "accepted"
+
+
+def test_an_index_decided_inside_a_checkout_stays_refused_after_the_alias_moves(tmp_path):
+    """The reverse: decided inside a checkout, AYL_HOME then pointed at a clean
+    folder. Re-reading AYL_HOME would have passed the check and written into the
+    checkout; judging DB_PATH refuses."""
+    clean, repo = tmp_path / "clean", fake_checkout(tmp_path)
+    clean.mkdir()
+    (repo / "inside").mkdir()
+    decided, verdict = retarget(tmp_path, repo / "inside", clean)
+    assert decided == (repo / "inside").resolve() / "index"
+    assert verdict.startswith("refused: ") and "inside the git work tree" in verdict
+    assert "Set LIBRARY_DB_PATH" in verdict
+    assert not decided.exists()
