@@ -110,15 +110,18 @@ def legacy_db_notice(choice: DbPathChoice, home: Path | None = None) -> str:
     """The one line a clause-2 process prints: the new default, the path being
     read, and the move, as commands. The move names both targets, the index
     and the chat database, so it lands in the same place whichever of the two
-    is still at its old default."""
+    is still at its old default — and it says to move the checkout's chat.db
+    away too, because while that file is there the web chat keeps reading it
+    and never the restored copy (`ui.launcher.chainlit_dir`)."""
     base = Path(AYL_HOME if home is None else home).expanduser().resolve()
     return (f"note: reading the index at {choice.path}, the old default. The default is now "
             f"{base / 'index'} ($AYL_HOME/index); the old place is read until "
             f"{LEGACY_DB_SUNSET}, when it becomes an error. Nothing is moved for you. To move "
             f"it: `ayl backup <dir>`, then `ayl restore <dir>/<timestamp> --db "
             f"{base / 'index'} --chat-db {base / 'ui' / '.chainlit' / 'chat.db'}`, then move "
-            f"{LEGACY_DB_PATH} out of this directory; or set LIBRARY_DB_PATH={choice.path} to "
-            f"keep it where it is.")
+            f"{LEGACY_DB_PATH} out of this directory, and the checkout's .chainlit/chat.db "
+            f"(with its -wal/-shm) if there is one; or set LIBRARY_DB_PATH={choice.path} to "
+            f"keep the index where it is.")
 
 
 DB_CHOICE = resolve_db_path()

@@ -67,8 +67,9 @@ The index a command opens, when no `--db` names one, is decided by three rules i
    now /Users/…/AskYourLibrary/index ($AYL_HOME/index); the old place is read until 0.5.0, when
    it becomes an error. Nothing is moved for you. To move it: `ayl backup <dir>`, then `ayl
    restore <dir>/<timestamp> --db /Users/…/AskYourLibrary/index --chat-db
-   /Users/…/AskYourLibrary/ui/.chainlit/chat.db`, then move data/lancedb out of this directory;
-   or set LIBRARY_DB_PATH=/…/ask-your-library/data/lancedb to keep it where it is.
+   /Users/…/AskYourLibrary/ui/.chainlit/chat.db`, then move data/lancedb out of this directory,
+   and the checkout's .chainlit/chat.db (with its -wal/-shm) if there is one; or set
+   LIBRARY_DB_PATH=/…/ask-your-library/data/lancedb to keep the index where it is.
    ```
 
    (one line on the terminal, wrapped here), and never when a command is only asked for its help
