@@ -6,7 +6,10 @@ local Ollama. Point LIBRARY_DB_PATH at any LanceDB with the same table layout
 library instead.
 """
 import os
+import sys
+from collections.abc import Mapping
 from pathlib import Path
+from typing import NamedTuple
 
 from dotenv import load_dotenv
 
@@ -14,11 +17,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- storage ---------------------------------------------------------------
-# Relative default resolves against the working directory (repo root under `uv run`).
-DB_PATH = Path(os.environ.get("LIBRARY_DB_PATH", "data/lancedb"))
-# The reader's own folder, OUTSIDE any checkout: what a reader may build for
-# themself and never share (today the engineer's shelf's local cards, later the
-# private shelf of ADR-026). `ask_your_library.home` refuses to write there when
+# The reader's own folder, OUTSIDE any checkout (ADR-026): the home of what this
+# machine builds for the reader. The index defaults to $AYL_HOME/index (below),
+# the scratchpads to $AYL_HOME/scratch and the web chat's state to $AYL_HOME/ui
+# (`ask_your_library.home`), the engineer's shelf's local cards live in
+# $AYL_HOME/cards/tech, and the private shelf of the reader's own books will.
+# `ask_your_library.home` refuses to write what may never be shared there when
 # it resolves inside a git work tree — .gitignore is not a boundary.
 AYL_HOME = Path(os.environ.get("AYL_HOME") or "~/AskYourLibrary").expanduser()
 
@@ -43,6 +47,107 @@ def tables_for(backend: str) -> dict[str, str]:
 
 
 TABLES = tables_for(EMBED_BACKEND)
+
+# --- where the index is (ADR-026) ---------------------------------------------
+# The index used to default to `data/lancedb`, relative, i.e. wherever the
+# command was typed. Its default is now $AYL_HOME/index. An index already built
+# at the old place is not moved, copied or deleted by anything here: it is
+# READ where it is, with one line saying so, until LEGACY_DB_SUNSET, when that
+# clause becomes an error naming the same two commands.
+LEGACY_DB_PATH = Path("data") / "lancedb"
+LEGACY_DB_SUNSET = "0.5.0"
+
+
+class DbPathChoice(NamedTuple):
+    """Which index a process opens when no `--db` names one, and why.
+
+    `clause` is the rule that decided it: 1 `LIBRARY_DB_PATH` is set, 2 an index
+    built before the move is in the working directory's `data/lancedb`, 3 the
+    default under `AYL_HOME`. `reason` is the sentence `ayl doctor` prints."""
+    path: Path
+    clause: int
+    reason: str
+
+
+def resolve_db_path(environ: Mapping[str, str] | None = None, cwd: Path | None = None,
+                    backend: str | None = None, home: Path | None = None) -> DbPathChoice:
+    """The three-clause rule, in order. Pure: it reads, and prints and creates
+    nothing, so it can run at import — `--help` and `--version` included.
+
+    1. `LIBRARY_DB_PATH` set (and not blank) -> that path, always, as written:
+       no `AYL_HOME`, no git-work-tree check, no notice. The developer's and
+       CI's escape hatch, and every test's (tests/conftest.py pins it).
+    2. Unset, and `<cwd>/data/lancedb` holds a `transcripts_<backend>` table ->
+       that index, where it is. A `data/lancedb` without that table is not an
+       index this configuration could answer from, and does not count.
+    3. Otherwise -> `$AYL_HOME/index`, absolute, created by the first write.
+
+    A blank `LIBRARY_DB_PATH` (a copied `.env` line with nothing after the
+    `=`) is unset: `Path("")` is the working directory itself, which is no
+    index anybody meant."""
+    environ = os.environ if environ is None else environ
+    named = environ.get("LIBRARY_DB_PATH") or ""
+    if named.strip():
+        return DbPathChoice(Path(named), 1, "LIBRARY_DB_PATH is set, and an explicit path is "
+                                            "always obeyed")
+    table = tables_for(EMBED_BACKEND if backend is None else backend)["transcripts"]
+    legacy = (Path.cwd() if cwd is None else Path(cwd)).absolute() / LEGACY_DB_PATH
+    if (legacy / f"{table}.lance").is_dir():
+        return DbPathChoice(legacy, 2, (
+            f"LIBRARY_DB_PATH is unset and the working directory holds an index at the old "
+            f"default, {LEGACY_DB_PATH} (it has a {table} table): it is read where it is "
+            f"until {LEGACY_DB_SUNSET}, and nothing is moved"))
+    default = Path(AYL_HOME if home is None else home).expanduser().resolve() / "index"
+    why = (f"{LEGACY_DB_PATH} here has no {table} table" if legacy.is_dir()
+           else f"there is no {LEGACY_DB_PATH} in the working directory")
+    return DbPathChoice(default, 3, f"LIBRARY_DB_PATH is unset and {why}, so the default "
+                                    f"under AYL_HOME")
+
+
+def legacy_db_notice(choice: DbPathChoice, home: Path | None = None) -> str:
+    """The one line a clause-2 process prints: the new default, the path being
+    read, and the move, as commands. The move names both targets, the index
+    and the chat database, so it lands in the same place whichever of the two
+    is still at its old default."""
+    base = Path(AYL_HOME if home is None else home).expanduser().resolve()
+    return (f"note: reading the index at {choice.path}, the old default. The default is now "
+            f"{base / 'index'} ($AYL_HOME/index); the old place is read until "
+            f"{LEGACY_DB_SUNSET}, when it becomes an error. Nothing is moved for you. To move "
+            f"it: `ayl backup <dir>`, then `ayl restore <dir>/<timestamp> --db "
+            f"{base / 'index'} --chat-db {base / 'ui' / '.chainlit' / 'chat.db'}`, then move "
+            f"{LEGACY_DB_PATH} out of this directory; or set LIBRARY_DB_PATH={choice.path} to "
+            f"keep it where it is.")
+
+
+DB_CHOICE = resolve_db_path()
+# The name every module imports. Decided once, at import, like every other knob
+# here; what is NOT done at import is saying anything about it (`confirm_db_path`).
+DB_PATH = DB_CHOICE.path
+
+_db_confirmed = False
+
+
+def confirm_db_path() -> Path:
+    """Called where a command is about to use the configured index — never at
+    import, so `--help` and `--version` stay silent. Once per process:
+
+    - clause 2 prints the notice (stderr, once);
+    - clause 3 asks `home.private_dir` for the folder, which refuses one inside
+      a git work tree and names LIBRARY_DB_PATH as the way out (RuntimeError).
+      The index holds the full text of the books it was built from, and the
+      reader's own books are what may never be committed.
+
+    Clause 1 is obeyed without a word. Returns `DB_PATH`."""
+    global _db_confirmed
+    if _db_confirmed:
+        return DB_PATH
+    if DB_CHOICE.clause == 2:
+        print(legacy_db_notice(DB_CHOICE), file=sys.stderr)
+    elif DB_CHOICE.clause == 3:
+        from .home import private_dir      # home imports this module
+        private_dir("index")
+    _db_confirmed = True
+    return DB_PATH
 
 # --- orchestrator LLM (OpenAI-compatible endpoint; local Ollama by default) --
 # The shipped default is LLM_BACKEND=ollama: every agent node runs on a local
