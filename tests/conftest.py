@@ -82,6 +82,14 @@ DEFAULTS = {
     # inside any git work tree, which `home.private_dir` would refuse), and
     # per-process.
     "AYL_HOME": os.path.join(tempfile.gettempdir(), f"ayl-tests-home-{os.getpid()}"),
+    # The web chat's database and auth secret. Unset, `launcher.chainlit_dir`
+    # reads a checkout's `.chainlit/chat.db` where it is (ADR-026) — and the
+    # checkout is the one this suite runs from, so a developer's real chat
+    # history would be what `ayl backup` copies and `ayl restore` writes over in
+    # tests/test_backup.py. Pinned like the index; the tests about the default
+    # unset it (or point `launcher.REPO_ROOT` at a checkout of their own).
+    "AYL_CHAINLIT_DIR": os.path.join(tempfile.gettempdir(),
+                                     f"ayl-tests-chainlit-{os.getpid()}", ".chainlit"),
 }
 
 # Tracing is switched off outright, not defaulted: an inherited flag is exactly
