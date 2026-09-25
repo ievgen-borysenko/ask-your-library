@@ -35,6 +35,71 @@ and a write is not: one `ayl add` into such a table leaves two chunkers' rows in
 to tell them apart, and the only repair after that is rebuilding all of it. That is the whole
 policy, in one line each: **warn on read, refuse on write** ([ADR-020](adr/README.md)).
 
+## The index moved to `$AYL_HOME/index`
+
+Three defaults moved out of the directory a command was typed in and into the reader's own
+folder, `AYL_HOME` (`~/AskYourLibrary` unless set) — [ADR-026](adr/README.md#adr-026-ayl_home-is-the-home-of-everything-built-on-this-machine-the-index-the-scratchpads-the-chat-database-the-private-shelf):
+
+| What | Old default | New default | Set this to keep it elsewhere |
+|---|---|---|---|
+| the index | `data/lancedb`, relative to the working directory | `$AYL_HOME/index` | `LIBRARY_DB_PATH` |
+| the scratchpads of `ayl ask` | `.scratch`, relative to the working directory | `$AYL_HOME/scratch` | `ASK_SCRATCH_DIR` |
+| the web chat's database and auth secret | the checkout's `.chainlit/` | `$AYL_HOME/ui/.chainlit/` | `AYL_CHAINLIT_DIR` |
+
+The demo corpus's downloads and prepared texts stay in the checkout's `data/raw/` and
+`data/prepared/`; only the index it builds goes to the new place.
+
+**Nothing is moved, copied or deleted for you**, and nothing you already built stops answering.
+The index a command opens, when no `--db` names one, is decided by three rules in this order, and
+`ayl doctor` prints which one applied and why:
+
+1. **`LIBRARY_DB_PATH` is set** — that path, exactly as written, always, with nothing said about
+   it. Check your `.env`: every `.env.example` before this one had the line
+   `LIBRARY_DB_PATH=data/lancedb` in it, uncommented, so a `.env` copied from one (or written by
+   `scripts/install-mac.sh`) keeps the index in the checkout through this rule, silently. Delete
+   the line to take the new default — after the move below, if that is where your index is.
+2. **It is unset, and the working directory holds `data/lancedb` with a `transcripts_<backend>`
+   table in it** — that index is read where it is, and every process that uses it says so once, on
+   stderr:
+
+   ```
+   note: reading the index at /…/ask-your-library/data/lancedb, the old default. The default is
+   now /Users/…/AskYourLibrary/index ($AYL_HOME/index); the old place is read until 0.5.0, when
+   it becomes an error. Nothing is moved for you. To move it: `ayl backup <dir>`, then `ayl
+   restore <dir>/<timestamp> --db /Users/…/AskYourLibrary/index --chat-db
+   /Users/…/AskYourLibrary/ui/.chainlit/chat.db`, then move data/lancedb out of this directory;
+   or set LIBRARY_DB_PATH=/…/ask-your-library/data/lancedb to keep it where it is.
+   ```
+
+   (one line on the terminal, wrapped here), and never when a command is only asked for its help
+   or its version. **This rule is kept for one minor release: from 0.5.0 an index found there is
+   an error naming the same two commands.** A web chat that finds a `chat.db` in the checkout's
+   `.chainlit/` does the same for it, once, when it starts.
+3. **Otherwise** — `$AYL_HOME/index`, created by the first write.
+
+`$AYL_HOME/index` is refused when `AYL_HOME` resolves inside a git work tree — the index holds the
+full text of the books it was built from — and the refusal names `LIBRARY_DB_PATH`, which is the
+way to keep a throwaway index inside a checkout on purpose. The scratchpads and the web chat's
+state are not refused there.
+
+**The move**, from the checkout, with the web chat stopped:
+
+```bash
+uv run ayl backup ~/ayl-backups                     # takes the index rule 2 found, and the chat db
+uv run ayl restore ~/ayl-backups/<timestamp> --db ~/AskYourLibrary/index \
+    --chat-db ~/AskYourLibrary/ui/.chainlit/chat.db
+uv run ayl doctor --db ~/AskYourLibrary/index      # the same books, the same stamps
+mv data/lancedb ~/ayl-old-index                     # out of the working directory, so rule 2
+mv .chainlit ~/ayl-old-chainlit                     # no longer applies; delete them when satisfied
+uv run ayl doctor                                   # "index: …/AskYourLibrary/index — … the default"
+```
+
+A restore refuses an index already at `--db` — `~/AskYourLibrary/index` exists if a demo build has
+run since you upgraded — and `--force` moves that one aside rather than deleting it
+([Restore](#restore)). The web chat's login secret is not in a backup: the first start after the
+move mints a new one, and you log in again. To keep everything where it is instead, set
+`LIBRARY_DB_PATH` and `AYL_CHAINLIT_DIR` to the two old directories as absolute paths.
+
 ## This release: the chunker changed (#28), and every earlier index is one behind it
 
 This is the first chunker bump this project has shipped, so it is also the first time the policy
@@ -216,8 +281,8 @@ writes `~/ayl-backups/<timestamp>/` holding
 
 - `lancedb/` — the whole index directory: every table, the `books` ledger, the `_index_meta`
   stamps and the BM25 index;
-- `chat.db` — the web UI's history, from `AYL_CHAINLIT_DIR` or `.chainlit/`, or wherever
-  `--chat-db` names. Taken through SQLite's own backup, so it is **one consistent snapshot in one
+- `chat.db` — the web UI's history, from `AYL_CHAINLIT_DIR`, else `$AYL_HOME/ui/.chainlit/` (or
+  a checkout's `.chainlit/` that still holds one, until 0.5.0), or wherever `--chat-db` names. Taken through SQLite's own backup, so it is **one consistent snapshot in one
   file** rather than a main file copied beside somebody else's write-ahead log. Absent if you never
   started the web UI, and the report says so; a file SQLite cannot open is reported and the index
   is still backed up without it;
@@ -264,8 +329,8 @@ A destination **inside** the index directory is refused: that is a copy of a dir
 itself. A failure part-way through removes the half-written directory rather than leaving something
 shaped like a backup with no manifest to say what it is missing.
 
-What is **not** backed up: `.scratch/` (the passages as the model saw them, written per run and
-not cleaned) and `.env` (a backup of secrets is a second place to lose them from).
+What is **not** backed up: the scratchpads, `$AYL_HOME/scratch/` (the passages as the model saw
+them, written per run and not cleaned) and `.env` (a backup of secrets is a second place to lose them from).
 
 ## The chat database
 

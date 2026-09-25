@@ -403,8 +403,8 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   or any other program from writing while it is held, and on a network share `flock` means whatever
   that share implements (a refusal naming another machine says so). Restoring stages its copy
   beside the target and publishes by rename, and **never deletes** the index it replaces — it is
-  moved aside and named — so a restore costs the disk of both until you remove one. `.scratch/`
-  and `.env` are not copied at all, and the chat database is snapshotted through SQLite rather
+  moved aside and named — so a restore costs the disk of both until you remove one. The
+  scratchpads and `.env` are not copied at all, and the chat database is snapshotted through SQLite rather
   than copied as files, so a `chat.db` SQLite cannot open is reported and skipped rather than
   copied as bytes. A **symlink inside the index** is refused outright rather than copied or
   followed: a copy follows links while the digests skip them, so the manifest would describe a set
