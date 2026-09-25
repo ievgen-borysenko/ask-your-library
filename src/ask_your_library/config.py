@@ -23,7 +23,10 @@ load_dotenv()
 # $AYL_HOME/cards/tech, and the private shelf of the reader's own books will.
 # `ask_your_library.home` refuses to write what may never be shared there when
 # it resolves inside a git work tree — .gitignore is not a boundary.
-AYL_HOME = Path(os.environ.get("AYL_HOME") or "~/AskYourLibrary").expanduser()
+# Blank or whitespace-only means the default, as for LIBRARY_DB_PATH below: a
+# folder named " " in the working directory is nobody's home.
+_ayl_home = os.environ.get("AYL_HOME") or ""
+AYL_HOME = Path(_ayl_home if _ayl_home.strip() else "~/AskYourLibrary").expanduser()
 
 # --- embeddings ------------------------------------------------------------
 # Backend selects both the embedder and the table suffix, so query and document

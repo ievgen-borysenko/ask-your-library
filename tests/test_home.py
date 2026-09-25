@@ -51,6 +51,17 @@ def test_the_variable_overrides_the_default_and_a_tilde_is_expanded(tmp_path):
     assert out.stdout.strip() == str(tmp_path / "reader" / "elsewhere")
 
 
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_a_blank_variable_is_the_default(tmp_path, blank):
+    """A copied `.env` line with nothing after the `=`, or only spaces, is the
+    default and not a folder named " " in the working directory."""
+    env = dict(os.environ, AYL_HOME=blank, HOME=str(tmp_path / "reader"))
+    out = subprocess.run([sys.executable, "-c",
+                          "from ask_your_library import config; print(config.AYL_HOME)"],
+                         cwd=tmp_path, env=env, capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == str(tmp_path / "reader" / "AskYourLibrary")
+
+
 def test_a_folder_outside_any_repository_is_accepted(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "AYL_HOME", tmp_path / "ayl")
     folder = home.private_dir("cards", "tech")

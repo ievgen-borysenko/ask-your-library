@@ -1351,13 +1351,16 @@ fi
 # table (read where it is until 0.5.0); else $AYL_HOME/index, which is
 # ~/AskYourLibrary/index unless AYL_HOME says otherwise. The demo build below
 # writes to the same place, because it asks config.py the same question.
-db_path="$(setting LIBRARY_DB_PATH)"
-if [ -z "$db_path" ]; then
+# `effective_value`, not `setting`: an EXPORTED blank value is what the app
+# sees (python-dotenv does not override a variable that exists, blank or not),
+# and config.py treats a blank or whitespace-only value of either name as unset.
+db_path="$(effective_value LIBRARY_DB_PATH)"
+if [ -z "${db_path//[[:space:]]/}" ]; then
     if [ -d "data/lancedb/transcripts_${loaded_embed_backend}.lance" ]; then
         db_path="$PWD/data/lancedb"
     else
-        ayl_home="$(setting AYL_HOME)"
-        [ -n "$ayl_home" ] || ayl_home="$HOME/AskYourLibrary"
+        ayl_home="$(effective_value AYL_HOME)"
+        [ -n "${ayl_home//[[:space:]]/}" ] || ayl_home="$HOME/AskYourLibrary"
         # config.py expands a leading ~ in AYL_HOME (it does not in LIBRARY_DB_PATH)
         case "$ayl_home" in
             "~") ayl_home="$HOME" ;;

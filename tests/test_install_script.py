@@ -1658,3 +1658,36 @@ def test_an_explicit_index_path_is_used_as_written(sandbox, tmp_path):
     env["LIBRARY_DB_PATH"] = str(tmp_path / "mine")
     out = dry_run(sandbox)
     assert f"Demo corpus: an index at {tmp_path}/mine" in out
+
+
+@mac_only
+@pytest.mark.parametrize("exported", ["", "   "])
+def test_an_exported_blank_index_path_is_unset_even_over_the_dotenv(sandbox, tmp_path, exported):
+    """python-dotenv does not override a variable that exists, blank or not, and
+    config.py reads a blank or whitespace-only LIBRARY_DB_PATH as unset — so the
+    app lands on $AYL_HOME/index, and step 11 has to say the same, not the .env
+    line it would have fallen through to."""
+    root, _, env = sandbox
+    (root / ".env").write_text(f"LIBRARY_DB_PATH={tmp_path}/from-dotenv\n")
+    env["HOME"] = str(tmp_path / "reader")
+    env["LIBRARY_DB_PATH"] = exported
+    out = dry_run(sandbox)
+    assert f"Demo corpus: an index at {tmp_path}/reader/AskYourLibrary/index" in out
+
+
+@mac_only
+def test_the_dotenv_index_path_is_used_when_nothing_is_exported(sandbox, tmp_path):
+    root, _, env = sandbox
+    (root / ".env").write_text(f"LIBRARY_DB_PATH={tmp_path}/from-dotenv\n")
+    out = dry_run(sandbox)
+    assert f"Demo corpus: an index at {tmp_path}/from-dotenv" in out
+
+
+@mac_only
+@pytest.mark.parametrize("exported", ["", "  "])
+def test_a_blank_ayl_home_is_the_default_home(sandbox, tmp_path, exported):
+    _, _, env = sandbox
+    env["HOME"] = str(tmp_path / "reader")
+    env["AYL_HOME"] = exported
+    out = dry_run(sandbox)
+    assert f"Demo corpus: an index at {tmp_path}/reader/AskYourLibrary/index" in out
