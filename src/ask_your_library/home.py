@@ -76,8 +76,15 @@ def private_dir(*parts: str) -> Path:
         override = OVERRIDES.get(parts[0]) if parts else None
         escape = (f"Set {override[0]} to put {override[1]} somewhere else, or set AYL_HOME "
                   if override else "Set AYL_HOME ")
+        # Which path is inside the checkout: AYL_HOME itself, or only this
+        # folder under it — a symlink planted at `$AYL_HOME/index` pointing into
+        # a checkout leaves AYL_HOME where it was, and saying otherwise would
+        # send the reader to fix the wrong thing.
+        real = folder.resolve()
+        where = (f"AYL_HOME resolves to {ayl_home()}" if real.is_relative_to(ayl_home())
+                 else f"{folder} resolves to {real}")
         raise RuntimeError(
-            f"AYL_HOME resolves to {ayl_home()}, inside the git work tree {tree}: files "
+            f"{where}, inside the git work tree {tree}: files "
             f"that may never be shared are not written into a checkout, where one "
             f"`git add` would commit them. {escape}to a folder outside any "
             f"repository (the default is ~/AskYourLibrary).")

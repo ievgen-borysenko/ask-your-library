@@ -93,6 +93,37 @@ def test_the_index_inside_a_git_work_tree_is_refused_naming_its_variable(tmp_pat
         refused.value)
 
 
+def test_a_folder_that_alone_links_into_a_checkout_is_named_not_ayl_home(tmp_path, monkeypatch):
+    """AYL_HOME outside any repository, and only `$AYL_HOME/index` a symlink
+    into one: the refusal says which path lands in the checkout, and does not
+    claim AYL_HOME does."""
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / "inside").mkdir()
+    ayl = tmp_path / "ayl"
+    ayl.mkdir()
+    (ayl / "index").symlink_to(repo / "inside")
+    monkeypatch.setattr(config, "AYL_HOME", ayl)
+    with pytest.raises(RuntimeError) as refused:
+        home.private_dir("index")
+    message = str(refused.value)
+    assert message.startswith(f"{ayl.resolve() / 'index'} resolves to "
+                              f"{(repo / 'inside').resolve()}, inside the git work tree "
+                              f"{repo.resolve()}")
+    assert "AYL_HOME resolves to" not in message
+    assert "Set LIBRARY_DB_PATH" in message
+
+
+def test_ayl_home_inside_a_checkout_is_named_as_such(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    monkeypatch.setattr(config, "AYL_HOME", repo / "ayl")
+    with pytest.raises(RuntimeError) as refused:
+        home.private_dir("index")
+    assert str(refused.value).startswith(f"AYL_HOME resolves to {(repo / 'ayl').resolve()}, "
+                                         f"inside the git work tree {repo.resolve()}")
+
+
 def test_a_card_refusal_names_no_variable_it_does_not_have(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
