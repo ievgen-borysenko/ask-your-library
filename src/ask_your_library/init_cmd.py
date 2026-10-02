@@ -930,7 +930,7 @@ class Progress:
 
     def __call__(self, status: str, completed: int | None, total: int | None) -> None:
         if total and self.live:
-            share = 100 * (completed or 0) // total
+            share = 100 * min(completed or 0, total) // total
             sys.stdout.write(f"\r       {self.model}: {status} {share}% of "
                              f"{total / 1e9:.1f} GB   ")
             sys.stdout.flush()

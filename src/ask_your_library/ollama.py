@@ -90,8 +90,15 @@ def pull(model: str, on_progress: Progress | None = None, url: str | None = None
     raise PullError(f"Ollama at {shown} ended the pull of {model} without saying it succeeded")
 
 
+# No model is this large. A count above it is the server's number, not a size:
+# 10**400 is a valid JSON integer, and dividing it for the progress line raised
+# OverflowError out of the first-run command.
+MAX_PULL_BYTES = 10 ** 13
+
+
 def _bytes(value) -> int | None:
     """A byte count from a progress line, or None: a value that is not a
-    whole number is not printed, nor allowed to break the progress line."""
-    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 \
-        else None
+    whole number between 0 and MAX_PULL_BYTES is not printed, nor allowed to
+    break the progress line."""
+    return value if isinstance(value, int) and not isinstance(value, bool) \
+        and 0 <= value <= MAX_PULL_BYTES else None

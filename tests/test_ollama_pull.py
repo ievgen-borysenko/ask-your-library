@@ -163,3 +163,40 @@ def test_what_the_tags_reply_is_classified_as(monkeypatch, fake, kind, names):
     monkeypatch.setattr(preflight, "requests", fake)
     reply = preflight.ollama_tags()
     assert reply.kind == kind and set(reply.names) == names
+
+
+@pytest.mark.parametrize("value", [10 ** 400, 10 ** 13 + 1, -1, True, 1.5, "7", None])
+def test_a_byte_count_no_model_could_have_is_not_a_byte_count(value):
+    """A progress line's numbers are the server's: 10**400 is valid JSON, and
+    as a size it overflowed the progress line's division and ended `ayl init`
+    with a traceback. Out of range, or not a whole number, is None."""
+    assert ollama._bytes(value) is None
+
+
+@pytest.mark.parametrize("value", [0, 1, 4_700_000_000, 10 ** 13])
+def test_a_plausible_byte_count_is_kept(value):
+    assert ollama._bytes(value) == value
+
+
+def test_the_progress_line_never_shows_more_than_the_whole(monkeypatch, capsys):
+    """`completed` above `total` is the server's arithmetic, not ours."""
+    from ask_your_library import init_cmd
+    monkeypatch.setattr(init_cmd.sys.stdout, "isatty", lambda: True)
+    init_cmd.Progress("bge-m3")("downloading", 10 ** 13, 1_000_000_000)
+    assert "100% of 1.0 GB" in capsys.readouterr().out
+
+
+
+def test_a_pull_with_absurd_byte_counts_runs_to_its_end_on_a_terminal(monkeypatch, capsys):
+    """The gate's payload, through the real pull and the real progress line:
+    a server streams `total: 10**400`, the first-run command neither divides
+    by it nor crashes, and the pull ends as the stream says."""
+    from ask_your_library import init_cmd
+    stream = Stream([{"status": "pulling", "total": 10 ** 400, "completed": 1},
+                     {"status": "pulling", "total": 1_000_000_000, "completed": 10 ** 400},
+                     {"status": "success"}])
+    monkeypatch.setattr(ollama, "requests", FakeRequests(stream))
+    monkeypatch.setattr(init_cmd.sys.stdout, "isatty", lambda: True)
+    ollama.pull("some-model:7b", init_cmd.Progress("some-model:7b"), url="http://localhost:11434")
+    printed = capsys.readouterr().out
+    assert "0% of 1.0 GB" in printed and "e+" not in printed and "inf" not in printed
