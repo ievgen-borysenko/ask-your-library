@@ -1972,3 +1972,25 @@ def test_what_ayl_init_refuses_the_installer_refuses_before_installing(sandbox, 
     else:
         assert init.returncode == 2, init.stdout + init.stderr
     assert not home.exists(), "ayl init wrote before refusing"
+
+
+@mac_only
+@pytest.mark.skipif(not have_package, reason="the package is not importable here")
+def test_yes_with_a_credential_in_a_url_is_refused_by_both_before_anything(sandbox, tmp_path):
+    """--yes is --demo for step 11, and `ayl init` does not start a demo build
+    while a URL-valued setting carries a credential (its error output can print
+    it, #107): the installer refuses the same, before it installs anything."""
+    from conftest import run_fresh
+    root, records, env = sandbox
+    url = "http://reader:s3cret-in-the-url@127.0.0.1:11434"
+    installer = real_run(sandbox, "--yes", OLLAMA_URL=url)
+    assert installer.returncode == 2, installer.stdout + installer.stderr
+    assert "not built while a URL-valued" in installer.stderr
+    assert invoked(records) == [] and not (root / ".env").exists()
+    assert "s3cret-in-the-url" not in installer.stdout + installer.stderr
+    init = run_fresh("import sys\nfrom ask_your_library import ayl\n"
+                     "sys.exit(ayl.main(['init', '--demo', '--dry-run']))\n",
+                     cwd=root, check=False, AYL_HOME=str(tmp_path / "home"), OLLAMA_URL=url)
+    assert init.returncode == 2, init.stdout + init.stderr
+    # Without --yes nothing asks for the demo: the run goes on.
+    assert real_run(sandbox, OLLAMA_URL=url).returncode == 0

@@ -60,7 +60,11 @@ comes from.
 default — or `--demo` builds it and `--no-demo` skips the question. It is six public-domain
 classics (`starter: true` in `corpus/manifest.yaml`, chosen to reach every path a first question
 takes) built in a few minutes into `~/AskYourLibrary/demo/index`, **apart from your own index**, so
-your library never starts mixed with the classics. `--demo --full` builds the whole demo corpus
+your library never starts mixed with the classics. It is not built while a URL-valued setting
+(`OLLAMA_URL`, `OPENROUTER_BASE_URL`, a trace endpoint) carries a credential (`user:password@`):
+the build's error output could print it (issue #107), so `ayl init --demo` refuses that step
+(exit 2, after steps 1–4), and `install-mac.sh --yes` refuses before installing anything; move the
+credential out of the URL first. `--demo --full` builds the whole demo corpus
 (33 books and two canaries, about 30 minutes). Ask it by naming it:
 
 ```bash

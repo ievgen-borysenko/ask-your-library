@@ -958,6 +958,24 @@ for name in $BACKEND_VARS; do
     esac
 done
 
+# --yes asks step 11 for the demo library, and `ayl init` does not start that
+# build while a URL-valued setting carries a credential (its error output can
+# print it: issue #107) — refused here, before anything is installed, with the
+# same words, rather than there, after everything was.
+if [ "$want_demo" -eq 1 ] && [ "$assume_yes" -eq 1 ]; then
+    for name in $ENDPOINT_VARS; do
+        case "$(effective_value "$name")" in
+            *@*)
+                fail "--yes asks for the demo library, which is not built while a URL-valued"
+                fail "setting carries a credential ($name, $(value_source "$name")): the demo"
+                fail "build's error output is not yet safe for one (issue #107). Move the"
+                fail "credential out of the URL, or run without --yes (or with --no-demo)."
+                exit 2
+                ;;
+        esac
+    done
+fi
+
 # Which configuration the local rule below is held to: the one this run sets
 # up, and also the one the application will LOAD when that is local — --hosted
 # with an exported LLM_BACKEND=ollama runs locally, and `ayl init` (step 11)

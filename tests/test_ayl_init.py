@@ -1046,3 +1046,34 @@ def test_what_a_dry_run_cannot_know_it_says_it_did_not_check(machine, capsys):
     assert ("Not checked without a request, so not part of this status: whether Ollama "
             "answers and has the models, and the pulls; the demo build and the check over it."
             in out)
+
+
+# --- no demo build while a credential is configured (F7-demo-traceback) -------------------
+
+@pytest.mark.parametrize("dry", [False, True])
+def test_the_demo_is_not_built_while_a_url_carries_a_credential(machine, capsys, dry):
+    """The demo build is a child whose error output can print the URL it was
+    sent to, user:password@ included (the embedders' HTTP errors, #107): it is
+    not started then — exit 2, our own words — and steps 1-4 still run."""
+    machine.mp.setattr(config, "OLLAMA_URL", CREDENTIAL_URL)
+    status = init(*(["--dry-run"] if dry else []), "--demo")
+    out, err = capsys.readouterr()
+    assert status == 2
+    assert machine.builds == []
+    assert "carries a credential" in err and "issue #107" in err
+    assert SECRET not in out + err
+    assert "[4/5] Configuration" in out
+    if not dry:
+        assert (machine.home / "config.env").is_file(), "steps 1-4 ran"
+
+
+def test_without_a_credential_the_demo_is_built_as_before(machine):
+    machine.check_status = 0
+    assert init("--demo") == 0 and len(machine.builds) == 1
+
+
+def test_the_question_is_not_asked_when_the_answer_could_not_be_built(machine):
+    machine.mp.setattr(config, "OLLAMA_URL", CREDENTIAL_URL)
+    machine.answer("y")
+    assert init() == 0
+    assert machine.prompts == [] and machine.builds == []

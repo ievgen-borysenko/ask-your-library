@@ -638,6 +638,10 @@ def _run(args) -> int:
         want_demo = args.demo
     elif args.yes or dry or not sys.stdin.isatty():
         want_demo = BUILD_DEMO_BY_DEFAULT
+    elif dataflow.credential_configured():
+        # Not offered when it could not be built (step 5 says why): a yes
+        # here would only end the run on a refusal the reader was led into.
+        want_demo = False
     else:
         say("")
         note(f"The demo library: six public-domain classics, built in {ESTIMATE[which]} after "
@@ -741,9 +745,21 @@ def _run(args) -> int:
     # the reason is a good one: the status says so, after the check and the
     # next steps have still been printed.
     demo_missed = False
+    demo_blocked = False        # refused over configuration: exit 2, like every such refusal
     if not want_demo:
         note(f"demo library: not built. `{command('ayl init --demo')}` builds six classics in "
              f"{ESTIMATE['starter']}, kept apart from your index")
+    elif dataflow.credential_configured():
+        # The demo build is a child process whose error output this PR does
+        # not control (the embedders' HTTP errors print the URL they were
+        # sent to, user:password@ included — #107). Until that is safe, a
+        # demo build is not started with a credential in any URL-valued
+        # setting: the reader moves it out of the URL first. Steps 1-4 ran.
+        problem("the demo library is not built while a URL-valued setting (OLLAMA_URL, "
+                "OPENROUTER_BASE_URL or a trace endpoint) carries a credential: the demo build's "
+                "error output is not yet safe for one (issue #107) and could print it. Move the "
+                "credential out of the URL, then run `ayl init --demo` again.")
+        demo_blocked = True
     elif legacy and any(path.name == "lancedb" for path, _ in legacy):
         note("demo library: NOT built — an index from an earlier version is there (above). Move "
              "it with the commands printed rather than build a second one beside it.")
@@ -816,7 +832,7 @@ def _run(args) -> int:
         if unknown:
             say("Not checked without a request, so not part of this status: "
                 + "; ".join(unknown) + ".")
-        return final_status(refused, known, None, demo_index, llm, embed)
+        return 2 if demo_blocked else final_status(refused, known, None, demo_index, llm, embed)
 
     if not changed:
         say("Nothing to do: every step was already done, and nothing was changed.")
@@ -829,7 +845,7 @@ def _run(args) -> int:
     for line in leftover:
         say(f"Left to you: {line}.")
     next_steps(demo_index, llm, reader_index)
-    return final_status(refused, known, status, demo_index, llm, embed)
+    return 2 if demo_blocked else final_status(refused, known, status, demo_index, llm, embed)
 
 
 def knowable_closing(index: Path, reader: bool, embed: str) -> tuple[int, list[str]]:
