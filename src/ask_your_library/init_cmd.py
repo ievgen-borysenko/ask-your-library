@@ -50,6 +50,7 @@ from .embeddings import OllamaEmbedder, OpenRouterEmbedder
 from .i18n import t
 from .index_meta import expected_chunker, read_index_meta, rows_by_book
 from .ingest.doctor import check_ledger
+from .ingest.foreign import foreign_books
 from .ingest.ledger import INDEXED, open_ledger
 from .ingest.publish import STAGING_SUFFIX, table_names
 from .paths import REPO_ROOT
@@ -372,8 +373,9 @@ def demo_state(path: Path, backend: str, wanted: dict[str, str]) -> tuple[str, s
     `absent` nothing is built; `partial` anything else a build finishes;
     `other_backend` an index whose transcripts another embedding backend
     built — building beside it would be a second index in one folder;
-    `foreign` an index holding a book no manifest entry built, or none that a
-    ledger describes — rebuilding the table would replace them."""
+    `foreign` an index holding a book no manifest entry built, by its rows or
+    its ledger (`ingest.foreign`, the demo script's own rule) — rebuilding
+    the table would replace them."""
     table = f"transcripts_{backend}"
     if not (path / f"{table}.lance").is_dir():
         built = (p.name[:-len(".lance")] for p in path.glob("transcripts_*.lance")) \
@@ -383,14 +385,12 @@ def demo_state(path: Path, backend: str, wanted: dict[str, str]) -> tuple[str, s
             return "other_backend", ", ".join(others)
         return "absent", ""
     db = lancedb.connect(path)
-    rows = open_ledger(db).all_rows()
-    refs = [str(row.get("source_ref") or "") for row in rows]
-    if not rows or any(not ref.startswith("manifest:") for ref in refs):
-        return "foreign", ("no ledger describes its books" if not rows
-                           else "it holds books that are not the demo corpus's")
-    present = set(rows_by_book(db, table))
-    if REPO_ROOT and present - set(manifest_books(None).values()):
+    # The demo script's own rule (`ingest.foreign`), so the two cannot
+    # disagree about whose books a folder holds.
+    if REPO_ROOT and foreign_books(db, set(manifest_books(None).values())):
         return "foreign", "it holds books that are not the demo corpus's"
+    rows = open_ledger(db).all_rows()
+    present = set(rows_by_book(db, table))
 
     there = sum(1 for key in wanted.values() if key in present)
     detail = f"{there} of {len(wanted)} books in the index"

@@ -51,6 +51,11 @@ def doc(note, title, author, chapters=("Chapter 1", "Chapter 2")):
 def demo_index(tmp_path, monkeypatch):
     monkeypatch.setattr(demo, "DB_PATH", tmp_path / "db")
     monkeypatch.setattr(demo, "get_embedder", lambda backend: FakeEmbedder())
+    # The manifest these documents are the corpus of: the guard against
+    # writing over another library's books reads the rows' keys against it.
+    monkeypatch.setattr(demo, "load_manifest", lambda: {"books": [
+        {"id": "moby-dick", "title": "Moby Dick", "author": "Herman Melville"},
+        {"id": "emma", "title": "Emma", "author": "Jane Austen"}], "canaries": []})
     monkeypatch.setattr(demo, "prepared_docs", lambda ids: [
         doc("moby-dick", "Moby Dick", "Herman Melville"),
         doc("emma", "Emma", "Jane Austen")])
@@ -198,7 +203,7 @@ def test_a_pre_ledger_index_holding_a_foreign_book_is_refused_and_unchanged(demo
     with pytest.raises(SystemExit) as refused:
         demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
     message = str(refused.value.code)
-    assert "My Own Notes — Me" in message and "no ledger" in message
+    assert "My Own Notes — Me" in message and "by its rows or its ledger" in message
     assert "LIBRARY_DB_PATH=$AYL_HOME/demo/index" in message
     table = lancedb.connect(demo_index).open_table("transcripts_ollama")
     assert sorted({row["book"] for row in table.to_arrow().to_pylist()}) == [
@@ -258,3 +263,69 @@ def test_a_single_book_upsert_prunes_nothing(demo_index, monkeypatch):
     demo.ingest_transcripts_table("ollama", "moby", ["moby-dick"])
     assert sorted(row["key"] for row in open_ledger(lancedb.connect(demo_index)).all_rows()) \
         == ["Emma — Jane Austen", "Moby Dick — Herman Melville"]
+
+
+# --- the ledger is a signal, never a substitute for the rows (F6-ledger-trust) --------------
+# `Ledger._put` documents that a crash between its delete and its add leaves
+# table rows with no ledger row: the guard reads the rows always, and a book
+# either signal names is foreign.
+
+def _manifest(monkeypatch):
+    monkeypatch.setattr(demo, "load_manifest", lambda: {"books": [
+        {"id": "moby-dick", "title": "Moby Dick", "author": "Herman Melville"},
+        {"id": "emma", "title": "Emma", "author": "Jane Austen"}], "canaries": []})
+
+
+def _refused_and_unchanged(demo_index, run):
+    before = sorted(row["book"] for row in lancedb.connect(demo_index)
+                    .open_table("transcripts_ollama").to_arrow().to_pylist())
+    with pytest.raises(SystemExit) as refused:
+        run()
+    after = sorted(row["book"] for row in lancedb.connect(demo_index)
+                   .open_table("transcripts_ollama").to_arrow().to_pylist())
+    assert after == before
+    return str(refused.value.code)
+
+
+def test_an_empty_ledger_beside_a_foreign_row_is_refused(demo_index, monkeypatch):
+    _manifest(monkeypatch)
+    pre_ledger_index(demo_index, ["Moby Dick — Herman Melville", "My Own Notes — Me"])
+    ledger = open_ledger(lancedb.connect(demo_index))
+    book_id = ledger.resolve("Moby Dick", "Herman Melville", source_ref="manifest:moby-dick")
+    ledger.begin(book_id, key="Moby Dick — Herman Melville", source_ref="manifest:moby-dick")
+    ledger.delete(book_id)                                   # the table exists, and is empty
+    assert ledger.exists() and ledger.all_rows() == []
+    message = _refused_and_unchanged(
+        demo_index, lambda: demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"]))
+    assert "My Own Notes — Me" in message
+
+
+def test_a_book_whose_ledger_row_is_missing_is_read_from_its_rows(demo_index, monkeypatch):
+    """A ledger of manifest rows only — the crash left the reader's book's rows
+    and lost its row."""
+    _manifest(monkeypatch)
+    demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
+    table = lancedb.connect(demo_index).open_table("transcripts_ollama")
+    row = table.to_arrow().to_pylist()[0]
+    table.add([{**row, "chunk_id": "mine-1", "book": "My Own Notes — Me", "note": "mine"}])
+    message = _refused_and_unchanged(
+        demo_index, lambda: demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"]))
+    assert "My Own Notes — Me" in message
+
+
+def test_a_manifest_ledger_over_a_non_manifest_key_is_refused(demo_index, monkeypatch):
+    _manifest(monkeypatch)
+    demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
+    db = lancedb.connect(demo_index)
+    db.open_table("transcripts_ollama").update(where="note = 'emma'",
+                                               values={"book": "Emma — Somebody Else"})
+    message = _refused_and_unchanged(
+        demo_index, lambda: demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"]))
+    assert "Emma — Somebody Else" in message
+
+
+def test_the_all_manifest_cases_still_rebuild(demo_index, monkeypatch):
+    _manifest(monkeypatch)
+    demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])     # with a ledger
+    demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
+    assert lancedb.connect(demo_index).open_table("transcripts_ollama").count_rows() > 0

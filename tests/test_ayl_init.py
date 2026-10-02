@@ -620,7 +620,7 @@ def test_what_an_existing_folder_is_as_a_demo_library(tmp_path):
     unledgered.mkdir()
     lancedb.connect(unledgered).create_table("transcripts_ollama", [{"x": 1}])
     assert init_cmd.demo_state(unledgered, "ollama", wanted) == (
-        "foreign", "no ledger describes its books")
+        "foreign", "it holds books that are not the demo corpus's")
 
 
 def test_an_interrupted_first_build_s_staging_table_is_not_another_backend(machine, tmp_path):
