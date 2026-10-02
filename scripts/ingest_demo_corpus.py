@@ -70,9 +70,9 @@ from ask_your_library.ingest.chunking import (CARD_CHUNKER_VERSION, CHUNKER_VERS
                                               parse_frontmatter)
 from ask_your_library.ingest.ledger import open_ledger
 from ask_your_library.ingest.lock import IngestBusy, ingest_lock
-from ask_your_library.ingest.publish import (add_ledger_columns, rebuild_table,
-                                             recover_staging, revision_of, table_names,
-                                             upsert_book_rows)
+from ask_your_library.ingest.publish import (STAGING_SUFFIX, add_ledger_columns,
+                                             rebuild_table, recover_staging, revision_of,
+                                             table_names, upsert_book_rows)
 from ask_your_library.sanitize import strip_control_chars
 
 REPO = Path(__file__).resolve().parents[1]
@@ -566,6 +566,33 @@ def refuse_unsafe_partial_reingest(db, name: str, embedder) -> None:
                                  f"refusing partial re-ingest of {name}", 1))
 
 
+def foreign_books(db) -> tuple[list[str], str]:
+    """(the books in this index the demo corpus did not build, how that was
+    told) — read, never written.
+
+    The ledger says it when there is one: `manifest:<id>` for a book this
+    corpus built, a file reference for one `ayl add` indexed. An index built
+    before the ledger (ADR-024) has none, and "no ledger" is not "only demo
+    books": its ROWS are read instead, every book key in its transcripts and
+    cards tables against the keys this manifest produces (`bookkey.book_key`,
+    the function the ingest mints them with). Empty or absent tables hold
+    nothing foreign."""
+    ledger = open_ledger(db)
+    if ledger.exists():
+        found = {str(row.get("key") or row.get("title") or "?") for row in ledger.all_rows()
+                 if not str(row.get("source_ref") or "").startswith("manifest:")}
+        how = "its ledger records"
+    else:
+        manifest = {book_key(e["title"], e["author"]) for e in all_entries(load_manifest())}
+        found = set()
+        for name in table_names(db):
+            if (name.startswith(("transcripts_", "cards_"))
+                    and not name.endswith(STAGING_SUFFIX)):
+                found |= set(rows_by_book(db, name)) - manifest
+        how = "it has no ledger, and its rows hold"
+    return sorted(strip_control_chars(book) for book in found), how
+
+
 def refuse_foreign_books(db, what: str) -> None:
     """Refuse to write the demo corpus into an index that holds the reader's
     own books.
@@ -573,21 +600,16 @@ def refuse_foreign_books(db, what: str) -> None:
     Unset, LIBRARY_DB_PATH is the reader's index ($AYL_HOME/index, ADR-026),
     which `ayl add` fills — and a full rebuild here replaces the whole
     transcripts table, so a bare run of this script dropped every book the
-    reader had added and left the classics in their place. The ledger says
-    which books are whose: `manifest:<id>` for one this corpus built, a file
-    reference for one `ayl add` indexed. An index with no ledger, or only
-    manifest rows, is this corpus's to rebuild, as it always was.
-
-    The demo corpus has an index of its own (ADR-028), named here."""
-    if not open_ledger(db).exists():
-        return
-    foreign = sorted({strip_control_chars(str(row.get("key") or row.get("title") or "?"))
-                      for row in open_ledger(db).all_rows()
-                      if not str(row.get("source_ref") or "").startswith("manifest:")})
+    reader had added and left the classics in their place. `foreign_books`
+    says which books are whose, from the ledger or, without one, from the rows.
+    There is no override: the demo corpus has an index of its own (ADR-028),
+    named here, and a reader who wants both in one folder adds their books to
+    the demo's, not the other way round."""
+    foreign, how = foreign_books(db)
     if foreign:
         sys.exit(
-            f"refusing to {what} {DB_PATH}: its ledger holds {len(foreign)} book(s) that are "
-            f"not the demo corpus's — {', '.join(foreign[:3])}"
+            f"refusing to {what} {DB_PATH}: {how} {len(foreign)} book(s) that are not the "
+            f"demo corpus's — {', '.join(foreign[:3])}"
             + (f" (+{len(foreign) - 3} more)" if len(foreign) > 3 else "") +
             f" — books `ayl add` indexed, which this would "
             f"{'replace' if what.startswith('rebuild') else 'mix with the classics'}. The demo "

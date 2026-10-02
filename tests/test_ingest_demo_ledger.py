@@ -180,3 +180,52 @@ def test_the_classics_cards_are_refused_there_and_a_named_cards_folder_is_not(de
 def test_an_index_with_only_the_demo_corpus_s_books_is_rebuilt_as_before(demo_index):
     demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
     demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
+
+
+# --- an index with no ledger is judged by its rows (F-preledger-index) ------------
+
+def pre_ledger_index(db_path, books):
+    """An index as one built before the ledger (ADR-024) leaves it: a
+    transcripts table and no `books` table."""
+    rows = [{"chunk_id": f"{book}-{i}", "note": book, "book": book, "source": "s",
+             "section": "Chapter 1", "text": PARA, "vector": [0.0, 1.0, 0.5, 0.25]}
+            for book in books for i in range(2)]
+    lancedb.connect(db_path).create_table("transcripts_ollama", rows)
+
+
+def test_a_pre_ledger_index_holding_a_foreign_book_is_refused_and_unchanged(demo_index):
+    pre_ledger_index(demo_index, ["Moby Dick — Herman Melville", "My Own Notes — Me"])
+    with pytest.raises(SystemExit) as refused:
+        demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
+    message = str(refused.value.code)
+    assert "My Own Notes — Me" in message and "no ledger" in message
+    assert "LIBRARY_DB_PATH=$AYL_HOME/demo/index" in message
+    table = lancedb.connect(demo_index).open_table("transcripts_ollama")
+    assert sorted({row["book"] for row in table.to_arrow().to_pylist()}) == [
+        "Moby Dick — Herman Melville", "My Own Notes — Me"]
+
+
+def test_a_pre_ledger_index_of_manifest_books_only_is_rebuilt_as_before(demo_index, monkeypatch):
+    monkeypatch.setattr(demo, "load_manifest", lambda: {"books": [
+        {"id": "moby-dick", "title": "Moby Dick", "author": "Herman Melville"},
+        {"id": "emma", "title": "Emma", "author": "Jane Austen"}], "canaries": []})
+    pre_ledger_index(demo_index, ["Moby Dick — Herman Melville"])
+    demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
+    table = lancedb.connect(demo_index).open_table("transcripts_ollama")
+    assert {row["book"] for row in table.to_arrow().to_pylist()} == {
+        "Moby Dick — Herman Melville", "Emma — Jane Austen"}
+
+
+def test_an_empty_folder_builds(demo_index):
+    demo_index.mkdir()
+    demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
+    assert lancedb.connect(demo_index).open_table("transcripts_ollama").count_rows() > 0
+
+
+def test_a_foreign_cards_row_with_no_ledger_is_refused_for_the_classics_cards(demo_index):
+    rows = [{"chunk_id": "c", "note": "mine", "book": "My Own Notes — Me", "source": "card",
+             "section": "Plot", "text": "x", "vector": [0.0, 1.0, 0.5, 0.25]}]
+    demo_index.mkdir()
+    lancedb.connect(demo_index).create_table("cards_ollama", rows)
+    with pytest.raises(SystemExit, match="My Own Notes — Me"):
+        demo.ingest_cards_table("ollama")
