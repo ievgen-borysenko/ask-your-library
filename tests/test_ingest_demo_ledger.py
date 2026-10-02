@@ -329,3 +329,19 @@ def test_the_all_manifest_cases_still_rebuild(demo_index, monkeypatch):
     demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])     # with a ledger
     demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
     assert lancedb.connect(demo_index).open_table("transcripts_ollama").count_rows() > 0
+
+
+def test_a_foreign_key_in_a_staging_table_refuses_too(demo_index, monkeypatch):
+    """`recover_staging` promotes a staging table whose live table is gone, so a
+    staging table is part of what the rebuild would publish (F7-staging-foreign)."""
+    _manifest(monkeypatch)
+    demo_index.mkdir()
+    db = lancedb.connect(demo_index)
+    db.create_table("transcripts_ollama__staging",
+                    [{"chunk_id": "m1", "note": "mine", "book": "My Own Notes — Me", "source": "s",
+                      "section": "1", "text": PARA, "vector": [0.0, 1.0, 0.5, 0.25]}])
+    with pytest.raises(SystemExit) as refused:
+        demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
+    assert "My Own Notes — Me" in str(refused.value.code)
+    names = lancedb.connect(demo_index).table_names()
+    assert "transcripts_ollama__staging" in names and "transcripts_ollama" not in names

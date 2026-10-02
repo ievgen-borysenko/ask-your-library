@@ -4,8 +4,9 @@ demo script refuses a rebuild on and `ayl init` calls a demo folder foreign by.
 Two signals, and a book either names is foreign; neither stands in for the
 other:
 
-- the ROWS: every book key in every transcripts and cards table (staging
-  tables aside) against the keys the manifest produces (`bookkey.book_key`,
+- the ROWS: every book key in every transcripts and cards table — staging
+  tables included, because `recover_staging` promotes one whose live table is
+  gone — against the keys the manifest produces (`bookkey.book_key`,
   the function the ingest mints them with). A table holding rows with no
   book key at all is foreign as a whole;
 - the LEDGER: a row whose `source_ref` is not `manifest:<id>` is a book
@@ -19,7 +20,7 @@ written.
 from ..index_meta import rows_by_book
 from ..sanitize import strip_control_chars
 from .ledger import open_ledger
-from .publish import STAGING_SUFFIX, table_names
+from .publish import table_names
 
 NO_KEY = "(rows with no book key)"
 
@@ -29,7 +30,7 @@ def foreign_books(db, manifest_keys: set[str]) -> list[str]:
     sorted and printable; empty when every row and every ledger row is."""
     found: set[str] = set()
     for name in table_names(db):
-        if not name.startswith(("transcripts_", "cards_")) or name.endswith(STAGING_SUFFIX):
+        if not name.startswith(("transcripts_", "cards_")):
             continue
         table = db.open_table(name)
         if table.count_rows() and "book" not in table.schema.names:

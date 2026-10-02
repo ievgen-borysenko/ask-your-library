@@ -189,14 +189,16 @@ def demo_state_folder(path: Path, transcripts=None, cards=None, *, ledger=None,
         ids[key(note)] = book_id
     if transcripts is not None:
         _table(db, "transcripts_ollama", {key(n) for n in transcripts}, t_fts, t_meta, ids)
+    staged = lambda notes: [{"chunk_id": f"s{i}", "book": key(n), "text": "t"}  # noqa: E731
+                            for i, n in enumerate(STARTER if notes is True else notes)]
     if t_staging:
-        db.create_table("transcripts_ollama__staging", [{"chunk_id": "s", "book": "", "text": "t"}],
-                        mode="overwrite")
+        db.create_table("transcripts_ollama__staging", staged(t_staging), mode="overwrite")
     if cards is not None:
         _table(db, "cards_ollama", {key(n) for n in cards if n in CARDED}, c_fts, c_meta)
     if c_staging:
-        db.create_table("cards_ollama__staging", [{"chunk_id": "s", "book": "", "text": "t"}],
-                        mode="overwrite")
+        db.create_table("cards_ollama__staging",
+                        staged([n for n in (STARTER if c_staging is True else c_staging)
+                                if n in CARDED]), mode="overwrite")
 
 
 def demo_library(path: Path, notes, source="manifest", ledger_notes=None, cards=True):
@@ -863,10 +865,10 @@ def snapshot(old, new, step):
     return {
         "S0 before anything is published": dict(transcripts=old, cards=old),
         "S1 transcripts staging being built": dict(transcripts=old, cards=old, ledger=begun,
-                                                   t_staging=True),
+                                                   t_staging=new),
         "S2 old transcripts dropped, staging complete": dict(transcripts=None, cards=old,
-                                                             ledger=begun, t_staging=True),
-        "S3 transcripts published, staging not dropped": t(t_staging=True, t_fts=False),
+                                                             ledger=begun, t_staging=new),
+        "S3 transcripts published, staging not dropped": t(t_staging=new, t_fts=False),
         "S4 transcripts published, no full-text index": t(t_fts=False),
         "S5 transcripts indexed, not stamped": t(),
         "S6 transcripts stamped, ledger not committed": dict(
@@ -875,11 +877,11 @@ def snapshot(old, new, step):
             transcripts=new, cards=old,
             ledger={**{n: "indexed" for n in (old or [])}, **{n: "indexed" for n in new}}),
         "S8 ledger reconciled, cards not started": dict(transcripts=new, cards=old),
-        "S9 cards staging being built": dict(transcripts=new, cards=old, c_staging=True),
+        "S9 cards staging being built": dict(transcripts=new, cards=old, c_staging=new),
         "S10 old cards dropped, staging complete": dict(transcripts=new, cards=None,
-                                                        c_staging=True),
+                                                        c_staging=new),
         "S11 cards published, staging not dropped": dict(transcripts=new, cards=new,
-                                                         c_staging=True, c_fts=False,
+                                                         c_staging=new, c_fts=False,
                                                          c_meta=not first),
         "S12 cards published, no full-text index": dict(transcripts=new, cards=new, c_fts=False,
                                                         c_meta=not first),
@@ -1077,3 +1079,11 @@ def test_the_question_is_not_asked_when_the_answer_could_not_be_built(machine):
     machine.answer("y")
     assert init() == 0
     assert machine.prompts == [] and machine.builds == []
+
+
+def test_a_staging_table_of_other_books_makes_the_folder_foreign(tmp_path):
+    """The demo script's rule, so init agrees with it (F7-staging-foreign)."""
+    folder = tmp_path / "demo"
+    demo_state_folder(folder, STARTER, STARTER, t_staging=["my-own-notes"])
+    assert init_cmd.demo_state(folder, "ollama", {n: MANIFEST_KEYS[n] for n in STARTER}) == (
+        "foreign", "it holds books that are not the demo corpus's")
