@@ -1335,7 +1335,17 @@ disagreement with `ayl ui` this record exists to end.
 **Consequences.** A command run from outside the clone no longer reads the clone's `.env`; the
 changelog says so. The installer still writes the clone's `.env` and judges it before installing
 anything; a `config.env` left by an earlier `ayl init` sits under it and fills only the names the
-`.env` does not set — the installer's guard does not read it. The test suite already pins every
+`.env` does not set, and the installer's guard reads it as the same third layer.
+
+**The working directory decides, and the local promise is checked when `ayl init` runs, not on
+every command.** The project's `.env` is the one of whatever project the command is typed in. An
+`ayl ask` typed inside another project whose `.env` sets, say, `LANGCHAIN_TRACING_V2=true` and a
+LangSmith key reads both, above `config.env`, and the answer's prompts are traced to LangSmith —
+`ayl init` held the local mode to "nothing leaves this machine" when it ran, in the directory it
+ran in, and nothing re-checks that at question time. The check a reader can run, from the
+directory they ask in: `ayl init --print-env-resolution`, which prints every setting that decides
+where data goes and the file each came from. Accepted for now: a per-question re-check of the data
+flow is a change to `ayl ask` and the web chat, not to the first run. The test suite already pins every
 setting it depends on before the first import, and `tests/test_config_layers.py` holds the order
 in fresh interpreters that look like a console script to python-dotenv.
 

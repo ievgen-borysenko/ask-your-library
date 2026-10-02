@@ -3,6 +3,13 @@
 From `backlog.md`, confirmed by the runs of 2026-09-05, 06 and 07 (`v0.2.0-rc1`), and — for the
 local default that ships since 0.3.0 — by the local run of 2026-09-10:
 
+- **"Fully local" is checked by `ayl init`, in the directory it runs in, not by every command.**
+  `ayl ask` and the web chat read the `.env` of the project they are started in, above
+  `~/AskYourLibrary/config.env` (ADR-027), so another project's `.env` with a tracing flag and a
+  key, a remote `OLLAMA_URL` or a hosted backend changes where that question goes, and nothing
+  says so at question time. `ayl init --print-env-resolution`, run from that directory, shows what
+  each data-flow setting resolves to and where it came from.
+
 - **The default local answering model is not good enough to advertise as a strong default, and
   this project's own measurement of it says so.** Measured on the local backend on 2026-09-10
   ([`eval-results/2026-09-10-local-models.md`](eval-results/2026-09-10-local-models.md)). Two

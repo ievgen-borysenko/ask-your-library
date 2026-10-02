@@ -152,6 +152,14 @@ can be started:
 - **`scripts/` is not in it.** `scripts/ingest_demo_corpus.py` downloads a corpus on purpose; that
   is a different path with a different claim.
 
+- **The directory a command is typed in can change where data goes.** Settings are read from
+  three places (ADR-027): exported, then the `.env` of the project the command runs in, then
+  `~/AskYourLibrary/config.env`. A command typed inside another project whose `.env` sets a
+  tracing flag and a LangSmith key — or a remote `OLLAMA_URL`, or `LLM_BACKEND=openrouter` —
+  reads those above the configuration `ayl init` wrote, and the local promise `ayl init` checked
+  is not checked again at question time. Run `ayl init --print-env-resolution` from that
+  directory to see every data-flow setting and the file it came from.
+
 ## Threat model
 
 Designed for **localhost, single user**. Not designed for internet exposure:
