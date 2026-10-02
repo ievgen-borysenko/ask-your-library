@@ -735,7 +735,18 @@ def reflect(state: AgentState) -> dict:
     if llm.deadline_passed():
         return {"current_query": "", "queries": [], "stop_reason": _deadline_reason()}
 
-    evidence_lines = "\n".join(f"- {e['book']} ({e['section']}): {e['why']}"
+    # The decision is made on the verified quotes, never on `observe`'s note
+    # about them (#93, ADR-005 amended 2026-10-02). The note (`why`) is the
+    # model's own paraphrase and nothing checks it: at temperature 0 its
+    # wording drifted between days, and a note that stated an outcome its quote
+    # does not carry ended the loop early. The quote passed the provenance
+    # gate, so it is the one thing here the books are known to say. It is shown
+    # as `synthesize` shows it — in double quotes, a '"' inside it left as it
+    # is — and the body goes through data_block like synthesize's, which drops
+    # control characters and neutralizes "<". This is the line the offline
+    # replay of 02.10 measured, byte for byte. `why` stays in the state for the
+    # scratchpad log and now reaches no prompt at all.
+    evidence_lines = "\n".join(f"- {e['book']} ({e['section']}): \"{e['quote']}\""
                                for e in state["evidence"]) or "(none)"
     queued = state["queries"]
     lines = [
