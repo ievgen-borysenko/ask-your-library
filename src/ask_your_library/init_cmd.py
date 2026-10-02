@@ -46,6 +46,7 @@ from . import config, home, ollama, preflight
 from .cli import say
 from .i18n import t
 from .ingest.ledger import INDEXED, open_ledger
+from .ingest.publish import STAGING_SUFFIX
 from .paths import REPO_ROOT
 from .ui import launcher
 
@@ -233,11 +234,18 @@ def demo_state(path: Path, backend: str, wanted: set[str]) -> tuple[str, str]:
     `other_backend` an index whose transcripts another embedding backend built
     — building beside it would be a second index in one folder; `foreign` an
     index holding a book no manifest entry built, or none that a ledger
-    describes — rebuilding the table would replace them."""
+    describes — rebuilding the table would replace them.
+
+    A staging table (`<table>__staging`) is not a built table of any backend:
+    it is what an interrupted rebuild leaves, and the script's
+    `recover_staging` finishes or drops it on the next run. Counted as a
+    table, a first build stopped with Ctrl-C read as "another backend" and the
+    rerun that was promised to resume refused instead."""
     table = f"transcripts_{backend}"
     if not (path / f"{table}.lance").is_dir():
-        others = sorted(p.name[:-len(".lance")] for p in path.glob("transcripts_*.lance")) \
-            if path.is_dir() else []
+        built = (p.name[:-len(".lance")] for p in path.glob("transcripts_*.lance")) \
+            if path.is_dir() else ()
+        others = sorted(name for name in built if not name.endswith(STAGING_SUFFIX))
         if others:
             return "other_backend", ", ".join(others)
         return "absent", ""

@@ -437,6 +437,18 @@ def test_what_an_existing_folder_is_as_a_demo_library(tmp_path):
         "foreign", "no ledger describes its books")
 
 
+def test_an_interrupted_first_build_s_staging_table_is_not_another_backend(machine, tmp_path):
+    """Ctrl-C during the first demo build leaves `transcripts_<backend>__staging`
+    and no built table; the rerun has to resume it, not refuse it."""
+    demo = machine.home / "demo" / "index"
+    demo.mkdir(parents=True)
+    lancedb.connect(demo).create_table("transcripts_ollama__staging", [{"x": 1}])
+    assert init_cmd.demo_state(demo, "ollama", set(STARTER)) == ("absent", "")
+    machine.check_status = 0
+    assert init("--demo") == 0
+    assert machine.builds == [(demo, "ollama", False)]
+
+
 def test_the_env_resolution_names_each_source_and_never_a_key(machine, monkeypatch, capsys):
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-not-a-real-key")
     monkeypatch.setattr(config, "EXPORTED", frozenset({"OPENROUTER_API_KEY", "OLLAMA_URL"}))
