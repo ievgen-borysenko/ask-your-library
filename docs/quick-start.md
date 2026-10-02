@@ -31,7 +31,7 @@ changes nothing and says so:
    sets `LLM_BACKEND` or `EMBED_BACKEND`, or an existing `config.env` — decides instead and is
    never rewritten. In the local mode an exported `LLM_BACKEND` or `EMBED_BACKEND` that is not
    `ollama` is refused (exit 2) before anything changes, because an exported variable would win
-   over the file; in the hosted mode, as under the installer's `--hosted`, the export decides and
+   over the file; in the hosted mode, as in the installer's hosted run, the export decides and
    step 2 names it. A value of either that is not `ollama` or `openrouter` is refused in every mode,
    wherever it came from — and `install-mac.sh` refuses all of these before it installs anything.
    The local mode is held to what it promises, the rule `install-mac.sh` applies: an `OLLAMA_URL`
