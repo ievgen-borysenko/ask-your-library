@@ -103,8 +103,9 @@ on translated prose:
 
 `3` and `5` are the two ordinary ways a fresh clone fails, and both messages carry the commands
 that fix them, `bash scripts/install-mac.sh` included. `ayl init` exits with the same numbers
-(5 when Ollama does not answer, 2 when an exported variable contradicts the mode it would write
-or a local mode would send something off this machine),
+(5 when Ollama does not answer; 2 when `LLM_BACKEND` or `EMBED_BACKEND` is neither `ollama` nor
+`openrouter`, when an exported one contradicts the local mode it would write, or when a local
+mode would send something off this machine — the installer refuses the same, before step 3),
 and with 0 when the only things left are yours to do: adding books, and a hosted mode's key.
 
 ## Fully local, no account

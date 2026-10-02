@@ -934,6 +934,38 @@ local_effect() {
     esac
 }
 
+# --- the two mode switches, in every mode -------------------------------------
+# Before anything is installed: config.py refuses a bad LLM_BACKEND at import,
+# and reads EMBED_BACKEND as it stands, so `EMBED_BACKEND=ollma` in a .env got
+# through a --hosted run's every step and failed at step 11, inside `ayl init`
+# — after Homebrew, uv, the models and the locked environment. The same values
+# `ayl init` refuses (exit 2), refused here first, with the same blank rule
+# (blank_is_default: the default for LLM_BACKEND, not for EMBED_BACKEND).
+for name in $BACKEND_VARS; do
+    value="$(effective_value "$name")"
+    case "$value" in
+        ollama|openrouter) ;;
+        *)
+            fail "$name='$value' ($(value_source "$name")) is not a backend: it must be one"
+            fail "of ollama, openrouter. Every command would fail on it (config.py refuses a"
+            fail "bad LLM_BACKEND at import; \`ayl add\` and \`ayl ask\` refuse an unknown"
+            fail "embedding backend). Fix it where it came from and re-run; nothing was installed."
+            exit 2
+            ;;
+    esac
+done
+
+# Which configuration the local rule below is held to: the one this run sets
+# up, and also the one the application will LOAD when that is local — --hosted
+# with an exported LLM_BACKEND=ollama runs locally, and `ayl init` (step 11)
+# holds the loaded local mode to the same rule. Judged here, before step 3,
+# so the run cannot install everything and then be refused by it.
+judge_local=0
+if [ "$setup_mode" = "fully local" ] || { [ "$(effective_value LLM_BACKEND)" = "ollama" ] \
+        && [ "$(effective_value EMBED_BACKEND)" = "ollama" ]; }; then
+    judge_local=1
+fi
+
 conflict_names=""
 conflict_lines=""
 exported_lines=""
@@ -948,7 +980,7 @@ for name in $DATA_FLOW_VARS; do
     # text to hold anything to, and step 10 stops the run on it with its own
     # message. An empty .env is a different thing — it resolves to config.py's
     # own defaults for real, and those are judged like any other values.
-    if [ "$planned_env_read" -eq 1 ] && [ "$setup_mode" = "fully local" ] \
+    if [ "$planned_env_read" -eq 1 ] && [ "$judge_local" -eq 1 ] \
         && contradicts_local "$name" "$value"; then
         conflict_names="$conflict_names $name"
         conflict_lines="$conflict_lines  $name=$shown ($origin) — $(local_effect "$name")"$'\n'
@@ -956,8 +988,13 @@ for name in $DATA_FLOW_VARS; do
 done
 
 if [ -n "$conflict_names" ]; then
-    fail "this run sets up the fully local configuration, but that is not what the"
-    fail "application would load. These values decide where your data goes:"
+    if [ "$setup_mode" = "fully local" ]; then
+        fail "this run sets up the fully local configuration, but that is not what the"
+        fail "application would load. These values decide where your data goes:"
+    else
+        fail "the application would load the fully local configuration (both backends"
+        fail "resolve to ollama, over --hosted), and these values would send data elsewhere:"
+    fi
     printf '%s' "$conflict_lines" | while IFS= read -r line; do fail "$line"; done
     exported_conflicts=""
     dotenv_conflicts=""

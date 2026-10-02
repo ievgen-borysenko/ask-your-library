@@ -238,29 +238,18 @@ def switch_problems() -> list[str]:
 
 
 def contradictions(mode: str) -> list[str]:
-    """Exported switches that would override the file this run writes, each
-    as the sentence that says what to do about it: python-dotenv never
-    overrides an exported name, so the file would say one mode and every
-    command would run another."""
+    """Exported switches that contradict the local mode this run would write,
+    each as the sentence that says what to do about it: python-dotenv never
+    overrides an exported name, so the file would say local and every command
+    would send something elsewhere. Asked only of the local mode — the hosted
+    one lets an export decide and names it, as the installer's --hosted does."""
     wanted = MODES[mode]
     loaded = {"LLM_BACKEND": config.LLM_BACKEND, "EMBED_BACKEND": config.EMBED_BACKEND}
-    found = []
-    for name in SWITCHES:
-        if name not in config.EXPORTED or loaded[name] == wanted[name]:
-            continue
-        if name == "EMBED_BACKEND":
-            # No mode of `ayl init` embeds anywhere but here, so choosing the
-            # other one is no remedy for this one.
-            found.append(f"EMBED_BACKEND={loaded[name]} is exported in this shell, and both "
-                         f"modes `ayl init` writes embed on this machine (EMBED_BACKEND=ollama); "
-                         f"unset it in this shell to use one, or write the configuration by "
-                         f"hand from .env.example")
-        else:
-            other = mode_of(loaded[name], wanted["EMBED_BACKEND"])
-            found.append(f"{name}={loaded[name]} is exported in this shell and would decide "
-                         f"every command instead of the {mode} mode this run writes; unset it"
-                         + (f", or run `ayl init --mode {other}`" if other in MODES else ""))
-    return found
+    return [f"{name}={loaded[name]} is exported in this shell and would decide every command "
+            f"instead of the {mode} mode this run writes; unset it, or run "
+            f"`ayl init --mode hosted`, in which an exported switch decides and is named"
+            for name in SWITCHES
+            if name in config.EXPORTED and loaded[name] != wanted[name]]
 
 
 def local_mode_problems(writing: bool) -> list[str]:
@@ -550,22 +539,35 @@ def _run(args) -> int:
     # Step 2 is decided first, silently: step 1 needs to know whether this
     # configuration uses Ollama at all.
     existing = existing_configuration()
+    written = None          # the mode of the file this run writes, if it writes one
     if existing is not None:
         llm, embed = config.LLM_BACKEND, config.EMBED_BACKEND
         mode = mode_of(llm, embed)
     else:
-        mode = args.mode or "local"
-        clash = contradictions(mode)
-        if clash:
-            for sentence in clash:
-                problem(f"{sentence}.")
-            problem("Nothing was changed.")
-            return 2
-        llm, embed = MODES[mode]["LLM_BACKEND"], MODES[mode]["EMBED_BACKEND"]
+        written = args.mode or "local"
+        if written == "local":
+            # The local mode promises that nothing leaves this machine, so an
+            # exported switch that would send something elsewhere is refused —
+            # the rule scripts/install-mac.sh holds its local mode to.
+            clash = contradictions(written)
+            if clash:
+                for sentence in clash:
+                    problem(f"{sentence}.")
+                problem("Nothing was changed.")
+                return 2
+        # The hosted mode, like the installer's --hosted, is not refused over
+        # an exported switch: the export decides (it wins over the file), the
+        # run follows it — pulls, checks, the local rule when it is local —
+        # and step 2 says so.
+        llm = config.LLM_BACKEND if "LLM_BACKEND" in config.EXPORTED \
+            else MODES[written]["LLM_BACKEND"]
+        embed = config.EMBED_BACKEND if "EMBED_BACKEND" in config.EXPORTED \
+            else MODES[written]["EMBED_BACKEND"]
+        mode = mode_of(llm, embed)
     if mode == "local":
         # "Nothing leaves this machine" is what the local mode is, so a run
         # that would send something elsewhere is not one, whatever file says so.
-        leaks = local_mode_problems(writing=existing is None)
+        leaks = local_mode_problems(writing=written == "local")
         if leaks:
             for leak in leaks:
                 problem(f"{leak}.")
@@ -616,6 +618,11 @@ def _run(args) -> int:
                  f"`ayl init` never rewrites one. Edit it (or move it aside) and run again.")
     else:
         note("chosen with --mode" if args.mode else "the default (--mode hosted for OpenRouter)")
+        if mode != written:
+            note(f"the file this run writes says {written}; "
+                 + ", ".join(f"{name}={value} is exported in this shell and wins over it"
+                             for name, value in (("LLM_BACKEND", llm), ("EMBED_BACKEND", embed))
+                             if name in config.EXPORTED and value != MODES[written][name]))
     if embed != "ollama":
         note("embeddings run on OpenRouter: a demo build would be billed per token")
 
@@ -669,7 +676,7 @@ def _run(args) -> int:
         note(f"{described(existing)} exists and is never rewritten; nothing was changed")
     else:
         target = home.ayl_home() / "config.env"
-        text = config_text(mode)
+        text = config_text(written)
         if dry:
             plan(f"write {target} (mode 0600):")
             for line in text.splitlines():
@@ -687,7 +694,7 @@ def _run(args) -> int:
             for line in text.splitlines():
                 if not line.startswith("#"):
                     note(f"  {line}")
-        if mode == "hosted":
+        if written == "hosted":
             note(f"OPENROUTER_API_KEY is left empty on purpose: set it in {target} (or export "
                  f"it) before the first question. `ayl init` never takes a key.")
 

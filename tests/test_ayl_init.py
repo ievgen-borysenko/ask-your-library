@@ -347,15 +347,29 @@ def test_a_dotenv_outside_the_checkout_is_named_as_one(machine, capsys):
     assert f"read from {dotenv} (a .env outside this checkout)" in capsys.readouterr().out
 
 
-def test_an_exported_hosted_embedder_gets_its_own_remedy(machine, capsys):
-    """Choosing the other mode does not fix this one: both embed locally."""
+def test_an_exported_hosted_embedder_is_refused_in_the_local_mode(machine, capsys):
     machine.mp.setattr(config, "EXPORTED", frozenset({"EMBED_BACKEND"}))
     machine.mp.setattr(config, "EMBED_BACKEND", "openrouter")
-    assert init("--mode", "hosted") == 2
+    assert init() == 2
     err = capsys.readouterr().err
     assert "EMBED_BACKEND=openrouter is exported in this shell" in err
-    assert "both modes `ayl init` writes embed on this machine" in err
-    assert "--mode local" not in err
+    assert "`ayl init --mode hosted`, in which an exported switch decides" in err
+
+
+def test_in_the_hosted_mode_an_exported_switch_decides_and_is_named(machine, monkeypatch,
+                                                                   capsys):
+    """As the installer's --hosted: the export wins over the file, the run
+    follows it, and step 2 says so — no refusal."""
+    machine.mp.setattr(config, "EXPORTED", frozenset({"EMBED_BACKEND"}))
+    machine.mp.setattr(config, "EMBED_BACKEND", "openrouter")
+    monkeypatch.setenv("EMBED_BACKEND", "openrouter")
+    machine.check_status = preflight.EXIT_NO_KEY
+    assert init("--mode", "hosted") == 0
+    out = capsys.readouterr().out
+    assert "Mode: neither mode `ayl init` writes — OpenRouter answers, OpenRouter embeds" in out
+    assert "EMBED_BACKEND=openrouter is exported in this shell and wins over it" in out
+    assert "\nLLM_BACKEND=openrouter\n" in (machine.home / "config.env").read_text()
+    assert machine.pulls == [], "nothing of this configuration runs on Ollama"
 
 
 def test_an_exported_switch_is_named_as_the_source_over_an_existing_file(machine, capsys):

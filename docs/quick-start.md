@@ -29,9 +29,11 @@ changes nothing and says so:
    (OpenRouter answers, the embeddings stay local, and you set `OPENROUTER_API_KEY` yourself;
    `ayl init` never takes a key). A configuration that already chooses the mode — a `.env` that
    sets `LLM_BACKEND` or `EMBED_BACKEND`, or an existing `config.env` — decides instead and is
-   never rewritten; an exported `LLM_BACKEND` or `EMBED_BACKEND` that contradicts the mode is
-   refused (exit 2) before anything changes, because an exported variable would win over the file,
-   and so is a value of either that is not `ollama` or `openrouter`, wherever it came from.
+   never rewritten. In the local mode an exported `LLM_BACKEND` or `EMBED_BACKEND` that is not
+   `ollama` is refused (exit 2) before anything changes, because an exported variable would win
+   over the file; in the hosted mode, as under the installer's `--hosted`, the export decides and
+   step 2 names it. A value of either that is not `ollama` or `openrouter` is refused in every mode,
+   wherever it came from — and `install-mac.sh` refuses all of these before it installs anything.
    The local mode is held to what it promises, the rule `install-mac.sh` applies: an `OLLAMA_URL`
    that is not this machine, a tracing flag that uploads, or a `LANGCHAIN_API_KEY` that would turn
    tracing on is refused (exit 2), each named with where its value came from.

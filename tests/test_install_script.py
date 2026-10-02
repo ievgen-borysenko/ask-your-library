@@ -1902,3 +1902,56 @@ def test_the_package_prints_no_planted_credential(tmp_path, where, argv):
     printed = assert_no_planted(result)
     assert "Traceback" not in printed, printed
     assert "<credentials>@" in printed, "no line named a URL: the check checked nothing"
+
+
+# --- what `ayl init` refuses from configuration alone, the installer refuses first ------
+# (F3-installer-backend-values.) Step 11 runs `ayl init`; a configuration it
+# refuses must not have got through steps 3 to 10 first. Each case is given to
+# both, as the same flags, exported variables and .env: the installer has to
+# stop before invoking any tool or writing .env, and `ayl init` before writing
+# anything under AYL_HOME.
+SAME_INPUT = [
+    # (id, --hosted?, exported, .env text)
+    ("invalid-embed-in-dotenv-hosted", True, {}, "LLM_BACKEND=openrouter\nEMBED_BACKEND=ollma\n"),
+    ("invalid-embed-exported", False, {"EMBED_BACKEND": "ollma"}, None),
+    ("blank-embed-exported", False, {"EMBED_BACKEND": ""}, None),
+    ("invalid-llm-exported", False, {"LLM_BACKEND": "ollma"}, None),
+    ("local-exported-hosted-answers", False, {"LLM_BACKEND": "openrouter"}, None),
+    ("local-exported-hosted-embeddings", False, {"EMBED_BACKEND": "openrouter"}, None),
+    ("local-remote-ollama", False, {"OLLAMA_URL": "http://ollama.example.com:11434"}, None),
+    ("local-tracing-v2", False, {"LANGSMITH_TRACING_V2": "true"}, None),
+    ("local-tracing-v1", False, {"LANGCHAIN_HANDLER": "langchain"}, None),
+    ("local-key-alone-over-dotenv", False, {"LANGCHAIN_API_KEY": "lsv2-not-a-real-key"},
+     "LLM_BACKEND=ollama\nEMBED_BACKEND=ollama\n"),
+    ("hosted-but-exported-local-with-tracing", True,
+     {"LLM_BACKEND": "ollama", "LANGSMITH_TRACING_V2": "true"}, None),
+]
+
+
+@mac_only
+@pytest.mark.skipif(not have_package, reason="the package is not importable here")
+@pytest.mark.parametrize("case", SAME_INPUT, ids=[c[0] for c in SAME_INPUT])
+def test_what_ayl_init_refuses_the_installer_refuses_before_installing(sandbox, tmp_path,
+                                                                     case):
+    from conftest import run_fresh
+    _, hosted, exported, dotenv = case
+    root, records, env = sandbox
+    if dotenv is not None:
+        (root / ".env").write_text(dotenv)
+    before = (root / ".env").read_text() if dotenv is not None else None
+    installer = real_run(sandbox, *(["--hosted"] if hosted else []), **exported)
+    assert installer.returncode == 2, installer.stdout + installer.stderr
+    assert invoked(records) == [], "a tool ran before the refusal"
+    assert ((root / ".env").read_text() if (root / ".env").exists() else None) == before
+
+    home = tmp_path / "ayl-home"
+    argv = ["init", "--no-demo", *(["--mode", "hosted"] if hosted else [])]
+    init = run_fresh("import sys\nfrom ask_your_library import ayl\n"
+                     f"sys.exit(ayl.main({argv!r}))\n",
+                     cwd=root, check=False, AYL_HOME=str(home), **exported)
+    if case[0] == "invalid-llm-exported":
+        # config.py refuses it at import, before `ayl init` can parse a flag.
+        assert init.returncode != 0 and "LLM_BACKEND must be" in init.stderr
+    else:
+        assert init.returncode == 2, init.stdout + init.stderr
+    assert not home.exists(), "ayl init wrote before refusing"
