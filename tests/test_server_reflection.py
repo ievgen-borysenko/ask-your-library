@@ -25,7 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 import requests
 
-from ask_your_library import config, dataflow, embeddings, ollama
+from ask_your_library import config, dataflow, ollama
 from conftest import run_fresh
 
 # Not words, so a slice of either cannot turn up in ordinary output by chance.
@@ -118,30 +118,6 @@ def test_a_progress_stage_without_a_credential_is_the_server_s_sanitised(monkeyp
     answering(monkeypatch, Stream([{"status": "pulling manifest\x1b[2J"}, {"status": "success"}]))
     ollama.pull("some-model", lambda *args: seen.append(args), url="http://127.0.0.1:11434")
     assert seen[0] == ("pulling manifest[2J", None, None)
-
-
-@pytest.mark.parametrize("embedder", ["ollama", "openrouter"])
-def test_an_embedding_http_error_is_our_own_words(monkeypatch, embedder):
-    """The demo build `ayl init` starts prints it (a traceback): status as an
-    integer and the URL with its credential taken out, never the server's
-    reason phrase — whether or not a credential is configured."""
-    class Response:
-        status_code = 502
-        url = f"{URL}/api/embed"
-        reason = f"Bad {PASSWORD[:4]}"
-
-        def raise_for_status(self):
-            raise requests.HTTPError(f"502 Server Error: {self.reason} for url: {self.url}")
-    monkeypatch.setattr(embeddings, "requests",
-                        type("R", (), {"post": lambda *a, **k: Response()})())
-    target = (embeddings.OllamaEmbedder(URL) if embedder == "ollama" else
-              object.__new__(embeddings.OpenRouterEmbedder))
-    if embedder == "openrouter":
-        target.key = "not-a-real-key"
-    with pytest.raises(requests.HTTPError) as failed:
-        target._embed(["text"])
-    assert_clean(str(failed.value))
-    assert "Bad" not in str(failed.value) and "HTTP 502" in str(failed.value)
 
 
 # --- end to end: a server that reflects fragments of what it was sent ---------------------

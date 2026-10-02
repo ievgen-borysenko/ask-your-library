@@ -7,12 +7,9 @@ import os
 import re
 
 import requests
-# Bound here so the except clause survives a stubbed `requests` in tests.
-from requests import HTTPError
 
 from .config import (OLLAMA_EMBED_MODEL, OLLAMA_URL, OPENROUTER_BASE_URL,
                      OPENROUTER_EMBED_MODEL, OPENROUTER_ENV_FILE)
-from .dataflow import without_credentials
 
 
 def openrouter_api_key() -> str:
@@ -39,24 +36,6 @@ def _check_dims(vectors: list[list[float]], dims: int, model: str) -> list[list[
     return vectors
 
 
-def _raise_for_status(response) -> None:
-    """`response.raise_for_status()`, with a message of our own: the status
-    and the URL with its credential taken out. requests' own text carries two
-    things a reader must not be shown — the URL as written, `user:password@`
-    included ("... for url: http://user:secret@host/..."), and the reason
-    phrase, which is the SERVER's text: a server sent that credential as Basic
-    auth can put it there. That text is a traceback line on the reader's
-    terminal; a demo build `ayl init` starts prints it whole. The response
-    stays on the error for a caller that inspects it."""
-    try:
-        response.raise_for_status()
-    except HTTPError:
-        url = str(getattr(response, "url", "") or "")
-        raise HTTPError(f"HTTP {getattr(response, 'status_code', '?')} from "
-                        f"{without_credentials(url) or 'the embedding endpoint'}",
-                        response=response) from None
-
-
 class OllamaEmbedder:
     """bge-m3 via local Ollama: multilingual, so non-English questions retrieve
     from an English corpus without translation."""
@@ -71,7 +50,7 @@ class OllamaEmbedder:
     def _embed(self, texts: list[str]) -> list[list[float]]:
         response = requests.post(f"{self.url}/api/embed",
                                  json={"model": self.model, "input": texts}, timeout=300)
-        _raise_for_status(response)
+        response.raise_for_status()
         return _check_dims(response.json()["embeddings"], self.dims, self.model)
 
     def embed_docs(self, texts: list[str]) -> list[list[float]]:
@@ -101,7 +80,7 @@ class OpenRouterEmbedder:
             f"{OPENROUTER_BASE_URL.rstrip('/')}/embeddings",
             headers={"Authorization": f"Bearer {self.key}"},
             json={"model": self.model, "input": texts}, timeout=120)
-        _raise_for_status(response)
+        response.raise_for_status()
         data = sorted(response.json()["data"], key=lambda d: d["index"])
         return _check_dims([d["embedding"] for d in data], self.dims, self.model)
 

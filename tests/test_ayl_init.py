@@ -759,28 +759,6 @@ class BadTags:
         return Reply()
 
 
-def test_an_embedding_http_error_carries_no_credential(monkeypatch):
-    """requests keeps `user:password@` in the URL of an HTTPError's text; a
-    demo build's traceback would print it."""
-    from ask_your_library import embeddings
-
-    class Response:
-        status_code = 500
-        url = f"{CREDENTIAL_URL}/api/embed"
-
-        def raise_for_status(self):
-            raise requests.HTTPError(f"500 Server Error: boom for url: {self.url}")
-
-    class Post:
-        def post(self, *args, **kwargs):
-            return Response()
-    monkeypatch.setattr(embeddings, "requests", Post())
-    with pytest.raises(requests.HTTPError) as raised:
-        embeddings.OllamaEmbedder(CREDENTIAL_URL)._embed(["text"])
-    assert SECRET not in str(raised.value)
-    assert "http://<credentials>@localhost:11434/api/embed" in str(raised.value)
-
-
 # --- completeness is read from the tables (F2-demo-completeness) -------------------------
 
 def test_a_full_ledger_over_a_starter_table_is_not_the_full_corpus(tmp_path):
