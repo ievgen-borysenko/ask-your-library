@@ -1631,7 +1631,7 @@ if [ "$demo_ready" -eq 1 ]; then
 fi
 if [ "$want_demo" -eq 0 ]; then
     if [ "$demo_ready" -eq 0 ]; then
-        note "no books yet, and no demo library (--no-demo). Index your own .txt / .md / .epub books:"
+        note "no books yet, and no demo library (--no-demo). Index your own .txt / .md / .epub / .pdf books:"
         note "  uv run ayl add ~/books"
     fi
 else
@@ -1875,7 +1875,7 @@ printf 'Next steps:\n'
 # line that asks it, and this index is still the reader's, still empty.
 if [ "$demo_ready" -eq 0 ]; then
     printf '  uv run ayl add ~/books\n'
-    printf '      index your own .txt / .md / .epub books first — your index is empty, and the\n'
+    printf '      index your own .txt / .md / .epub / .pdf books first — your index is empty, and the\n'
     printf '      question below has nothing to search until it is not.\n'
     if [ "$want_demo" -eq 1 ]; then
         # --no-demo already said no; offering it again reads as not having listened.
