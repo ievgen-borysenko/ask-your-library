@@ -23,10 +23,11 @@ accepts, and anything written after a bare `--` reaches it verbatim (`ayl backup
 this had before, is still installed and still runs the same code; it prints one deprecation line
 and is removed at `0.6.0`.
 
-Every `.txt` / `.md` file under the folder (recursively) is **one book**. Skipped, and reported
-on stderr: hidden files and directories; **symlinks** — in or out of the folder, including files
-under a symlinked directory; files that are not UTF-8 text; and files with nothing but a front
-matter block or a title line. A link is not followed, so nothing outside the folder is ever read
+Every `.txt`, `.md` and `.epub` file under the folder (recursively) is **one book**. Skipped, and
+reported on stderr: hidden files and directories; **symlinks** — in or out of the folder, including
+files under a symlinked directory; files that are not UTF-8 text; files with nothing but a front
+matter block or a title line; and an EPUB that is refused ([below](#an-epub)): DRM-protected,
+malformed, over the archive limits, or without text. A link is not followed, so nothing outside the folder is ever read
 or embedded; copy the file in if you want it indexed. One bad file never aborts the run — the
 others are still indexed, and every skip is named on stderr (hidden ones as a single line with
 the count and the first few names, so one hidden directory cannot bury the rest). Only a folder
@@ -229,6 +230,55 @@ which never gains them. The
 catalogue deliberately does not: what your library holds is answered from the rows that can
 actually be searched, never from the record of what was ingested. `ayl add` is that contract with
 a CLI in front of it.
+
+## An EPUB
+
+An `.epub` is read for what it declares, never guessed at. **The book key** is the package
+metadata: `dc:title`, and `dc:creator` as the author — the creators with the author role (`aut`),
+or with no role at all, joined with commas, so a translator or an illustrator is not named as the
+author; every creator when none of them qualifies. With no `dc:title` the file name rule above
+applies (`Title - Author.epub`); with a title and no creator the author is `Unknown`. Front
+matter and title lines do not apply: an EPUB has metadata of its own.
+
+**A chapter is one file of the spine.** The spine is the reading order the book itself declares;
+each of its XHTML/HTML documents is read in that order, and the documents marked `linear="no"`
+(notes, answer keys — text with no place of its own in the reading order) follow the rest rather
+than being dropped. A document is named by the book's table of contents — the EPUB 3 navigation
+document (`<nav epub:type="toc">`), or the EPUB 2 `toc.ncx` when there is none — with the first
+entry that points at it, in the order the contents list them, so a part named above its chapters
+keeps its own name and a chapter keeps its name when the contents also list a scene inside it. A
+document the contents do not name continues the section before it (a chapter split over two
+files, which converters do for size); one before the first named document is `Front matter`
+(cover, title page, copyright page), the rule a `.txt` follows for text before its first heading.
+**With no usable table of contents** — none at all, or one that names none of the spine's
+documents — every document with text is a section of its own, `Section 1`, `Section 2`, … in
+reading order, and a book of one document is `Full text`. Nothing is inferred from headings in
+the text. Section names are made unique as for a text book.
+
+The text is taken out of the markup with Python's HTML parser: paragraphs and headings become
+paragraphs, scripts, styles, SVG and images are left out, whitespace is normalised, and the
+control and invisible characters the text path strips are stripped here too. A document may
+declare its encoding in its XML prolog (`windows-1252`, say); one that does not decode as it
+declares refuses the book rather than indexing mojibake.
+
+**Refused, with one line naming the file and why** — never a line of its text — and the rest of
+the folder is indexed as usual:
+
+- **DRM-protected**: a `META-INF/encryption.xml` that lists anything other than font obfuscation
+  (the IDPF and Adobe algorithms that only mangle an embedded font). Nothing is decrypted, stripped
+  or worked around; a book you bought with DRM is not indexable, by design.
+- **Malformed**: not a zip archive, no package document, no spine, a package or contents file that
+  is not well-formed XML, a reference to a file the archive does not hold.
+- **Unsafe**: an archive member whose path is absolute or climbs out with `..`, and any document
+  that declares an XML entity (the "billion laughs" shape; a book has no need of one).
+- **Too large**: more than 10,000 files in the archive, any one file over 64 MiB uncompressed, or
+  over 512 MiB uncompressed in total. What is read is read into memory by name — nothing is ever
+  extracted to disk — and every read is cut off at the per-file cap, whatever the archive claims.
+- **No text**: a spine with no XHTML/HTML document, or one whose documents hold no text (a book of
+  images).
+
+The limits of what is read — fixed layout, MOBI and AZW, footnotes, a file that holds several
+chapters — are in [Known limits](known-limits.md).
 
 ## More than one library
 

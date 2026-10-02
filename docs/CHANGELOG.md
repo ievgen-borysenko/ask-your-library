@@ -29,6 +29,20 @@
   `scripts/install-mac.sh` no longer asks about the demo corpus itself: step 11 runs `ayl init`
   (`--yes` there is `--demo` here), and its closing lines lead with `ayl add`.
 
+- **`ayl add` reads `.epub`** (#34,
+  [ADR-029](adr/README.md#adr-029-epub-is-read-with-the-standard-library-as-untrusted-input-and-drm-is-refused)):
+  a folder may now hold EPUB books beside `.txt` and `.md`. The title and author come from the
+  package metadata (`dc:title`, `dc:creator`; the file-name rule when there is no title), the
+  chapters from the spine in reading order, named by the book's own table of contents (the EPUB 3
+  `nav`, else the EPUB 2 `toc.ncx`); no heading in the text is guessed at. The rest is the text
+  path's: the same ledger, chunker and provenance. A DRM-protected EPUB (an `encryption.xml`
+  covering anything but font obfuscation) is refused with one line naming the file, and so is a
+  malformed one, one over the archive limits (10,000 files, 64 MiB a file, 512 MiB in all,
+  uncompressed), one with an unsafe member path or an XML entity declaration, and one with no
+  text; the rest of the folder is indexed as before. Standard library only, no new dependency.
+  [Add your own books](add-your-own-books.md#an-epub) has the rules,
+  [Known limits](known-limits.md) what is not read.
+
 - **One order for where a setting comes from, for every command** (#30,
   [ADR-027](adr/README.md#adr-027-one-precedence-for-every-command-exported-then-the-projects-env-then-ayl_homeconfigenv)):
   exported in the shell, then the `.env` of the project you are in (the working directory's, or a
