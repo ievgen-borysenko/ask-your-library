@@ -101,6 +101,12 @@ def sandbox(tmp_path):
     # Stubs first, then the system directories only: no /opt/homebrew, no
     # ~/.local/bin, so `uv` and friends cannot resolve to the real binaries.
     env["PATH"] = os.pathsep.join([str(bindir), "/usr/bin", "/bin", "/usr/sbin", "/sbin"])
+    # A home of the sandbox's own. AYL_HOME is scrubbed above, so the script's
+    # default — $HOME/AskYourLibrary, whose index step 11 looks at and whose
+    # config.env the guard reads — was the developer's real one.
+    home = tmp_path / "home"
+    home.mkdir()
+    env["HOME"] = str(home)
     return root, records, env
 
 
