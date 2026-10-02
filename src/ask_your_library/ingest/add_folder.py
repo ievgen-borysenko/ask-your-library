@@ -1,4 +1,4 @@
-"""`ayl-add <folder>`: index a folder of .txt / .md books into the agent's LanceDB.
+"""`ayl-add <folder>`: index a folder of .txt / .md / .epub books into the agent's LanceDB.
 
 The demo corpus is built from a checksum-pinned manifest; this is the generic
 path for your own library. Everything downstream is the demo pipeline's code —
@@ -19,6 +19,12 @@ and filters on) is taken from, in order:
    "Title by Author"); that line is then dropped from the body;
 3. the file name: "Title - Author.txt" -> "Title — Author"; "Title.txt" ->
    "Title — Unknown".
+
+An .epub takes its key from the package metadata (`dc:title`, `dc:creator`)
+and its chapters from the spine and the navigation document (`epub.py`); with
+no `dc:title` it falls back to rule 3. A refused .epub (DRM-protected,
+malformed, over the archive limits, no text) is left out and named like any
+other unreadable file.
 
 Writes the transcripts table only. Book cards are a separate, paid step (they
 need an LLM to distil each book) and are not generated here — the agent
@@ -45,6 +51,7 @@ from .chapters import MergedHeading, split_book_sections
 from .chunking import CHUNKER_VERSION, Chunk, embedding_text, pack_sentences, \
     parse_frontmatter, rows_for, split_sentences
 from .doctor import check_ledger
+from .epub import EpubRefused, read_epub
 from .fts import build_fts_index
 from .ledger import (INDEXED, LEGACY_CHUNKER, REQUESTED, Ledger, backfill_from_index,
                      open_ledger)
@@ -102,8 +109,9 @@ class IngestError(Exception):
     """A problem the user can fix, reported as one line instead of a traceback."""
 
 
-BOOK_SUFFIXES = (".txt", ".md", ".markdown")
+BOOK_SUFFIXES = (".txt", ".md", ".markdown", ".epub")
 MARKDOWN_SUFFIXES = (".md", ".markdown")
+EPUB_SUFFIX = ".epub"
 
 
 @dataclass
@@ -171,7 +179,7 @@ def key_from_filename(path: Path) -> str:
 # --- reading a folder -------------------------------------------------------
 
 def book_files(folder: Path) -> list[Path]:
-    """Every .txt / .md file under the folder, recursively.
+    """Every .txt / .md / .epub file under the folder, recursively.
 
     Skipped, and reported: hidden files and hidden directories; symlinks, in or
     out of the folder; anything that resolves outside the folder (a symlinked
@@ -224,6 +232,8 @@ def read_book(path: Path, folder: Path) -> Book | None:
     Unreadable files are warned about and skipped, never fatal: a folder of a
     few hundred books should not be blocked by one stray PDF that happens to be
     named .txt, and the run reports every file it left out."""
+    if path.suffix.lower() == EPUB_SUFFIX:
+        return read_epub_book(path, folder)
     try:
         raw = path.read_text(encoding="utf-8")
     except UnicodeDecodeError as error:
@@ -256,10 +266,28 @@ def read_book(path: Path, folder: Path) -> Book | None:
                 sections=sections, text_sha256=text_digest(body), merged_headings=merged)
 
 
+def read_epub_book(path: Path, folder: Path) -> Book | None:
+    """One .epub -> a Book, or None when it is refused.
+
+    The refusal is one warning naming the file by its path inside the folder and
+    giving the reason `epub` wrote — never an exception's text and never a line
+    of the book. The key comes from the package metadata, and from the file
+    name when the package has no title, which is the text path's last rule."""
+    try:
+        epub = read_epub(path)
+    except EpubRefused as reason:
+        log.warning("%s: %s, skipped", path.relative_to(folder), reason)
+        return None
+    key = book_key(epub.title, epub.author) if epub.title else key_from_filename(path)
+    text = "\n\n".join(body for _, body in epub.sections)
+    return Book(note=slug(key), book=key, source=f"local:{path.name}", path=path,
+                sections=epub.sections, text_sha256=text_digest(text))
+
+
 def read_folder(folder: Path) -> list[Book]:
     files = book_files(folder)
     if not files:
-        raise IngestError(f"no .txt or .md files in {folder}")
+        raise IngestError(f"no .txt, .md or .epub files in {folder}")
     books: list[Book] = []
     by_note: dict[str, Book] = {}
     for path in files:
@@ -986,7 +1014,7 @@ def build_parser(prog: str = "ayl-add") -> argparse.ArgumentParser:
     which are the names a reader typed (#30)."""
     parser = argparse.ArgumentParser(
         prog=prog,
-        description="Index a folder of .txt / .md books into the Ask Your Library LanceDB.",
+        description="Index a folder of .txt / .md / .epub books into the Ask Your Library LanceDB.",
         # No long-option abbreviations. `--doctor`, `--backup`, `--restore` and
         # `--rebuild` each decide WHICH command this run is, and argparse
         # resolves an unambiguous prefix to the option itself: `--doct` was
@@ -997,7 +1025,7 @@ def build_parser(prog: str = "ayl-add") -> argparse.ArgumentParser:
     # Optional only because --doctor reads the index and needs no folder; a
     # run without either is the argparse error it always was.
     parser.add_argument("folder", type=Path, nargs="?",
-                        help="folder of .txt / .md files (searched recursively)")
+                        help="folder of .txt / .md / .epub files (searched recursively)")
     parser.add_argument("--backend", default=EMBED_BACKEND, choices=("ollama", "openrouter"),
                         help="embedding backend; also selects the table suffix")
     parser.add_argument("--db", type=Path, default=None,
