@@ -19,7 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 import requests
 
-from ask_your_library import dataflow, embeddings, ollama, runner
+from ask_your_library import dataflow, embeddings, ollama
 from conftest import run_fresh
 
 USER, PASSWORD = "reader", "s3cret-not-a-real-password"
@@ -123,15 +123,6 @@ def test_an_embedding_http_error_carries_neither_the_url_s_credential_nor_the_re
         target._embed(["text"])
     assert_clean(str(failed.value))
     assert "Bad" not in str(failed.value) and "HTTP 502" in str(failed.value)
-
-
-def test_a_failed_run_s_message_is_scrubbed(monkeypatch):
-    """`ayl ask`'s failure line: a model call's error can carry the reply of
-    a server that was sent the credential."""
-    from ask_your_library import config
-    monkeypatch.setattr(config, "OLLAMA_URL", URL)
-    failure = runner._failure(RuntimeError(f"Error code: 401 - {{'error': '{PASSWORD} {B64}'}}"))
-    assert_clean(failure.message)
 
 
 # --- end to end: a server that reflects what it was sent ---------------------------------

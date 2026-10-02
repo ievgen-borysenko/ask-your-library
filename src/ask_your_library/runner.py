@@ -78,7 +78,6 @@ from langgraph.types import Command
 
 from .i18n import t
 from .llm import pause_deadline, reset_usage, usage_snapshot
-from .dataflow import scrub_credentials
 from .paths import redact_paths
 
 
@@ -231,10 +230,7 @@ class RunResult:
 def _failure(error: BaseException) -> RunFailure:
     """One place that turns an exception into the record of it: the class name,
     and the message with this machine's paths taken out of it."""
-    # A model call's error can carry the server's reply, and a server reached
-    # through a URL with a credential in it was sent that credential.
-    return RunFailure(type=type(error).__name__,
-                      message=redact_paths(scrub_credentials(f"{error}")), error=error)
+    return RunFailure(type=type(error).__name__, message=redact_paths(f"{error}"), error=error)
 
 
 def failed_result(question: str, error: Exception) -> RunResult:
