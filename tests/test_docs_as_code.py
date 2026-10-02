@@ -824,8 +824,12 @@ COMMAND_DOCS = ("docs/add-your-own-books.md", "docs/upgrading.md", "README.md")
 # deliberately absent: they appear as the directory `.chainlit/` and as the value
 # of `LLM_BACKEND=ollama` far more often than as a command, and neither may take
 # a flag away from the command named above it.
-COMMANDS = AYL_ADD_FORMS + ("ayl ask", "ayl books", "ayl ui", "ask-library",
+COMMANDS = AYL_ADD_FORMS + ("ayl init", "ayl ask", "ayl books", "ayl ui", "ask-library",
                             "ingest_demo_corpus.py", "install-mac.sh")
+# `ayl init` has a parser of its own (#30), and the first-run pages are where a
+# reader copies its flags from.
+INIT_DOCS = ("README.md", "docs/quick-start.md", "docs/configuration.md",
+             "docs/add-your-own-books.md", "docs/upgrading.md")
 FLAG = re.compile(r"(?<![\w-])(--[a-z][a-z0-9-]*)")
 
 
@@ -852,15 +856,20 @@ def flags_attributed_to_ayl_add() -> list[tuple[str, int, str]]:
     one of AYL_ADD_FORMS, i.e. the ingest parser under any of its names. A flag
     written before any command has been named in the file belongs to nothing
     this test can identify and is left alone."""
+    return flags_attributed_to(AYL_ADD_FORMS, COMMAND_DOCS)
+
+
+def flags_attributed_to(forms, docs) -> list[tuple[str, int, str]]:
+    """The attribution above, for any command's names over any pages."""
     found: list[tuple[str, int, str]] = []
-    for doc in COMMAND_DOCS:
+    for doc in docs:
         carried: str | None = None      # the last command named on an earlier line
         for number, text, _ in prose_and_code(REPO / doc):
             named = commands_in(text)
             for flag in FLAG.finditer(text):
                 earlier = [name for at, name in named if at < flag.start()]
                 owner = earlier[-1] if earlier else carried
-                if owner in AYL_ADD_FORMS:
+                if owner in forms:
                     found.append((doc, number, flag.group(1)))
             if named:
                 carried = named[-1][1]
@@ -884,3 +893,16 @@ def test_every_ayl_add_flag_the_docs_mention_is_one_the_parser_accepts():
     distinct = {flag for _, _, flag in mentioned}
     assert len(distinct) >= 8, (f"only {len(distinct)} distinct flags were attributed to "
                                 f"`{AYL_ADD}`: {sorted(distinct)}")
+
+
+def test_every_ayl_init_flag_the_docs_mention_is_one_its_parser_accepts():
+    """The same check for the first-run command: a page that says `ayl init
+    --demo` is a command a reader types before anything else works."""
+    from ask_your_library.init_cmd import build_parser
+    accepted = {option for action in build_parser()._actions for option in action.option_strings}
+    mentioned = flags_attributed_to(("ayl init",), INIT_DOCS)
+    problems = sorted({f"{doc}:{number}: {flag} is not an option of `ayl init`"
+                       for doc, number, flag in mentioned if flag not in accepted})
+    report(problems, "`ayl init` flags the docs name and its parser does not accept")
+    assert {flag for _, _, flag in mentioned} >= {"--demo", "--dry-run"}, (
+        "the first-run pages no longer show `ayl init --demo` / `--dry-run`")

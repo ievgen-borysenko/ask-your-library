@@ -18,6 +18,7 @@ apart without matching on translated prose, so `exit_code()` turns the kinds
 into the distinct status the CLI exits with.
 """
 from pathlib import Path
+from typing import NamedTuple
 
 import lancedb
 import requests
@@ -25,8 +26,9 @@ import requests
 # RequestException, so it must be caught first where both are handled.
 from requests import HTTPError, RequestException
 
-from .config import (DB_PATH, EMBED_BACKEND, LLM_BACKEND, OLLAMA_EMBED_MODEL, OLLAMA_URL, OPENROUTER_NEEDS_KEY,
-                     ORCHESTRATOR_MODEL, TABLES, confirm_db_path, tables_for)
+from .config import (DB_PATH, EMBED_BACKEND, LLM_BACKEND, OLLAMA_EMBED_MODEL, OLLAMA_LLM_MODEL, OLLAMA_URL,
+                     OPENROUTER_NEEDS_KEY, ORCHESTRATOR_MODEL, TABLES, confirm_db_path, tables_for)
+from .dataflow import shown_url
 from .embeddings import get_embedder, openrouter_api_key
 from .i18n import t
 from .index_meta import check_index, warn_version_mismatch
@@ -104,20 +106,77 @@ def check_api_key() -> str | None:
     return None
 
 
-def pull_commands() -> str:
-    """The `ollama pull` lines THIS configuration needs, in the order they are
-    wanted: the answering model first, then the embedding one.
+def pull_models(llm_backend: str | None = None, embed_backend: str | None = None) -> list[str]:
+    """The models a configuration needs pulled into Ollama, in the order they
+    are wanted: the answering model first, then the embedding one.
 
-    Naming the configured models instead of a hard-coded pair is what keeps the
-    remedy true when OLLAMA_LLM_MODEL or OLLAMA_EMBED_MODEL is something else —
-    a message that says `ollama pull bge-m3` to somebody running nomic-embed-text
-    sends them to fetch a model their run will never open."""
+    The configured pair by default; `ayl init` passes the pair of the mode it
+    is about to write, which this process has not loaded. Naming the configured
+    models instead of a hard-coded pair is what keeps the answer true when
+    OLLAMA_LLM_MODEL or OLLAMA_EMBED_MODEL is something else — a message that
+    says `ollama pull bge-m3` to somebody running nomic-embed-text sends them to
+    fetch a model their run will never open."""
+    llm = LLM_BACKEND if llm_backend is None else llm_backend
+    embed = EMBED_BACKEND if embed_backend is None else embed_backend
     models = []
-    if LLM_BACKEND == "ollama":
-        models.append(ORCHESTRATOR_MODEL)   # = OLLAMA_LLM_MODEL in this mode
-    if EMBED_BACKEND == "ollama":
+    if llm == "ollama":
+        # ORCHESTRATOR_MODEL is OLLAMA_LLM_MODEL whenever the CONFIGURED backend
+        # is local (config); asked about a local mode this process was not
+        # configured for, it is the hosted model's name, so the local one is read.
+        models.append(ORCHESTRATOR_MODEL if LLM_BACKEND == "ollama" else OLLAMA_LLM_MODEL)
+    if embed == "ollama":
         models.append(OLLAMA_EMBED_MODEL)
-    return ", ".join(f"`ollama pull {model}`" for model in models)
+    return models
+
+
+def pull_commands() -> str:
+    """The `ollama pull` lines THIS configuration needs (`pull_models`), as
+    the remedy a problem message prints."""
+    return ", ".join(f"`ollama pull {model}`" for model in pull_models())
+
+
+class OllamaTags(NamedTuple):
+    """What `GET /api/tags` said. `kind` is None when Ollama answered with a
+    list (then `names` holds what is pulled), `no_ollama` when nothing answered
+    and `ollama_bad_reply` when something answered that is not Ollama's list;
+    `status` is the HTTP status, for the message, or "?"."""
+    kind: str | None
+    names: frozenset
+    status: object
+
+
+def ollama_tags(url: str | None = None) -> OllamaTags:
+    """The first question the Ollama half asks, on its own: is a server there,
+    and what has it pulled. `check_environment` turns the answer into problems;
+    `ayl init` asks it before pulling, through this same function, so the two
+    cannot classify one reply two ways."""
+    url = OLLAMA_URL if url is None else url
+    tags = None
+    try:
+        tags = requests.get(f"{url}/api/tags", timeout=3)
+        tags.raise_for_status()
+    except HTTPError:
+        # A server DID answer, with 4xx/5xx: `ollama serve` is not the remedy
+        # (something else may hold that port, or this Ollama is unwell), so
+        # this is a bad reply, and the status code is the useful part of it.
+        return OllamaTags("ollama_bad_reply", frozenset(), getattr(tags, "status_code", "?"))
+    except RequestException:
+        # Nothing answered at all: the endpoint is the problem, and installing
+        # and starting Ollama is the fix. A reply we cannot read is a different
+        # problem and must not be reported as this one.
+        return OllamaTags("no_ollama", frozenset(), "?")
+    try:
+        # Not JSON, no "models" key, or entries that are not objects: something
+        # answers on that URL, but it is not Ollama's /api/tags. An empty list
+        # is a valid reply — nothing is pulled yet; so is a `null`, which is what
+        # Go encodes an empty slice as and what older Ollama builds return. Read
+        # in BOTH modes: local embeddings call the same server, so a 200 that is
+        # not Ollama would otherwise pass preflight and fail on the first
+        # embedding request, deep inside retrieval.
+        names = frozenset(m.get("name", "") for m in (tags.json()["models"] or []))
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return OllamaTags("ollama_bad_reply", frozenset(), getattr(tags, "status_code", "?"))
+    return OllamaTags(None, names, getattr(tags, "status_code", "?"))
 
 
 def check_environment(index_only: bool = False, db_path: Path | None = None,
@@ -179,51 +238,31 @@ def check_environment(index_only: bool = False, db_path: Path | None = None,
             problem("no_key", t("pf_no_key"))
 
     if checks_local_runtime:
-        tags = None
-        try:
-            tags = requests.get(f"{OLLAMA_URL}/api/tags", timeout=3)
-            tags.raise_for_status()
-        except HTTPError:
-            # A server DID answer, with 4xx/5xx: `ollama serve` is not the remedy
-            # (something else may hold that port, or this Ollama is unwell), so
-            # this is a bad reply, and the status code is the useful part of it.
-            problem("ollama_bad_reply", t("pf_ollama_bad_reply", url=OLLAMA_URL,
-                                          status=getattr(tags, "status_code", "?")))
-        except RequestException:
-            # Nothing answered at all: the endpoint is the problem, and
-            # installing and starting Ollama is the fix. A reply we cannot read
-            # is a different problem and must not be reported as this one. This
-            # is the first-run failure of the shipped default, so the message
+        reply = ollama_tags()
+        if reply.kind == "ollama_bad_reply":
+            # Printed as scheme, host and port only (`dataflow.shown_url`).
+            problem("ollama_bad_reply", t("pf_ollama_bad_reply", url=shown_url(OLLAMA_URL),
+                                          status=reply.status))
+        elif reply.kind == "no_ollama":
+            # The first-run failure of the shipped default, so the message
             # carries the whole remedy: install, start, pull, or the one command
             # that does all three.
-            problem("no_ollama", t("pf_no_ollama", url=OLLAMA_URL, pulls=pull_commands()))
+            problem("no_ollama", t("pf_no_ollama", url=shown_url(OLLAMA_URL),
+                                   pulls=pull_commands()))
         else:
-            try:
-                # Not JSON, no "models" key, or entries that are not objects:
-                # something answers on that URL, but it is not Ollama's /api/tags.
-                # An empty list is a valid reply — nothing is pulled yet; so is a
-                # `null`, which is what Go encodes an empty slice as and what
-                # older Ollama builds return. Read in BOTH modes: local embeddings
-                # call the same server, so a 200 that is not Ollama would otherwise
-                # pass preflight and fail on the first embedding request, deep
-                # inside retrieval.
-                names = {m.get("name", "") for m in (tags.json()["models"] or [])}
-            except (ValueError, TypeError, KeyError, AttributeError):
-                problem("ollama_bad_reply", t("pf_ollama_bad_reply", url=OLLAMA_URL,
-                                              status=getattr(tags, "status_code", "?")))
-            else:
-                if LLM_BACKEND == "ollama" and not _pulled(ORCHESTRATOR_MODEL, names):
-                    # The local model must be pulled: a missing one fails on the
-                    # first (planner) call with a 404, after the user typed a question.
-                    # ORCHESTRATOR_MODEL is OLLAMA_LLM_MODEL in this mode (config), so the
-                    # model checked here is the model the client will call. Only this
-                    # half is conditional: with a hosted LLM nothing is pulled locally.
-                    problem("no_local_model", t("pf_no_local_model", model=ORCHESTRATOR_MODEL))
-                if embed_backend == "ollama" and not _pulled(OLLAMA_EMBED_MODEL, names):
-                    # The same for the embedding model: a reachable Ollama without
-                    # it passes every other check and then fails on the first
-                    # search, which is the least legible place to learn about it.
-                    problem("no_embed_model", t("pf_no_embed_model", model=OLLAMA_EMBED_MODEL))
+            names = reply.names
+            if LLM_BACKEND == "ollama" and not _pulled(ORCHESTRATOR_MODEL, names):
+                # The local model must be pulled: a missing one fails on the
+                # first (planner) call with a 404, after the user typed a question.
+                # ORCHESTRATOR_MODEL is OLLAMA_LLM_MODEL in this mode (config), so the
+                # model checked here is the model the client will call. Only this
+                # half is conditional: with a hosted LLM nothing is pulled locally.
+                problem("no_local_model", t("pf_no_local_model", model=ORCHESTRATOR_MODEL))
+            if embed_backend == "ollama" and not _pulled(OLLAMA_EMBED_MODEL, names):
+                # The same for the embedding model: a reachable Ollama without
+                # it passes every other check and then fails on the first
+                # search, which is the least legible place to learn about it.
+                problem("no_embed_model", t("pf_no_embed_model", model=OLLAMA_EMBED_MODEL))
 
     if db_path is None:
         # The first real use of the configured index: where the notice of an

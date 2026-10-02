@@ -1,9 +1,12 @@
 """Runtime settings, all overridable through environment variables.
 
-Defaults target the demo corpus built by scripts/ingest_demo_corpus.py and a
-local Ollama. Point LIBRARY_DB_PATH at any LanceDB with the same table layout
-(cards_<backend> / transcripts_<backend>) to run the agent over a private
-library instead.
+With LIBRARY_DB_PATH unset, the index is the reader's own library,
+$AYL_HOME/index (ADR-026), which `ayl add` fills. The demo library
+`ayl init --demo` builds is a separate index, $AYL_HOME/demo/index, asked by
+pointing LIBRARY_DB_PATH at it (ADR-028); so is any other LanceDB with the same
+table layout (cards_<backend> / transcripts_<backend>). The answering model and
+the embeddings default to a local Ollama. Where each setting is read from —
+exported, the project's .env, $AYL_HOME/config.env — is ADR-027, below.
 """
 import os
 import shlex
@@ -11,10 +14,82 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
-# Exported variables win over .env; .env (cwd or parents) makes `cp .env.example .env` work.
-load_dotenv()
+# --- where a setting comes from (ADR-027) --------------------------------------
+# Highest first, and the same for every command — `ayl ask`, `ayl ui`, a script:
+#   1. a variable exported in the environment;
+#   2. the `.env` of the PROJECT the command is typed in (`project_env` below);
+#   3. `$AYL_HOME/config.env`, the file `ayl init` writes;
+#   4. the defaults in this file.
+# python-dotenv never overrides a name that is already set, so loading the two
+# files in this order is the whole rule. The `.env` is looked for here and not
+# by `load_dotenv()`'s own search, which walks up from the CALLING FILE — this
+# package — so a clone found its own `.env` from any directory and an installed
+# wheel found none; and `find_dotenv(usecwd=True)` walks to `/`, so a `.env`
+# in any ancestor (a home folder's, another tool's) overrode `config.env`.
+PROJECT_MARKERS = (".git", "pyproject.toml")
+
+
+def project_env(start: Path | None = None) -> Path | None:
+    """The `.env` this process reads: in the working directory, or in a parent
+    up to and including the nearest one that marks a project (a `.git` or a
+    `pyproject.toml`), never above it. With no such marker above the working
+    directory, only the working directory's own `.env` counts."""
+    here = (Path.cwd() if start is None else Path(start)).absolute()
+    folders = [here, *here.parents]
+    boundary = next((at for at, folder in enumerate(folders)
+                     if any((folder / marker).exists() for marker in PROJECT_MARKERS)), 0)
+    return next((folder / ".env" for folder in folders[:boundary + 1]
+                 if (folder / ".env").is_file()), None)
+
+
+def _unreadable(path: Path, error: Exception) -> None:
+    """A configuration file that cannot be read stops the process with one
+    line naming it and exit status 2 — the status every configuration
+    refusal of `ayl init` and the installer uses — instead of a traceback
+    out of an import."""
+    print(f"error: {path} cannot be read ({type(error).__name__}): every command reads it at its "
+          f"start. Fix its permissions or its encoding (UTF-8), or move it aside, and run again.",
+          file=sys.stderr)
+    raise SystemExit(2)
+
+
+CONFIG_ENV_LINE_RULE = ("Write config.env as plain NAME=value lines (every line with an =, "
+                        "no ${...}) and run again.")
+
+
+def _config_env_values(path: Path) -> dict:
+    """`$AYL_HOME/config.env` as python-dotenv reads it — after refusing the
+    two forms the installer's reader refuses, with the same one-line message:
+    a line with no `=` (python-dotenv holds the name with no value) and a
+    `${...}` (which it expands). `ayl init` writes neither."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        _unreadable(path, error)
+    for number, line in enumerate(text.splitlines(), 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        reason = ("no = on the line, so python-dotenv holds the name with no value at all"
+                  if "=" not in stripped else
+                  "a ${...} interpolation, which python-dotenv expands from the environment"
+                  if "${" in stripped.split("=", 1)[1] else None)
+        if reason:
+            print(f"error: {path}, line {number}: {reason}. {CONFIG_ENV_LINE_RULE}",
+                  file=sys.stderr)
+            raise SystemExit(2)
+    return dotenv_values(path)
+
+
+EXPORTED = frozenset(os.environ)
+PROJECT_ENV = project_env()
+if PROJECT_ENV is not None:
+    try:
+        load_dotenv(PROJECT_ENV)
+    except (OSError, UnicodeDecodeError) as _error:
+        _unreadable(PROJECT_ENV, _error)
 
 # --- storage ---------------------------------------------------------------
 # The reader's own folder, OUTSIDE any checkout (ADR-026): the home of what this
@@ -28,6 +103,33 @@ load_dotenv()
 # folder named " " in the working directory is nobody's home.
 _ayl_home = os.environ.get("AYL_HOME") or ""
 AYL_HOME = Path(_ayl_home if _ayl_home.strip() else "~/AskYourLibrary").expanduser()
+
+# The third layer. Read after AYL_HOME is decided, and never its AYL_HOME line:
+# the file cannot move the folder it lives in. Not `load_dotenv`, which would
+# export that line — this process keeps the home it found the file in, while
+# every child it starts (the web chat's server, `ayl init`'s doctor and demo
+# build) would resolve the other folder.
+HOME_CONFIG = AYL_HOME / "config.env"
+if HOME_CONFIG.is_file():
+    for _name, _value in _config_env_values(HOME_CONFIG).items():
+        if _name != "AYL_HOME" and _name not in os.environ and _value is not None:
+            os.environ[_name] = _value
+
+
+def setting_source(variable: str) -> str:
+    """Which layer of the rule above decided `variable`: `exported`, the
+    `.env` path, the `config.env` path, or `default`. What `ayl init
+    --print-env-resolution` prints beside each value; a read, nothing else."""
+    if variable in EXPORTED:
+        return "exported"
+    for path in (PROJECT_ENV, HOME_CONFIG):
+        if path is None or not path.is_file():
+            continue
+        if path == HOME_CONFIG and variable == "AYL_HOME":
+            continue
+        if variable in dotenv_values(path):
+            return str(path)
+    return "default"
 
 # --- embeddings ------------------------------------------------------------
 # Backend selects both the embedder and the table suffix, so query and document
@@ -56,9 +158,13 @@ TABLES = tables_for(EMBED_BACKEND)
 # command was typed. Its default is now $AYL_HOME/index. An index already built
 # at the old place is not moved, copied or deleted by anything here: it is
 # READ where it is, with one line saying so, until LEGACY_DB_SUNSET, when that
-# clause becomes an error naming the same two commands.
+# clause becomes an error naming the same two commands. 0.6.0 and not 0.5.0:
+# 0.4.0 was never tagged, so a 0.3.1 reader would have had no release of
+# warning at all, and 0.6.0 is where the two old command names go too.
+# tests/test_db_path.py fails once the package version reaches this number
+# while clause 2 still answers with a path, so the bump cannot pass silently.
 LEGACY_DB_PATH = Path("data") / "lancedb"
-LEGACY_DB_SUNSET = "0.5.0"
+LEGACY_DB_SUNSET = "0.6.0"
 
 
 class DbPathChoice(NamedTuple):

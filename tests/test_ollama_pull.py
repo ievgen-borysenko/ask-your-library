@@ -1,0 +1,202 @@
+"""The pull helper `ayl init` uses, against a recorded `/api/pull` stream: no
+network, no Ollama. And the two preflight functions it shares with the
+preflight — which models a configuration needs, and what `/api/tags` said —
+so `ayl init` and `ayl ask` cannot disagree about either."""
+import json
+
+import pytest
+import requests
+
+from ask_your_library import ollama, preflight
+
+# What Ollama streams for a pull, abridged from a real `POST /api/pull`.
+TRANSCRIPT = [
+    {"status": "pulling manifest"},
+    {"status": "pulling 0a1b2c", "digest": "sha256:0a1b2c", "total": 1000, "completed": 0},
+    {"status": "pulling 0a1b2c", "digest": "sha256:0a1b2c", "total": 1000, "completed": 500},
+    {"status": "pulling 0a1b2c", "digest": "sha256:0a1b2c", "total": 1000, "completed": 1000},
+    {"status": "verifying sha256 digest"},
+    {"status": "writing manifest"},
+    {"status": "success"},
+]
+
+
+class Stream:
+    def __init__(self, lines, status=200, text=""):
+        self.lines, self.status_code, self.text = lines, status, text
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def iter_lines(self):
+        for line in self.lines:
+            yield line if isinstance(line, bytes) else json.dumps(line).encode()
+
+
+class FakeRequests:
+    """`requests` as `ollama` uses it: one POST, answered from a transcript."""
+    def __init__(self, response=None, error=None):
+        self.response, self.error, self.calls = response, error, []
+
+    def post(self, url, json=None, stream=False, timeout=None):
+        self.calls.append({"url": url, "json": json, "stream": stream, "timeout": timeout})
+        if self.error:
+            raise self.error
+        return self.response
+
+
+def test_a_pull_streams_its_progress_and_ends_on_success(monkeypatch):
+    fake = FakeRequests(Stream(TRANSCRIPT))
+    monkeypatch.setattr(ollama, "requests", fake)
+    seen = []
+    ollama.pull("some-model:7b", lambda status, done, total: seen.append((status, done, total)),
+                url="http://localhost:11434/")
+    assert fake.calls == [{"url": "http://localhost:11434/api/pull",
+                           "json": {"model": "some-model:7b", "name": "some-model:7b",
+                                    "stream": True},
+                           "stream": True, "timeout": (ollama.CONNECT_TIMEOUT_S,
+                                                       ollama.READ_TIMEOUT_S)}]
+    # Our own words for the stages, never the server's; integers for the bytes.
+    assert seen[0] == ("working", None, None)
+    assert ("downloading", 500, 1000) in seen
+    assert seen[-1] == ("success", None, None)
+
+
+def test_an_error_line_inside_a_200_stream_is_a_failure(monkeypatch):
+    """How a model name Ollama does not know is reported: the stream starts
+    with 200, then says `error`."""
+    monkeypatch.setattr(ollama, "requests", FakeRequests(Stream(
+        [{"status": "pulling manifest"}, {"error": "pull model manifest: file does not exist"}])))
+    with pytest.raises(ollama.PullError) as failed:
+        ollama.pull("no-such-model")
+    assert "reported an error while pulling no-such-model" in str(failed.value)
+    assert "file does not exist" not in str(failed.value), "the server's text is not printed"
+
+
+def test_a_stream_that_never_says_success_is_a_failure(monkeypatch):
+    monkeypatch.setattr(ollama, "requests", FakeRequests(Stream(TRANSCRIPT[:3])))
+    with pytest.raises(ollama.PullError, match="without saying it succeeded"):
+        ollama.pull("some-model")
+
+
+def test_an_http_error_names_the_status_and_not_the_server_s_text(monkeypatch):
+    monkeypatch.setattr(ollama, "requests", FakeRequests(Stream(
+        [], status=500, text='{"error": "disk full"}')))
+    with pytest.raises(ollama.PullError) as failed:
+        ollama.pull("some-model")
+    assert "HTTP 500; its own text is not printed" in str(failed.value)
+    assert "disk full" not in str(failed.value)
+
+
+def test_a_reply_that_is_not_ollama_s_is_a_failure_not_a_crash(monkeypatch):
+    monkeypatch.setattr(ollama, "requests", FakeRequests(Stream([b"<html>"])))
+    with pytest.raises(ollama.PullError, match="not a pull progress line"):
+        ollama.pull("some-model")
+
+
+def test_a_lost_connection_is_a_failure_with_the_endpoint_named(monkeypatch):
+    monkeypatch.setattr(ollama, "requests", FakeRequests(
+        error=requests.ConnectionError("refused")))
+    monkeypatch.setattr(ollama, "RequestException", requests.RequestException)
+    with pytest.raises(ollama.PullError, match="connection to Ollama at http://x:1 failed"):
+        ollama.pull("some-model", url="http://x:1")
+
+
+# --- what the preflight and init share ----------------------------------------
+
+def test_the_models_to_pull_follow_the_pair_asked_about(monkeypatch):
+    monkeypatch.setattr(preflight, "LLM_BACKEND", "ollama")
+    monkeypatch.setattr(preflight, "EMBED_BACKEND", "ollama")
+    monkeypatch.setattr(preflight, "ORCHESTRATOR_MODEL", "local-answers")
+    monkeypatch.setattr(preflight, "OLLAMA_LLM_MODEL", "local-answers")
+    monkeypatch.setattr(preflight, "OLLAMA_EMBED_MODEL", "local-embeds")
+    assert preflight.pull_models() == ["local-answers", "local-embeds"]
+    assert preflight.pull_models("openrouter", "ollama") == ["local-embeds"]
+    assert preflight.pull_commands() == "`ollama pull local-answers`, `ollama pull local-embeds`"
+
+
+def test_a_local_mode_asked_about_from_a_hosted_process_names_the_local_model(monkeypatch):
+    """`ayl init --mode local` in a process whose configuration is hosted:
+    ORCHESTRATOR_MODEL is then the hosted model's name, which Ollama cannot pull."""
+    monkeypatch.setattr(preflight, "LLM_BACKEND", "openrouter")
+    monkeypatch.setattr(preflight, "ORCHESTRATOR_MODEL", "vendor/hosted-model")
+    monkeypatch.setattr(preflight, "OLLAMA_LLM_MODEL", "local-answers")
+    monkeypatch.setattr(preflight, "OLLAMA_EMBED_MODEL", "local-embeds")
+    assert preflight.pull_models("ollama", "ollama") == ["local-answers", "local-embeds"]
+
+
+class Tags:
+    def __init__(self, reply=None, error=None):
+        self.reply, self.error = reply, error
+
+    def get(self, url, timeout=None):
+        if self.error:
+            raise self.error
+        return self.reply
+
+
+class Reply:
+    def __init__(self, body, status=200):
+        self.body, self.status_code = body, status
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(str(self.status_code))
+
+    def json(self):
+        if isinstance(self.body, Exception):
+            raise self.body
+        return self.body
+
+
+@pytest.mark.parametrize("fake, kind, names", [
+    (Tags(Reply({"models": [{"name": "a:latest"}, {"name": "b"}]})), None, {"a:latest", "b"}),
+    (Tags(Reply({"models": None})), None, set()),
+    (Tags(error=requests.ConnectionError("down")), "no_ollama", set()),
+    (Tags(Reply({}, status=503)), "ollama_bad_reply", set()),
+    (Tags(Reply(ValueError("not json"))), "ollama_bad_reply", set()),
+])
+def test_what_the_tags_reply_is_classified_as(monkeypatch, fake, kind, names):
+    monkeypatch.setattr(preflight, "requests", fake)
+    reply = preflight.ollama_tags()
+    assert reply.kind == kind and set(reply.names) == names
+
+
+@pytest.mark.parametrize("value", [10 ** 400, 10 ** 13 + 1, -1, True, 1.5, "7", None])
+def test_a_byte_count_no_model_could_have_is_not_a_byte_count(value):
+    """A progress line's numbers are the server's: 10**400 is valid JSON, and
+    as a size it overflowed the progress line's division and ended `ayl init`
+    with a traceback. Out of range, or not a whole number, is None."""
+    assert ollama._bytes(value) is None
+
+
+@pytest.mark.parametrize("value", [0, 1, 4_700_000_000, 10 ** 13])
+def test_a_plausible_byte_count_is_kept(value):
+    assert ollama._bytes(value) == value
+
+
+def test_the_progress_line_never_shows_more_than_the_whole(monkeypatch, capsys):
+    """`completed` above `total` is the server's arithmetic, not ours."""
+    from ask_your_library import init_cmd
+    monkeypatch.setattr(init_cmd.sys.stdout, "isatty", lambda: True)
+    init_cmd.Progress("bge-m3")("downloading", 10 ** 13, 1_000_000_000)
+    assert "100% of 1.0 GB" in capsys.readouterr().out
+
+
+
+def test_a_pull_with_absurd_byte_counts_runs_to_its_end_on_a_terminal(monkeypatch, capsys):
+    """The gate's payload, through the real pull and the real progress line:
+    a server streams `total: 10**400`, the first-run command neither divides
+    by it nor crashes, and the pull ends as the stream says."""
+    from ask_your_library import init_cmd
+    stream = Stream([{"status": "pulling", "total": 10 ** 400, "completed": 1},
+                     {"status": "pulling", "total": 1_000_000_000, "completed": 10 ** 400},
+                     {"status": "success"}])
+    monkeypatch.setattr(ollama, "requests", FakeRequests(stream))
+    monkeypatch.setattr(init_cmd.sys.stdout, "isatty", lambda: True)
+    ollama.pull("some-model:7b", init_cmd.Progress("some-model:7b"), url="http://localhost:11434")
+    printed = capsys.readouterr().out
+    assert "0% of 1.0 GB" in printed and "e+" not in printed and "inf" not in printed

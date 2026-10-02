@@ -108,6 +108,54 @@ def test_the_notice_names_the_new_default_the_path_and_the_move(tmp_path):
     assert "\n" not in notice, "one line"
 
 
+def _release(text: str) -> tuple[int, ...]:
+    """`0.3.1` -> (0, 3, 1); a pre-release suffix is cut off at the first part
+    that is not a number, which is the conservative reading here: `0.6.0rc1`
+    counts as 0.6.0 and so already trips the check below."""
+    import re
+
+    parts = []
+    for part in text.split("."):
+        leading = re.match(r"\d+", part)
+        if not leading:
+            break
+        parts.append(int(leading.group()))
+        if leading.end() < len(part):
+            break
+    return tuple(parts)
+
+
+def test_the_sunset_cannot_be_reached_while_clause_2_still_answers(tmp_path):
+    """`LEGACY_DB_SUNSET` used to be a number in a sentence and nothing else:
+    nothing compared it to the version being released, so the release that
+    was meant to turn clause 2 into an error could ship with clause 2 still
+    answering, and every notice printed in it would promise an error that
+    never came. Tied here to the version in pyproject.toml — the one a release
+    is cut from. When this fails, the release has reached the sunset: make
+    clause 2 raise (naming the backup/restore move), or move the sunset on
+    with a changelog line saying why."""
+    import tomllib
+    from conftest import REPO
+
+    version = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    legacy_index(tmp_path)
+    choice = config.resolve_db_path("", cwd=tmp_path, backend="ollama", home=tmp_path / "home")
+    if _release(version) >= _release(config.LEGACY_DB_SUNSET):
+        assert choice.clause != 2, (
+            f"the package is at {version} and the legacy-index sunset is "
+            f"{config.LEGACY_DB_SUNSET}, yet clause 2 still reads {choice.path}: the sunset "
+            f"was passed silently")
+    else:
+        assert choice.clause == 2
+
+
+def test_the_version_reading_the_sunset_check_relies_on():
+    assert _release("0.3.1") == (0, 3, 1)
+    assert _release("0.6.0rc1") == (0, 6, 0)
+    assert _release("1.0") == (1, 0)
+    assert _release("0.6.0") >= _release("0.6.0") > _release("0.5.9")
+
+
 NOTICE = "note: reading the index at"
 
 

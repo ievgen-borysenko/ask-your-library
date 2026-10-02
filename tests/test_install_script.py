@@ -38,6 +38,9 @@ import pytest
 from conftest import REPO, SCRUBBED, fresh_output
 
 SCRIPT = REPO / "scripts" / "install-mac.sh"
+# What the script and the package print in place of a URL-valued setting they
+# cannot print (dataflow.NOT_SHOWN; the script spells it out the same).
+NOT_SHOWN = "<not shown: the value carries a credential or is not a plain URL>"
 BASH = shutil.which("bash")
 # Everything the script could invoke that installs, downloads or starts something.
 RECORDED = ("brew", "ollama", "uv", "curl")
@@ -53,7 +56,7 @@ PLAN = [
     "[8/12] Models",
     "[9/12] Dependencies",
     "[10/12] Configuration",
-    "[11/12] Demo corpus",
+    "[11/12] Library",
     "[12/12] Verification",
     "Next steps:",
 ]
@@ -101,6 +104,12 @@ def sandbox(tmp_path):
     # Stubs first, then the system directories only: no /opt/homebrew, no
     # ~/.local/bin, so `uv` and friends cannot resolve to the real binaries.
     env["PATH"] = os.pathsep.join([str(bindir), "/usr/bin", "/bin", "/usr/sbin", "/sbin"])
+    # A home of the sandbox's own. AYL_HOME is scrubbed above, so the script's
+    # default — $HOME/AskYourLibrary, whose index step 11 looks at and whose
+    # config.env the guard reads — was the developer's real one.
+    home = tmp_path / "home"
+    home.mkdir()
+    env["HOME"] = str(home)
     return root, records, env
 
 
@@ -297,19 +306,53 @@ def test_hosted_dry_run_says_it_transforms_the_example_and_shows_every_line(sand
 
 
 @mac_only
-def test_demo_build_is_confirmed_once_and_says_how_long_it_takes(sandbox):
+def test_the_demo_library_is_ayl_init_s_question_not_a_second_one_here(sandbox):
+    """One prompt, one estimate, one place that builds the demo: the script
+    hands step 11 to `ayl init`, which asks once (no is the default) and keeps
+    the demo apart from the reader's index. The script asks nothing itself."""
     out = dry_run(sandbox)
-    assert "about 30 minutes" in out
-    assert "ask once for confirmation" in out
-    assert "uv run scripts/ingest_demo_corpus.py" in out
+    assert "would run: uv run ayl init\n" in out
+    assert "it asks once, and no is the default" in out
+    assert "Build it now?" not in out and "ingest_demo_corpus.py" not in out
+
+
+@mac_only
+@pytest.mark.parametrize("flags, command", [
+    (("--yes",), "uv run ayl init --demo"),
+    (("--hosted",), "uv run ayl init --mode hosted"),
+    (("--hosted", "--yes"), "uv run ayl init --mode hosted --demo"),
+])
+def test_the_flags_reach_ayl_init_as_its_own(sandbox, flags, command):
+    """--yes meant "do not ask before the demo build"; to `ayl init` that is
+    --demo. --hosted is the mode, which init reads from the .env step 10 wrote
+    anyway and names when it disagrees."""
+    assert f"would run: {command}\n" in dry_run(sandbox, *flags)
+
+
+@mac_only
+def test_a_real_run_hands_step_11_to_ayl_init_and_a_failure_there_stops_it(sandbox):
+    """The stubbed `uv` records the call; a status other than 0, 3 or 4 from it
+    is a failed step, reported with the command and exit 1. A stub that
+    answers 7 only for `uv run ayl init` stands in for one that failed."""
+    root, records, env = sandbox
+    result = real_run(sandbox)
+    assert result.returncode == 0, result.stderr
+    assert "run ayl init\n" in (records / "uv").read_text()
+    stub = Path(env["PATH"].split(os.pathsep)[0]) / "uv"
+    stub.write_text(f'#!/bin/sh\necho "$@" >> "{records}/uv"\n'
+                    f'[ "$2" = "ayl" ] && [ "$3" = "init" ] && exit 7\nexit 0\n')
+    (root / ".env").unlink()
+    result = real_run(sandbox)
+    assert result.returncode == 1
+    assert "uv run ayl init failed with status 7." in error_lines(result.stderr)
 
 
 @mac_only
 def test_no_demo_points_at_ayl_add_instead(sandbox):
     out = dry_run(sandbox, "--no-demo")
-    assert "skipped (--no-demo)" in out
-    assert "uv run ayl-add ~/books" in out
-    assert "ingest_demo_corpus.py" not in out
+    assert "no demo library (--no-demo)" in out
+    assert "uv run ayl add ~/books" in out
+    assert "ayl init" not in out and "ingest_demo_corpus.py" not in out
 
 
 @mac_only
@@ -358,9 +401,12 @@ def test_a_non_loopback_ollama_host_is_refused(sandbox, bind):
     rest: ':11434' is a host/port pair whose empty host is every interface, and
     '0' is 0.0.0.0 — the two spellings that read most like loopback and are not."""
     _, records, _ = sandbox
+    from ask_your_library.dataflow import shown_url
     result = real_run(sandbox, "--no-demo", OLLAMA_HOST=bind)
     assert result.returncode == 1, result.stdout
-    assert f"OLLAMA_HOST={bind}" in result.stderr
+    # Named as every URL-valued setting is printed: what is in front of an @ is
+    # replaced (it may be a credential), the host the request would reach is kept.
+    assert f"OLLAMA_HOST={shown_url(bind)}" in result.stderr
     assert "unset OLLAMA_HOST" in result.stderr           # the fix is named
     # The gate is judged with the rest of the resolution, ahead of step 3, so
     # nothing at all runs in front of it — `uv python find` included.
@@ -386,21 +432,24 @@ def test_a_loopback_ollama_host_passes_the_gate(sandbox, bind):
 
 @mac_only
 @pytest.mark.skipif(os.geteuid() == 0, reason="root reads a chmod 000 file anyway")
-def test_a_failed_env_write_leaves_no_env_behind(sandbox):
-    """`local_env > .env` truncated the file into existence before sed produced a
-    byte, so a sed that failed left an empty .env — which the next run refuses to
-    overwrite and config.py resolves to the hosted defaults. The fully local run
-    became a hosted one, silently. Now the write lands beside it and only a
-    complete file is moved into place."""
-    root, _, _ = sandbox
+def test_an_unreadable_env_example_stops_the_run_before_anything(sandbox):
+    """`local_env > .env` once truncated the file into existence before sed
+    produced a byte, and an unreadable .env.example was the way to show it;
+    the write still lands beside .env and only a complete file is moved into
+    place. Since F9-installer-unreadable-env the run does not get that far: the
+    file it writes .env from is checked before step 3, and nothing is
+    installed or written."""
+    root, records, _ = sandbox
     reaches_the_start_path(sandbox)
     (root / ".env.example").chmod(0o000)
     try:
         result = real_run(sandbox, "--no-demo")
     finally:
         (root / ".env.example").chmod(0o644)
-    assert result.returncode == 1, result.stdout
-    assert "no usable .env" in result.stderr
+    assert result.returncode == 2, result.stdout
+    assert ".env.example cannot be read (PermissionError): this run writes .env from it" \
+        in result.stderr
+    assert invoked(records) == []
     assert not (root / ".env").exists(), "a .env was left behind by a failed write"
     assert [p.name for p in root.glob(".env.tmp.*")] == []
 
@@ -547,7 +596,9 @@ def test_a_userinfo_host_is_not_this_machine(sandbox):
     result = real_run(sandbox, "--no-demo",
                       OLLAMA_URL="http://localhost:11434@ollama.example.com")
     assert result.returncode == 2, result.stdout
-    assert ("OLLAMA_URL=http://localhost:11434@ollama.example.com (exported in this shell)"
+    # Printed with the userinfo replaced, like any credential in a URL: what is
+    # left is the host the request goes to, which is the point of the refusal.
+    assert (f"OLLAMA_URL={NOT_SHOWN} (exported in this shell)"
             " — that endpoint is not on this machine") in error_lines(result.stderr)
     assert not (root / ".env").exists()
     assert invoked(records) == []
@@ -572,7 +623,8 @@ def test_an_ollama_url_without_a_scheme_is_refused_by_name(sandbox):
     root, records, _ = sandbox
     result = real_run(sandbox, "--no-demo", OLLAMA_URL="localhost:11434")
     assert result.returncode == 2, result.stdout
-    assert ("OLLAMA_URL=localhost:11434 has no scheme, and config.py uses the value as it"
+    # Not printable under the allowlist (no scheme): named, its value not shown.
+    assert (f"OLLAMA_URL={NOT_SHOWN} has no scheme, and config.py uses the value as it"
             in error_lines(result.stderr))
     assert not (root / ".env").exists()
     assert invoked(records) == []
@@ -672,7 +724,8 @@ def test_a_non_loopback_ollama_host_is_refused_even_when_a_server_answers(sandbo
     _, records, _ = sandbox
     result = real_run(sandbox, "--no-demo", OLLAMA_HOST="ollama.example.com:11434")
     assert result.returncode == 1, result.stdout
-    assert ("OLLAMA_HOST=ollama.example.com:11434 is not one of the loopback forms this "
+    # host[:port] without a scheme is not printable under the allowlist
+    assert (f"OLLAMA_HOST={NOT_SHOWN} is not one of the loopback forms this "
             "script will") in error_lines(result.stderr)
     assert invoked(records) == [], "a tool ran past the gate"
 
@@ -722,11 +775,21 @@ def run_preflight(expected, tmp_path, mode="", **environment):
     with them."""
     env = {k: v for k, v in os.environ.items() if k not in SCRUBBED}
     env["PYTHONPATH"] = str(REPO)
+    # SCRUBBED drops AYL_HOME, so the default, $HOME/AskYourLibrary, would be the
+    # developer's real one, config.env included: a home of the test's own.
+    (tmp_path / "home").mkdir(exist_ok=True)
+    env["HOME"] = str(tmp_path / "home")
     env.update({"LLM_BACKEND": "openrouter", "EMBED_BACKEND": "openrouter",
                 "OPENROUTER_API_KEY": "not-a-real-key",
                 "LIBRARY_DB_PATH": str(tmp_path / "nothing-here"), **environment})
     return subprocess.run([sys.executable, "-c", preflight_snippet(), expected, mode],
                           cwd=tmp_path, env=env, capture_output=True, text=True)
+
+
+def test_the_snippet_s_child_has_a_home_of_its_own(tmp_path):
+    """F8-preflight-home: the child never reads the developer's ~/AskYourLibrary."""
+    run_preflight("", tmp_path)
+    assert (tmp_path / "home").is_dir()
 
 
 @pytest.mark.skipif(not have_package, reason="the package is not importable here")
@@ -756,7 +819,7 @@ def test_the_preflight_snippet_reports_the_configuration_the_loader_resolves(tmp
     # The endpoint line whole, not a search for the host inside the output: a
     # substring test against a URL is the shape of an allow-list check and is
     # not one, and here the pair of endpoints is the whole point of the line.
-    assert ("LLM_BASE_URL=https://openrouter.ai/api/v1, OLLAMA_URL=http://localhost:11434"
+    assert ("LLM_BASE_URL=https://openrouter.ai (path not shown), OLLAMA_URL=http://localhost:11434"
             in printed_lines(result.stdout))
     assert "tracing: LANGSMITH_TRACING_V2" in result.stdout
     assert "not the fully local one" in result.stdout
@@ -772,7 +835,7 @@ def test_the_preflight_snippet_prints_the_configuration_it_agrees_with(tmp_path)
     result = run_preflight("no-index", tmp_path, mode="hosted")
     assert result.returncode == 3, result.stdout + result.stderr
     assert "LLM_BACKEND=openrouter, EMBED_BACKEND=openrouter" in result.stdout
-    assert ("LLM_BASE_URL=https://openrouter.ai/api/v1, OLLAMA_URL=http://localhost:11434"
+    assert ("LLM_BASE_URL=https://openrouter.ai (path not shown), OLLAMA_URL=http://localhost:11434"
             in printed_lines(result.stdout))
     assert "tracing: off" in printed_lines(result.stdout)
 
@@ -1049,8 +1112,12 @@ def test_the_redacted_resolution_still_agrees_with_python_dotenv(sandbox):
     resolved, order = env_resolution(sandbox)
     real = dotenv_values(root / ".env")
     assert order == list(real)
+    from ask_your_library.dataflow import ENDPOINT_VARS, shown_url
     for name, value in real.items():
-        if not is_secret_name(name):
+        if name in ENDPOINT_VARS:
+            # a URL-valued setting is printed as the allowlist prints it
+            assert resolved[name] == shown_url(value), name
+        elif not is_secret_name(name):
             assert resolved[name] == value, name
         elif value:
             assert resolved[name] == f"<set, {len(value)} chars>", name
@@ -1404,9 +1471,12 @@ def test_a_host_that_only_looks_like_loopback_is_refused(sandbox, bind):
     compared exactly; a bind address has no userinfo at all, so an @ in one is
     refused outright."""
     _, records, _ = sandbox
+    from ask_your_library.dataflow import shown_url
     result = real_run(sandbox, "--no-demo", OLLAMA_HOST=bind)
     assert result.returncode == 1, result.stdout
-    assert f"OLLAMA_HOST={bind}" in result.stderr
+    # Named as every URL-valued setting is printed: what is in front of an @ is
+    # replaced (it may be a credential), the host the request would reach is kept.
+    assert f"OLLAMA_HOST={shown_url(bind)}" in result.stderr
     assert invoked(records) == [], "the gate let a tool run past it"
 
 
@@ -1451,7 +1521,7 @@ def test_hosted_mode_warns_when_the_embedder_is_openrouter(sandbox):
     assert ("warning: EMBED_BACKEND=openrouter (exported in this shell), which is"
             in printed)
     assert "not on this machine — every passage of your library would be sent to" in printed
-    assert printed.count("https://openrouter.ai/api/v1") == 1
+    assert printed.count("https://openrouter.ai (path not shown)") == 1
 
 
 @mac_only
@@ -1578,12 +1648,14 @@ def test_the_local_env_this_script_writes_is_the_example_it_already_ships(sandbo
 def test_the_closing_message_leads_with_the_index_then_the_free_first_question(sandbox):
     """After this script finishes, one command has to answer a question — and
     the reader has to be told which, in which order, and that it costs nothing.
-    With no index yet the build comes first: `ask-library` before it exits 3 on
-    a preflight that says the same thing one step later."""
+    With no index yet the reader's own books come first: `ayl ask` before them
+    exits 3 on a preflight that says the same thing one step later. The demo
+    library is offered beside them, as its own index."""
     out = dry_run(sandbox)
-    build = out.index("uv run scripts/ingest_demo_corpus.py\n      build the demo corpus first")
-    question = out.index('uv run ask-library "What does Marcus Aurelius')
+    build = out.index("uv run ayl add ~/books\n      index your own .txt / .md books first")
+    question = out.index('uv run ayl ask "..."')
     assert build < question
+    assert "uv run ayl init --demo" in out
     assert "No account, no key, nothing to pay" in out
     # The model this run pulled, not a name the script was written against.
     _, llm_model = config_models()
@@ -1604,8 +1676,44 @@ def test_no_demo_closes_on_the_reader_s_own_books_not_the_demo_build(sandbox):
     """--no-demo already said the demo corpus is not wanted; offering it again
     as the next step reads as the script not having listened."""
     out = dry_run(sandbox, "--no-demo")
-    assert "index your books first" in out
-    assert "build the demo corpus first" not in out
+    assert "index your own .txt / .md books first" in out
+    assert "ayl init --demo" not in out
+
+
+@mac_only
+def test_an_existing_index_closes_on_the_first_question_itself(sandbox):
+    root, _, _ = sandbox
+    (root / "data" / "lancedb" / "transcripts_ollama.lance").mkdir(parents=True)
+    out = dry_run(sandbox)
+    assert 'uv run ayl ask "..."' in out
+    assert "What does Marcus Aurelius" not in out, "that index may be the reader's own books"
+    # The demo library is offered by running `ayl init`, never by a bare run
+    # of the demo script, which writes this one.
+    assert "would run: uv run ayl init\n" in out
+    assert "ingest_demo_corpus.py" not in out
+
+
+@mac_only
+def test_yes_builds_the_demo_library_for_a_reader_who_already_has_an_index(sandbox):
+    """--yes promises the separate demo library; an index of the reader's own
+    is no reason to skip `ayl init --demo`, which builds apart from it and has
+    its own safeguards (F2-installer-yes)."""
+    root, _, _ = sandbox
+    (root / "data" / "lancedb" / "transcripts_ollama.lance").mkdir(parents=True)
+    out = dry_run(sandbox, "--yes")
+    assert "an index is already there; nothing is rebuilt" in out
+    assert "would run: uv run ayl init --demo\n" in out
+    out = dry_run(sandbox, "--no-demo")
+    assert "ayl init" not in out.split("[11/12]")[1].split("[12/12]")[0]
+
+
+@mac_only
+def test_a_real_run_over_an_existing_index_still_runs_ayl_init(sandbox):
+    root, records, _ = sandbox
+    (root / "data" / "lancedb" / "transcripts_ollama.lance").mkdir(parents=True)
+    result = real_run(sandbox, "--yes")
+    assert result.returncode == 0, result.stderr
+    assert "run ayl init --demo\n" in (records / "uv").read_text()
 
 
 # --- where the demo index goes (ADR-026) --------------------------------------
@@ -1618,7 +1726,7 @@ def test_the_demo_index_defaults_under_the_home_folder_not_the_checkout(sandbox,
     root, _, env = sandbox
     env["HOME"] = str(tmp_path / "reader")
     out = dry_run(sandbox)
-    assert f"Demo corpus: an index at {tmp_path}/reader/AskYourLibrary/index" in out
+    assert f"Library: your index at {tmp_path}/reader/AskYourLibrary/index" in out
     assert str(root / "data") not in out
 
 
@@ -1628,7 +1736,7 @@ def test_the_demo_index_follows_ayl_home_with_its_tilde_expanded(sandbox, tmp_pa
     env["HOME"] = str(tmp_path / "reader")
     env["AYL_HOME"] = "~/elsewhere"
     out = dry_run(sandbox)
-    assert f"Demo corpus: an index at {tmp_path}/reader/elsewhere/index" in out
+    assert f"Library: your index at {tmp_path}/reader/elsewhere/index" in out
 
 
 @mac_only
@@ -1638,8 +1746,9 @@ def test_an_old_index_in_the_checkout_is_found_where_it_is(sandbox):
     root, _, _ = sandbox
     (root / "data" / "lancedb" / "transcripts_ollama.lance").mkdir(parents=True)
     out = dry_run(sandbox)
-    assert f"Demo corpus: an index at {root}/data/lancedb" in out
+    assert f"Library: your index at {root}/data/lancedb" in out
     assert "an index is already there; nothing is rebuilt" in out
+    assert "update it later with: uv run scripts/ingest_demo_corpus.py" not in out
 
 
 @mac_only
@@ -1648,7 +1757,7 @@ def test_an_old_folder_without_the_table_is_not_the_index(sandbox, tmp_path):
     env["HOME"] = str(tmp_path / "reader")
     (root / "data" / "lancedb" / "cards_ollama.lance").mkdir(parents=True)
     out = dry_run(sandbox)
-    assert f"Demo corpus: an index at {tmp_path}/reader/AskYourLibrary/index" in out
+    assert f"Library: your index at {tmp_path}/reader/AskYourLibrary/index" in out
 
 
 @mac_only
@@ -1657,7 +1766,7 @@ def test_an_explicit_index_path_is_used_as_written(sandbox, tmp_path):
     (root / "data" / "lancedb" / "transcripts_ollama.lance").mkdir(parents=True)
     env["LIBRARY_DB_PATH"] = str(tmp_path / "mine")
     out = dry_run(sandbox)
-    assert f"Demo corpus: an index at {tmp_path}/mine" in out
+    assert f"Library: your index at {tmp_path}/mine" in out
 
 
 @mac_only
@@ -1672,7 +1781,7 @@ def test_an_exported_blank_index_path_is_unset_even_over_the_dotenv(sandbox, tmp
     env["HOME"] = str(tmp_path / "reader")
     env["LIBRARY_DB_PATH"] = exported
     out = dry_run(sandbox)
-    assert f"Demo corpus: an index at {tmp_path}/reader/AskYourLibrary/index" in out
+    assert f"Library: your index at {tmp_path}/reader/AskYourLibrary/index" in out
 
 
 @mac_only
@@ -1680,7 +1789,7 @@ def test_the_dotenv_index_path_is_used_when_nothing_is_exported(sandbox, tmp_pat
     root, _, env = sandbox
     (root / ".env").write_text(f"LIBRARY_DB_PATH={tmp_path}/from-dotenv\n")
     out = dry_run(sandbox)
-    assert f"Demo corpus: an index at {tmp_path}/from-dotenv" in out
+    assert f"Library: your index at {tmp_path}/from-dotenv" in out
 
 
 @mac_only
@@ -1690,7 +1799,7 @@ def test_a_blank_ayl_home_is_the_default_home(sandbox, tmp_path, exported):
     env["HOME"] = str(tmp_path / "reader")
     env["AYL_HOME"] = exported
     out = dry_run(sandbox)
-    assert f"Demo corpus: an index at {tmp_path}/reader/AskYourLibrary/index" in out
+    assert f"Library: your index at {tmp_path}/reader/AskYourLibrary/index" in out
 
 
 @mac_only
@@ -1709,3 +1818,357 @@ def test_an_ayl_home_named_by_user_is_refused_not_guessed(sandbox, tmp_path, nam
     assert f"AYL_HOME={named_user} names a home folder by user" in result.stderr
     assert "absolute path or as ~/..." in result.stderr
     assert "Demo corpus: an index at" not in result.stdout
+
+
+def test_the_installer_s_data_flow_names_are_the_package_s():
+    """Its guard runs before any Python is installed, so it keeps a bash copy
+    of ask_your_library.dataflow's lists; a name added on one side only is a
+    variable one of the two judges and the other does not."""
+    from ask_your_library import dataflow
+    text = SCRIPT.read_text(encoding="utf-8")
+    for name in ("BACKEND_VARS", "ENDPOINT_VARS", "TRACING_V2_VARS", "TRACING_V1_VARS",
+                 "TRACING_VARS", "KEY_VARS"):
+        written = re.search(rf'^{name}="([^"$]*)"$', text, re.M)
+        assert written, name
+        assert tuple(written.group(1).split()) == getattr(dataflow, name), name
+
+
+SECRET = "s3cret-not-a-real-password"
+
+
+@mac_only
+def test_a_credential_in_ollama_url_is_never_printed(sandbox):
+    """The installer requests the URL as written and prints it with the
+    credential replaced, in its own steps and in `ayl init`'s (F-url-credentials)."""
+    _, _, env = sandbox
+    env["OLLAMA_URL"] = f"http://reader:{SECRET}@localhost:11434"
+    out = dry_run(sandbox)
+    assert SECRET not in out
+    assert f"answering its /api/tags at {NOT_SHOWN}" in out
+    result = real_run(sandbox, "--no-demo", OLLAMA_URL=f"http://reader:{SECRET}@localhost:11434")
+    assert SECRET not in result.stdout + result.stderr
+
+
+@pytest.mark.skipif(not have_package, reason="the package is not importable here")
+def test_the_preflight_snippet_prints_no_credential_written_into_a_url(tmp_path):
+    result = run_preflight("no-index", tmp_path, mode="local", LLM_BACKEND="ollama",
+                           EMBED_BACKEND="ollama",
+                           OLLAMA_URL=f"http://reader:{SECRET}@127.0.0.1:9",
+                           LANGSMITH_TRACING_V2="true",
+                           LANGSMITH_ENDPOINT=f"https://u:{SECRET}@smith.example.com")
+    assert SECRET not in result.stdout + result.stderr
+    assert f"OLLAMA_URL={NOT_SHOWN}" in result.stdout
+    assert f"-> {NOT_SHOWN}" in result.stdout
+
+
+# --- a credential planted in EVERY URL-valued setting at once (F2-installer-url) --------
+# The class, not one line: each URL-valued setting the installer or the package
+# reads carries the same secret, exported in one run and written into the .env in
+# another, and no output of the installer's dry run (both modes), `ayl init
+# --dry-run`, `ayl init --print-env-resolution` or `ayl doctor` may contain it.
+USER = "uQ7zK9"
+PLANTED = "Gx7Rk2TqVw9"
+# Passwords that hold, unencoded, the characters that ended the authority
+# before its @ was found (F7-authority-last-at), and whole values the
+# redaction it replaced misread (F8-url-allowlist): a "://" inside a
+# scheme-less value, a token in the query or the path, an encoded @ in the
+# userinfo, IPv6 with userinfo, an empty value. None of them is a word, so a
+# four-character slice of one cannot turn up in ordinary output by chance.
+PASSWORDS = [PLANTED, "Gx7/Rk2TqVw9", "Gx7?Rk2TqVw9", "Gx7#Rk2TqVw9", "Gx7@Rk2TqVw9",
+             "Gx7:Rk2:TqVw9", "G/x7?R#k2@T:qVw9"]
+# Port 9: nothing answers there, so no run reaches an Ollama this machine may
+# be running.
+WHOLE_VALUES = [
+    (f"{USER}:Zq8Lr2Vx@127.0.0.1:9/via/http://gw", ["Zq8Lr2Vx", USER]),
+    (f"{USER}:Kp4v://Yz6w@127.0.0.1:9", ["Kp4v://Yz6w", USER]),
+    ("http://127.0.0.1:9/?key=zqzqxvxv", ["zqzqxvxv"]),
+    ("http://127.0.0.1:9/Pz8Xk2Nj/api", ["Pz8Xk2Nj"]),
+    ("http://uQ7%40zK9:Mv5%40Rq3@127.0.0.1:9", ["Mv5%40Rq3", "uQ7%40zK9"]),
+    (f"http://{USER}:Hn3Bv7Qs@[::1]:9", ["Hn3Bv7Qs", USER]),
+    ("", []),
+]
+SECRETS = PASSWORDS      # kept for the name the tests below use
+
+
+def url_settings(secret=PLANTED):
+    return {
+        "OLLAMA_URL": f"http://{USER}:{secret}@127.0.0.1:9",
+        "OLLAMA_HOST": f"{USER}:{secret}@127.0.0.1:11434",
+        "OPENROUTER_BASE_URL": f"https://{USER}:{secret}@openrouter.example/api/v1",
+        "LANGCHAIN_ENDPOINT": f"https://{USER}:{secret}@smith.example",
+        "LANGSMITH_ENDPOINT": f"https://{USER}:{secret}@smith.example",
+    }
+
+
+def planted_cases():
+    """(id, settings, secrets): every password in every URL-valued setting,
+    and every whole value in all of them at once."""
+    cases = [(f"password-{i}", url_settings(p), [p, USER]) for i, p in enumerate(PASSWORDS)]
+    cases += [(f"value-{i}", {name: value for name in url_settings()}, secrets)
+              for i, (value, secrets) in enumerate(WHOLE_VALUES)]
+    return cases
+
+
+PLANTED_CASES = planted_cases()
+
+
+URL_SETTINGS = url_settings()
+
+
+def test_every_url_valued_setting_is_named_in_the_planted_set():
+    """The planted set has to grow with the list the code reports, or a new
+    endpoint name would go untested."""
+    from ask_your_library import dataflow
+    assert set(URL_SETTINGS) == set(dataflow.ENDPOINT_VARS)
+
+
+def assert_no_planted(result, secrets=(PLANTED, USER)):
+    """No run of four or more characters of any planted secret: every such
+    run contains a four-character slice, so the slices are what is checked."""
+    printed = result.stdout + result.stderr
+    pieces = {secret[at:at + 4] for secret in secrets for at in range(len(secret) - 3)}
+    leaked = sorted(piece for piece in pieces if piece in printed)
+    assert not leaked, (leaked, printed[printed.find(leaked[0]) - 200:][:400] if leaked else "")
+    return printed
+
+
+@mac_only
+@pytest.mark.parametrize("case", PLANTED_CASES, ids=[c[0] for c in PLANTED_CASES])
+@pytest.mark.parametrize("where", ["exported", "dotenv"])
+@pytest.mark.parametrize("mode", [(), ("--hosted",)])
+def test_the_installer_dry_run_prints_no_planted_credential(sandbox, where, mode, case):
+    root, _, env = sandbox
+    _, settings, secrets = case
+    if where == "exported":
+        env.update(settings)
+    else:
+        (root / ".env").write_text("".join(f"{name}={value}\n"
+                                           for name, value in settings.items()))
+    result = subprocess.run([BASH, "scripts/install-mac.sh", "--dry-run", *mode], cwd=root,
+                            env=env, capture_output=True, text=True)
+    printed = assert_no_planted(result, secrets)
+    if secrets:
+        assert "not shown" in printed, "the run never reached a line that names a URL"
+    resolution = subprocess.run([BASH, "scripts/install-mac.sh", "--print-env-resolution"],
+                                cwd=root, env=env, capture_output=True, text=True)
+    assert_no_planted(resolution, secrets)
+
+
+@pytest.mark.skipif(not have_package, reason="the package is not importable here")
+@pytest.mark.parametrize("case", PLANTED_CASES, ids=[c[0] for c in PLANTED_CASES])
+@pytest.mark.parametrize("where", ["exported", "dotenv"])
+@pytest.mark.parametrize("argv", [["init", "--dry-run", "--no-demo"],
+                                  ["init", "--print-env-resolution"],
+                                  ["init", "--no-demo", "--yes"],
+                                  ["doctor"]])
+def test_the_package_prints_no_planted_credential(tmp_path, where, argv, case):
+    """`ayl init` and `ayl doctor` in a fresh interpreter, Ollama on a port
+    nothing answers (the remedy text names the URL), a temp AYL_HOME."""
+    from conftest import run_fresh
+    work = tmp_path / "work"
+    work.mkdir()
+    _, planted, secrets = case
+    planted = dict(planted)
+    if where == "dotenv":
+        (work / ".env").write_text("".join(f"{n}={v}\n" for n, v in planted.items()))
+        planted = {}
+    result = run_fresh("import sys\nfrom ask_your_library import ayl\n"
+                       f"sys.exit(ayl.main({argv!r}))\n",
+                       cwd=work, check=False, **planted)
+    printed = assert_no_planted(result, secrets)
+    assert "Traceback" not in printed, printed
+    if secrets:
+        assert "not shown" in printed, "no line named a URL: the check checked nothing"
+
+
+# --- what `ayl init` refuses from configuration alone, the installer refuses first ------
+# (F3-installer-backend-values.) Step 11 runs `ayl init`; a configuration it
+# refuses must not have got through steps 3 to 10 first. Each case is given to
+# both, as the same flags, exported variables and .env: the installer has to
+# stop before invoking any tool or writing .env, and `ayl init` before writing
+# anything under AYL_HOME.
+SAME_INPUT = [
+    # (id, --hosted?, exported, .env text)
+    ("invalid-embed-in-dotenv-hosted", True, {}, "LLM_BACKEND=openrouter\nEMBED_BACKEND=ollma\n"),
+    ("invalid-embed-exported", False, {"EMBED_BACKEND": "ollma"}, None),
+    ("blank-embed-exported", False, {"EMBED_BACKEND": ""}, None),
+    ("invalid-llm-exported", False, {"LLM_BACKEND": "ollma"}, None),
+    ("local-exported-hosted-answers", False, {"LLM_BACKEND": "openrouter"}, None),
+    ("local-exported-hosted-embeddings", False, {"EMBED_BACKEND": "openrouter"}, None),
+    ("local-remote-ollama", False, {"OLLAMA_URL": "http://ollama.example.com:11434"}, None),
+    ("local-tracing-v2", False, {"LANGSMITH_TRACING_V2": "true"}, None),
+    ("local-tracing-v1", False, {"LANGCHAIN_HANDLER": "langchain"}, None),
+    ("local-key-alone-over-dotenv", False, {"LANGCHAIN_API_KEY": "lsv2-not-a-real-key"},
+     "LLM_BACKEND=ollama\nEMBED_BACKEND=ollama\n"),
+    ("hosted-but-exported-local-with-tracing", True,
+     {"LLM_BACKEND": "ollama", "LANGSMITH_TRACING_V2": "true"}, None),
+    # $AYL_HOME/config.env, the third layer (F7-installer-config-env). Keys the
+    # .env this script writes does not set, or a .env already in the clone that
+    # does not set them: there, config.env is what both read.
+    ("config-env-tracing", False, {}, None, "LANGSMITH_TRACING=true\n"),
+    ("config-env-tracing-v1", False, {}, None, "LANGCHAIN_HANDLER=langchain\n"),
+    ("config-env-remote-ollama-under-a-dotenv", False, {}, "LLM_BACKEND=ollama\nEMBED_BACKEND=ollama\n",
+     "OLLAMA_URL=http://ollama.example.com:11434\n"),
+    ("config-env-invalid-embed-under-a-dotenv", False, {}, "LLM_BACKEND=ollama\n",
+     "EMBED_BACKEND=ollma\n"),
+    ("config-env-own-ayl-home-line-ignored", False, {}, None,
+     "AYL_HOME=/nowhere\nLANGSMITH_TRACING=true\n"),
+    # Read as config.py reads it, or refused by both with one message
+    # (F8-unreadable-config, F8-config-env-lines).
+    ("config-env-unreadable", False, {}, None, "LLM_BACKEND=ollama\n"),
+    ("config-env-interpolation", False, {}, None, "OLLAMA_URL=${SOMEWHERE}\n"),
+    ("config-env-line-without-equals", False, {}, None, "LLM_BACKEND\n"),
+    # The project .env (F9-installer-unreadable-env): the installer used to read
+    # it with `cat ... 2>/dev/null || true` and judge the empty result.
+    ("dotenv-unreadable", False, {}, "LLM_BACKEND=ollama\n"),
+    ("dotenv-not-utf8", False, {}, "LLM_BACKEND=ollama\n"),
+]
+
+
+@mac_only
+@pytest.mark.skipif(not have_package, reason="the package is not importable here")
+@pytest.mark.parametrize("case", SAME_INPUT, ids=[c[0] for c in SAME_INPUT])
+def test_what_ayl_init_refuses_the_installer_refuses_before_installing(sandbox, tmp_path,
+                                                                     case):
+    from conftest import run_fresh
+    _, hosted, exported, dotenv, *config_env = case
+    root, records, env = sandbox
+    home = Path(env["HOME"]) / "AskYourLibrary"
+    home.mkdir()
+    if config_env:
+        (home / "config.env").write_text(config_env[0])
+        if case[0] == "config-env-unreadable":
+            (home / "config.env").chmod(0)
+    written = sorted(home.rglob("*"))
+    if dotenv is not None:
+        (root / ".env").write_text(dotenv)
+        if case[0] == "dotenv-unreadable":
+            (root / ".env").chmod(0)
+        if case[0] == "dotenv-not-utf8":
+            (root / ".env").write_bytes(b"LLM_BACKEND=oll\xffama\n")
+    before = (root / ".env").read_bytes() if case[0] != "dotenv-unreadable" and \
+        dotenv is not None else None
+    installer = real_run(sandbox, *(["--hosted"] if hosted else []), **exported)
+    assert installer.returncode == 2, installer.stdout + installer.stderr
+    assert invoked(records) == [], "a tool ran before the refusal"
+    if case[0] != "dotenv-unreadable":
+        assert ((root / ".env").read_bytes() if (root / ".env").exists() else None) == before
+
+    argv = ["init", "--no-demo", *(["--mode", "hosted"] if hosted else [])]
+    init = run_fresh("import sys\nfrom ask_your_library import ayl\n"
+                     f"sys.exit(ayl.main({argv!r}))\n",
+                     cwd=root, check=False, AYL_HOME=str(home), **exported)
+    if case[0] == "invalid-llm-exported":
+        # config.py refuses it at import, before `ayl init` can parse a flag.
+        assert init.returncode != 0 and "LLM_BACKEND must be" in init.stderr
+    else:
+        assert init.returncode == 2, init.stdout + init.stderr
+    if case[0].startswith("config-env-") and case[0] != "config-env-own-ayl-home-line-ignored":
+        assert "Traceback" not in init.stderr
+    if case[0] == "config-env-unreadable":
+        assert "config.env cannot be read" in init.stderr
+        assert "config.env cannot be read" in installer.stderr
+    if case[0].startswith("dotenv-"):
+        kind = "PermissionError" if case[0] == "dotenv-unreadable" else "UnicodeDecodeError"
+        line = (f".env cannot be read ({kind}): every command reads it at its start. Fix its "
+                f"permissions or its encoding (UTF-8), or move it aside, and run again.")
+        assert "Traceback" not in init.stderr
+        assert line in init.stderr and line in installer.stderr
+    if case[0] in ("config-env-interpolation", "config-env-line-without-equals"):
+        rule = "Write config.env as plain NAME=value lines (every line with an =, no ${...})"
+        assert rule in init.stderr and rule in installer.stderr
+    assert sorted(home.rglob("*")) == written, "ayl init wrote before refusing"
+
+
+@mac_only
+@pytest.mark.skipif(not have_package, reason="the package is not importable here")
+def test_yes_with_a_credential_in_a_url_is_refused_by_both_before_anything(sandbox, tmp_path):
+    """--yes is --demo for step 11, and `ayl init` does not start a demo build
+    while a URL-valued setting carries a credential (its error output can print
+    it, #107): the installer refuses the same, before it installs anything."""
+    from conftest import run_fresh
+    root, records, env = sandbox
+    url = "http://reader:s3cret-in-the-url@127.0.0.1:11434"
+    installer = real_run(sandbox, "--yes", OLLAMA_URL=url)
+    assert installer.returncode == 2, installer.stdout + installer.stderr
+    assert "not built while a URL-valued" in installer.stderr
+    assert invoked(records) == [] and not (root / ".env").exists()
+    assert "s3cret-in-the-url" not in installer.stdout + installer.stderr
+    init = run_fresh("import sys\nfrom ask_your_library import ayl\n"
+                     "sys.exit(ayl.main(['init', '--demo', '--dry-run']))\n",
+                     cwd=root, check=False, AYL_HOME=str(tmp_path / "home"), OLLAMA_URL=url)
+    assert init.returncode == 2, init.stdout + init.stderr
+    # Without --yes nothing asks for the demo: the run goes on.
+    assert real_run(sandbox, OLLAMA_URL=url).returncode == 0
+
+
+@mac_only
+@pytest.mark.skipif(not have_package, reason="the package is not importable here")
+@pytest.mark.parametrize("where", ["exported", "dotenv"])
+def test_a_whitespace_only_llm_backend_is_the_default_for_both(sandbox, tmp_path, where):
+    """config.py reads a blank or whitespace-only LLM_BACKEND as the default
+    (`_env`); the installer refused it as "not a backend" (F7-blank-llm-backend)."""
+    from conftest import run_fresh
+    root, _, env = sandbox
+    exported = {"LLM_BACKEND": "   "} if where == "exported" else {}
+    if where == "dotenv":
+        (root / ".env").write_text("LLM_BACKEND=   \nEMBED_BACKEND=ollama\n")
+    installer = real_run(sandbox, "--no-demo", **exported)
+    assert installer.returncode == 0, installer.stdout + installer.stderr
+    assert "not a backend" not in installer.stderr
+    init = run_fresh("import sys\nfrom ask_your_library import ayl\n"
+                     "sys.exit(ayl.main(['init', '--dry-run', '--no-demo']))\n",
+                     cwd=root, check=False, AYL_HOME=str(tmp_path / "ayl-home"), **exported)
+    assert init.returncode == 0, init.stdout + init.stderr
+
+
+@mac_only
+def test_an_ayl_home_named_in_the_dotenv_decides_which_config_env_is_read(sandbox, tmp_path):
+    """AYL_HOME may come from the .env, as config.py reads it; the guard used to
+    look for config.env before it could read the .env's line."""
+    root, records, _ = sandbox
+    chosen = tmp_path / "chosen-home"
+    chosen.mkdir()
+    (chosen / "config.env").write_text("LANGSMITH_TRACING=true\n")
+    (root / ".env").write_text(f"AYL_HOME={chosen}\nLLM_BACKEND=ollama\nEMBED_BACKEND=ollama\n")
+    result = real_run(sandbox, "--no-demo")
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "command not found" not in result.stderr
+    assert f"LANGSMITH_TRACING=true ({chosen}/config.env)" in result.stderr
+    assert invoked(records) == []
+
+
+@mac_only
+def test_the_remedy_names_config_env_when_the_value_came_from_it(sandbox):
+    """F8-remedy-source: "Edit .env" was the remedy for a value config.env set."""
+    root, _, env = sandbox
+    home = Path(env["HOME"]) / "AskYourLibrary"
+    home.mkdir()
+    (home / "config.env").write_text("LANGSMITH_TRACING=true\n")
+    result = real_run(sandbox, "--no-demo")
+    assert result.returncode == 2
+    lines = error_lines(result.stderr)
+    assert f"these come from {home}/config.env, under the .env: edit that file" in lines
+    assert "(or move it aside and re-run) for: LANGSMITH_TRACING" in lines
+    assert not any(line.startswith("value came from. Edit .env") for line in lines)
+
+
+
+@mac_only
+def test_yes_with_a_token_in_a_url_s_query_is_refused_before_anything(sandbox):
+    """F8-query-token, F9-server-text-never: for the --yes demo refusal a URL
+    counts unless it is plain with a known-safe path, as
+    dataflow.carries_credential counts it — a query does, and so does any
+    path but /, /v1 and /api/v1."""
+    root, records, _ = sandbox
+    for url in ("http://127.0.0.1:11434/?key=zqzqxvxvzqzqxv",
+                "http://127.0.0.1:11434/vxvxpathvxvx"):
+        result = real_run(sandbox, "--yes", OLLAMA_URL=url)
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "not built while a URL-valued" in result.stderr
+        assert invoked(records) == []
+        assert "zqzq" not in result.stdout + result.stderr
+        assert "vxvx" not in result.stdout + result.stderr
+    # A known-safe path does not count.
+    safe = real_run(sandbox, "--yes", OLLAMA_URL="http://127.0.0.1:11434/v1")
+    assert "not built while a URL-valued" not in safe.stderr

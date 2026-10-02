@@ -7,14 +7,38 @@ clone answers with no account, no key and nothing to pay. Nothing below has to b
 the [Fully local, no account](#fully-local-no-account) section is what that default does, and
 [Cost](cost.md) is about the hosted alternative.
 
-All settings are environment variables (`.env` in the repo root is loaded; exported variables
-win). `.env.example` **is** the default configuration — copy it to `.env` and edit from there;
-the hosted lines ship commented out with what they cost written beside them.
+All settings are environment variables, read from three places, highest first, the same for
+every command ([ADR-027](adr/README.md#adr-027-one-precedence-for-every-command-exported-then-the-projects-env-then-ayl_homeconfigenv)):
+
+1. a variable **exported** in your shell;
+2. the **`.env` of the project you are in**: the working directory's, or a parent's up to the
+   nearest folder holding a `.git` or a `pyproject.toml` — so from anywhere inside the clone,
+   the clone's `.env` — and never one above that folder; outside any project, only the working
+   directory's own `.env`;
+3. **`$AYL_HOME/config.env`** (`~/AskYourLibrary/config.env` by default), the file `ayl init`
+   writes. An `AYL_HOME` line in it is not read: the file cannot move the folder it lives in.
+   `ayl init` does not write it when a `.env` above it already sets `LLM_BACKEND` or
+   `EMBED_BACKEND`, or when it exists. Write it as plain `NAME=value` lines: a line with no `=`
+   or with a `${...}` in it is refused, by every command and by the installer, with the same
+   line. A configuration file that cannot be read (its permissions, or not UTF-8) stops every
+   command at its start with one line naming it (exit 2); the installer refuses it before it
+   installs anything.
+
+A name none of the three sets takes the default in the table below. `.env.example` **is** the
+default configuration — copy it to `.env` and edit from there; the hosted lines ship commented out
+with what they cost written beside them. `ayl init --print-env-resolution` prints, for every
+setting that decides where your data goes, its value and which of the three places it came from. `scripts/install-mac.sh` reads the same three layers, in the same order, when it judges a
+configuration before installing anything. Neither prints a URL-valued setting as written: only
+its `scheme://host[:port]`, with "(path not shown)" when a path or query followed, and for a value
+with an `@` anywhere, or one that is not a plain URL, the words
+`<not shown: the value carries a credential or is not a plain URL>`. Nothing a server sends
+back — an error, an error body, a progress stage — is printed either: `ayl init` says in its own
+words that the server reported an error, with the HTTP status, and points to Ollama's own log.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `LIBRARY_DB_PATH` | `$AYL_HOME/index` | LanceDB with `cards_<backend>` / `transcripts_<backend>`, the `books` ledger and the `_index_meta` stamps. **Set, it is used exactly as written, always** — no `~` expansion, no git-work-tree check, no notice. **Unset**, the index is `$AYL_HOME/index`, created by the first write, unless the working directory holds an index built before that default moved: a `data/lancedb` with a `transcripts_<EMBED_BACKEND>` table in it is read where it is, with one line on stderr per process naming the move, until 0.5.0, when it becomes an error ([upgrading](upgrading.md#the-index-moved-to-ayl_homeindex)). `ayl doctor` prints which of the three applied and why. It is a directory, so a backup of it is a file copy — `ayl backup <dir>` is the one that says when a copy is safe ([upgrading](upgrading.md)). While an ingest runs it holds an `flock` on `.ayl-ingest-<name>.lock` BESIDE this directory (`$AYL_HOME/.ayl-ingest-index.lock` for the default); a second `ayl add`, a backup or a restore is refused until it finishes. The lock is the operating system's, so it is released the moment the holder ends, however it ends — there is nothing to clear by hand |
-| `AYL_HOME` | `~/AskYourLibrary` | The reader's own folder, the home of everything built on this machine ([ADR-026](adr/README.md#adr-026-ayl_home-is-the-home-of-everything-built-on-this-machine-the-index-the-scratchpads-the-chat-database-the-private-shelf)): the index (`$AYL_HOME/index`), the scratchpads (`$AYL_HOME/scratch`), the web chat's app root and chat database (`$AYL_HOME/ui`), the engineer's shelf's local cards (`$AYL_HOME/cards/tech/`, [corpus-tech](../corpus-tech/README.md#local-cards-and-ayl_home)), and later the private shelf of your own books. A `~` is expanded; blank means the default. The default index and the local cards are refused when this resolves inside a git work tree — `.gitignore` is not a boundary — and the refusal of the index names `LIBRARY_DB_PATH`, the one-line way to keep an index elsewhere. The scratchpads and the web chat's state are not refused: they are working files of a run |
+| `LIBRARY_DB_PATH` | `$AYL_HOME/index` | LanceDB with `cards_<backend>` / `transcripts_<backend>`, the `books` ledger and the `_index_meta` stamps. **Set, it is used exactly as written, always** — no `~` expansion, no git-work-tree check, no notice. **Unset**, the index is `$AYL_HOME/index`, created by the first write, unless the working directory holds an index built before that default moved: a `data/lancedb` with a `transcripts_<EMBED_BACKEND>` table in it is read where it is, with one line on stderr per process naming the move, until 0.6.0, when it becomes an error ([upgrading](upgrading.md#the-index-moved-to-ayl_homeindex)). `ayl doctor` prints which of the three applied and why. It is a directory, so a backup of it is a file copy — `ayl backup <dir>` is the one that says when a copy is safe ([upgrading](upgrading.md)). While an ingest runs it holds an `flock` on `.ayl-ingest-<name>.lock` BESIDE this directory (`$AYL_HOME/.ayl-ingest-index.lock` for the default); a second `ayl add`, a backup or a restore is refused until it finishes. The lock is the operating system's, so it is released the moment the holder ends, however it ends — there is nothing to clear by hand |
+| `AYL_HOME` | `~/AskYourLibrary` | The reader's own folder, the home of everything built on this machine ([ADR-026](adr/README.md#adr-026-ayl_home-is-the-home-of-everything-built-on-this-machine-the-index-the-scratchpads-the-chat-database-the-private-shelf)): the index (`$AYL_HOME/index`), the demo library `ayl init --demo` builds (`$AYL_HOME/demo/index`, apart from your index; asked by setting `LIBRARY_DB_PATH` to it) and its downloads and prepared texts (`$AYL_HOME/demo/cache`; the build writes nothing into the clone), the configuration `ayl init` writes (`$AYL_HOME/config.env`), the scratchpads (`$AYL_HOME/scratch`), the web chat's app root and chat database (`$AYL_HOME/ui`), the engineer's shelf's local cards (`$AYL_HOME/cards/tech/`, [corpus-tech](../corpus-tech/README.md#local-cards-and-ayl_home)), and later the private shelf of your own books. A `~` is expanded; blank means the default. The default index, the demo library with its cache, and the local cards are refused when this resolves inside a git work tree — `.gitignore` is not a boundary — and the refusal of the index names `LIBRARY_DB_PATH`, the one-line way to keep an index elsewhere. The scratchpads and the web chat's state are not refused: they are working files of a run |
 | `EMBED_BACKEND` | `ollama` | `ollama` (local bge-m3) or `openrouter`; also selects the table suffix |
 | `OLLAMA_URL` | `http://localhost:11434` | Local Ollama endpoint |
 | `OLLAMA_EMBED_MODEL` | `bge-m3` | Embedding model, 1024 dims, multilingual |
@@ -48,7 +72,7 @@ the hosted lines ship commented out with what they cost written beside them.
 | `CHAINLIT_USERNAME` / `CHAINLIT_PASSWORD` | `admin` / `change-me` | Web UI login |
 | `CHAINLIT_AUTH_SECRET` | generated | Signs login tokens; persisted to `auth-secret` in the directory below |
 | `CHAINLIT_HOST` / `CHAINLIT_PORT` | `127.0.0.1` / `8000` | Where the web chat listens. The host is an IPv4 address or a DNS name, lowercased, and it is added to the server's `Host` check so the name it was told to serve is a name it answers; an IPv6 literal is refused, because that check reads the host as everything before the first `:` and cannot match the `[::1]:8000` a browser sends. Chainlit's own two names; `ayl ui` reads them as the defaults of its `--host` and `--port`, because it always passes both to `chainlit run` — and the port it ends up with is the one written into the generated `allow_origins`, so a page served on another port cannot read this server's threads. A `CHAINLIT_PORT` that is not a port number is refused at startup rather than rounded |
-| `AYL_CHAINLIT_DIR` | `$AYL_HOME/ui/.chainlit/` | Where the UI writes its chat db and auth secret. Unset, the checkout the package runs from (not the working directory), when its `.chainlit/` already holds a `chat.db` from before that default moved, keeps it there, with one line when the web chat starts, until 0.5.0 ([upgrading](upgrading.md#the-index-moved-to-ayl_homeindex)). `~` is expanded and the path resolved, once, in one place (`ui/launcher.py`), so the web chat and `ayl backup` / `ayl restore` cannot end up at two different directories — never the working directory, which anyone can prepare a `.chainlit/auth-secret` in; tests and the canary point it at a temp dir. It also decides the **Chainlit app root** `ayl ui` prepares — the directory above it — into which the launcher writes `chainlit_config.toml` and the translation on every start; unset, that root is `$AYL_HOME/ui`. `ayl backup` / `ayl restore` read the same variable to find `chat.db` (and `--chat-db <path>` overrides it) |
+| `AYL_CHAINLIT_DIR` | `$AYL_HOME/ui/.chainlit/` | Where the UI writes its chat db and auth secret. Unset, the checkout the package runs from (not the working directory), when its `.chainlit/` already holds a `chat.db` from before that default moved, keeps it there, with one line when the web chat starts, until 0.6.0 ([upgrading](upgrading.md#the-index-moved-to-ayl_homeindex)). `~` is expanded and the path resolved, once, in one place (`ui/launcher.py`), so the web chat and `ayl backup` / `ayl restore` cannot end up at two different directories — never the working directory, which anyone can prepare a `.chainlit/auth-secret` in; tests and the canary point it at a temp dir. It also decides the **Chainlit app root** `ayl ui` prepares — the directory above it — into which the launcher writes `chainlit_config.toml` and the translation on every start; unset, that root is `$AYL_HOME/ui`. `ayl backup` / `ayl restore` read the same variable to find `chat.db` (and `--chat-db <path>` overrides it) |
 | `AYL_ALLOW_DEFAULT_LOGIN` | (unset) | `1` allows the placeholder password (local demo only) |
 | `AYL_ALLOW_START_WITHOUT_KEY` | (unset) | `1` lets `src/ask_your_library/ui/app.py` be imported without an OpenRouter key (tests, the injection canary). The gate it bypasses only exists when a key is needed at all, so it does nothing in the default local configuration; with a hosted answering model or hosted embeddings the server otherwise refuses to start, before anyone can log in |
 | `AYL_CLARIFY_TIMEOUT_S` | `300` | How long the web UI's ask-back waits for the reader before the agent goes on without an answer. The default is five minutes, for a person reading a numbered list; `tests/ui` shortens it so a test can watch one expire. A value that is not a whole number above 0 is refused at startup rather than rounded |
@@ -83,12 +107,21 @@ on translated prose:
 | `0` | an answer |
 | `1` | the environment is not ready for a reason with no remedy of its own (an index built by another embedding model; a default index that would land inside a git work tree, which names `LIBRARY_DB_PATH`), or the run itself failed |
 | `2` | a bad command line (argparse's own) |
-| `3` | no index yet — build the demo corpus, run `ayl add`, or point `LIBRARY_DB_PATH` at one |
+| `3` | no index yet — run `ayl add`, build the demo library (`ayl init --demo`), or point `LIBRARY_DB_PATH` at one |
 | `4` | a hosted backend is configured and has no key |
 | `5` | Ollama is not reachable, does not answer as Ollama, or a configured model is not pulled |
 
 `3` and `5` are the two ordinary ways a fresh clone fails, and both messages carry the commands
-that fix them, `bash scripts/install-mac.sh` included.
+that fix them, `bash scripts/install-mac.sh` included. `ayl init` exits with the same numbers
+(5 when Ollama does not answer; 2 when `LLM_BACKEND` or `EMBED_BACKEND` is neither `ollama` nor
+`openrouter`, when an exported one contradicts the local mode it would write, when a local
+mode would send something off this machine, or when `--demo` is asked for while a URL-valued
+setting is anything but a plain URL with no path beyond `/v1` or `/api/v1` — the demo build's
+error output could print it, issue #107 — and
+the installer refuses the same, before step 3),
+and with 0 when the only things left are yours to do: adding books, and a key the configuration
+needs. A refused folder for your index is 1 even when a demo library was built. `--dry-run` ends on
+the same status wherever that can be told without a request, and names what it did not check.
 
 ## Fully local, no account
 
@@ -101,13 +134,14 @@ Indexing needs no account either: `ayl add` chunks locally and embeds with Ollam
 So the whole system runs on this machine, and there is nothing to set:
 
 ```bash
-ollama pull qwen2.5:14b                   # the default OLLAMA_LLM_MODEL; or any chat model
+uv run ayl init                           # pulls the default models and writes the local config.env
 uv run ayl ask "..."                      # no key, cost lines read $0.0000
 uv run --extra ui ayl ui                  # the web chat; its key gate is off in this mode
 ```
 
-`bash scripts/install-mac.sh` does the pulls and writes this `.env` for you. Nothing in either
-command names a backend, because the local one is the default; `LLM_BACKEND=openrouter` is how
+`ayl init` pulls `OLLAMA_LLM_MODEL` and `OLLAMA_EMBED_MODEL` (`ollama pull` each by hand is the
+same thing) and writes `$AYL_HOME/config.env`; `bash scripts/install-mac.sh` writes a `.env` in
+the clone instead and then runs `ayl init`. Nothing in any of these commands names a backend, because the local one is the default; `LLM_BACKEND=openrouter` is how
 you leave it.
 
 **Check the loaded context, and pin `num_ctx` for any model with a large trained context.** Ollama

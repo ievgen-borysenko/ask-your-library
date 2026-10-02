@@ -457,7 +457,9 @@ def test_a_missing_ollama_and_a_missing_index_are_different_statuses(monkeypatch
     assert result.kinds == ["no_db"]
     assert pf.exit_code(result) == pf.EXIT_NO_INDEX == 3
     # And it says which command builds one.
-    assert "ingest_demo_corpus.py" in result[0] and "ayl add" in result[0]
+    assert "ayl add" in result[0] and "LIBRARY_DB_PATH=$AYL_HOME/demo/index" in result[0]
+    # a missing index of the reader's is not remedied by building the classics
+    assert "ayl init --demo" not in result[0]
 
 
 def test_a_missing_key_keeps_its_own_status_on_the_hosted_backend(monkeypatch, tmp_path):

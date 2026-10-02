@@ -3,18 +3,19 @@
 # Ask Your Library — macOS setup (Apple silicon and Intel).
 #
 # Takes a fresh clone to a working local install: prerequisites, models,
-# dependencies, .env, the demo corpus, and the project's own preflight. Nothing
-# here runs sudo. What reaches the network: package fetches through brew, uv and
-# ollama, and — when you say yes to the demo corpus — the checksum-pinned
-# public-domain texts scripts/ingest_demo_corpus.py downloads from gutenberg.org.
+# dependencies, .env, then `ayl init` (which offers the demo library), and the
+# project's own preflight. Nothing here runs sudo. What reaches the network:
+# package fetches through brew, uv and ollama, and — when you say yes to the demo
+# library — the checksum-pinned public-domain texts scripts/ingest_demo_corpus.py
+# downloads from gutenberg.org.
 # The two LibriVox audiobooks are not fetched: their transcripts are committed
 # under corpus/prepared-audio/, so archive.org is reached only by that script's
 # --retranscribe. Nothing else leaves this machine.
 #
 #   bash scripts/install-mac.sh                 # fully local: Ollama answers and embeds
 #   bash scripts/install-mac.sh --dry-run       # print the plan, change nothing
-#   bash scripts/install-mac.sh --yes           # no confirmation before the demo build
-#   bash scripts/install-mac.sh --no-demo       # skip the demo corpus
+#   bash scripts/install-mac.sh --yes           # build the demo library without asking
+#   bash scripts/install-mac.sh --no-demo       # no demo library, and no question about it
 #   bash scripts/install-mac.sh --hosted        # keep the OpenRouter answering model
 #
 # Exit codes: 0 done, 1 a prerequisite is missing or a step failed (both are printed
@@ -40,9 +41,85 @@ note() { printf '       %s\n' "$1"; }
 plan() { printf '       would %s\n' "$1"; }
 fail() { printf 'error: %s\n' "$1" >&2; }
 
+# A configuration file this script must read, refused before anything is
+# installed when it cannot be read or is not UTF-8 — the two failures
+# python-dotenv raises on (PermissionError, UnicodeDecodeError). A read
+# swallowed by `2>/dev/null || true` used to come back empty and be judged as
+# an empty, valid configuration. $2 is what the file is to this run; for the
+# files config.py reads, the line is the one config.py prints.
+refuse_unreadable() {
+    local path="$1" what="$2" kind=""
+    if [ ! -r "$path" ]; then
+        kind="PermissionError"
+    elif ! iconv -f UTF-8 -t UTF-8 "$path" >/dev/null 2>&1; then
+        kind="UnicodeDecodeError"
+    fi
+    [ -z "$kind" ] && return 0
+    fail "$path cannot be read ($kind): $what. Fix its permissions or its encoding (UTF-8), or move it aside, and run again."
+    exit 2
+}
+
 # The first line of a possibly multi-line value. `| head -1` would be shorter,
 # but `set -o pipefail` turns the SIGPIPE it can send the writer into a failure.
 first_line() { printf '%s\n' "${1%%$'\n'*}"; }
+
+# A URL-valued setting as this script prints it: `scheme://host[:port]`,
+# rebuilt from the parts a strict pattern extracted from the WHOLE value, plus
+# "(path not shown)" when a path, query or fragment followed — or, for a value
+# with an @ anywhere or one the pattern does not match whole, fixed words and
+# nothing of the value. An allowlist, not a redaction: taking a credential out
+# of a value failed three ways (the first delimiter, a / ? or # in a password,
+# a "://" in a scheme-less value). The same rule, pattern and words as
+# ask_your_library.dataflow.shown_url. Printing only: requests and the
+# loopback checks use the real value. Every line that prints OLLAMA_URL,
+# OLLAMA_HOST, OPENROUTER_BASE_URL or a trace endpoint goes through it (or
+# through shown_value); tests/test_install_script.py plants secrets in all.
+NOT_SHOWN="<not shown: the value carries a credential or is not a plain URL>"
+PLAIN_URL_RE='^([A-Za-z][A-Za-z0-9+.-]*)://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?([/?#].*)?$'
+shown_url() {
+    local value="$1" LC_ALL=C note=""
+    case "$value" in
+        *@*) printf '%s\n' "$NOT_SHOWN"; return 0 ;;
+    esac
+    if [[ "$value" =~ $PLAIN_URL_RE ]]; then
+        [ -z "${BASH_REMATCH[4]}" ] || note=" (path not shown)"
+        printf '%s://%s%s%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "$note"
+    else
+        printf '%s\n' "$NOT_SHOWN"
+    fi
+}
+
+# The same rule as ask_your_library.dataflow.carries_credential, over the same
+# list (dataflow.SAFE_URL_PATHS; the empty path is always safe here): true
+# unless the value is a plain URL whose path is one of these — any other path,
+# any query or fragment, any @, any non-match counts. It decides only the --yes
+# refusal: the demo build's child can print the URL it requested (#107).
+SAFE_URL_PATHS='/ /v1 /v1/ /api/v1 /api/v1/'
+carries_credential() {
+    local value="$1" LC_ALL=C path safe
+    [ "$(shown_url "$value")" = "$NOT_SHOWN" ] && return 0
+    [[ "$value" =~ $PLAIN_URL_RE ]] || return 0
+    path="${BASH_REMATCH[4]}"
+    [ -z "$path" ] && return 1
+    for safe in $SAFE_URL_PATHS; do
+        [ "$path" = "$safe" ] && return 1
+    done
+    return 0
+}
+
+# Any setting as this script prints it: a URL-valued one (ENDPOINT_VARS, the
+# names dataflow.ENDPOINT_VARS holds) through shown_url; any other as it is,
+# unless it holds an @, which none of them needs.
+shown_setting() {
+    case " OLLAMA_URL OLLAMA_HOST OPENROUTER_BASE_URL LANGCHAIN_ENDPOINT LANGSMITH_ENDPOINT " in
+        *" $1 "*) shown_url "$2"; return 0 ;;
+    esac
+    case "$2" in
+        *@*) printf '%s\n' "$NOT_SHOWN" ;;
+        *) printf '%s\n' "$2" ;;
+    esac
+}
+
 
 usage() {
     cat <<'USAGE'
@@ -50,14 +127,16 @@ Usage: bash scripts/install-mac.sh [--dry-run] [--yes] [--no-demo] [--hosted]
                                    [--print-env-resolution] [--help]
 
 Sets up Ask Your Library on macOS: uv and Ollama through Homebrew, the two
-models, the locked dependencies, a .env, and (optionally) the demo corpus.
+models, the locked dependencies, a .env, then `ayl init`, which offers the demo
+library of public-domain classics and keeps it apart from your own index.
 Run it from the repository root.
 
   --dry-run       print the plan and exit; reads files, changes nothing, installs
                   nothing, and never invokes brew, uv or ollama
-  --yes, -y       do not ask before the demo corpus build (about 30 minutes)
-  --no-demo       skip the demo corpus; the script prints how to index a folder of
-                  your own books instead
+  --yes, -y       build the demo library without asking (`ayl init --demo`, a few
+                  minutes; without --yes `ayl init` asks once, and no is the default)
+  --no-demo       no demo library, and no question about it; the script prints how
+                  to index a folder of your own books instead
   --hosted        write the hosted configuration (OpenRouter answering model)
                   instead of the fully local one. The key is never taken on the
                   command line: the script names the variable to set
@@ -162,6 +241,8 @@ if [ ! -f pyproject.toml ] || ! grep -q '^name = "ask-your-library"' pyproject.t
     exit 2
 fi
 note "$(pwd)"
+# Read with sed for the defaults below; a failed read would come back empty.
+refuse_unreadable "$PWD/src/ask_your_library/config.py" "this script reads the defaults from it"
 
 # The model names and the endpoint come from the code, so this script cannot
 # pull a model the app will never ask for. Exported value first, then .env, then
@@ -232,6 +313,9 @@ hosted_env() {
 # LangSmith key, which needs no flag of its own: graph.py turns a key with no
 # LANGCHAIN_TRACING_V2 set into LANGCHAIN_TRACING_V2=true before the first node
 # runs, so a key alone is a tracing switch that none of the five flags shows.
+# The same names, in the same order, are ask_your_library/dataflow.py, which
+# step 12 and `ayl init` use; this copy exists because nothing is installed yet
+# when it is read, and tests/test_install_script.py holds the two equal.
 BACKEND_VARS="LLM_BACKEND EMBED_BACKEND"
 ENDPOINT_VARS="OLLAMA_URL OLLAMA_HOST OPENROUTER_BASE_URL LANGCHAIN_ENDPOINT LANGSMITH_ENDPOINT"
 # The tracing names are read by two libraries with two different truth tables,
@@ -269,13 +353,16 @@ DATA_FLOW_VARS="$BACKEND_VARS $ENDPOINT_VARS $TRACING_VARS $KEY_VARS"
 # judgement is the same either way, and it is the values that changed.
 planned_env_read=1
 if [ -f .env ]; then
-    planned_env="$(cat .env 2>/dev/null || true)"
+    refuse_unreadable "$PWD/.env" "every command reads it at its start"
+    planned_env="$(cat .env)"
     planned_env_source="the .env already in this clone"
 elif [ "$hosted" -eq 1 ]; then
+    refuse_unreadable "$PWD/.env.example" "this run writes .env from it"
     planned_env="$(hosted_env 2>/dev/null || true)"
     planned_env_source="the .env this run writes"
     [ -n "$planned_env" ] || planned_env_read=0
 else
+    refuse_unreadable "$PWD/.env.example" "this run writes .env from it"
     planned_env="$(local_env 2>/dev/null || true)"
     planned_env_source="the .env this run writes"
     [ -n "$planned_env" ] || planned_env_read=0
@@ -307,6 +394,11 @@ dotenv_scanned=""
 dotenv_rest=""
 
 dotenv_refuse() {
+    if [ "${parsing_config_env-0}" -eq 1 ]; then
+        # config.py refuses the same two forms in config.env with this line.
+        fail "$planned_env_source, line $1: $2. Write config.env as plain NAME=value lines (every line with an =, no \${...}) and run again."
+        exit 2
+    fi
     fail "$planned_env_source, line $1: $2."
     fail "the application reads .env with python-dotenv, which would read that line"
     fail "differently from this script — and the difference decides where your data"
@@ -561,6 +653,14 @@ print_env_resolution() {
             fi
             continue
         fi
+        # A URL's credential or token is not in the record either. Only a
+        # URL-valued name, or a value with an @, goes through shown_setting: a
+        # command substitution drops trailing newlines, and every other value
+        # has to come back exactly as read.
+        case " $ENDPOINT_VARS " in
+            *" $name "*) value="$(shown_setting "$name" "$value")" ;;
+            *) case "$value" in *@*) value="$(shown_setting "$name" "$value")" ;; esac ;;
+        esac
         out=""
         index=0
         while [ "$index" -lt "${#value}" ]; do
@@ -603,10 +703,60 @@ dotenv_defines() {
     return 1
 }
 
+# --- the third layer: $AYL_HOME/config.env, the file `ayl init` writes ---------
+# config.py reads it beneath exported variables and the project's .env (ADR-027),
+# so the judgement below has to as well: a LANGSMITH_TRACING=true there made a
+# run this script let through refused by `ayl init` at step 11, after the
+# installs. Parsed with the same reader, then kept apart from the .env's values
+# (home_v_NAME, home_names); its AYL_HOME line is ignored, as config.py ignores
+# it. AYL_HOME itself: exported, else the .env's, else ~/AskYourLibrary. A
+# ~user spelling is not resolved here (step 11 refuses it), so no file is read.
+home_names=""
+home_dir="${AYL_HOME-}"
+if [ -z "${AYL_HOME+set}" ] && dotenv_defines AYL_HOME; then
+    home_dir="$(planned_value AYL_HOME)"
+fi
+[ -n "${home_dir//[[:space:]]/}" ] || home_dir="$HOME/AskYourLibrary"
+case "$home_dir" in
+    "~") home_dir="$HOME" ;;
+    "~/"*) home_dir="$HOME/${home_dir#"~/"}" ;;
+esac
+case "$home_dir" in
+    "~"*) ;;
+    *)
+        if [ -f "$home_dir/config.env" ]; then
+            # config.py would stop at every command's import on it (exit 2):
+            # stopped here instead, before anything is installed.
+            refuse_unreadable "$home_dir/config.env" "every command reads it at its start"
+        fi
+        if [ -f "$home_dir/config.env" ]; then
+            saved_names="$dotenv_names" saved_source="$planned_env_source"
+            for name in $saved_names; do eval "saved_v_$name=\${dotenv_v_$name}"; done
+            planned_env_source="$home_dir/config.env" parsing_config_env=1
+            dotenv_parse "$(cat "$home_dir/config.env")"
+            parsing_config_env=0
+            for name in $dotenv_names; do
+                [ "$name" = "AYL_HOME" ] && continue
+                eval "home_v_$name=\${dotenv_v_$name}"
+                home_names="$home_names $name"
+                unset "dotenv_v_$name"
+            done
+            dotenv_names="$saved_names" planned_env_source="$saved_source"
+            for name in $saved_names; do eval "dotenv_v_$name=\${saved_v_$name}"; done
+        fi
+        ;;
+esac
+home_defines() {
+    case " $home_names " in *" $1 "*) return 0 ;; esac
+    return 1
+}
+home_value() { local variable="home_v_$1"; printf '%s\n' "${!variable-}"; }
+
 setting() {
     local name="$1" value
     value="${!name-}"
     [ -n "$value" ] || value="$(planned_value "$name")"
+    [ -n "$value" ] || value="$(home_value "$name")"
     [ -n "$value" ] || value="$(config_default "$name")"
     printf '%s\n' "$value"
 }
@@ -615,6 +765,8 @@ ollama_url="$(setting OLLAMA_URL)"
 # config.py strips trailing slashes before it builds an endpoint out of this
 # value; without the same here a URL written with one asks for //api/tags.
 while [ "${ollama_url%/}" != "$ollama_url" ]; do ollama_url="${ollama_url%/}"; done
+
+ollama_shown="$(shown_url "$ollama_url")"
 embed_model="$(setting OLLAMA_EMBED_MODEL)"
 llm_model="$(setting OLLAMA_LLM_MODEL)"
 # The download sizes step 8 prints were measured on the two defaults and on
@@ -636,8 +788,8 @@ fi
 case "$ollama_url" in
     *://*) ;;
     *)
-        fail "OLLAMA_URL=$ollama_url has no scheme, and config.py uses the value as it"
-        fail "stands: the answering model would be asked for at $ollama_url/v1, which is"
+        fail "OLLAMA_URL=$ollama_shown has no scheme, and config.py uses the value as it"
+        fail "stands: the answering model would be asked for at that value with /v1 after it, which is"
         fail "not an address. Write it in full (http://localhost:11434), or unset"
         fail "OLLAMA_URL to use that default, and re-run."
         exit 2
@@ -651,6 +803,8 @@ esac
 env_backend=""
 if [ -f .env ]; then
     env_backend="$(planned_value LLM_BACKEND)"
+    # Blank or whitespace-only is the default, as config.py reads it.
+    [ -n "${env_backend//[[:space:]]/}" ] || env_backend=""
 fi
 setup_backend="${env_backend:-$requested_backend}"
 if [ "$setup_backend" = "ollama" ]; then
@@ -689,11 +843,14 @@ effective_value() {
         value="${!1}"
     elif dotenv_defines "$1"; then
         value="$(planned_value "$1")"
+    elif home_defines "$1"; then
+        value="$(home_value "$1")"
     else
         config_default "$1"
         return 0
     fi
-    if [ -z "$value" ] && blank_is_default "$1"; then
+    # Whitespace-only is blank, as config.py's _env reads it.
+    if [ -z "${value//[[:space:]]/}" ] && blank_is_default "$1"; then
         config_default "$1"
         return 0
     fi
@@ -704,13 +861,15 @@ effective_value() {
 # script cannot rewrite, and the only one whose remedy is `unset`.
 value_source() {
     if [ -n "${!1+set}" ]; then
-        if [ -z "${!1}" ] && blank_is_default "$1"; then
+        if [ -z "${!1//[[:space:]]/}" ] && blank_is_default "$1"; then
             printf 'exported empty in this shell, which config.py reads as the default\n'
         else
             printf 'exported in this shell\n'
         fi
     elif dotenv_defines "$1"; then
         printf '%s\n' "$planned_env_source"
+    elif home_defines "$1"; then
+        printf '%s\n' "$home_dir/config.env"
     else
         printf 'the default in config.py\n'
     fi
@@ -724,7 +883,7 @@ shown_value() {
     if is_secret_name "$1"; then
         if [ -n "$2" ]; then printf '<set>\n'; else printf '\n'; fi
     else
-        printf '%s\n' "$2"
+        shown_setting "$1" "$2"
     fi
 }
 
@@ -859,8 +1018,11 @@ trace_endpoint() {
     local endpoint
     endpoint="$(effective_value LANGSMITH_ENDPOINT)"
     [ -n "$endpoint" ] || endpoint="$(effective_value LANGCHAIN_ENDPOINT)"
-    [ -n "$endpoint" ] || endpoint="https://api.smith.langchain.com (the LangSmith default)"
-    printf '%s\n' "$endpoint"
+    if [ -n "$endpoint" ]; then
+        shown_url "$endpoint"
+    else
+        printf '%s\n' "https://api.smith.langchain.com (the LangSmith default)"
+    fi
 }
 
 # What contradicts "fully local". OLLAMA_HOST is reported but not judged here:
@@ -900,6 +1062,58 @@ local_effect() {
     esac
 }
 
+# --- the two mode switches, in every mode -------------------------------------
+# Before anything is installed: config.py refuses a bad LLM_BACKEND at import,
+# and reads EMBED_BACKEND as it stands, so `EMBED_BACKEND=ollma` in a .env got
+# through a --hosted run's every step and failed at step 11, inside `ayl init`
+# — after Homebrew, uv, the models and the locked environment. The same values
+# `ayl init` refuses (exit 2), refused here first, with the same blank rule
+# (blank_is_default: the default for LLM_BACKEND, not for EMBED_BACKEND).
+for name in $BACKEND_VARS; do
+    value="$(effective_value "$name")"
+    case "$value" in
+        ollama|openrouter) ;;
+        *)
+            fail "$name='$value' ($(value_source "$name")) is not a backend: it must be one"
+            fail "of ollama, openrouter. Every command would fail on it (config.py refuses a"
+            fail "bad LLM_BACKEND at import; \`ayl add\` and \`ayl ask\` refuse an unknown"
+            fail "embedding backend). Fix it where it came from and re-run; nothing was installed."
+            exit 2
+            ;;
+    esac
+done
+
+# --yes asks step 11 for the demo library, and `ayl init` does not start that
+# build while a URL-valued setting carries a credential (its error output can
+# print it: issue #107) — refused here, before anything is installed, with the
+# same words, rather than there, after everything was.
+# The settings a request goes to (dataflow.REQUEST_URL_VARS), and "carries a
+# credential" exactly as dataflow.carries_credential reads it (carries_credential
+# above): anything but a plain URL with a known-safe path.
+if [ "$want_demo" -eq 1 ] && [ "$assume_yes" -eq 1 ]; then
+    for name in OLLAMA_URL OPENROUTER_BASE_URL LANGCHAIN_ENDPOINT LANGSMITH_ENDPOINT; do
+        value="$(effective_value "$name")"
+        if [ -n "$value" ] && carries_credential "$value"; then
+            fail "--yes asks for the demo library, which is not built while a URL-valued"
+            fail "setting carries a credential ($name, $(value_source "$name")): the demo"
+            fail "build's error output is not yet safe for one (issue #107). Move the"
+            fail "credential out of the URL, or run without --yes (or with --no-demo)."
+            exit 2
+        fi
+    done
+fi
+
+# Which configuration the local rule below is held to: the one this run sets
+# up, and also the one the application will LOAD when that is local — --hosted
+# with an exported LLM_BACKEND=ollama runs locally, and `ayl init` (step 11)
+# holds the loaded local mode to the same rule. Judged here, before step 3,
+# so the run cannot install everything and then be refused by it.
+judge_local=0
+if [ "$setup_mode" = "fully local" ] || { [ "$(effective_value LLM_BACKEND)" = "ollama" ] \
+        && [ "$(effective_value EMBED_BACKEND)" = "ollama" ]; }; then
+    judge_local=1
+fi
+
 conflict_names=""
 conflict_lines=""
 exported_lines=""
@@ -914,7 +1128,7 @@ for name in $DATA_FLOW_VARS; do
     # text to hold anything to, and step 10 stops the run on it with its own
     # message. An empty .env is a different thing — it resolves to config.py's
     # own defaults for real, and those are judged like any other values.
-    if [ "$planned_env_read" -eq 1 ] && [ "$setup_mode" = "fully local" ] \
+    if [ "$planned_env_read" -eq 1 ] && [ "$judge_local" -eq 1 ] \
         && contradicts_local "$name" "$value"; then
         conflict_names="$conflict_names $name"
         conflict_lines="$conflict_lines  $name=$shown ($origin) — $(local_effect "$name")"$'\n'
@@ -922,14 +1136,22 @@ for name in $DATA_FLOW_VARS; do
 done
 
 if [ -n "$conflict_names" ]; then
-    fail "this run sets up the fully local configuration, but that is not what the"
-    fail "application would load. These values decide where your data goes:"
+    if [ "$setup_mode" = "fully local" ]; then
+        fail "this run sets up the fully local configuration, but that is not what the"
+        fail "application would load. These values decide where your data goes:"
+    else
+        fail "the application would load the fully local configuration (both backends"
+        fail "resolve to ollama, over --hosted), and these values would send data elsewhere:"
+    fi
     printf '%s' "$conflict_lines" | while IFS= read -r line; do fail "$line"; done
     exported_conflicts=""
     dotenv_conflicts=""
+    home_conflicts=""
     for name in $conflict_names; do
         if [ -n "${!name+set}" ]; then
             exported_conflicts="$exported_conflicts $name"
+        elif ! dotenv_defines "$name" && home_defines "$name"; then
+            home_conflicts="$home_conflicts $name"
         else
             dotenv_conflicts="$dotenv_conflicts $name"
         fi
@@ -950,6 +1172,11 @@ if [ -n "$conflict_names" ]; then
     if [ -n "$dotenv_conflicts" ]; then
         fail "nothing in this shell exports these — each line above names where its"
         fail "value came from. Edit .env (or move it aside and re-run) for:$dotenv_conflicts"
+    fi
+    # The same for the third layer: the file the value came from, by name.
+    if [ -n "$home_conflicts" ]; then
+        fail "these come from $home_dir/config.env, under the .env: edit that file"
+        fail "(or move it aside and re-run) for:$home_conflicts"
     fi
     case " $conflict_names " in
         *" LANGCHAIN_API_KEY "*)
@@ -996,7 +1223,7 @@ fi
 # is not digits and anything carrying a path.
 ollama_bind="${OLLAMA_HOST-}"
 if ! ollama_host_is_loopback "$ollama_bind"; then
-    fail "OLLAMA_HOST=$ollama_bind is not one of the loopback forms this script will"
+    fail "OLLAMA_HOST=$(shown_url "$ollama_bind") is not one of the loopback forms this script will"
     fail "start a server on, or send an 'ollama pull' to, so it could listen — or"
     fail "fetch — beyond this machine. Run 'unset OLLAMA_HOST' and re-run, or start"
     fail "Ollama yourself with the binding you want."
@@ -1066,14 +1293,14 @@ fi
 if [ "$setup_mode" != "fully local" ]; then
     if [ "$loaded_embed_backend" = "ollama" ]; then
         if ! url_is_loopback "$(effective_value OLLAMA_URL)"; then
-            note "warning: EMBED_BACKEND=ollama with OLLAMA_URL=$(effective_value OLLAMA_URL), which is"
+            note "warning: EMBED_BACKEND=ollama with OLLAMA_URL=$(shown_url "$(effective_value OLLAMA_URL)"), which is"
             note "not on this machine — every passage of your library would be sent there to be"
             note "embedded. --hosted asks for a hosted answering model, not for that. Unset"
             note "OLLAMA_URL, or set EMBED_BACKEND=openrouter if the remote endpoint is meant."
         fi
     else
         if [ "$loaded_embed_backend" = "openrouter" ]; then
-            embed_destination="$(effective_value OPENROUTER_BASE_URL)"
+            embed_destination="$(shown_url "$(effective_value OPENROUTER_BASE_URL)")"
         else
             embed_destination="whatever endpoint the $loaded_embed_backend backend calls"
         fi
@@ -1148,7 +1375,7 @@ fi
 # --- 7. Ollama --------------------------------------------------------------
 ollama_ready() { curl -fsS --max-time 3 "$ollama_url/api/tags" >/dev/null 2>&1; }
 
-step "Ollama: the binary, and a server answering on $ollama_url/api/tags"
+step "Ollama: the binary, and a server answering its /api/tags at $ollama_shown"
 # OLLAMA_HOST — what a server started below binds, and where step 8's `ollama
 # pull` goes — was judged with the rest of the resolution, before step 3. The
 # gate used to sit here, and it sat inside the branch that starts a server, so a
@@ -1165,14 +1392,14 @@ ollama_service=0        # ... and it was brew services, which the last block nam
 ollama_pid=""           # ... or a bare `ollama serve`, whose pid is how to stop it
 if [ "$dry_run" -eq 1 ]; then
     plan "start it for this session (brew services run ollama, else 'ollama serve')"
-    plan "wait up to ${OLLAMA_WAIT_S}s for $ollama_url/api/tags to answer"
+    plan "wait up to ${OLLAMA_WAIT_S}s for its /api/tags at $ollama_shown to answer"
 elif ollama_ready; then
     note "already answering"
 else
     # Only a server on this machine is ours to start, by the same rule the guard
     # above holds an Ollama endpoint to.
     if ! url_is_loopback "$ollama_url"; then
-        fail "nothing answers on $ollama_url, and it is not an address on this machine."
+        fail "nothing answers on $ollama_shown, and it is not an address on this machine."
         fail "start Ollama there (or unset OLLAMA_URL to use the default) and re-run."
         exit 1
     fi
@@ -1199,7 +1426,7 @@ else
         waited=$((waited + 1))
     done
     if ! ollama_ready; then
-        fail "Ollama did not answer on $ollama_url/api/tags within ${OLLAMA_WAIT_S}s."
+        fail "Ollama did not answer its /api/tags at $ollama_shown within ${OLLAMA_WAIT_S}s."
         fail "start it in another terminal ('ollama serve'), then re-run."
         exit 1
     fi
@@ -1306,7 +1533,11 @@ SUMMARY_KEYS="$SUMMARY_KEYS|ORCHESTRATOR_MODEL|PRICE_IN_PER_MTOK|PRICE_OUT_PER_M
 
 env_summary() {
     # `|| true`: no match is an empty summary, not a failed script under `set -e`.
-    { grep -E "^($SUMMARY_KEYS)=" || true; } | while IFS= read -r line; do note "$line"; done
+    # A .env value may be a URL with a credential in it (OLLAMA_URL is one of
+    # these keys): the value is shown through shown_setting, the name as it is.
+    { grep -E "^($SUMMARY_KEYS)=" || true; } | while IFS= read -r line; do
+        note "${line%%=*}=$(shown_setting "${line%%=*}" "${line#*=}")"
+    done
 }
 
 step "Configuration: .env in the repository root"
@@ -1344,13 +1575,15 @@ else
     note "OPENROUTER_API_KEY stays empty: nothing goes to OpenRouter in this mode."
 fi
 
-# --- 11. demo corpus --------------------------------------------------------
+# --- 11. library ------------------------------------------------------------
 # Where the index is, by the rule config.resolve_db_path applies (ADR-026):
 # LIBRARY_DB_PATH when it is set, exported or in the .env this run reads; else
 # the old default, data/lancedb here, when it holds this backend's transcripts
-# table (read where it is until 0.5.0); else $AYL_HOME/index, which is
-# ~/AskYourLibrary/index unless AYL_HOME says otherwise. The demo build below
-# writes to the same place, because it asks config.py the same question.
+# table (read where it is until 0.6.0); else $AYL_HOME/index, which is
+# ~/AskYourLibrary/index unless AYL_HOME says otherwise: the reader's own index,
+# the one `ayl init` below names because it asks config.py the same question.
+# A demo library is never built into it: `ayl init` keeps that in
+# $AYL_HOME/demo/index (ADR-028).
 # `effective_value`, not `setting`: an EXPORTED blank value is what the app
 # sees (python-dotenv does not override a variable that exists, blank or not),
 # and config.py treats a blank or whitespace-only value of either name as unset.
@@ -1383,7 +1616,7 @@ fi
 # LIBRARY_DB_PATH is used exactly as the package uses it: config.py takes it as
 # written, with no expanduser, so a literal "~/index" is a directory called "~"
 # for the app and has to be one here too — expanding it here would have the two
-# halves of one run looking in different places. The ayl-add lines printed below
+# halves of one run looking in different places. The `ayl add` lines printed below
 # are command lines, where the shell expands the tilde long before the package
 # sees the value.
 demo_ready=0
@@ -1392,40 +1625,52 @@ for table in "$db_path"/transcripts_*.lance; do
     demo_ready=1
 done
 
-step "Demo corpus: an index at $db_path"
-if [ "$want_demo" -eq 0 ]; then
-    note "skipped (--no-demo). Index a folder of your own .txt / .md books instead:"
-    note "  LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books"
-    note "  LIBRARY_DB_PATH=~/ayl-index uv run ask-library \"...\""
-elif [ "$demo_ready" -eq 1 ]; then
+step "Library: your index at $db_path"
+if [ "$demo_ready" -eq 1 ]; then
     note "an index is already there; nothing is rebuilt"
-    note "update it later with: uv run scripts/ingest_demo_corpus.py"
-else
-    note "about 30 minutes on the first run. It downloads public-domain texts from"
-    note "gutenberg.org (checksum-pinned in corpus/manifest.yaml) — the only thing"
-    note "here that reaches anywhere but a package registry — and uses the two"
-    note "audiobook transcripts already committed under corpus/prepared-audio/, so"
-    note "archive.org is not contacted. Every stage is cached in data/, so it is"
-    note "safe to interrupt and re-run."
-    build_demo=0
-    if [ "$dry_run" -eq 1 ]; then
-        plan "ask once for confirmation, then run: uv run scripts/ingest_demo_corpus.py"
-    elif [ "$assume_yes" -eq 1 ]; then
-        build_demo=1
-    elif [ ! -t 0 ]; then
-        note "no terminal to ask on, so it was skipped; re-run with --yes to build it."
-    else
-        printf '       Build it now? [y/N] '
-        reply=""
-        read -r reply || true
-        case "$reply" in
-            [yY]|[yY][eE][sS]) build_demo=1 ;;
-            *) note "skipped. Build it later: uv run scripts/ingest_demo_corpus.py" ;;
-        esac
+fi
+if [ "$want_demo" -eq 0 ]; then
+    if [ "$demo_ready" -eq 0 ]; then
+        note "no books yet, and no demo library (--no-demo). Index your own .txt / .md books:"
+        note "  uv run ayl add ~/books"
     fi
-    if [ "$build_demo" -eq 1 ]; then
-        run uv run scripts/ingest_demo_corpus.py
-        demo_ready=1
+else
+    # `ayl init` runs whether or not this index exists: the demo library is a
+    # separate index, so a reader who already has books is offered it too, and
+    # --yes keeps its promise for them. init applies its own safeguards — an
+    # old index here is reported with its move and nothing is built beside it,
+    # a demo library already built is not built again — and never touches
+    # this index. (Not `scripts/ingest_demo_corpus.py`: run bare it writes
+    # THIS index, and refuses to when it holds the reader's books.)
+    # The demo library is `ayl init`'s question now, not this script's: one
+    # prompt, one estimate, one place that builds it — apart from this index,
+    # in $AYL_HOME/demo/index, so a reader's own library never starts mixed
+    # with the classics. init re-checks the server and pulls nothing already
+    # pulled; it keeps the .env step 10 wrote. --yes here is --demo there.
+    init_args=(ayl init)
+    if [ "$hosted" -eq 1 ]; then
+        init_args+=(--mode hosted)
+    fi
+    if [ "$assume_yes" -eq 1 ]; then
+        init_args+=(--demo)
+    fi
+    note "\`ayl init\` offers the demo library: six public-domain classics in a few"
+    note "minutes, kept apart from this index; it asks once, and no is the default."
+    if [ "$dry_run" -eq 1 ]; then
+        plan "run: uv run ${init_args[*]}"
+    else
+        init_status=0
+        uv run "${init_args[@]}" || init_status=$?
+        case "$init_status" in
+            # 3 and 4 are what its closing check found left to do: step 12
+            # below classifies the same two conditions for this script.
+            0|3|4) ;;
+            *)
+                fail "uv run ${init_args[*]} failed with status $init_status."
+                fail "fix what it printed and re-run: every step of both is idempotent."
+                exit 1
+                ;;
+        esac
     fi
 fi
 
@@ -1454,19 +1699,17 @@ fi
 preflight_code='
 import os
 import sys
-from urllib.parse import urlsplit
 
 try:
     from ask_your_library.config import (DB_PATH, EMBED_BACKEND, LLM_BACKEND, LLM_BASE_URL,
                                          OLLAMA_URL, TABLES)
+    # The data-flow names and the "fully local" rule, from the one Python
+    # definition `ayl init` judges its local mode with.
+    from ask_your_library.dataflow import (is_loopback, tracing_on, v1_tracing_set,
+                                           shown_url)
     from ask_your_library.graph import enable_tracing_if_key_present
     from ask_your_library.i18n import t
     from ask_your_library.preflight import check_environment
-    # The rule that decides the v1 names, imported rather than copied: it is
-    # what CallbackManager.configure() itself calls, and a second copy of it
-    # here is exactly the drift this check exists to catch.
-    from langchain_core.utils.env import env_var_is_set
-
     # Tracing is not decided by the flags alone. build_graph calls this before
     # the first node, and it turns a LANGCHAIN_API_KEY with no
     # LANGCHAIN_TRACING_V2 set into LANGCHAIN_TRACING_V2=true. Reading the
@@ -1481,30 +1724,24 @@ except Exception as error:
 
 expected = sys.argv[1].split() if len(sys.argv) > 1 else []
 mode = sys.argv[2] if len(sys.argv) > 2 else ""
-# Both prefixes, and two truth tables rather than one. These four are what
-# langsmith reads for "is tracing on", and any value that is not one of these
-# spellings of off is taken as an upload.
-TRACING = ("LANGSMITH_TRACING_V2", "LANGCHAIN_TRACING_V2", "LANGSMITH_TRACING",
-           "LANGCHAIN_TRACING")
-OFF = ("", "false", "0", "no", "off")
-tracing_on = [name for name in TRACING
-              if os.environ.get(name, "").strip().lower() not in OFF]
-# The v1 names are judged by the rule langchain_core applies, not by that list:
-# env_var_is_set counts every value but "", "0", "false" and "False" as set, so
-# LANGCHAIN_TRACING=off is set. Set, with v2 tracing off, is what makes
-# CallbackManager.configure() raise RuntimeError on the first model call — while
-# the list above reported "tracing: off" and this run finished.
-TRACING_V1 = ("LANGCHAIN_TRACING", "LANGCHAIN_HANDLER")
-v1_tracing_set = [name for name in TRACING_V1 if env_var_is_set(name)]
+# Both prefixes, and two truth tables rather than one (ask_your_library.dataflow):
+# the four v2 names langsmith reads, any value that is not a spelling of off
+# taken as an upload; and the v1 names by the rule langchain_core applies,
+# env_var_is_set, imported there rather than copied — LANGCHAIN_TRACING=off is
+# set, and set with v2 tracing off makes the first model call raise.
+tracing_on = tracing_on()
+v1_tracing_set = v1_tracing_set()
 print(f"       LLM_BACKEND={LLM_BACKEND}, EMBED_BACKEND={EMBED_BACKEND}")
-print(f"       LLM_BASE_URL={LLM_BASE_URL}, OLLAMA_URL={OLLAMA_URL}")
+print(f"       LLM_BASE_URL={shown_url(LLM_BASE_URL)}, "
+      f"OLLAMA_URL={shown_url(OLLAMA_URL)}")
 if tracing_on:
     # A flag says that traces leave; the endpoint says where to. Neither name is
     # required, so the destination of a run that sets neither is the default the
     # LangSmith client falls back to.
     endpoint = (os.environ.get("LANGSMITH_ENDPOINT", "").strip()
-                or os.environ.get("LANGCHAIN_ENDPOINT", "").strip()
-                or "https://api.smith.langchain.com (the LangSmith default)")
+                or os.environ.get("LANGCHAIN_ENDPOINT", "").strip())
+    endpoint = shown_url(endpoint) if endpoint else (
+        "https://api.smith.langchain.com (the LangSmith default)")
     print("       tracing: " + ", ".join(tracing_on) + " -> " + endpoint)
 else:
     print("       tracing: off")
@@ -1533,8 +1770,8 @@ if mode == "local":
     wrong = [f"{name}={value}" for name, value in
              (("LLM_BACKEND", LLM_BACKEND), ("EMBED_BACKEND", EMBED_BACKEND))
              if value != "ollama"]
-    if urlsplit(OLLAMA_URL).hostname not in ("localhost", "127.0.0.1", "::1"):
-        wrong.append(f"OLLAMA_URL={OLLAMA_URL}")
+    if not is_loopback(OLLAMA_URL):
+        wrong.append(f"OLLAMA_URL={shown_url(OLLAMA_URL)}")
     wrong += tracing_on
     wrong += [name for name in v1_tracing_set if name not in tracing_on]
     if wrong:
@@ -1597,9 +1834,9 @@ else
             note "no problems"
             ;;
         3)
-            note "the missing index is the only problem, and it is this run's own:"
-            note "build the demo corpus, or point LIBRARY_DB_PATH at one of your own"
-            note "built with ayl-add."
+            note "the missing index is the only problem, and it is this run's own: your"
+            note "index is empty until you add books (uv run ayl add ~/books). A demo library"
+            note "ayl init built is an index of its own and does not fill this one."
             ;;
         4)
             note "the missing key is the only problem, and it is expected here:"
@@ -1607,8 +1844,8 @@ else
             ;;
         5)
             note "both problems are this run's own: no index yet, and no OPENROUTER_API_KEY."
-            note "build the demo corpus (or point LIBRARY_DB_PATH at one of your own), and"
-            note "set the key in .env before the first question."
+            note "add your books (uv run ayl add ~/books), and set the key in .env before"
+            note "the first question."
             ;;
         6)
             fail "the configuration the application loads is not the $loaded_mode one this"
@@ -1631,23 +1868,25 @@ else
     printf 'Done.\n'
 fi
 printf 'Next steps:\n'
-# The index comes first when there is none: `ask-library` without one exits 3 on
-# a preflight that says the same thing, so putting the question at the top of
-# this list would hand the reader a command that cannot work yet.
-if [ "$demo_ready" -eq 0 ] && [ "$want_demo" -eq 0 ]; then
-    # --no-demo: the reader said they have their own books, so the index step is
-    # theirs and the demo build is not offered again.
-    printf '  LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books\n'
-    printf '      index your books first — there is no index yet, and the question below\n'
-    printf '      has nothing to search until there is. Ask against the same path:\n'
-    printf '      LIBRARY_DB_PATH=~/ayl-index uv run ask-library "..."\n'
-elif [ "$demo_ready" -eq 0 ]; then
-    printf '  uv run scripts/ingest_demo_corpus.py\n'
-    printf '      build the demo corpus first — about 30 minutes. The question below has\n'
-    printf '      nothing to search until this finishes. Your own books instead:\n'
-    printf '      LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books\n'
+# The index comes first when there is none: `ayl ask` without one exits 3 on a
+# preflight that says the same thing, so putting the question at the top of
+# this list would hand the reader a command that cannot work yet. The demo
+# library, when `ayl init` built one, is its own index: `ayl init` printed the
+# line that asks it, and this index is still the reader's, still empty.
+if [ "$demo_ready" -eq 0 ]; then
+    printf '  uv run ayl add ~/books\n'
+    printf '      index your own .txt / .md books first — your index is empty, and the\n'
+    printf '      question below has nothing to search until it is not.\n'
+    if [ "$want_demo" -eq 1 ]; then
+        # --no-demo already said no; offering it again reads as not having listened.
+        printf '      Or the demo library of six classics, kept apart: uv run ayl init --demo\n'
+    fi
+    printf '  uv run ayl ask "..."\n'
+else
+    # The index there may be the reader's own books, so no question about a
+    # book the demo corpus holds: that one is printed by `ayl init --demo`.
+    printf '  uv run ayl ask "..."\n'
 fi
-printf '  uv run ask-library "What does Marcus Aurelius say about anger?"\n'
 # The one sentence this whole mode exists for, printed where the reader is about
 # to type the command: no account, no key, nothing to pay. The answering model is
 # named because it is the thing that makes that true, and it is the model this
@@ -1666,8 +1905,6 @@ printf '      the web chat on 127.0.0.1, login admin / change-me (the form asks 
 printf '      "Email address": type the username there). That variable is what\n'
 printf '      allows the placeholder password; set CHAINLIT_USERNAME and CHAINLIT_PASSWORD\n'
 printf '      for a real one and drop it.\n'
-printf '  LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books\n'
-printf '      index your own .txt / .md books, then ask the same way against that path.\n'
 if [ "$ollama_service" -eq 1 ]; then
     printf '  brew services start ollama\n'
     printf '      Ollama was started for this session only. This registers it as a login\n'

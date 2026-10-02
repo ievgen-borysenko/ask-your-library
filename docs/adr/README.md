@@ -5,13 +5,13 @@ what it was measured to buy. They were written from the code rather than ahead o
 describe the system as built; where a variant was tried and dropped, the rejected variant is part
 of the record, because it is usually the more useful half.
 
-Twenty-six decisions, in the order they were taken. ADR-016 is written out as a file of its own
+Twenty-eight decisions, in the order they were taken. ADR-016 is written out as a file of its own
 because it changed the planner's contract and added a node to the graph; the rest are summarised
 here. ADR-017 to ADR-023 were recorded on 2026-09-16, after the fact: a review of this tree found
 seven decisions the code had made and no record named. The four that constrain what may be built
 next are written out below; the other three are reserved as stubs — number, title, one sentence —
 to be written when the code they describe is next touched, so that the numbering is taken and the
-decision is not forgotten. ADR-024 and ADR-025 were taken on 2026-09-17 and ADR-026 on 2026-09-25,
+decision is not forgotten. ADR-024 and ADR-025 were taken on 2026-09-17, ADR-026 on 2026-09-25 and ADR-027 and ADR-028 on 2026-10-02,
 each written out with the code it describes. The measurements are not repeated in full: the reports under
 [`docs/eval-results/`][reports] are the primary record, and each entry below names the one that
 carries its numbers. Reports of
@@ -1202,11 +1202,13 @@ builds for the reader points, and nothing of it defaults into the working direct
 | local cards of the engineer's shelf | `$AYL_HOME/cards/tech` | — | yes |
 | the private shelf (the reader's own books, cards, index) | under `$AYL_HOME` | — | yes (not built yet) |
 
-What is **not** moved: the demo corpus's downloads and prepared texts (`data/raw/`,
-`data/prepared/`), which `scripts/ingest_demo_corpus.py` still stages in the checkout. The corpus
-pin job in CI and every developer checkout depend on that layout, and they are derived inputs of
-the checkout's own manifest, not something built for the reader; moving them is a later slice
-(with `ayl init`, which will run the same stages). Nor the committed inputs — `corpus/`,
+What is **not** moved by default: the demo corpus's downloads and prepared texts (`data/raw/`,
+`data/prepared/`), which `scripts/ingest_demo_corpus.py` stages in the checkout when it is run
+directly. The corpus pin job in CI and every developer checkout depend on that layout, and they
+are derived inputs of the checkout's own manifest, not something built for the reader. *Amended
+2026-10-02 (#30, ADR-028):* a demo build `ayl init --demo` starts passes `--cache-dir
+$AYL_HOME/demo/cache`, and such a run keeps both there and writes nothing under the checkout —
+the committed `corpus/toc/` included, which only a direct run regenerates. Nor the committed inputs — `corpus/`,
 `corpus-tech/`, the golden sets — which are versioned with the code and pinned by checksum.
 
 **The backward-compatibility rule, for the index**, in `config.resolve_db_path`, in this order:
@@ -1229,9 +1231,13 @@ importing Chainlit leaves behind, does not. `AYL_CHAINLIT_DIR` unset and that fi
 read where it is, with one line when the web chat starts. **Nothing is copied, moved or deleted by the
 code.** An index of hundreds of megabytes, and a reader's chat history, are not things a startup
 path relocates on its own; the supported move is `ayl backup` then `ayl restore`, which verify what they
-copy. **Clause 2 has a sunset: it is honoured through 0.4.x, and from 0.5.0 finding an index or a
+copy. **Clause 2 has a sunset: it is honoured through 0.5.x, and from 0.6.0 finding an index or a
 chat database at the old place is an error naming the same two commands** (`LEGACY_DB_SUNSET` in
-`config.py`, printed in the notice). `ayl doctor` prints which clause applied and why.
+`config.py`, printed in the notice). It said 0.5.0 until 2026-10-02 and was moved, before any
+release carried it: 0.4.0 was never tagged, so a reader upgrading from 0.3.1 would have had no
+release of warning at all, and 0.6.0 is where the two old command names go as well. Nothing compared
+the number to the package version, so `tests/test_db_path.py` now fails once the version reaches it
+while clause 2 still answers with a path. `ayl doctor` prints which clause applied and why.
 
 **When it is said.** The resolution is pure and runs at import, so `config.DB_PATH` keeps its name
 for every module that imports it; the notice and the refusal are not at import but in
@@ -1271,13 +1277,120 @@ blind spot stays: a bare-repository dotfiles setup leaves no `.git` in `$HOME` a
 
 **Consequences.** Once no old index is left in the working directory and `LIBRARY_DB_PATH` is
 either unset or absolute, the same command opens the same index from any directory; clause 2 is
-cwd-dependent by design until 0.5.0, and a relative `LIBRARY_DB_PATH` is still resolved against
+cwd-dependent by design until 0.6.0, and a relative `LIBRARY_DB_PATH` is still resolved against
 the working directory, as it always was. An `.env` copied from
 any earlier `.env.example` carries `LIBRARY_DB_PATH=data/lancedb`, which clause 1 obeys — silently,
 by design — so the changelog and the upgrade page tell the reader to delete that line;
 `.env.example` now ships it commented out. `scripts/install-mac.sh` can no longer read one default
 out of `config.py` with `sed`, and applies the three clauses in bash instead. The test suite pins
 `AYL_HOME` next to `LIBRARY_DB_PATH`, since an unpinned one would be the developer's own folder.
+
+## ADR-027: One precedence for every command: exported, then the project's .env, then $AYL_HOME/config.env
+
+Status: accepted (2026-10-02, #30, with `ayl init`).
+
+`config.py` called `load_dotenv()` with no path. python-dotenv then searches upward from the
+**calling file** — the package — unless it believes it is in a REPL, when it searches the working
+directory. So a console script (`ayl`, `ask-library`) read the clone's `.env` from any directory
+and, installed as a wheel, read none; a `python -c` over the same code read the working directory's;
+and Chainlit, which `ayl ui` starts, loads `<cwd>/.env` at its own import. The comment above the call
+said "cwd or parents". `ayl init` needed a place to write a configuration that every command would
+read, and there was no rule to put it in.
+
+**Decision.** Three layers, highest first, read the same way by every entry point:
+
+1. a variable exported in the environment;
+2. the `.env` of the project the command is typed in (`config.project_env`): the working
+   directory's, or a parent's up to and including the nearest folder holding a `.git` or a
+   `pyproject.toml` — never above it, and with no such folder above, the working directory's
+   alone;
+3. `$AYL_HOME/config.env`, read after `AYL_HOME` is decided — so an `AYL_HOME` line in it is
+   ignored (it is not even put into the environment, where every child process would have read
+   the other folder), and an `AYL_HOME` set in the `.env` decides which home file is read;
+
+then the defaults in `config.py`. python-dotenv never overrides a name that is already set, so
+loading the two files in that order is the whole rule. `config.setting_source(name)` says which
+layer decided a name, and `ayl init --print-env-resolution` prints it.
+
+`ayl init` writes the third layer, through `home.write_private` (mode 0600, refused inside a git
+work tree, never written through a link), and only when no file already chooses the mode: a
+`.env` that sets `LLM_BACKEND` or `EMBED_BACKEND` to a non-blank value, or an existing
+`config.env`, is the reader's
+and is never rewritten; a `.env` that sets neither is read above the file `ayl init` writes. A
+`.env` outside the checkout is named as one wherever `ayl init` prints it. The `.env` stays the developer's layer —
+`cp .env.example .env` in a clone works as before, from inside the clone — and the home file is
+the reader's, which works from any directory and from an installed package.
+
+**Why the search stops at the project.** `find_dotenv(usecwd=True)` walks to `/`, so a `.env`
+in a home folder — another tool's, as likely as ours — overrode `config.env` for every command
+typed anywhere below it, and made `ayl init` believe the machine was configured. The project
+markers are the ones a clone and a project of the reader's own both carry.
+
+**Alternatives.** Writing the clone's `.env`, as `scripts/install-mac.sh` does: it is read only
+from inside the clone once the search is the working directory's, and it is a file in a checkout.
+Keeping the old search and adding the home file under it: a wheel would then read the home file
+and no `.env` at all, and the clone would keep reading its `.env` from anywhere, which is the
+disagreement with `ayl ui` this record exists to end.
+
+**Consequences.** A command run from outside the clone no longer reads the clone's `.env`; the
+changelog says so. The installer still writes the clone's `.env` and judges it before installing
+anything; a `config.env` left by an earlier `ayl init` sits under it and fills only the names the
+`.env` does not set, and the installer's guard reads it as the same third layer.
+
+**The working directory decides, and the local promise is checked when `ayl init` runs, not on
+every command.** The project's `.env` is the one of whatever project the command is typed in. An
+`ayl ask` typed inside another project whose `.env` sets, say, `LANGCHAIN_TRACING_V2=true` and a
+LangSmith key reads both, above `config.env`, and the answer's prompts are traced to LangSmith —
+`ayl init` held the local mode to "nothing leaves this machine" when it ran, in the directory it
+ran in, and nothing re-checks that at question time. The check a reader can run, from the
+directory they ask in: `ayl init --print-env-resolution`, which prints every setting that decides
+where data goes and the file each came from. Accepted for now: a per-question re-check of the data
+flow is a change to `ayl ask` and the web chat, not to the first run. The test suite already pins every
+setting it depends on before the first import, and `tests/test_config_layers.py` holds the order
+in fresh interpreters that look like a console script to python-dotenv.
+
+## ADR-028: The demo library is opt-in and is an index of its own
+
+Status: accepted (2026-10-02, #30, with `ayl init`). Supersedes the plan of 22.09.2026, which had
+`ayl init` build the starter subset by default.
+
+The first-run command has to leave a reader one command away from their own books
+(`ayl add <folder>`) and a question. The plan of #30 had it build a starter subset of the demo
+corpus by default, into the index every command reads. Two independent readings of that plan
+before the code agreed on the cost: a reader who then ran `ayl add ~/books` started with their
+own library mixed into six classics, which `ayl books` lists, the catalogue counts, and retrieval
+ranks against — and nothing removes a manifest book from an index short of a rebuild. The two
+kinds of book are distinguishable after the fact (the ledger's `source_ref` is `manifest:<id>`
+for a demo book and a file reference for one `ayl add` indexed), but separable only by hand.
+
+**Decision.** `ayl init` builds no demo library unless asked: `--demo` (the starter subset, the
+manifest entries marked `starter: true`), `--demo --full` (the whole corpus), or a yes to the one
+question it asks on a terminal, whose default is no; `--yes` and `--no-demo` ask nothing. The
+demo library goes to `$AYL_HOME/demo/index`, never to the reader's index, and is asked by naming
+it with `LIBRARY_DB_PATH` — the variable every command already obeys (ADR-026 clause 1), so the
+whole mechanism is one documented line and no new flag on `ask`, `books` or `ui`. It is built by
+`scripts/ingest_demo_corpus.py --starter` (or without it, for `--full`) run as a child with that
+variable set: the same stages, checksums, staging tables and ingest lock as before, nothing
+reimplemented. One constant, `init_cmd.BUILD_DEMO_BY_DEFAULT`, holds the default; flipping it
+makes the question's default answer and `--yes` mean "build it".
+
+**Where it writes.** Only under `AYL_HOME`: the index in `demo/index`, and the downloads and
+prepared texts in `demo/cache`, which `ayl init` names to the script with `--cache-dir`. A run
+given that option treats the checkout as read-only input — it reads the manifest, the committed
+transcripts and cards, and verifies every source against the manifest's pins, but it does not
+regenerate `corpus/toc/` and refuses `--stage checksums`, the stage that rewrites the manifest. So
+a first `ayl init --demo` does not write into the clone, cannot be stopped by a read-only one,
+and cannot rewrite a committed file. The cache is public-domain text, but it sits beside the demo
+library and is refused inside a git work tree by the same check (`home.private_dir`), so one
+refusal covers both. A direct run of the script keeps the checkout layout, for CI's pin job and a
+developer's runbooks.
+
+**Consequences.** The demo library needs a clone: the script and `corpus/` ship with it and not
+with the package, and `ayl init --demo` outside one refuses with the two ways on. A reader who
+wants the classics and their own books in one index can still point `ayl add` at the demo
+library's path; the default never does it for them. An old index found by ADR-026's clause 2, or
+in the clone when `ayl init` runs elsewhere, is not built beside: the move is printed (and, when
+every book in it came from the manifest, the demo location is offered as its destination).
 
 [reports]: ../eval-results/
 [backlog]: ../backlog.md

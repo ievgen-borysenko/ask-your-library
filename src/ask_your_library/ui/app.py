@@ -22,8 +22,9 @@ languages don't clobber each other. ASK_LANG remains the process default and
 the fallback when a thread's profile can't be determined.
 
 Requires the same as the CLI: an answering model and an embedding backend, both
-a local Ollama by default, and a LanceDB built by scripts/ingest_demo_corpus.py
-or `ayl-add`, or pointed to by LIBRARY_DB_PATH. OPENROUTER_API_KEY is needed
+a local Ollama by default, and an index: the reader's own ($AYL_HOME/index,
+filled by `ayl add`), or another LanceDB named by LIBRARY_DB_PATH, the demo
+library `ayl init --demo` builds ($AYL_HOME/demo/index) among them. OPENROUTER_API_KEY is needed
 only when the answering model or the embeddings are moved to OpenRouter, so with
 the shipped default the key gate below never fires. When a key IS needed it is
 checked at startup (before anyone can log in); the rest is checked per session,

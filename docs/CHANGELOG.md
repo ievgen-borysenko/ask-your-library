@@ -2,6 +2,50 @@
 
 ## Unreleased
 
+- **`ayl init`, the first run** (#30): checks that Ollama answers (exit 5 with the remedy when it
+  does not), takes `--mode local|hosted` (local by default), pulls the models that mode needs and
+  Ollama lacks over its HTTP API with the progress streamed, writes `~/AskYourLibrary/config.env`
+  unless a `.env` or that file already configures the machine, and says where your books go —
+  then runs `ayl doctor` and prints the next commands. Every step is skipped when it is already
+  done; a second run changes nothing and says so. `--dry-run` prints every step and touches
+  nothing; `--print-env-resolution` prints where each setting that decides where your data goes
+  comes from. An index or chat history from before the `AYL_HOME` move is reported with the
+  backup/restore commands that move it, and nothing is built beside it.
+
+  **The demo library is opt-in and kept apart**
+  ([ADR-028](adr/README.md#adr-028-the-demo-library-is-opt-in-and-is-an-index-of-its-own)):
+  `ayl init --demo` builds six public-domain classics in a few minutes — the manifest entries now
+  marked `starter: true`, chosen to reach every path a first question takes — and
+  `--demo --full` the whole corpus; on a terminal `ayl init` asks once, and no is the default. It
+  goes to `~/AskYourLibrary/demo/index`, never into your own index, and is asked by naming it:
+  `LIBRARY_DB_PATH=~/AskYourLibrary/demo/index uv run ayl ask "..."`. It is built by
+  `scripts/ingest_demo_corpus.py`, which gained `--starter`, so it needs a clone — but it writes
+  nothing into it: the script also gained `--cache-dir`, and `ayl init` passes
+  `~/AskYourLibrary/demo/cache`, so the downloads and prepared texts go there and the committed
+  `corpus/toc/` is not regenerated. Run directly, the script keeps its `data/` layout. It now also
+  refuses to write the classics into an index that holds books `ayl add` indexed — told by the
+  ledger, or by the rows of an index built before the ledger.
+
+  `scripts/install-mac.sh` no longer asks about the demo corpus itself: step 11 runs `ayl init`
+  (`--yes` there is `--demo` here), and its closing lines lead with `ayl add`.
+
+- **One order for where a setting comes from, for every command** (#30,
+  [ADR-027](adr/README.md#adr-027-one-precedence-for-every-command-exported-then-the-projects-env-then-ayl_homeconfigenv)):
+  exported in the shell, then the `.env` of the project you are in (the working directory's, or a
+  parent's up to the folder holding `.git` or `pyproject.toml`, never above it), then
+  `$AYL_HOME/config.env`, then the default. The `.env` used to be found by searching
+  upward from the installed package rather than from where the command was typed, so a clone read
+  its own `.env` from any directory, an installed package read none, and `ayl ui` (whose Chainlit
+  reads `<cwd>/.env`) could disagree with `ayl ask`. **If you ran commands from outside the clone
+  and relied on its `.env`, run them from inside it, export the values, or move them into
+  `~/AskYourLibrary/config.env`.** `$AYL_HOME/config.env` is new: it is what `ayl init` writes.
+
+- **The old index location is read until 0.6.0, not 0.5.0.** 0.4.0 was never tagged, so a reader
+  upgrading from 0.3.1 would have had no release of warning before the index at `data/lancedb`
+  (and a checkout's `.chainlit/chat.db`) stopped being read; 0.6.0 is also where `ask-library`
+  and `ayl-add` go. A test now fails when the package version reaches the sunset while the old
+  location still answers, so the change cannot ship by accident.
+
 - **`reflect` decides whether to stop from the verified quotes, not from `observe`'s notes on
   them** (#93, [ADR-005](adr/README.md#adr-005-observe-sees-a-fixed-budget-of-each-hit-the-rest-of-the-loop-sees-only-evidence)).
   Its evidence line was `- book (section): why`, the model's own unchecked paraphrase, and on the
@@ -42,7 +86,7 @@
   own: with `AYL_CHAINLIT_DIR` unset, any `chat.db` file in the `.chainlit/` of the checkout the
   package runs from (not the working directory) is read where it is, with one line at the web
   chat's start.
-  **Both old places are honoured until 0.5.0, when finding one becomes an error naming the same
+  **Both old places are honoured until 0.6.0, when finding one becomes an error naming the same
   two commands.** `ayl doctor` now opens with the index it checks and the rule that chose it.
   [Upgrading](upgrading.md#the-index-moved-to-ayl_homeindex) has the move, end to end.
 

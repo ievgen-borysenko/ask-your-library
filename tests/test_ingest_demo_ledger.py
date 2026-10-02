@@ -51,6 +51,11 @@ def doc(note, title, author, chapters=("Chapter 1", "Chapter 2")):
 def demo_index(tmp_path, monkeypatch):
     monkeypatch.setattr(demo, "DB_PATH", tmp_path / "db")
     monkeypatch.setattr(demo, "get_embedder", lambda backend: FakeEmbedder())
+    # The manifest these documents are the corpus of: the guard against
+    # writing over another library's books reads the rows' keys against it.
+    monkeypatch.setattr(demo, "load_manifest", lambda: {"books": [
+        {"id": "moby-dick", "title": "Moby Dick", "author": "Herman Melville"},
+        {"id": "emma", "title": "Emma", "author": "Jane Austen"}], "canaries": []})
     monkeypatch.setattr(demo, "prepared_docs", lambda ids: [
         doc("moby-dick", "Moby Dick", "Herman Melville"),
         doc("emma", "Emma", "Jane Austen")])
@@ -134,3 +139,209 @@ def test_a_single_book_reingest_into_a_pre_ledger_table_migrates_it_first(demo_i
     assert {r["book"] for r in rows} == set(ids)
     for row in rows:
         assert row["book_id"] == ids[row["book"]]
+
+
+# --- the reader's own books are not the demo corpus's to rebuild ------------------
+
+def reader_s_book(db_path):
+    """A ledger row as `ayl add` leaves one: a file reference, not a manifest id."""
+    ledger = open_ledger(lancedb.connect(db_path))
+    book_id = ledger.resolve("My Own Notes", "Me", source_ref="local:books/notes.md")
+    ledger.begin(book_id, key="My Own Notes — Me", source_ref="local:books/notes.md",
+                 embedding_model="fake-embed")
+    ledger.commit(book_id, rows=3)
+
+
+@pytest.mark.parametrize("book", [None, "moby"])
+def test_a_rebuild_into_an_index_holding_the_reader_s_books_is_refused(demo_index, book):
+    """Unset, LIBRARY_DB_PATH is the reader's index; a bare run of this script
+    rebuilt its whole transcripts table from the classics and dropped the
+    books `ayl add` had put there. A `--book` upsert would mix them in."""
+    demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
+    reader_s_book(demo_index)
+    before = lancedb.connect(demo_index).open_table("transcripts_ollama").count_rows()
+    with pytest.raises(SystemExit) as refused:
+        demo.ingest_transcripts_table("ollama", book, ["moby-dick", "emma"])
+    message = str(refused.value.code)
+    assert "My Own Notes — Me" in message and "books `ayl add` indexed" in message
+    assert "LIBRARY_DB_PATH=$AYL_HOME/demo/index" in message and "ayl init --demo" in message
+    assert lancedb.connect(demo_index).open_table("transcripts_ollama").count_rows() == before
+
+
+def test_the_classics_cards_are_refused_there_and_a_named_cards_folder_is_not(demo_index,
+                                                                            tmp_path):
+    """The engineer's shelf writes its own cards over books `ayl add` indexed
+    (`--cards-dir`); only the default, the classics' cards, is refused."""
+    reader_s_book(demo_index)
+    with pytest.raises(SystemExit, match="write the demo corpus's cards into"):
+        demo.ingest_cards_table("ollama")
+    cards = tmp_path / "shelf-cards"
+    cards.mkdir()
+    (cards / "notes.md").write_text("# My Own Notes — Me\n\n## Plot\n\n- a thing\n")
+    demo.ingest_cards_table("ollama", [cards])
+    assert lancedb.connect(demo_index).open_table("cards_ollama").count_rows() > 0
+
+
+def test_an_index_with_only_the_demo_corpus_s_books_is_rebuilt_as_before(demo_index):
+    demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
+    demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
+
+
+# --- an index with no ledger is judged by its rows (F-preledger-index) ------------
+
+def pre_ledger_index(db_path, books):
+    """An index as one built before the ledger (ADR-024) leaves it: a
+    transcripts table and no `books` table."""
+    rows = [{"chunk_id": f"{book}-{i}", "note": book, "book": book, "source": "s",
+             "section": "Chapter 1", "text": PARA, "vector": [0.0, 1.0, 0.5, 0.25]}
+            for book in books for i in range(2)]
+    lancedb.connect(db_path).create_table("transcripts_ollama", rows)
+
+
+def test_a_pre_ledger_index_holding_a_foreign_book_is_refused_and_unchanged(demo_index):
+    pre_ledger_index(demo_index, ["Moby Dick — Herman Melville", "My Own Notes — Me"])
+    with pytest.raises(SystemExit) as refused:
+        demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
+    message = str(refused.value.code)
+    assert "My Own Notes — Me" in message and "by its rows or its ledger" in message
+    assert "LIBRARY_DB_PATH=$AYL_HOME/demo/index" in message
+    table = lancedb.connect(demo_index).open_table("transcripts_ollama")
+    assert sorted({row["book"] for row in table.to_arrow().to_pylist()}) == [
+        "Moby Dick — Herman Melville", "My Own Notes — Me"]
+
+
+def test_a_pre_ledger_index_of_manifest_books_only_is_rebuilt_as_before(demo_index, monkeypatch):
+    monkeypatch.setattr(demo, "load_manifest", lambda: {"books": [
+        {"id": "moby-dick", "title": "Moby Dick", "author": "Herman Melville"},
+        {"id": "emma", "title": "Emma", "author": "Jane Austen"}], "canaries": []})
+    pre_ledger_index(demo_index, ["Moby Dick — Herman Melville"])
+    demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
+    table = lancedb.connect(demo_index).open_table("transcripts_ollama")
+    assert {row["book"] for row in table.to_arrow().to_pylist()} == {
+        "Moby Dick — Herman Melville", "Emma — Jane Austen"}
+
+
+def test_an_empty_folder_builds(demo_index):
+    demo_index.mkdir()
+    demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
+    assert lancedb.connect(demo_index).open_table("transcripts_ollama").count_rows() > 0
+
+
+def test_a_foreign_cards_row_with_no_ledger_is_refused_for_the_classics_cards(demo_index):
+    rows = [{"chunk_id": "c", "note": "mine", "book": "My Own Notes — Me", "source": "card",
+             "section": "Plot", "text": "x", "vector": [0.0, 1.0, 0.5, 0.25]}]
+    demo_index.mkdir()
+    lancedb.connect(demo_index).create_table("cards_ollama", rows)
+    with pytest.raises(SystemExit, match="My Own Notes — Me"):
+        demo.ingest_cards_table("ollama")
+
+
+# --- a whole-table rebuild reconciles the ledger (F2-demo-completeness) ------------
+
+def test_a_whole_table_rebuild_prunes_ledger_rows_of_books_it_no_longer_holds(demo_index,
+                                                                             monkeypatch):
+    """A full ingest, then a starter one: the table holds the subset, and the
+    ledger used to keep `indexed` rows for every book of the full run — which
+    is what made `ayl init --demo --full` call the full corpus built."""
+    demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
+    monkeypatch.setattr(demo, "prepared_docs", lambda ids, known=None: [
+        doc("moby-dick", "Moby Dick", "Herman Melville")])
+    demo.ingest_transcripts_table("ollama", None, ["moby-dick"], ["moby-dick", "emma"])
+    db = lancedb.connect(demo_index)
+    assert sorted(row["key"] for row in open_ledger(db).all_rows()) == [
+        "Moby Dick — Herman Melville"]
+    books = {row["book"] for row in db.open_table("transcripts_ollama").to_arrow().to_pylist()}
+    assert books == {"Moby Dick — Herman Melville"}
+
+
+def test_a_single_book_upsert_prunes_nothing(demo_index, monkeypatch):
+    """Only the whole-table rebuild reconciles: `--book` replaces one book's
+    rows and leaves every other book, and its ledger row, where it was."""
+    demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
+    monkeypatch.setattr(demo, "prepared_docs", lambda ids: [
+        doc("moby-dick", "Moby Dick", "Herman Melville")])
+    demo.ingest_transcripts_table("ollama", "moby", ["moby-dick"])
+    assert sorted(row["key"] for row in open_ledger(lancedb.connect(demo_index)).all_rows()) \
+        == ["Emma — Jane Austen", "Moby Dick — Herman Melville"]
+
+
+# --- the ledger is a signal, never a substitute for the rows (F6-ledger-trust) --------------
+# `Ledger._put` documents that a crash between its delete and its add leaves
+# table rows with no ledger row: the guard reads the rows always, and a book
+# either signal names is foreign.
+
+def _manifest(monkeypatch):
+    monkeypatch.setattr(demo, "load_manifest", lambda: {"books": [
+        {"id": "moby-dick", "title": "Moby Dick", "author": "Herman Melville"},
+        {"id": "emma", "title": "Emma", "author": "Jane Austen"}], "canaries": []})
+
+
+def _refused_and_unchanged(demo_index, run):
+    before = sorted(row["book"] for row in lancedb.connect(demo_index)
+                    .open_table("transcripts_ollama").to_arrow().to_pylist())
+    with pytest.raises(SystemExit) as refused:
+        run()
+    after = sorted(row["book"] for row in lancedb.connect(demo_index)
+                   .open_table("transcripts_ollama").to_arrow().to_pylist())
+    assert after == before
+    return str(refused.value.code)
+
+
+def test_an_empty_ledger_beside_a_foreign_row_is_refused(demo_index, monkeypatch):
+    _manifest(monkeypatch)
+    pre_ledger_index(demo_index, ["Moby Dick — Herman Melville", "My Own Notes — Me"])
+    ledger = open_ledger(lancedb.connect(demo_index))
+    book_id = ledger.resolve("Moby Dick", "Herman Melville", source_ref="manifest:moby-dick")
+    ledger.begin(book_id, key="Moby Dick — Herman Melville", source_ref="manifest:moby-dick")
+    ledger.delete(book_id)                                   # the table exists, and is empty
+    assert ledger.exists() and ledger.all_rows() == []
+    message = _refused_and_unchanged(
+        demo_index, lambda: demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"]))
+    assert "My Own Notes — Me" in message
+
+
+def test_a_book_whose_ledger_row_is_missing_is_read_from_its_rows(demo_index, monkeypatch):
+    """A ledger of manifest rows only — the crash left the reader's book's rows
+    and lost its row."""
+    _manifest(monkeypatch)
+    demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
+    table = lancedb.connect(demo_index).open_table("transcripts_ollama")
+    row = table.to_arrow().to_pylist()[0]
+    table.add([{**row, "chunk_id": "mine-1", "book": "My Own Notes — Me", "note": "mine"}])
+    message = _refused_and_unchanged(
+        demo_index, lambda: demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"]))
+    assert "My Own Notes — Me" in message
+
+
+def test_a_manifest_ledger_over_a_non_manifest_key_is_refused(demo_index, monkeypatch):
+    _manifest(monkeypatch)
+    demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
+    db = lancedb.connect(demo_index)
+    db.open_table("transcripts_ollama").update(where="note = 'emma'",
+                                               values={"book": "Emma — Somebody Else"})
+    message = _refused_and_unchanged(
+        demo_index, lambda: demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"]))
+    assert "Emma — Somebody Else" in message
+
+
+def test_the_all_manifest_cases_still_rebuild(demo_index, monkeypatch):
+    _manifest(monkeypatch)
+    demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])     # with a ledger
+    demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
+    assert lancedb.connect(demo_index).open_table("transcripts_ollama").count_rows() > 0
+
+
+def test_a_foreign_key_in_a_staging_table_refuses_too(demo_index, monkeypatch):
+    """`recover_staging` promotes a staging table whose live table is gone, so a
+    staging table is part of what the rebuild would publish (F7-staging-foreign)."""
+    _manifest(monkeypatch)
+    demo_index.mkdir()
+    db = lancedb.connect(demo_index)
+    db.create_table("transcripts_ollama__staging",
+                    [{"chunk_id": "m1", "note": "mine", "book": "My Own Notes — Me", "source": "s",
+                      "section": "1", "text": PARA, "vector": [0.0, 1.0, 0.5, 0.25]}])
+    with pytest.raises(SystemExit) as refused:
+        demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
+    assert "My Own Notes — Me" in str(refused.value.code)
+    names = lancedb.connect(demo_index).table_names()
+    assert "transcripts_ollama__staging" in names and "transcripts_ollama" not in names

@@ -64,7 +64,7 @@ The index a command opens, when no `--db` names one, is decided by three rules i
 
    ```
    note: reading the index at /…/ask-your-library/data/lancedb, the old default. The default is
-   now /Users/…/AskYourLibrary/index ($AYL_HOME/index); the old place is read until 0.5.0, when
+   now /Users/…/AskYourLibrary/index ($AYL_HOME/index); the old place is read until 0.6.0, when
    it becomes an error. Nothing is moved for you. To move it: `ayl backup <dir>`, then `ayl
    restore <dir>/<timestamp> --db /Users/…/AskYourLibrary/index --chat-db
    /Users/…/AskYourLibrary/ui/.chainlit/chat.db`, then move data/lancedb out of this directory,
@@ -74,7 +74,7 @@ The index a command opens, when no `--db` names one, is decided by three rules i
 
    (one line on the terminal, wrapped here; a path in a command is shell-quoted when it holds a
    space or anything a shell would expand), and never when a command is only asked for its help
-   or its version. **This rule is kept for one minor release: from 0.5.0 an index found there is
+   or its version. **This rule is kept for one minor release: from 0.6.0 an index found there is
    an error naming the same two commands.** The chat database has a rule of its own with the same
    sunset: when `AYL_CHAINLIT_DIR` is unset and the checkout the package runs from — not the
    working directory — has any `chat.db` file in its `.chainlit/`, the web chat reads that file
@@ -146,17 +146,20 @@ says exactly this, naming them; `--rebuild --force` goes ahead and reports every
 (their ids are kept and their rows are not, so they go back to `requested` until you re-add their
 folder).
 
-**The demo corpus** has its own rebuild and does not go through `ayl add`:
+**The demo corpus** has its own rebuild and does not go through `ayl add`. It lives in an index of
+its own, `~/AskYourLibrary/demo/index`, and `ayl init` rebuilds it there: it sees the old chunker's
+stamp, calls the library unfinished, and runs the demo build the way it first did:
 
 ```bash
-uv run scripts/ingest_demo_corpus.py --stage ingest
+uv run ayl init --demo          # --demo --full for the whole corpus
 ```
 
-The cards table is untouched by the bump, so `--stage cards` is not part of this upgrade.
+The cards table is untouched by the bump, so the cards stage of `scripts/ingest_demo_corpus.py`
+(`--stage cards`) is not part of this upgrade.
 
 **If you do not want to rebuild yet**, nothing forces you: keep reading the index and postpone
 adding books to it. What you must not do is silence the warning by re-stamping the table
-(`--stage stamp-meta --chunker …`) — the stamp would then claim something the rows do not have,
+(`ingest_demo_corpus.py --stage stamp-meta --chunker …`) — the stamp would then claim something the rows do not have,
 which is worse than no stamp at all. Since #75 the command refuses that attempt itself: claiming the
 version this code chunks at samples the rows first and refuses when they cannot have come from it.
 
@@ -169,8 +172,8 @@ transcripts_ollama was built by chunker 'sentence-pack-1', this code chunks as
 'sentence-pack-2'. The index still answers, from the chunks it already holds. The way out
 is a rebuild, which replaces every row: `uv run ayl add <folder> --rebuild --backup <dir>`
 takes a copy first, drops the table and re-indexes (`--rebuild --force` skips the copy).
-For the demo corpus, `uv run scripts/ingest_demo_corpus.py --stage ingest` is already a
-full rebuild.
+For the demo library, `uv run ayl init --demo` (`--demo --full` for the whole corpus) rebuilds it
+in its own index (ADR-028).
 ```
 
 ### What the refusal looks like
@@ -210,12 +213,13 @@ reads with a warning, and the warning, the refusal and `--doctor` name the quick
 rebuilds only the cards from the card files and leaves the full text alone:
 
 ```bash
-uv run scripts/ingest_demo_corpus.py --stage cards
+LIBRARY_DB_PATH=~/AskYourLibrary/demo/index uv run scripts/ingest_demo_corpus.py --stage cards \
+    --starter                    # the six-book demo library; without --starter, the whole corpus
 LIBRARY_DB_PATH=~/ayl-tech uv run scripts/ingest_demo_corpus.py --stage cards \
     --cards-dir corpus-tech/cards --cards-dir "${AYL_HOME:-$HOME/AskYourLibrary}/cards/tech"
 ```
 
-The first is the demo corpus; the second is the engineer's shelf, with its own index.
+The first is the demo library, in its own index; the second is the engineer's shelf, with its own index.
 
 ### Checking before you upgrade
 
@@ -286,7 +290,7 @@ writes `~/ayl-backups/<timestamp>/` holding
 - `lancedb/` — the whole index directory: every table, the `books` ledger, the `_index_meta`
   stamps and the BM25 index;
 - `chat.db` — the web UI's history, from `AYL_CHAINLIT_DIR`, else `$AYL_HOME/ui/.chainlit/` (or
-  a checkout's `.chainlit/` that still holds one, until 0.5.0), or wherever `--chat-db` names. Taken through SQLite's own backup, so it is **one consistent snapshot in one
+  a checkout's `.chainlit/` that still holds one, until 0.6.0), or wherever `--chat-db` names. Taken through SQLite's own backup, so it is **one consistent snapshot in one
   file** rather than a main file copied beside somebody else's write-ahead log. Absent if you never
   started the web UI, and the report says so; a file SQLite cannot open is reported and the index
   is still backed up without it;
@@ -410,8 +414,8 @@ uv run ayl add ~/books --db ~/ayl-index
 # 4b. a chunker or embedder mismatch: rebuild, which discards every row it replaces
 uv run ayl add ~/books --db ~/ayl-index                       # refused, and it names --rebuild
 uv run ayl add ~/books --rebuild --backup ~/ayl-backups --db ~/ayl-index   # copy, drop, re-index
-# for the demo corpus, a full rebuild is the repair (it replaces every row):
-uv run scripts/ingest_demo_corpus.py --stage ingest
+# for the demo library, in its own index, a full rebuild is the repair (it replaces every row):
+uv run ayl init --demo                                      # --demo --full for the whole corpus
 
 # 5. only now, and only if step 4b succeeded, is the index what the stamp would claim
 uv run ayl doctor --db ~/ayl-index
@@ -427,14 +431,15 @@ line ends the run instead of the next line going ahead on top of it:
 #!/usr/bin/env bash
 set -euo pipefail                  # any failing line ends the run
 
-uv run scripts/ingest_demo_corpus.py --stage ingest
+uv run ayl init --demo
 uv run ayl doctor --db ~/ayl-index
 ```
 
-**A failed ingest stops the chain: never stamp after one.** `scripts/ingest_demo_corpus.py --stage ingest`
-exits non-zero when it has nothing to ingest — a missing `data/prepared` is the ordinary case, and
-it names the directory it looked in — so the `set -euo pipefail` above is what keeps the rest of
-the script from running. #75 is what its absence costs: the ingest skipped all 35 books and exited
+**A failed ingest stops the chain: never stamp after one.** `ayl init --demo` exits non-zero
+when the demo build stops, and the build (`scripts/ingest_demo_corpus.py`) exits non-zero when it
+has nothing to ingest — a missing prepared folder is the ordinary case, and it names the directory
+it looked in — so the `set -euo pipefail` above is what keeps the rest of the script from
+running. #75 is what its absence costs: the ingest skipped all 35 books and exited
 1, the next line stamped the chunker anyway onto the rows the old one had left, `--doctor` said
 "no drift", and an hour of measurement ran on an index that claimed one chunker and held another.
 The stamp now samples the rows and would refuse that write — but a chain that runs on after a

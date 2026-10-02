@@ -11,6 +11,11 @@ LIBRARY_DB_PATH=~/ayl-index uv run ayl books                  # what the index h
 LIBRARY_DB_PATH=~/ayl-index uv run ayl ask "..."              # ask it
 ```
 
+The `LIBRARY_DB_PATH=~/ayl-index` prefix keeps that library in a folder of its own. Without it the
+same commands work on your index, `~/AskYourLibrary/index` — the one `ayl init` names and every
+command reads by default; the demo library `ayl init --demo` builds is a separate index beside it,
+so your books and the classics are never mixed unless you point `ayl add` at the demo's folder.
+
 `ayl add`, `ayl doctor`, `ayl backup` and `ayl restore` are one program under four verbs. Each
 verb's own `--help` lists what it takes; `ayl add --help` lists everything the ingest command
 accepts, and anything written after a bare `--` reaches it verbatim (`ayl backup <dir> --

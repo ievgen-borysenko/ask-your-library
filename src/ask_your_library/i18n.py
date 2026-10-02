@@ -262,18 +262,19 @@ _T = {
     "pf_ollama_bad_reply": {
         "ua": "Щось на {url} відповіло (HTTP {status}), але це не придатна відповідь /api/tags "
               "(помилковий статус, не JSON або несподівана структура). Перевір, що на цій адресі "
-              "саме Ollama (`curl {url}/api/tags`).",
+              "саме Ollama (`curl` її /api/tags за адресою з OLLAMA_URL).",
         "en": "Something at {url} answered with HTTP {status}, but the reply is not a usable "
               "/api/tags (an error status, not JSON, or an unexpected shape): check that this "
-              "address is really Ollama (`curl {url}/api/tags`).",
+              "address is really Ollama (`curl` the /api/tags of the address OLLAMA_URL names).",
     },
     "pf_no_db": {
-        "ua": "Бази нема: {path}. Побудуй демо-корпус "
-              "(`uv run scripts/ingest_demo_corpus.py`, ~30 хв), проіндексуй свої книжки "
-              "(`uv run ayl add <тека>`) або вкажи LIBRARY_DB_PATH на свою LanceDB.",
-        "en": "Database not found: {path}. Build the demo corpus "
-              "(`uv run scripts/ingest_demo_corpus.py`, ~30 min), index your own books "
-              "(`uv run ayl add <folder>`) or point LIBRARY_DB_PATH at your LanceDB.",
+        "ua": "Бази нема: {path}. Проіндексуй у неї свої книжки (`uv run ayl add <тека>`) "
+              "або вкажи LIBRARY_DB_PATH на іншу LanceDB. Демо-бібліотека — окремий індекс, "
+              "і питають її так само: LIBRARY_DB_PATH=$AYL_HOME/demo/index.",
+        "en": "Database not found: {path}. Index your own books into it "
+              "(`uv run ayl add <folder>`), or point LIBRARY_DB_PATH at another LanceDB. The "
+              "demo library is an index of its own and is asked the same way: "
+              "LIBRARY_DB_PATH=$AYL_HOME/demo/index.",
     },
     "pf_no_tables": {
         "ua": "У базі {path} нема таблиць: {tables}. Заверши інжест "

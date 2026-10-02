@@ -65,7 +65,7 @@ than assumed away. Details below.
   default `$AYL_HOME/index/` — refused inside a git work tree unless the variable names it.
 - The Chainlit UI stores chats, questions and answers included, in `chat.db` under
   `AYL_CHAINLIT_DIR` (by default `$AYL_HOME/ui/.chainlit/`, or a checkout's `.chainlit/` that
-  already holds one, until 0.5.0 — never the directory the server was started in), a SQLite file.
+  already holds one, until 0.6.0 — never the directory the server was started in), a SQLite file.
 - Optional LangSmith tracing (`LANGCHAIN_API_KEY`, or `LANGSMITH_API_KEY` with `LANGSMITH_TRACING`)
   sends prompts and retrieved text to LangSmith; `LANGSMITH_TRACING_V2=false` and
   `LANGCHAIN_TRACING_V2=false` together keep it off.
@@ -151,6 +151,14 @@ can be started:
   has its own sockets and is not instrumented.
 - **`scripts/` is not in it.** `scripts/ingest_demo_corpus.py` downloads a corpus on purpose; that
   is a different path with a different claim.
+
+- **The directory a command is typed in can change where data goes.** Settings are read from
+  three places (ADR-027): exported, then the `.env` of the project the command runs in, then
+  `~/AskYourLibrary/config.env`. A command typed inside another project whose `.env` sets a
+  tracing flag and a LangSmith key — or a remote `OLLAMA_URL`, or `LLM_BACKEND=openrouter` —
+  reads those above the configuration `ayl init` wrote, and the local promise `ayl init` checked
+  is not checked again at question time. Run `ayl init --print-env-resolution` from that
+  directory to see every data-flow setting and the file it came from.
 
 ## Threat model
 

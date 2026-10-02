@@ -8,7 +8,10 @@ pipeline is exercised for real.
 Chunking, embedding and the FTS index come from ask_your_library.ingest — the
 same code that serves the agent, so every corpus is processed identically.
 
-Stages (all cached in data/, safe to re-run):
+Stages (all cached in data/, or in --cache-dir, safe to re-run). Each command
+below writes the index LIBRARY_DB_PATH names: for the demo library put
+LIBRARY_DB_PATH=~/AskYourLibrary/demo/index in front, as `ayl init --demo`
+does (see below):
   uv run scripts/ingest_demo_corpus.py                     # everything
   uv run scripts/ingest_demo_corpus.py --stage prepare-text
   uv run scripts/ingest_demo_corpus.py --stage prepare-audio   # slow: Whisper
@@ -19,6 +22,8 @@ Stages (all cached in data/, safe to re-run):
   uv run scripts/ingest_demo_corpus.py --stage cards --cards-dir corpus-tech/cards \
       --cards-dir ~/AskYourLibrary/cards/tech   # + cards built only here ($AYL_HOME)
   uv run scripts/ingest_demo_corpus.py --book alice        # filter by substring
+  uv run scripts/ingest_demo_corpus.py --starter           # the starter subset only (what
+                                                           # `ayl init --demo` builds)
   uv run scripts/ingest_demo_corpus.py --stage stamp-meta  # fingerprint pre-existing tables
   uv run scripts/ingest_demo_corpus.py --stage checksums   # pin source sha256 into the manifest
 
@@ -30,11 +35,16 @@ reused, so investigating a drifted pin needs --refetch, which downloads again
 and keeps the old copy as pg<id>.txt.prev to diff against; a second --refetch
 over the same book refuses rather than overwrite that backup.
 
-The LanceDB lives in $AYL_HOME/index by default (LIBRARY_DB_PATH overrides, the
-same variable the agent reads; an index already built at the old default,
-data/lancedb, is read there until it is moved — ADR-026). Table names:
+The LanceDB is the one LIBRARY_DB_PATH names, the same variable the agent reads.
+Name the demo library's own index, $AYL_HOME/demo/index (ADR-028), which is
+what `ayl init --demo` does: unset, the variable means the READER's index,
+$AYL_HOME/index (ADR-026), and this script refuses to write the classics into
+one that holds books `ayl add` indexed. Table names:
 cards_<backend> / transcripts_<backend>. The downloads and the prepared texts
-stay in the checkout's data/raw and data/prepared.
+go to the checkout's data/raw and data/prepared, and the contents pages are
+regenerated into corpus/toc/ — unless --cache-dir names another folder, in
+which case the run writes nothing under the checkout (`ayl init --demo` runs it
+that way, into $AYL_HOME/demo/cache, ADR-028).
 """
 import argparse
 import hashlib
@@ -66,6 +76,7 @@ from ask_your_library.ingest.chapters import (DEFAULT_CHAPTER_RE, MIN_CHAPTER_CH
 from ask_your_library.ingest.chunking import (CARD_CHUNKER_VERSION, CHUNKER_VERSION,
                                               TRANSCRIPT_MAX_CHARS, card_note, chunk_floor,
                                               parse_frontmatter)
+from ask_your_library.ingest.foreign import foreign_books
 from ask_your_library.ingest.ledger import open_ledger
 from ask_your_library.ingest.lock import IngestBusy, ingest_lock
 from ask_your_library.ingest.publish import (add_ledger_columns, rebuild_table,
@@ -86,6 +97,20 @@ TOC_DIR = REPO / "corpus" / "toc"
 DATA = REPO / "data"
 RAW_DIR = DATA / "raw"            # downloaded texts / mp3s, as fetched
 PREPARED_DIR = DATA / "prepared"  # one json per book: {note, book, chapters}
+# Whether a prepare stage regenerates corpus/toc/<id>.json. The default run is
+# the developer's and CI's, which keep the committed contents pages in step
+# with the editions; a run given --cache-dir (the one `ayl init --demo` starts)
+# treats the checkout as read-only input and writes nothing under it.
+WRITE_TOC = True
+
+
+def shown(path: Path) -> str:
+    """A path as the runbooks spell it: relative to the checkout when it is in
+    it, whole when it is not (a --cache-dir under AYL_HOME)."""
+    try:
+        return str(Path(path).relative_to(REPO))
+    except ValueError:
+        return str(path)
 
 WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo"
 
@@ -157,6 +182,14 @@ def write_checksums() -> None:
 
 def all_entries(manifest: dict) -> list[dict]:
     return manifest["books"] + manifest["canaries"]
+
+
+def starter_entries(manifest: dict) -> list[dict]:
+    """The manifest entries marked `starter: true`: the small demo library
+    `ayl init --demo` builds in minutes instead of the whole corpus's half
+    hour. The choice of books, and why each is in it, is written beside the
+    flag in corpus/manifest.yaml; this only reads it."""
+    return [entry for entry in all_entries(manifest) if entry.get("starter") is True]
 
 
 # --- fetching ---------------------------------------------------------------
@@ -245,9 +278,10 @@ def save_prepared(entry: dict, chapters: list[tuple[str, str]], provenance: str)
         "source": provenance,
         "chapters": [{"title": t, "text": b} for t, b in chapters],
     }, ensure_ascii=False), encoding="utf-8")
-    TOC_DIR.mkdir(parents=True, exist_ok=True)
-    (TOC_DIR / f"{entry['id']}.json").write_text(
-        json.dumps([t for t, _ in chapters], ensure_ascii=False, indent=0), encoding="utf-8")
+    if WRITE_TOC:
+        TOC_DIR.mkdir(parents=True, exist_ok=True)
+        (TOC_DIR / f"{entry['id']}.json").write_text(
+            json.dumps([t for t, _ in chapters], ensure_ascii=False, indent=0), encoding="utf-8")
     total = sum(len(b) for _, b in chapters)
     print(f"  {entry['id']}: {len(chapters)} chapters, {total:,} chars")
 
@@ -275,7 +309,7 @@ def refuse_overwriting_backups(entries: list[dict]) -> None:
              if backup_path(raw).exists()]
     if not taken:
         return
-    listing = "\n".join(f"  {book}: {prev.relative_to(REPO)}" for book, _raw, prev in taken)
+    listing = "\n".join(f"  {book}: {shown(prev)}" for book, _raw, prev in taken)
     _book, raw, prev = taken[0]
     sys.exit(
         f"--refetch would overwrite a backup that already exists:\n{listing}\n"
@@ -284,7 +318,7 @@ def refuse_overwriting_backups(entries: list[dict]) -> None:
         f"mirror serves the newer file. Overwriting it leaves you diffing one fresh download "
         f"against another.\n"
         f"Finish the investigation with the backup you have "
-        f"(diff {prev.relative_to(REPO)} {raw.relative_to(REPO)}), or move it aside by hand "
+        f"(diff {shown(prev)} {shown(raw)}), or move it aside by hand "
         f"under a name of your own, and then run --refetch again.")
 
 
@@ -471,13 +505,18 @@ def chunk_prepared(doc: dict) -> list[Chunk]:
     return chunks
 
 
-def prepared_docs(entry_ids: list[str]) -> list[dict]:
+def prepared_docs(entry_ids: list[str], known: list[str] | None = None) -> list[dict]:
     """Prepared documents for exactly the manifest entries — a prepared file
     that no longer has a manifest entry would silently contaminate a corpus
-    whose sources are supposed to be pinned."""
+    whose sources are supposed to be pinned.
+
+    `known` is every id the manifest holds, when `entry_ids` is only part of
+    it (`--starter`): a prepared file of a book outside the subset is then a
+    book prepared by an earlier full run, not a stale one, and is left out of
+    this ingest rather than refused."""
     expected = {f"{i}.json" for i in entry_ids}
     present = {p.name for p in PREPARED_DIR.glob("*.json")}
-    stale = sorted(present - expected)
+    stale = sorted(present - expected - {f"{i}.json" for i in (known or [])})
     if stale:
         sys.exit(f"prepared files without a manifest entry: {stale} — delete them "
                  f"(or restore the entries) before ingesting")
@@ -551,8 +590,36 @@ def refuse_unsafe_partial_reingest(db, name: str, embedder) -> None:
                                  f"refusing partial re-ingest of {name}", 1))
 
 
-def ingest_transcripts_table(backend: str, book_filter: str | None, entry_ids: list[str]) -> None:
-    docs = prepared_docs(entry_ids)
+def refuse_foreign_books(db, what: str) -> None:
+    """Refuse to write the demo corpus into an index that holds the reader's
+    own books.
+
+    Unset, LIBRARY_DB_PATH is the reader's index ($AYL_HOME/index, ADR-026),
+    which `ayl add` fills — and a full rebuild here replaces the whole
+    transcripts table, so a bare run of this script dropped every book the
+    reader had added and left the classics in their place.
+    `ingest.foreign.foreign_books` says which books are whose — the rows
+    always, the ledger as a second signal — and `ayl init` judges a demo
+    folder by the same function.
+    There is no override: the demo corpus has an index of its own (ADR-028),
+    named here, and a reader who wants both in one folder adds their books to
+    the demo's, not the other way round."""
+    manifest = {book_key(e["title"], e["author"]) for e in all_entries(load_manifest())}
+    foreign = foreign_books(db, manifest)
+    if foreign:
+        sys.exit(
+            f"refusing to {what} {DB_PATH}: it holds {len(foreign)} book(s) that are not the "
+            f"demo corpus's, by its rows or its ledger — {', '.join(foreign[:3])}"
+            + (f" (+{len(foreign) - 3} more)" if len(foreign) > 3 else "") +
+            f" — books `ayl add` indexed, which this would "
+            f"{'replace' if what.startswith('rebuild') else 'mix with the classics'}. The demo "
+            f"corpus has an index of its own: `ayl init --demo`, or this script with "
+            f"LIBRARY_DB_PATH=$AYL_HOME/demo/index (~/AskYourLibrary/demo/index by default).")
+
+
+def ingest_transcripts_table(backend: str, book_filter: str | None, entry_ids: list[str],
+                             known: list[str] | None = None) -> None:
+    docs = prepared_docs(entry_ids) if known is None else prepared_docs(entry_ids, known)
     if book_filter:
         docs = [d for d in docs if book_filter.lower() in d["book"].lower()]
     if not docs:
@@ -561,6 +628,7 @@ def ingest_transcripts_table(backend: str, book_filter: str | None, entry_ids: l
     embedder = get_embedder(backend)
     db = lancedb.connect(DB_PATH)
     name = f"transcripts_{backend}"
+    refuse_foreign_books(db, "re-ingest books into" if book_filter else "rebuild the transcripts of")
     # Before the recoveries: both guards are reads (`read_index_meta` never
     # recovers), so a run that is going to be refused promotes and drops
     # nothing on its way to saying no.
@@ -602,7 +670,8 @@ def ingest_transcripts_table(backend: str, book_filter: str | None, entry_ids: l
             yield doc["note"], rows_for(chunks, vectors, book_id,
                                         revision_of(ledger.get(book_id).get("sha256") or ""))
 
-    if book_filter and name in table_names(db):
+    whole_table = not (book_filter and name in table_names(db))
+    if not whole_table:
         # Re-ingest selected books in place: replace their rows, never append.
         # One table, one embedding model: an upsert with a different embedder
         # would leave a table of mixed vectors and re-stamp it as if it were not.
@@ -626,6 +695,19 @@ def ingest_transcripts_table(backend: str, book_filter: str | None, entry_ids: l
                      chunker=CHUNKER_VERSION)
     for book_id, rows in written.items():
         ledger.commit(book_id, rows=rows, fts_seconds=fts_seconds)
+    if whole_table:
+        # A whole-table rebuild leaves exactly the books it wrote, so a ledger
+        # row of any other book now describes rows that are gone — a full run
+        # followed by a `--starter` one kept `indexed` rows for the whole
+        # corpus, and `ayl init --demo --full` read them as built. Pruned here,
+        # in this script's rebuild and nowhere else: `refuse_foreign_books`
+        # has already established that every row is the demo corpus's, and
+        # the reader's own index never comes through this path.
+        stale = [row["book_id"] for row in ledger.all_rows() if row["book_id"] not in written]
+        for book_id in stale:
+            ledger.delete(book_id)
+        if stale:
+            print(f"  ledger: {len(stale)} row(s) of books this rebuild no longer holds removed")
     print(f"transcripts done: {total} chunks in {(time.time() - started) / 60:.1f} min "
           f"(FTS rebuild {fts_seconds:.1f}s)")
 
@@ -655,17 +737,31 @@ def card_files(cards_dirs: list[Path]) -> list[Path]:
     return cards
 
 
-def ingest_cards_table(backend: str, cards_dirs: list[Path] | None = None) -> None:
+def ingest_cards_table(backend: str, cards_dirs: list[Path] | None = None,
+                       only: set[str] | None = None) -> None:
     """Rebuild this index's cards table from folders of `*.md` cards.
 
     The folders are a parameter because the engineer's shelf (#58) is a second
     index with cards of its own: `--cards-dir corpus-tech/cards` together with
     LIBRARY_DB_PATH pointing at that index writes the shelf's `cards_<backend>`
     table through this same code, so both shelves' cards are cut, embedded and
-    stamped by one implementation rather than two."""
+    stamped by one implementation rather than two.
+
+    `only` keeps the cards whose file name is one of those manifest ids — the
+    starter subset's — so its cards table holds no card of a book its
+    transcripts table does not: a card hit there would name a book no chapter
+    read could open."""
+    if not cards_dirs:
+        # The classics' cards, into an index of the reader's own books, would
+        # be cards of books that index does not hold. A folder named with
+        # --cards-dir is the engineer's shelf's path (cards over books `ayl
+        # add` indexed), and is the operator's to name.
+        refuse_foreign_books(lancedb.connect(DB_PATH), "write the demo corpus's cards into")
     cards_dirs = cards_dirs or [CARDS_DIR]
     where = ", ".join(str(folder) for folder in cards_dirs)
     cards = card_files(cards_dirs)
+    if only is not None:
+        cards = [path for path in cards if path.stem in only]
     if not cards:
         sys.exit(f"no cards in {where} — generate them first")
     embedder = get_embedder(backend)
@@ -893,6 +989,16 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--backend", default=EMBED_BACKEND, choices=("ollama", "openrouter"))
     ap.add_argument("--book", help="substring filter: of the title for the prepare stages, "
                                    "of the book key for --stage ingest")
+    ap.add_argument("--starter", action="store_true",
+                    help="only the starter subset: the manifest entries marked `starter: true`, "
+                         "and their cards (what `ayl init --demo` builds; a few minutes "
+                         "instead of about thirty)")
+    ap.add_argument("--cache-dir", type=lambda value: Path(value).expanduser(), metavar="DIR",
+                    help="where the downloads (DIR/raw) and the prepared texts (DIR/prepared) "
+                         "go, instead of the checkout's data/; with it the run writes nothing "
+                         "under the checkout, corpus/toc/ included (`ayl init --demo` passes "
+                         "$AYL_HOME/demo/cache). The sources are still verified against the "
+                         "manifest's pins")
     ap.add_argument("--no-verify", action="store_true",
                     help="skip manifest checksum verification of sources")
     ap.add_argument("--chunker", metavar="VERSION",
@@ -944,11 +1050,27 @@ def main(argv: list[str] | None = None) -> None:
         # every other stage would ignore the flag without saying so.
         ap.error("--cards-dir belongs to --stage cards; no other stage reads a folder "
                  "of cards")
-    global VERIFY_CHECKSUMS
+    if args.starter and (args.book or args.cards_dir or args.stage in ("stamp-meta",
+                                                                        "checksums")):
+        # The subset is a whole library of its own: a substring filter inside
+        # it, another folder of cards, or a stage that works on every table or
+        # on the manifest itself would each make it something else.
+        ap.error("--starter builds the starter subset as a whole: it does not combine with "
+                 "--book, --cards-dir, --stage stamp-meta or --stage checksums")
+    if args.cache_dir and args.stage == "checksums":
+        # That stage rewrites corpus/manifest.yaml, the one write a --cache-dir
+        # run promises not to make.
+        ap.error("--cache-dir keeps the checkout read-only, and --stage checksums writes "
+                 "corpus/manifest.yaml: pin checksums from a run without --cache-dir")
+    global VERIFY_CHECKSUMS, RAW_DIR, PREPARED_DIR, WRITE_TOC
     VERIFY_CHECKSUMS = not args.no_verify
+    if args.cache_dir:
+        RAW_DIR, PREPARED_DIR, WRITE_TOC = (args.cache_dir / "raw", args.cache_dir / "prepared",
+                                            False)
 
     manifest = load_manifest()
-    entries = all_entries(manifest)
+    entries = starter_entries(manifest) if args.starter else all_entries(manifest)
+    known = [e["id"] for e in all_entries(manifest)] if args.starter else None
     if args.book and args.stage.startswith("prepare"):
         entries = [e for e in entries if args.book.lower() in e["title"].lower()]
 
@@ -970,11 +1092,15 @@ def main(argv: list[str] | None = None) -> None:
         if args.stage in ("all", "ingest"):
             print("== ingest transcripts ==")
             with ingest_lock(DB_PATH, command=f"ingest_demo_corpus.py --stage {args.stage}"):
-                ingest_transcripts_table(args.backend, args.book, [e["id"] for e in entries])
+                ingest_transcripts_table(args.backend, args.book, [e["id"] for e in entries],
+                                         known)
         if args.stage in ("all", "cards"):
             print("== ingest cards ==")
             with ingest_lock(DB_PATH, command=f"ingest_demo_corpus.py --stage {args.stage}"):
-                ingest_cards_table(args.backend, args.cards_dir)
+                if args.starter:
+                    ingest_cards_table(args.backend, None, {e["id"] for e in entries})
+                else:
+                    ingest_cards_table(args.backend, args.cards_dir)
         if args.stage == "checksums":
             print("== pin source checksums into the manifest ==")
             write_checksums()
