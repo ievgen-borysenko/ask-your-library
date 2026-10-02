@@ -24,7 +24,7 @@ from pathlib import Path
 
 from . import cli
 from .catalog import render_catalog, run_catalog
-from .config import DB_PATH, EMBED_BACKEND
+from .config import DB_CHOICE, DB_PATH, EMBED_BACKEND
 from .i18n import t
 from .ingest import add_folder
 from .preflight import PreflightResult, check_environment, exit_code
@@ -133,7 +133,8 @@ VERB_FLAGS = {"--doctor": "ayl doctor", "--backup": "ayl backup",
 # verb rather than copied from the ingest parser, which has to describe what
 # `--force` means to `--restore` AND to `--rebuild` — half a paragraph about
 # something else under `ayl restore`.
-DB_HELP = f"the LanceDB directory to work on (default: LIBRARY_DB_PATH, now {DB_PATH})"
+DB_HELP = (f"the LanceDB directory to work on (default: LIBRARY_DB_PATH, else "
+           f"$AYL_HOME/index; now {DB_PATH})")
 BACKEND_HELP = ("the embedding backend, which selects the table suffix "
                 f"(default: EMBED_BACKEND, now {EMBED_BACKEND})")
 HATCH = ("Anything after a bare `--` is passed to the ingest command verbatim, "
@@ -197,7 +198,7 @@ def _backend_option(parser: argparse.ArgumentParser) -> None:
 def _chat_db_option(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--chat-db", type=Path, default=None, metavar="PATH",
                         help="the web UI's chat database (default: AYL_CHAINLIT_DIR, "
-                             "else .chainlit/chat.db)")
+                             "else $AYL_HOME/ui/.chainlit/chat.db)")
 
 
 def _forwarded(args) -> list[str]:
@@ -280,7 +281,20 @@ def run_doctor(rest: list[str]) -> int:
     args = parser.parse_args(mine)
 
     db = args.db.expanduser() if args.db is not None else None
+    # Which index, and which rule chose it (ADR-026): one named by
+    # LIBRARY_DB_PATH, one read at the old default in the working directory and
+    # the default under AYL_HOME are three different situations, and this is
+    # the command that says which. A default refused inside a git work tree is
+    # the preflight's problem, reported below.
+    if db is None:
+        cli.say(f"index: {DB_CHOICE.path} — {DB_CHOICE.reason}")
+    else:
+        cli.say(f"index: {db} — named with --db")
     problems = report_environment(db_path=db, backend=args.backend)
+    if "index_in_checkout" in getattr(problems, "kinds", ()):
+        # The index half would ask for the same refused folder and print the
+        # same refusal a second time; there is no index for it to reconcile.
+        return exit_code(problems)
     status = add_folder.main(["--doctor", *_forwarded(args), *extra], prog="ayl doctor")
     return exit_code(problems) if problems else status
 

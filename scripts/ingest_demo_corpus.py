@@ -30,8 +30,11 @@ reused, so investigating a drifted pin needs --refetch, which downloads again
 and keeps the old copy as pg<id>.txt.prev to diff against; a second --refetch
 over the same book refuses rather than overwrite that backup.
 
-The LanceDB lives in data/lancedb by default (LIBRARY_DB_PATH overrides, the
-same variable the agent reads). Table names: cards_<backend> / transcripts_<backend>.
+The LanceDB lives in $AYL_HOME/index by default (LIBRARY_DB_PATH overrides, the
+same variable the agent reads; an index already built at the old default,
+data/lancedb, is read there until it is moved — ADR-026). Table names:
+cards_<backend> / transcripts_<backend>. The downloads and the prepared texts
+stay in the checkout's data/raw and data/prepared.
 """
 import argparse
 import hashlib
@@ -49,7 +52,7 @@ import requests
 import yaml
 
 from ask_your_library.bookkey import author_of, book_key, chunk_id, title_of
-from ask_your_library.config import DB_PATH, EMBED_BACKEND
+from ask_your_library.config import DB_PATH, EMBED_BACKEND, confirm_db_path
 from ask_your_library.embeddings import get_embedder
 from ask_your_library.index_meta import (CARDS_PREFIX, META_TABLE, check_index, chunk_lengths,
                                          expected_chunker, length_mismatch, read_index_meta,
@@ -915,6 +918,12 @@ def main(argv: list[str] | None = None) -> None:
                          "cards built only on this machine, together with its own "
                          "LIBRARY_DB_PATH)")
     args = ap.parse_args(argv)
+    try:
+        # The old-default notice, or the refusal of a default index inside a
+        # git work tree (ADR-026): after parsing, so --help says nothing.
+        confirm_db_path()
+    except RuntimeError as error:
+        raise SystemExit(str(error)) from None
     if args.chunker and args.stage != "stamp-meta":
         # Silently ignoring it would let somebody believe they had asserted a
         # chunker over an index that was never stamped with one.

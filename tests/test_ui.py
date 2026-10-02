@@ -43,7 +43,7 @@ def hosted_backend(monkeypatch):
 def ui(monkeypatch, tmp_path):
     # app.py refuses the placeholder password unless the demo login is acknowledged,
     # refuses to start without an OpenRouter key, mints a secret file on import and
-    # creates the chat db: all of that goes to tmp, never to the checkout's .chainlit/.
+    # creates the chat db: all of that goes to tmp, never to the reader's own history.
     monkeypatch.setenv("CHAINLIT_AUTH_SECRET", "test-secret")
     monkeypatch.setenv("AYL_ALLOW_DEFAULT_LOGIN", "1")
     monkeypatch.setenv("AYL_ALLOW_START_WITHOUT_KEY", "1")

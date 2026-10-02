@@ -25,18 +25,21 @@ import argparse
 import os
 import sys
 from importlib.metadata import PackageNotFoundError, version
-from pathlib import Path
 
 from .bookkey import split_read_query, unescape_marker
 from .config import QUESTION_DEADLINE_S, SUPPORTED_LANGS
 from .graph import build_graph
+from .home import scratch_dir
 from .i18n import set_lang, source_word, status_word, t
 from .preflight import check_environment, exit_code
 from .runner import RunResult, failed_result, history_entry, run_question
 from .sanitize import LINE_BREAK_RE, strip_control_chars
 
 EXIT_WORDS = {"exit", "quit", "q", "вихід"}
-SCRATCH_DIR = Path(os.environ.get("ASK_SCRATCH_DIR", ".scratch"))
+# ASK_SCRATCH_DIR, else $AYL_HOME/scratch — absolute, the web chat's rule
+# (`home.scratch_dir`), and never a `.scratch/` in whatever directory the
+# command was typed in. Resolving it creates nothing, so `--help` stays clean.
+SCRATCH_DIR = scratch_dir()
 
 # Session totals live in the interface: the metrics event is always about one
 # question. A question that FAILED emits that event too (since 16.09, so the

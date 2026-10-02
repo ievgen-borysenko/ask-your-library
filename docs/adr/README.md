@@ -5,14 +5,14 @@ what it was measured to buy. They were written from the code rather than ahead o
 describe the system as built; where a variant was tried and dropped, the rejected variant is part
 of the record, because it is usually the more useful half.
 
-Twenty-five decisions, in the order they were taken. ADR-016 is written out as a file of its own
+Twenty-six decisions, in the order they were taken. ADR-016 is written out as a file of its own
 because it changed the planner's contract and added a node to the graph; the rest are summarised
 here. ADR-017 to ADR-023 were recorded on 2026-09-16, after the fact: a review of this tree found
 seven decisions the code had made and no record named. The four that constrain what may be built
 next are written out below; the other three are reserved as stubs — number, title, one sentence —
 to be written when the code they describe is next touched, so that the numbering is taken and the
-decision is not forgotten. ADR-024 and ADR-025 were taken on 2026-09-17 and written out with the
-code they describe. The measurements are not repeated in full: the reports under
+decision is not forgotten. ADR-024 and ADR-025 were taken on 2026-09-17 and ADR-026 on 2026-09-25,
+each written out with the code it describes. The measurements are not repeated in full: the reports under
 [`docs/eval-results/`][reports] are the primary record, and each entry below names the one that
 carries its numbers. Reports of
 intermediate development runs were not exported with this repository; where a decision was measured
@@ -1100,6 +1100,108 @@ passes with `facts 0/3` on both sides and now reports a chapter read that aimed 
 and no item is below the baseline. What the re-run does not buy, and the report says it plainly:
 evidence items rise 43 -> 50, which is eight more card matches (9 -> 17) against one fewer
 book-text match (34 -> 33) — seven more in net, and none of it more of the books.
+
+## ADR-026: AYL_HOME is the home of everything built on this machine: the index, the scratchpads, the chat database, the private shelf
+
+Status: accepted (2026-09-25, #30). The number was reserved by #58 for "the private shelf", which
+this record now covers as one case of a wider rule.
+
+Until this, what the project builds for a reader had three defaults of three kinds. The index was
+`data/lancedb`, **relative**: resolved against whatever directory the command was typed in, so
+`ayl ask` from the clone and from `~` opened two indexes, and from `~` a fresh empty one that the
+preflight then reported missing. The CLI's scratchpads were a relative `.scratch`, the same defect
+with the retrieved passages in it. The web chat's database and auth secret defaulted to the
+checkout's `.chainlit/`. #94 had already moved the web chat's app root and a wheel's fallback to
+`$AYL_HOME/ui`, and the engineer's shelf's local cards were in `$AYL_HOME/cards/tech` since #58.
+Both of those slices named the remaining three as one decision still to be made; this is it.
+
+**Decision.** `AYL_HOME` (default `~/AskYourLibrary`) is where every default of what this machine
+builds for the reader points, and nothing of it defaults into the working directory:
+
+| What | Default | Explicit override | Refused inside a git work tree |
+|---|---|---|---|
+| the index | `$AYL_HOME/index` | `LIBRARY_DB_PATH` | yes, naming `LIBRARY_DB_PATH` |
+| the scratchpads (CLI and web chat) | `$AYL_HOME/scratch` | `ASK_SCRATCH_DIR` | no |
+| the web chat's app root, chat database, auth secret | `$AYL_HOME/ui`, `$AYL_HOME/ui/.chainlit` | `AYL_CHAINLIT_DIR` | no |
+| local cards of the engineer's shelf | `$AYL_HOME/cards/tech` | — | yes |
+| the private shelf (the reader's own books, cards, index) | under `$AYL_HOME` | — | yes (not built yet) |
+
+What is **not** moved: the demo corpus's downloads and prepared texts (`data/raw/`,
+`data/prepared/`), which `scripts/ingest_demo_corpus.py` still stages in the checkout. The corpus
+pin job in CI and every developer checkout depend on that layout, and they are derived inputs of
+the checkout's own manifest, not something built for the reader; moving them is a later slice
+(with `ayl init`, which will run the same stages). Nor the committed inputs — `corpus/`,
+`corpus-tech/`, the golden sets — which are versioned with the code and pinned by checksum.
+
+**The backward-compatibility rule, for the index**, in `config.resolve_db_path`, in this order:
+
+1. `LIBRARY_DB_PATH` set → that path, as written, always. No `AYL_HOME`, no git-work-tree check,
+   no notice. It is the developer's and CI's escape hatch, and the test suite's: `tests/conftest.py`
+   pins it per process. (A blank value is unset; `Path("")` was the working directory itself.)
+2. Unset, and `<cwd>/data/lancedb` holds `transcripts_<EMBED_BACKEND>` → that index, where it is,
+   and one line on stderr per process: the new default, this path, and the move as the two
+   commands `ayl backup <dir>` and `ayl restore <dir>/<timestamp> --db … --chat-db …`. A
+   `data/lancedb` without that table is no index this configuration answers from and does not
+   count.
+3. Otherwise → `$AYL_HOME/index`, created by the first write.
+
+The chat database has a second clause of its own (`ui.launcher.legacy_chat_db`), and it is not the
+index's: it is keyed on the checkout **the package runs from** (`paths.REPO_ROOT`), not on the
+working directory — a wheel has none, so it never applies there — and **any** `chat.db` file in
+that checkout's `.chainlit/` counts, whatever it holds; a `.chainlit/` without one, which is what
+importing Chainlit leaves behind, does not. `AYL_CHAINLIT_DIR` unset and that file present, it is
+read where it is, with one line when the web chat starts. **Nothing is copied, moved or deleted by the
+code.** An index of hundreds of megabytes, and a reader's chat history, are not things a startup
+path relocates on its own; the supported move is `ayl backup` then `ayl restore`, which verify what they
+copy. **Clause 2 has a sunset: it is honoured through 0.4.x, and from 0.5.0 finding an index or a
+chat database at the old place is an error naming the same two commands** (`LEGACY_DB_SUNSET` in
+`config.py`, printed in the notice). `ayl doctor` prints which clause applied and why.
+
+**When it is said.** The resolution is pure and runs at import, so `config.DB_PATH` keeps its name
+for every module that imports it; the notice and the refusal are not at import but in
+`config.confirm_db_path`, called where a command first uses the configured index — the preflight
+(`ayl ask`, `doctor`, `books`, the web chat), `ayl add` / `backup` / `restore`, the demo ingest —
+and once per process. `--help` and `--version` answer before any of that runs, which is the rule
+`cli.main` already stated: parsing precedes any environment touch.
+
+**The git-work-tree refusal: kept for what may never be shared, with the override named.**
+`home.private_dir` refuses a folder that resolves inside a git work tree (#58). The index holds the
+full text of the books it was built from — the reader's own among them — so its default goes
+through that refusal, and the message now names `LIBRARY_DB_PATH` rather than only "set `AYL_HOME`
+elsewhere": a developer who keeps `AYL_HOME` inside a checkout on purpose, or a Codespace whose home
+is under `/workspaces`, has one line to write. The scratchpads and the web chat's state resolve
+through `home.ayl_home` without the refusal, as #94 decided for the app root: they are working
+files of a run, and refusing to answer a question or to start the web chat because the home folder
+is under version control would be the rule applied where it protects nothing the reader asked for.
+The alternative — the refusal only for never-shared content and none for the index — was rejected
+because the index is exactly that content once `ayl add` has run over a private folder.
+
+The plan for this slice (#30, 22.09.2026) recommended the other way round: keep the refusal for
+the index, the scratchpads and the chat state alike, with `LIBRARY_DB_PATH`, `ASK_SCRATCH_DIR`
+and `AYL_CHAINLIT_DIR` as the explicit escapes. **That was declined for the scratchpads and the
+chat state**, and followed for the index. They are working files of a run, written on every
+question; refusing to answer — or to start the web chat — because the home folder is under
+version control guards nothing the reader asked for, and it is the precedent #94 set for the web
+chat's app root. The counter-argument is real and is recorded with it: a scratchpad holds the
+retrieved passages verbatim, and a chat database holds answers that quote them, so a home folder
+inside a checkout can put book text one `git add` away from a commit. Both stay outside the
+checkout by default; what is not enforced is the case where the reader moved `AYL_HOME` into one.
+Revisit if the private shelf makes those passages the reader's own books by default.
+
+When only a folder under `AYL_HOME` is a symlink into a checkout — `$AYL_HOME/index` linked into
+one, `AYL_HOME` itself outside — the refusal names that folder and what it resolves to rather than
+claiming `AYL_HOME` does. The known
+blind spot stays: a bare-repository dotfiles setup leaves no `.git` in `$HOME` and is not detected.
+
+**Consequences.** Once no old index is left in the working directory and `LIBRARY_DB_PATH` is
+either unset or absolute, the same command opens the same index from any directory; clause 2 is
+cwd-dependent by design until 0.5.0, and a relative `LIBRARY_DB_PATH` is still resolved against
+the working directory, as it always was. An `.env` copied from
+any earlier `.env.example` carries `LIBRARY_DB_PATH=data/lancedb`, which clause 1 obeys — silently,
+by design — so the changelog and the upgrade page tell the reader to delete that line;
+`.env.example` now ships it commented out. `scripts/install-mac.sh` can no longer read one default
+out of `config.py` with `sed`, and applies the three clauses in bash instead. The test suite pins
+`AYL_HOME` next to `LIBRARY_DB_PATH`, since an unpinned one would be the developer's own folder.
 
 [reports]: ../eval-results/
 [backlog]: ../backlog.md

@@ -29,8 +29,8 @@ requires a rebuild — a new chunker, a new embedding model — this backup is t
 only way back to the index you had, and those fields are how you know which
 index that was.
 
-What is NOT backed up: `.scratch/` (the passages as a model saw them, deleted
-per run by design) and `.env` (secrets; a backup is a second copy of them).
+What is NOT backed up: the scratchpads (`$AYL_HOME/scratch`, the passages as a
+model saw them, a per-run log by design) and `.env` (secrets; a backup is a second copy of them).
 """
 import contextlib
 import hashlib
@@ -75,7 +75,8 @@ def default_chat_db() -> Path:
     """Where the web UI keeps its chat database.
 
     `ui.launcher.chainlit_dir` is THE rule (`AYL_CHAINLIT_DIR` expanded, else
-    the checkout's `.chainlit/`, else the app root's) and this asks it rather
+    a checkout's `.chainlit/` that already holds a chat database, else
+    `$AYL_HOME/ui/.chainlit/`, ADR-026) and this asks it rather
     than spelling it out a second time — the two spellings disagreed the moment
     one of them learnt to expand a `~`, and this function names the file
     `ayl backup` copies AND the file `ayl restore` writes. Importing the

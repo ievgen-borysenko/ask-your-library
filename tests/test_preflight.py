@@ -516,3 +516,29 @@ def test_the_remedy_names_the_models_this_configuration_will_open(monkeypatch, t
     assert "bge-m3" not in message and "qwen2.5:14b" not in message
     assert "brew install ollama" in message and "ollama serve" in message
     assert "bash scripts/install-mac.sh" in message
+
+
+def test_an_exported_home_or_chat_folder_cannot_hand_the_suite_real_locations(tmp_path):
+    """AYL_HOME and AYL_CHAINLIT_DIR are where the suite writes, so unlike the
+    other pinned knobs an exported value does not win: a developer's shell that
+    exports their real folders would otherwise have the backup tests copy and
+    restore over their own chat history. Checked in a fresh interpreter, with
+    both exported to marker paths and a planted .env naming them too."""
+    from conftest import fresh_output
+
+    (tmp_path / ".env").write_text("AYL_HOME=/marker/dotenv-home\n"
+                                   "AYL_CHAINLIT_DIR=/marker/dotenv-chainlit\n", encoding="utf-8")
+    code = ("from conftest import DEFAULTS, pin_environment\n"
+            "pin_environment()\n"
+            "import os\n"
+            "from ask_your_library import config\n"
+            "from ask_your_library.ui import launcher\n"
+            "assert os.environ['AYL_HOME'] == DEFAULTS['AYL_HOME'], os.environ['AYL_HOME']\n"
+            "assert os.environ['AYL_CHAINLIT_DIR'] == DEFAULTS['AYL_CHAINLIT_DIR']\n"
+            "print(config.AYL_HOME)\n"
+            "print(launcher.chainlit_dir())\n")
+    out = fresh_output(code, cwd=str(tmp_path), AYL_HOME="/marker/exported-home",
+                       AYL_CHAINLIT_DIR="/marker/exported-chainlit")
+    assert "/marker" not in out
+    home, chainlit = out.split("\n")
+    assert "ayl-tests-home-" in home and "ayl-tests-chainlit-" in chainlit

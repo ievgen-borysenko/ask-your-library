@@ -1,18 +1,31 @@
 """The reader's own folder, `AYL_HOME`, and the one rule that guards it.
 
-Some files may be built on the reader's machine for the reader and never shared:
-a model-written card of a work whose licence withholds sharing an adaptation
-(CC BY-NC-ND 4.0 section 2(a)(1)(B)) is the first, the reader's own books, their
-cards and their index (the private shelf, ADR-026) are next. Those files live
-under `AYL_HOME` (default `~/AskYourLibrary`), outside any checkout, and never in
-a folder inside the repository: a line in `.gitignore` is a convention a
-`git add -f` walks through, and a folder that is not in the tree cannot be
-committed by anyone.
+`AYL_HOME` (default `~/AskYourLibrary`) is where everything this machine builds
+for the reader has its default (ADR-026): the index (`$AYL_HOME/index`, decided
+in `config.resolve_db_path`), the scratchpads (`scratch_dir` below), the web
+chat's app root and chat database (`$AYL_HOME/ui`, `ui.launcher`) and the local
+cards (`$AYL_HOME/cards/tech`).
+
+Some of those files may be built on the reader's machine for the reader and
+never shared: a model-written card of a work whose licence withholds sharing an
+adaptation (CC BY-NC-ND 4.0 section 2(a)(1)(B)), and an index, which holds the
+full text of the books it was built from — the reader's own among them, and
+later the private shelf's. Those never go in a folder inside a repository: a
+line in `.gitignore` is a convention a `git add -f` walks through, and a folder
+that is not in the tree cannot be committed by anyone.
 
 So the rule is a check, not a default: `private_dir` refuses a folder that
 resolves inside a git work tree — this repository's or any other — before
 anything is written to it, and `private_file` does the same for the file itself,
 so a symlink planted at the file's name cannot carry the write into a checkout.
+The check guards the DEFAULT only. A path a reader names explicitly for one kind
+of file (`LIBRARY_DB_PATH` for the index) is theirs and is obeyed, and the
+refusal names that variable, so a developer who keeps a throwaway index inside a
+checkout has one line to write rather than a folder to move. The scratchpads and
+the web chat's state go through `ayl_home` and are not refused: they are working
+files of a run, and refusing to answer a question — or to start the web chat —
+because the reader's home folder is under version control would be the rule
+applied where the reader did not ask it to be.
 
 What is detected is a `.git` directory or file in the path or above it. A
 bare-repository setup whose work tree is elsewhere — dotfiles kept with
@@ -46,19 +59,62 @@ def ayl_home() -> Path:
     return Path(config.AYL_HOME).expanduser().resolve()
 
 
+# The variable that puts one kind of file somewhere else without moving
+# AYL_HOME, by the first part of its folder under AYL_HOME. A refusal names it,
+# because it is the smaller change: the reader who kept AYL_HOME inside a
+# checkout on purpose usually wants THAT file elsewhere, not everything.
+OVERRIDES = {"index": ("LIBRARY_DB_PATH", "the index")}
+
+
 def private_dir(*parts: str) -> Path:
     """A folder under `AYL_HOME`, refused if it lies inside a git work tree.
 
     Only the path is returned; the caller creates it when it writes."""
-    folder = ayl_home().joinpath(*parts)
+    return refuse_in_work_tree(ayl_home().joinpath(*parts), parts[0] if parts else None)
+
+
+def refuse_in_work_tree(folder: Path, kind: str | None = None) -> Path:
+    """`folder` itself, refused (RuntimeError) when it lies inside a git work
+    tree; `kind` is the key of OVERRIDES whose variable the refusal names.
+
+    Takes the CONCRETE path rather than recomputing it from `AYL_HOME`, so a
+    caller that decided its path earlier checks the very path it will open.
+    `config.confirm_db_path` is that caller: `DB_PATH` was resolved at import,
+    and an `AYL_HOME` symlink retargeted since then would otherwise have the
+    check look at one folder while the index is written into another."""
     tree = git_work_tree_of(folder)
     if tree is not None:
+        override = OVERRIDES.get(kind) if kind else None
+        escape = (f"Set {override[0]} to put {override[1]} somewhere else, or set AYL_HOME "
+                  if override else "Set AYL_HOME ")
+        # Which path is inside the checkout: AYL_HOME itself, or only this
+        # folder under it — a symlink planted at `$AYL_HOME/index` pointing into
+        # a checkout leaves AYL_HOME where it was, and saying otherwise would
+        # send the reader to fix the wrong thing.
+        real = folder.resolve()
+        where = (f"AYL_HOME resolves to {ayl_home()}" if real.is_relative_to(ayl_home())
+                 else f"{folder} resolves to {real}")
         raise RuntimeError(
-            f"AYL_HOME resolves to {ayl_home()}, inside the git work tree {tree}: files "
+            f"{where}, inside the git work tree {tree}: files "
             f"that may never be shared are not written into a checkout, where one "
-            f"`git add` would commit them. Set AYL_HOME to a folder outside any "
+            f"`git add` would commit them. {escape}to a folder outside any "
             f"repository (the default is ~/AskYourLibrary).")
     return folder
+
+
+def scratch_dir() -> Path:
+    """`ASK_SCRATCH_DIR` when set, else `$AYL_HOME/scratch` — absolute either
+    way, and never `.scratch` in whatever directory the reader typed the
+    command in.
+
+    The CLI's default was the relative `.scratch`, right while every command
+    was run from the checkout. From anywhere else the first answered question
+    dropped a `.scratch/` with retrieved passages in it wherever the terminal
+    happened to be. One function for the CLI and for the server `ayl ui`
+    starts (`ui.launcher` hands its answer to the child), so the two cannot
+    disagree. Read when called: nothing is created here."""
+    named = os.environ.get("ASK_SCRATCH_DIR", "").strip()
+    return Path(named).expanduser().resolve() if named else ayl_home() / "scratch"
 
 
 def private_file(path: Path) -> Path:

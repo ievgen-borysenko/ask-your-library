@@ -646,3 +646,19 @@ def test_the_chat_restore_replaces_by_rename(built, tmp_path):
 
     assert chat_rows(live) == ["old history"]
     assert not list(live.parent.glob("chat.db.restoring-*"))
+
+
+
+def test_the_suite_never_reaches_the_checkouts_own_chat_history(tmp_path, monkeypatch):
+    """tests/conftest.py pins AYL_CHAINLIT_DIR. Unpinned, the default chat
+    database is a checkout's `.chainlit/chat.db` whenever one is there
+    (ADR-026) — this checkout's, with a developer's real history in it — and
+    the tests above would back it up and restore over it."""
+    from ask_your_library.ui import launcher
+    checkout = tmp_path / "checkout"
+    (checkout / ".chainlit").mkdir(parents=True)
+    (checkout / ".chainlit" / "chat.db").write_bytes(b"a real history")
+    monkeypatch.setattr(launcher, "REPO_ROOT", str(checkout))
+    pinned = Path(os.environ["AYL_CHAINLIT_DIR"]).resolve()
+    assert backup_module.default_chat_db() == pinned / "chat.db"
+    assert checkout not in backup_module.default_chat_db().parents

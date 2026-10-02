@@ -36,7 +36,7 @@ import lancedb
 
 from ..bookkey import (MAX_TITLE_LINE, UNKNOWN_AUTHOR, author_of, book_key, chunk_id, slug,
                        split_title_author, title_of)
-from ..config import DB_PATH, EMBED_BACKEND
+from ..config import DB_PATH, EMBED_BACKEND, confirm_db_path
 from ..embeddings import get_embedder
 from ..index_meta import (META_TABLE, check_index, read_index_meta, refuse_version_mismatch,
                           write_index_meta)
@@ -1001,7 +1001,8 @@ def build_parser(prog: str = "ayl-add") -> argparse.ArgumentParser:
     parser.add_argument("--backend", default=EMBED_BACKEND, choices=("ollama", "openrouter"),
                         help="embedding backend; also selects the table suffix")
     parser.add_argument("--db", type=Path, default=None,
-                        help=f"LanceDB directory (default: LIBRARY_DB_PATH, now {DB_PATH})")
+                        help=f"LanceDB directory (default: LIBRARY_DB_PATH, else "
+                             f"$AYL_HOME/index; now {DB_PATH})")
     parser.add_argument("--dry-run", action="store_true",
                         help="print the books, sections and chunk counts and the diff against "
                              "the book ledger; embed and write nothing")
@@ -1035,7 +1036,8 @@ def build_parser(prog: str = "ayl-add") -> argparse.ArgumentParser:
                              "the check that another folder's books are about to lose their rows")
     parser.add_argument("--chat-db", type=Path, default=None, metavar="PATH",
                         help="--backup / --restore: the web UI's chat database "
-                             "(default: AYL_CHAINLIT_DIR or .chainlit/chat.db)")
+                             "(default: AYL_CHAINLIT_DIR, else "
+                             "$AYL_HOME/ui/.chainlit/chat.db)")
     parser.add_argument("--cards", action="store_true",
                         help="not implemented (see the message it prints)")
     return parser
@@ -1054,6 +1056,15 @@ def main(argv: list[str] | None = None, prog: str = "ayl-add") -> int:
             error=True)
         return 2
 
+    if args.db is None:
+        # The configured index is about to be used: the old-default notice, or
+        # the refusal of a default inside a git work tree (ADR-026). A --db
+        # was named, and is obeyed as it is.
+        try:
+            confirm_db_path()
+        except RuntimeError as error:
+            say(str(error), error=True)
+            return 1
     db_default = (args.db.expanduser() if args.db else DB_PATH)
     chat_db = args.chat_db.expanduser() if args.chat_db else None
     if args.doctor:

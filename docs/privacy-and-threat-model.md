@@ -12,7 +12,7 @@ flowchart LR
     subgraph local[your machine]
         Corpus[(LanceDB index)] --> Act[act: search / read]
         Act --> San[sanitize: EN/UA regex]
-        San --> Pad[scratchpad .scratch/ and hits_log in memory]
+        San --> Pad[scratchpad in AYL_HOME/scratch and hits_log in memory]
         Chat[(Chainlit chat.db)]
     end
     San -->|passages, cut to budget| Obs[observe LLM]
@@ -58,11 +58,14 @@ than assumed away. Details below.
   retrieval. `EMBED_BACKEND=openrouter` sends chunk text to the embedding API too.
 - Every run writes a scratchpad with the **retrieved passages as the model saw them** (sanitized,
   cut to 2,500 characters per search hit and 12,000 per chapter read; `SEARCH_HIT_CHARS` and
-  `CHAPTER_HIT_CHARS` in the environment set the two cuts) to `.scratch/` (gitignored,
-  never cleaned up automatically).
+  `CHAPTER_HIT_CHARS` in the environment set the two cuts) to `ASK_SCRATCH_DIR`, by default
+  `$AYL_HOME/scratch/` (`~/AskYourLibrary/scratch/`), outside the checkout and never cleaned up
+  automatically.
+- The index itself holds the full text of every book it was built from, at `LIBRARY_DB_PATH`, by
+  default `$AYL_HOME/index/` — refused inside a git work tree unless the variable names it.
 - The Chainlit UI stores chats, questions and answers included, in `chat.db` under
-  `AYL_CHAINLIT_DIR` (by default `.chainlit/` in the checkout, or `$AYL_HOME/ui/.chainlit/`
-  where there is no checkout — never the directory the server was started in), a SQLite file.
+  `AYL_CHAINLIT_DIR` (by default `$AYL_HOME/ui/.chainlit/`, or a checkout's `.chainlit/` that
+  already holds one, until 0.5.0 — never the directory the server was started in), a SQLite file.
 - Optional LangSmith tracing (`LANGCHAIN_API_KEY`, or `LANGSMITH_API_KEY` with `LANGSMITH_TRACING`)
   sends prompts and retrieved text to LangSmith; `LANGSMITH_TRACING_V2=false` and
   `LANGCHAIN_TRACING_V2=false` together keep it off.

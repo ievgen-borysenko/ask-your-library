@@ -475,7 +475,8 @@ UI_MODULE = "ask_your_library.ui.app"
 def ui_module():
     """Import the web chat with the demo-login guards satisfied and everything
     it writes (secret file, chat db) pointed at a temp dir, never the
-    checkout's .chainlit/. Mirrors the fixture in tests/test_ui.py.
+    reader's own chat history under AYL_HOME. Mirrors the fixture in
+    tests/test_ui.py.
 
     A context manager because this file is also imported by the test suite: the
     environment, sys.path and sys.modules go back to what they were, and the
