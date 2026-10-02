@@ -82,7 +82,7 @@ def test_a_stream_that_never_says_success_is_a_failure(monkeypatch):
 def test_an_http_error_names_the_status_and_ollama_s_reason(monkeypatch):
     monkeypatch.setattr(ollama, "requests", FakeRequests(Stream(
         [], status=500, text='{"error": "disk full"}')))
-    with pytest.raises(ollama.PullError, match="HTTP 500 — disk full"):
+    with pytest.raises(ollama.PullError, match="HTTP 500 — it said: disk full"):
         ollama.pull("some-model")
 
 

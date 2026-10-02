@@ -17,7 +17,7 @@ import requests
 from requests import RequestException
 
 from .config import OLLAMA_URL
-from .dataflow import without_credentials
+from .dataflow import server_text, without_credentials
 
 # A pull of a 9 GB model streams for minutes; what is bounded is the wait for
 # the NEXT line, not the whole download. Ollama sends a progress line every
@@ -50,8 +50,13 @@ def pull(model: str, on_progress: Progress | None = None, url: str | None = None
         with requests.post(f"{base}/api/pull", json=body, stream=True,
                            timeout=(CONNECT_TIMEOUT_S, READ_TIMEOUT_S)) as response:
             if response.status_code >= 400:
+                # The status is ours to print; the body is the server's, and
+                # goes through server_text — a server that was sent a
+                # credential in the URL can answer with it.
+                reason = _error_of(response.text)
                 raise PullError(f"Ollama at {shown} refused to pull {model}: HTTP "
-                                f"{response.status_code} {_error_of(response.text)}".rstrip())
+                                f"{response.status_code}"
+                                + (f" — it said: {server_text(reason, base)}" if reason else ""))
             for raw in response.iter_lines():
                 if not raw:
                     continue
@@ -64,12 +69,17 @@ def pull(model: str, on_progress: Progress | None = None, url: str | None = None
                     raise PullError(f"Ollama at {shown} sent something that is not a pull "
                                     f"progress line while pulling {model}")
                 if line.get("error"):
-                    raise PullError(f"Ollama could not pull {model}: {line['error']}")
+                    raise PullError(f"Ollama at {shown} reported an error while pulling "
+                                    f"{model}; it said: {server_text(line['error'], base)}")
                 status = str(line.get("status", ""))
-                if on_progress is not None:
-                    on_progress(status, line.get("completed"), line.get("total"))
                 if status == "success":
+                    if on_progress is not None:
+                        on_progress(status, None, None)
                     return
+                if on_progress is not None:
+                    # The stage name is the server's text too, and is printed.
+                    on_progress(server_text(status, base, 60), _bytes(line.get("completed")),
+                                _bytes(line.get("total")))
     except RequestException as error:
         raise PullError(f"the connection to Ollama at {shown} failed while pulling {model}: "
                         f"{type(error).__name__}") from None
@@ -78,9 +88,17 @@ def pull(model: str, on_progress: Progress | None = None, url: str | None = None
 
 def _error_of(text: str) -> str:
     """The `error` field of a JSON error body, or nothing: a body that is not
-    Ollama's is not repeated to the reader."""
+    Ollama's is not repeated to the reader. Not yet fit to print: the caller
+    passes it through `server_text`."""
     try:
         value = json.loads(text)
     except ValueError:
         return ""
-    return f"— {value['error']}" if isinstance(value, dict) and value.get("error") else ""
+    return str(value["error"]) if isinstance(value, dict) and value.get("error") else ""
+
+
+def _bytes(value) -> int | None:
+    """A byte count from a progress line, or None: a value that is not a
+    whole number is not printed, nor allowed to break the progress line."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 \
+        else None

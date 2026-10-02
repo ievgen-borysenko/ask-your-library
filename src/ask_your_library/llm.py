@@ -28,6 +28,7 @@ from openai import APIConnectionError, APIStatusError, APITimeoutError
 from .config import (LLM_BACKEND, LLM_BASE_URL, LLM_MAX_RETRIES, LLM_NEEDS_KEY, LLM_REASONING, LLM_TIMEOUT_S,
                      MAX_OUTPUT_TOKENS, ORCHESTRATOR_MODEL, PRICE_IN_PER_MTOK, PRICE_OUT_PER_MTOK,
                      QUESTION_DEADLINE_S)
+from .dataflow import scrub_credentials
 from .embeddings import openrouter_api_key
 from .sanitize import LINE_BREAK_RE, strip_control_chars
 
@@ -515,7 +516,8 @@ def ask_json(system: str, user: str, role: str) -> dict:
             # this one sees any difference.
             _observe_json_call({"role": role, "attempt": attempt + 1, "system": system,
                                 "user": attempt_user, "raw": "",
-                                "error": f"{type(error).__name__}: {error}"})
+                                "error": f"{type(error).__name__}: "
+                                         f"{scrub_credentials(str(error))}"})
             raise
         parsed, why = json_object(reply)
         if why:

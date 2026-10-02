@@ -13,9 +13,12 @@ langchain_core reads the two v1 names and counts a name as SET unless its
 value is "", "0", "false" or "False"; set, with v2 tracing off, it makes the
 first model call raise. LANGCHAIN_TRACING is in both lists on purpose.
 """
+import base64
 import os
 import re
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
+
+from .sanitize import strip_control_chars
 
 BACKEND_VARS = ("LLM_BACKEND", "EMBED_BACKEND")
 ENDPOINT_VARS = ("OLLAMA_URL", "OLLAMA_HOST", "OPENROUTER_BASE_URL", "LANGCHAIN_ENDPOINT",
@@ -68,3 +71,72 @@ def without_credentials(value: str) -> str:
         return value
     return (f"{scheme + '://' if scheme else ''}<credentials>@"
             f"{authority.rsplit('@', 1)[1]}{rest[len(authority):]}")
+
+
+# --- text a server sent back -----------------------------------------------------
+# A server reached through a URL with `user:password@` in it receives that
+# credential (requests sends it as Basic auth) and can put it into anything it
+# answers. So no text from a response is printed as it came: it goes through
+# `server_text`, and a message that does not need it does not carry it.
+SERVER_TEXT_LIMIT = 160
+WITHHELD = "(the server's own text is withheld: it carries part of a credential)"
+
+
+def credentials_of(url: str) -> list[str]:
+    """Every spelling of the credential written into `url` that a server
+    could send back: the user name and the password as written and
+    percent-decoded, the whole `user:password`, and its Base64 (standard and
+    URL-safe, with and without padding) — the Authorization header requests
+    built from it. Longest first; empty when the URL carries none."""
+    rest = url.split("://", 1)[1] if "://" in url else url
+    authority = re.split(r"[/?#]", rest, maxsplit=1)[0]
+    if "@" not in authority:
+        return []
+    userinfo = authority.rsplit("@", 1)[0]
+    user, _, password = userinfo.partition(":")
+    found = {userinfo, user, password, unquote(userinfo), unquote(user), unquote(password)}
+    for pair in {userinfo, f"{unquote(user)}:{unquote(password)}"}:
+        raw = pair.encode("utf-8")
+        for encoded in (base64.b64encode(raw), base64.urlsafe_b64encode(raw)):
+            text = encoded.decode("ascii")
+            found |= {text, text.rstrip("=")}
+    return sorted((value for value in found if value), key=len, reverse=True)
+
+
+def configured_credentials(*urls: str) -> list[str]:
+    """Every spelling (`credentials_of`) of the credentials in `urls` and in
+    every URL-valued setting this process is configured with: OLLAMA_URL,
+    OPENROUTER_BASE_URL and the endpoints in ENDPOINT_VARS. Longest first."""
+    from . import config      # here, not at the top: config is loaded lazily by its users
+    every = [*urls, config.OLLAMA_URL, config.OPENROUTER_BASE_URL,
+             *(os.environ.get(name, "") for name in ENDPOINT_VARS)]
+    return sorted({secret for url in every for secret in credentials_of(url)},
+                  key=len, reverse=True)
+
+
+def scrub_credentials(text: str, *urls: str) -> str:
+    """`text` with every spelling of a configured credential (and of the
+    credentials in `urls`) replaced by `<credentials>`. A part shorter than
+    four characters cannot be replaced without garbling the text around it (a
+    one-letter user name is in every word), so when one occurs the whole text
+    is withheld instead. For an exception's message, which may carry a
+    server's reply, before it is printed, logged or recorded."""
+    text = str(text)
+    for secret in configured_credentials(*urls):
+        if secret in text:
+            if len(secret) < 4:
+                return WITHHELD
+            text = text.replace(secret, "<credentials>")
+    return text
+
+
+def server_text(text, url: str = "", limit: int = SERVER_TEXT_LIMIT) -> str:
+    """`text` from a server's response, made fit to print: every spelling of a
+    credential replaced (`scrub_credentials`, including `url`'s), control
+    characters stripped, whitespace folded to single spaces, and the length
+    capped. The one sanitiser every server-provided string goes through."""
+    text = scrub_credentials(str(text), url)
+    if text == WITHHELD:
+        return text
+    text = re.sub(r"\s+", " ", strip_control_chars(text)).strip()
+    return text if len(text) <= limit else text[:limit - 1] + "…"

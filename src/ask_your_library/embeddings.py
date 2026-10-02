@@ -40,19 +40,21 @@ def _check_dims(vectors: list[list[float]], dims: int, model: str) -> list[list[
 
 
 def _raise_for_status(response) -> None:
-    """`response.raise_for_status()`, with any credential written into the URL
-    taken out of the error. requests keeps `user:password@` in the URL it puts
-    into an HTTPError's text ("... for url: http://user:secret@host/..."), and
-    that text is a traceback line on the reader's terminal — a demo build
-    `ayl init` starts prints it whole."""
+    """`response.raise_for_status()`, with a message of our own: the status
+    and the URL with its credential taken out. requests' own text carries two
+    things a reader must not be shown — the URL as written, `user:password@`
+    included ("... for url: http://user:secret@host/..."), and the reason
+    phrase, which is the SERVER's text: a server sent that credential as Basic
+    auth can put it there. That text is a traceback line on the reader's
+    terminal; a demo build `ayl init` starts prints it whole. The response
+    stays on the error for a caller that inspects it."""
     try:
         response.raise_for_status()
-    except HTTPError as error:
+    except HTTPError:
         url = str(getattr(response, "url", "") or "")
-        shown = without_credentials(url) if url else url
-        if url and shown != url:
-            raise HTTPError(str(error).replace(url, shown), response=response) from None
-        raise
+        raise HTTPError(f"HTTP {getattr(response, 'status_code', '?')} from "
+                        f"{without_credentials(url) or 'the embedding endpoint'}",
+                        response=response) from None
 
 
 class OllamaEmbedder:
