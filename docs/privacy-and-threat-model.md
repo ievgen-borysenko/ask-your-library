@@ -65,7 +65,7 @@ than assumed away. Details below.
   default `$AYL_HOME/index/` — refused inside a git work tree unless the variable names it.
 - The Chainlit UI stores chats, questions and answers included, in `chat.db` under
   `AYL_CHAINLIT_DIR` (by default `$AYL_HOME/ui/.chainlit/`, or a checkout's `.chainlit/` that
-  already holds one, until 0.5.0 — never the directory the server was started in), a SQLite file.
+  already holds one, until 0.6.0 — never the directory the server was started in), a SQLite file.
 - Optional LangSmith tracing (`LANGCHAIN_API_KEY`, or `LANGSMITH_API_KEY` with `LANGSMITH_TRACING`)
   sends prompts and retrieved text to LangSmith; `LANGSMITH_TRACING_V2=false` and
   `LANGCHAIN_TRACING_V2=false` together keep it off.

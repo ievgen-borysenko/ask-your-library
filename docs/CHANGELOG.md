@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **One order for where a setting comes from, for every command** (#30,
+  [ADR-027](adr/README.md#adr-027-one-precedence-for-every-command-exported-then-the-working-directorys-env-then-ayl_homeconfigenv)):
+  exported in the shell, then the `.env` in the working directory (or the nearest parent that has
+  one), then `$AYL_HOME/config.env`, then the default. The `.env` used to be found by searching
+  upward from the installed package rather than from where the command was typed, so a clone read
+  its own `.env` from any directory, an installed package read none, and `ayl ui` (whose Chainlit
+  reads `<cwd>/.env`) could disagree with `ayl ask`. **If you ran commands from outside the clone
+  and relied on its `.env`, run them from inside it, export the values, or move them into
+  `~/AskYourLibrary/config.env`.** `$AYL_HOME/config.env` is new: it is what `ayl init` writes.
+
+- **The old index location is read until 0.6.0, not 0.5.0.** 0.4.0 was never tagged, so a reader
+  upgrading from 0.3.1 would have had no release of warning before the index at `data/lancedb`
+  (and a checkout's `.chainlit/chat.db`) stopped being read; 0.6.0 is also where `ask-library`
+  and `ayl-add` go. A test now fails when the package version reaches the sunset while the old
+  location still answers, so the change cannot ship by accident.
+
 - **What this machine builds for the reader lives in `AYL_HOME`, not in the directory a command
   was typed in** (#30, [ADR-026](adr/README.md#adr-026-ayl_home-is-the-home-of-everything-built-on-this-machine-the-index-the-scratchpads-the-chat-database-the-private-shelf)).
   Three defaults moved: the index from `data/lancedb` (relative, so the same command typed in two
@@ -22,7 +38,7 @@
   own: with `AYL_CHAINLIT_DIR` unset, any `chat.db` file in the `.chainlit/` of the checkout the
   package runs from (not the working directory) is read where it is, with one line at the web
   chat's start.
-  **Both old places are honoured until 0.5.0, when finding one becomes an error naming the same
+  **Both old places are honoured until 0.6.0, when finding one becomes an error naming the same
   two commands.** `ayl doctor` now opens with the index it checks and the rule that chose it.
   [Upgrading](upgrading.md#the-index-moved-to-ayl_homeindex) has the move, end to end.
 

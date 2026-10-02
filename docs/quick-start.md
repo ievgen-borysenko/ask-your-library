@@ -55,7 +55,7 @@ comparison is in [Known limits](known-limits.md).
 
 The index it builds goes to `~/AskYourLibrary/index` — `$AYL_HOME/index`, outside the clone, and
 `LIBRARY_DB_PATH` puts it anywhere else ([configuration](configuration.md)); an index an earlier
-version built in the clone's `data/lancedb` is read where it is until 0.5.0
+version built in the clone's `data/lancedb` is read where it is until 0.6.0
 ([upgrading](upgrading.md#the-index-moved-to-ayl_homeindex)). The downloads and the prepared texts
 are staged and cached in the clone's `data/`, so the build is safe to interrupt and re-run:
 `--stage prepare-text|prepare-audio|prepare-canaries|ingest|cards` runs one stage, `--book <substring>`

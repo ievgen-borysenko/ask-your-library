@@ -64,7 +64,7 @@ The index a command opens, when no `--db` names one, is decided by three rules i
 
    ```
    note: reading the index at /…/ask-your-library/data/lancedb, the old default. The default is
-   now /Users/…/AskYourLibrary/index ($AYL_HOME/index); the old place is read until 0.5.0, when
+   now /Users/…/AskYourLibrary/index ($AYL_HOME/index); the old place is read until 0.6.0, when
    it becomes an error. Nothing is moved for you. To move it: `ayl backup <dir>`, then `ayl
    restore <dir>/<timestamp> --db /Users/…/AskYourLibrary/index --chat-db
    /Users/…/AskYourLibrary/ui/.chainlit/chat.db`, then move data/lancedb out of this directory,
@@ -74,7 +74,7 @@ The index a command opens, when no `--db` names one, is decided by three rules i
 
    (one line on the terminal, wrapped here; a path in a command is shell-quoted when it holds a
    space or anything a shell would expand), and never when a command is only asked for its help
-   or its version. **This rule is kept for one minor release: from 0.5.0 an index found there is
+   or its version. **This rule is kept for one minor release: from 0.6.0 an index found there is
    an error naming the same two commands.** The chat database has a rule of its own with the same
    sunset: when `AYL_CHAINLIT_DIR` is unset and the checkout the package runs from — not the
    working directory — has any `chat.db` file in its `.chainlit/`, the web chat reads that file
@@ -286,7 +286,7 @@ writes `~/ayl-backups/<timestamp>/` holding
 - `lancedb/` — the whole index directory: every table, the `books` ledger, the `_index_meta`
   stamps and the BM25 index;
 - `chat.db` — the web UI's history, from `AYL_CHAINLIT_DIR`, else `$AYL_HOME/ui/.chainlit/` (or
-  a checkout's `.chainlit/` that still holds one, until 0.5.0), or wherever `--chat-db` names. Taken through SQLite's own backup, so it is **one consistent snapshot in one
+  a checkout's `.chainlit/` that still holds one, until 0.6.0), or wherever `--chat-db` names. Taken through SQLite's own backup, so it is **one consistent snapshot in one
   file** rather than a main file copied beside somebody else's write-ahead log. Absent if you never
   started the web UI, and the report says so; a file SQLite cannot open is reported and the index
   is still backed up without it;

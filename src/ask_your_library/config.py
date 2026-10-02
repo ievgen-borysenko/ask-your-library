@@ -11,10 +11,24 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, find_dotenv, load_dotenv
 
-# Exported variables win over .env; .env (cwd or parents) makes `cp .env.example .env` work.
-load_dotenv()
+# --- where a setting comes from (ADR-027) --------------------------------------
+# Highest first, and the same for every command — `ayl ask`, `ayl ui`, a script:
+#   1. a variable exported in the environment;
+#   2. the `.env` in the WORKING DIRECTORY, or in the nearest parent that has one;
+#   3. `$AYL_HOME/config.env`, the file `ayl init` writes;
+#   4. the defaults in this file.
+# python-dotenv never overrides a name that is already set, so loading the two
+# files in this order is the whole rule. `usecwd=True` is not a detail: without
+# it `find_dotenv` walks up from the CALLING FILE — this package — so a clone
+# found its own `.env` from any directory, an installed wheel found none, and a
+# `python -c` reading the same configuration searched the working directory.
+EXPORTED = frozenset(os.environ)
+_found = find_dotenv(usecwd=True)
+PROJECT_ENV = Path(_found) if _found else None
+if PROJECT_ENV is not None:
+    load_dotenv(PROJECT_ENV)
 
 # --- storage ---------------------------------------------------------------
 # The reader's own folder, OUTSIDE any checkout (ADR-026): the home of what this
@@ -28,6 +42,24 @@ load_dotenv()
 # folder named " " in the working directory is nobody's home.
 _ayl_home = os.environ.get("AYL_HOME") or ""
 AYL_HOME = Path(_ayl_home if _ayl_home.strip() else "~/AskYourLibrary").expanduser()
+
+# The third layer. Read after AYL_HOME is decided, so an AYL_HOME line in this
+# file is not read as one: the file cannot move the folder it lives in.
+HOME_CONFIG = AYL_HOME / "config.env"
+if HOME_CONFIG.is_file():
+    load_dotenv(HOME_CONFIG)
+
+
+def setting_source(variable: str) -> str:
+    """Which layer of the rule above decided `variable`: `exported`, the
+    `.env` path, the `config.env` path, or `default`. What `ayl init
+    --print-env-resolution` prints beside each value; a read, nothing else."""
+    if variable in EXPORTED:
+        return "exported"
+    for path in (PROJECT_ENV, HOME_CONFIG):
+        if path is not None and path.is_file() and variable in dotenv_values(path):
+            return str(path)
+    return "default"
 
 # --- embeddings ------------------------------------------------------------
 # Backend selects both the embedder and the table suffix, so query and document
@@ -56,9 +88,13 @@ TABLES = tables_for(EMBED_BACKEND)
 # command was typed. Its default is now $AYL_HOME/index. An index already built
 # at the old place is not moved, copied or deleted by anything here: it is
 # READ where it is, with one line saying so, until LEGACY_DB_SUNSET, when that
-# clause becomes an error naming the same two commands.
+# clause becomes an error naming the same two commands. 0.6.0 and not 0.5.0:
+# 0.4.0 was never tagged, so a 0.3.1 reader would have had no release of
+# warning at all, and 0.6.0 is where the two old command names go too.
+# tests/test_db_path.py fails once the package version reaches this number
+# while clause 2 still answers with a path, so the bump cannot pass silently.
 LEGACY_DB_PATH = Path("data") / "lancedb"
-LEGACY_DB_SUNSET = "0.5.0"
+LEGACY_DB_SUNSET = "0.6.0"
 
 
 class DbPathChoice(NamedTuple):

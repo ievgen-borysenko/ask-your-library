@@ -5,13 +5,13 @@ what it was measured to buy. They were written from the code rather than ahead o
 describe the system as built; where a variant was tried and dropped, the rejected variant is part
 of the record, because it is usually the more useful half.
 
-Twenty-six decisions, in the order they were taken. ADR-016 is written out as a file of its own
+Twenty-seven decisions, in the order they were taken. ADR-016 is written out as a file of its own
 because it changed the planner's contract and added a node to the graph; the rest are summarised
 here. ADR-017 to ADR-023 were recorded on 2026-09-16, after the fact: a review of this tree found
 seven decisions the code had made and no record named. The four that constrain what may be built
 next are written out below; the other three are reserved as stubs — number, title, one sentence —
 to be written when the code they describe is next touched, so that the numbering is taken and the
-decision is not forgotten. ADR-024 and ADR-025 were taken on 2026-09-17 and ADR-026 on 2026-09-25,
+decision is not forgotten. ADR-024 and ADR-025 were taken on 2026-09-17, ADR-026 on 2026-09-25 and ADR-027 on 2026-10-02,
 each written out with the code it describes. The measurements are not repeated in full: the reports under
 [`docs/eval-results/`][reports] are the primary record, and each entry below names the one that
 carries its numbers. Reports of
@@ -1153,9 +1153,13 @@ importing Chainlit leaves behind, does not. `AYL_CHAINLIT_DIR` unset and that fi
 read where it is, with one line when the web chat starts. **Nothing is copied, moved or deleted by the
 code.** An index of hundreds of megabytes, and a reader's chat history, are not things a startup
 path relocates on its own; the supported move is `ayl backup` then `ayl restore`, which verify what they
-copy. **Clause 2 has a sunset: it is honoured through 0.4.x, and from 0.5.0 finding an index or a
+copy. **Clause 2 has a sunset: it is honoured through 0.5.x, and from 0.6.0 finding an index or a
 chat database at the old place is an error naming the same two commands** (`LEGACY_DB_SUNSET` in
-`config.py`, printed in the notice). `ayl doctor` prints which clause applied and why.
+`config.py`, printed in the notice). It said 0.5.0 until 2026-10-02 and was moved, before any
+release carried it: 0.4.0 was never tagged, so a reader upgrading from 0.3.1 would have had no
+release of warning at all, and 0.6.0 is where the two old command names go as well. Nothing compared
+the number to the package version, so `tests/test_db_path.py` now fails once the version reaches it
+while clause 2 still answers with a path. `ayl doctor` prints which clause applied and why.
 
 **When it is said.** The resolution is pure and runs at import, so `config.DB_PATH` keeps its name
 for every module that imports it; the notice and the refusal are not at import but in
@@ -1195,13 +1199,56 @@ blind spot stays: a bare-repository dotfiles setup leaves no `.git` in `$HOME` a
 
 **Consequences.** Once no old index is left in the working directory and `LIBRARY_DB_PATH` is
 either unset or absolute, the same command opens the same index from any directory; clause 2 is
-cwd-dependent by design until 0.5.0, and a relative `LIBRARY_DB_PATH` is still resolved against
+cwd-dependent by design until 0.6.0, and a relative `LIBRARY_DB_PATH` is still resolved against
 the working directory, as it always was. An `.env` copied from
 any earlier `.env.example` carries `LIBRARY_DB_PATH=data/lancedb`, which clause 1 obeys — silently,
 by design — so the changelog and the upgrade page tell the reader to delete that line;
 `.env.example` now ships it commented out. `scripts/install-mac.sh` can no longer read one default
 out of `config.py` with `sed`, and applies the three clauses in bash instead. The test suite pins
 `AYL_HOME` next to `LIBRARY_DB_PATH`, since an unpinned one would be the developer's own folder.
+
+## ADR-027: One precedence for every command: exported, then the working directory's .env, then $AYL_HOME/config.env
+
+Status: accepted (2026-10-02, #30, with `ayl init`).
+
+`config.py` called `load_dotenv()` with no path. python-dotenv then searches upward from the
+**calling file** — the package — unless it believes it is in a REPL, when it searches the working
+directory. So a console script (`ayl`, `ask-library`) read the clone's `.env` from any directory
+and, installed as a wheel, read none; a `python -c` over the same code read the working directory's;
+and Chainlit, which `ayl ui` starts, loads `<cwd>/.env` at its own import. The comment above the call
+said "cwd or parents". `ayl init` needed a place to write a configuration that every command would
+read, and there was no rule to put it in.
+
+**Decision.** Three layers, highest first, read the same way by every entry point:
+
+1. a variable exported in the environment;
+2. the `.env` in the working directory, or the nearest parent that has one
+   (`find_dotenv(usecwd=True)`);
+3. `$AYL_HOME/config.env`, read after `AYL_HOME` is decided — so an `AYL_HOME` line in it is
+   ignored, and an `AYL_HOME` set in the `.env` decides which home file is read;
+
+then the defaults in `config.py`. python-dotenv never overrides a name that is already set, so
+loading the two files in that order is the whole rule. `config.setting_source(name)` says which
+layer decided a name, and `ayl init --print-env-resolution` prints it.
+
+`ayl init` writes the third layer, through `home.write_private` (mode 0600, refused inside a git
+work tree, never written through a link), and only when neither file exists: an existing `.env`
+or `config.env` is the reader's and is never rewritten. The `.env` stays the developer's layer —
+`cp .env.example .env` in a clone works as before, from inside the clone — and the home file is
+the reader's, which works from any directory and from an installed package.
+
+**Alternatives.** Writing the clone's `.env`, as `scripts/install-mac.sh` does: it is read only
+from inside the clone once the search is the working directory's, and it is a file in a checkout.
+Keeping the old search and adding the home file under it: a wheel would then read the home file
+and no `.env` at all, and the clone would keep reading its `.env` from anywhere, which is the
+disagreement with `ayl ui` this record exists to end.
+
+**Consequences.** A command run from outside the clone no longer reads the clone's `.env`; the
+changelog says so. The installer still writes the clone's `.env` and judges it before installing
+anything; a `config.env` left by an earlier `ayl init` sits under it and fills only the names the
+`.env` does not set — the installer's guard does not read it. The test suite already pins every
+setting it depends on before the first import, and `tests/test_config_layers.py` holds the order
+in fresh interpreters that look like a console script to python-dotenv.
 
 [reports]: ../eval-results/
 [backlog]: ../backlog.md

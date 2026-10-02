@@ -1348,7 +1348,7 @@ fi
 # Where the index is, by the rule config.resolve_db_path applies (ADR-026):
 # LIBRARY_DB_PATH when it is set, exported or in the .env this run reads; else
 # the old default, data/lancedb here, when it holds this backend's transcripts
-# table (read where it is until 0.5.0); else $AYL_HOME/index, which is
+# table (read where it is until 0.6.0); else $AYL_HOME/index, which is
 # ~/AskYourLibrary/index unless AYL_HOME says otherwise. The demo build below
 # writes to the same place, because it asks config.py the same question.
 # `effective_value`, not `setting`: an EXPORTED blank value is what the app
