@@ -293,13 +293,14 @@ gate, and every hosted model under it.
 ## ADR-005: `observe` sees a fixed budget of each hit; the rest of the loop sees only evidence
 
 Status: accepted; the size of the budget was revised by ADR-012 and its MEANING by ADR-025
-(2026-09-17), and 2026-09-16 added one number to what `reflect` sees (see below). The budget
-itself is unchanged.
+(2026-09-17), 2026-09-16 added one number to what `reflect` sees, and 2026-10-02 replaced the
+note `reflect` decided on with the verified quote (see below). The budget itself is unchanged.
 
 Raw hits never reach `plan`, `reflect` or `synthesize`. `observe` receives one `<result>` block
 per hit, carrying that hit's id, book and section, with the text cut to `SEARCH_HIT_CHARS`
-(`CHAPTER_HIT_CHARS` for a chapter read), and returns quotes with a `why`; `reflect` decides on
-book / section / why lines. The alternative, passing the retrieved text down the loop, pays input
+(`CHAPTER_HIT_CHARS` for a chapter read), and returns quotes with a `why`; `reflect` decided on
+book / section / why lines until 2026-10-02, and decides on book / section / quote lines since
+(amendment below). The alternative, passing the retrieved text down the loop, pays input
 tokens at every node and widens the surface an injected instruction can reach.
 
 What this buys is cost control, the pinning of ADR-004, and an injection blast radius that stops at
@@ -326,6 +327,44 @@ unchanged; the reason it is there is that without it "evidence so far: (none)" a
 retrieved plenty reads to the planner as a silent library, and the next query would be chosen on
 that misreading. The line is added only when the count is non-zero, so a run that drops nothing
 sends the prompt it has always sent.
+
+Amended 2026-10-02 (#93): **`reflect` decides from the verified quotes, not from `observe`'s notes
+on them.** Its evidence line was `- book (section): why`, and `why` is the model's own one-line
+paraphrase, which nothing checks. On the extended set h14 (Beatrice Cenci: why the public sympathy,
+and did it save her?) stopped after one step on 22.09 and read the chapter on 19.09, on the same hits and,
+in one attempt, the same two quotes: only the second note's wording differed, and the 22.09 note
+asserted an outcome ("though it did not ultimately save her") its quote does not carry. The line is
+now `- book (section): "quote"`, the quote that passed the provenance gate (ADR-004), shown as
+`synthesize` shows it, and `REFLECT_RULES` gains one sentence under the `enough` bullet: "enough"
+is justified only when the quotes themselves cover every part of the question. `why` still goes to
+the scratchpad log and reaches no prompt. The blast radius is unchanged: the quote is a span of a
+passage `observe` already saw, inside the same data block.
+
+Measured offline before it was written, on the decision only: `reflect` replayed on stored states
+with everything but the evidence line and the rule byte-identical, `deepseek/deepseek-v4-flash-0731`
+through OpenRouter, reasoning off, temperature 0, 149 calls (about $0.007). With the shipped rules
+the replay reproduced 47 of the 48 stored decisions. Three arms: shipped, quote plus note (with a
+sentence saying a note is not evidence), and quotes only.
+
+| states | shipped | quote + note | quotes only |
+|---|---|---|---|
+| h14, six stored step-1 states (two runs × three attempts), n=5: continued | 16/30 | 23/30 | 30/30 |
+| c03 attempt 3 after step 3, facts incomplete, n=3: continued | 0/6 | 6/6 | 6/6 |
+| controls where stopping was right (h15, h16, c05 ×2), n=3: `enough` | 12/12 | 12/12 | 12/12 |
+
+With the note beside the quote the note still decided (the 22.09 attempt-1 state stayed `enough`
+5/5); without notes, four of the six h14 states became byte-identical prompts. Cost per `reflect`
+call, prompt / completion tokens: 613 / 19.9 shipped, 700 / 34.2 quotes only (a chapter read is a
+longer reply than `enough`).
+
+**Not measured, and the eval run (core, then extended) has to read them out before this is called
+a fix:** whether the extra step finds the missing fact, i.e. the effect on answers; and two side
+effects the replay showed. Chapter reads are aimed less precisely — in 12 of 28 h14 reads
+`looking_for` was only "Beatrice", where the other arms named the outcome — and a loose window is
+what missed the answer on 19.09. And the malformed book key (the section folded into the title)
+appeared in 6 of 28 reads against 1 of 16 with the shipped rules; it finds nothing and costs a
+step. Neither is addressed here. The limits of the replay: n=5 and n=3, a queue rebuilt by
+replaying `plan`, four easy controls, and a hosted model that is not deterministic at temperature 0.
 
 ## ADR-006: Clarify as an interrupt with a candidate list and a code resolver
 

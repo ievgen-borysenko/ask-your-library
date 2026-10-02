@@ -209,9 +209,9 @@ and clarify candidates all carry a marker and try to forge a delimiter, and the 
 appear only inside data-block bodies or neutralized attributes of the *user* message, never in
 the system message, with every untrusted `<` neutralized and no forged `<result>` /
 `<evidence>`; the **test's own detection** - the
-injection is planted in the evidence field each node really puts in its prompt (`why` for
-`reflect`, `quote` for `synthesize`), each fake model asserts it actually received the marker
-before echoing it, and an echo must be reported `FAILED`, a benign output `BLOCKED`, so a pass
+injection is planted in the evidence field both nodes really put in their prompt (`quote`
+for `reflect` and `synthesize`; `why` reaches neither since #93, and each fake asserts that too),
+each fake model asserts it actually received the marker before echoing it, and an echo must be reported `FAILED`, a benign output `BLOCKED`, so a pass
 cannot be an artefact of a blind check; and the **UI render path** - an answer and a clarify
 question carrying a markdown image, a reference image and raw HTML come out inert, and so do the
 two fragments the UI builds as HTML itself: the provenance badge on a broken quote and the

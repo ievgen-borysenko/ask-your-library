@@ -150,7 +150,9 @@ in [`adr/README.md`](adr/README.md), each with the measurement that settled it.
 - **Only `observe` sees retrieved text, sanitized and cut to a fixed budget.** `act` writes the
   sanitized passages, cut to the same budget, to a per-run scratchpad (a human-readable log) and
   keeps each passage, as observe saw it, in state under a stable hit id; plan, reflect and synthesize work on the distilled evidence,
-  never on raw hits.
+  never on raw hits. `reflect` and `synthesize` both read an evidence item's verified quote, never
+  `observe`'s note on it (#93, ADR-005): the decision to stop is made on what the books are known
+  to say.
 - **The chunk and that budget are one decision (17.09, ADR-025).** A chunk was 4,000 characters
   and the budget 2,500, so 90% of chunks were ranked on more text than was ever read; transcript
   chunks are packed to 2,400 now, under the budget, and a search hit arrives whole. A chapter read
