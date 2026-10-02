@@ -1759,3 +1759,16 @@ def test_an_ayl_home_named_by_user_is_refused_not_guessed(sandbox, tmp_path, nam
     assert f"AYL_HOME={named_user} names a home folder by user" in result.stderr
     assert "absolute path or as ~/..." in result.stderr
     assert "Demo corpus: an index at" not in result.stdout
+
+
+def test_the_installer_s_data_flow_names_are_the_package_s():
+    """Its guard runs before any Python is installed, so it keeps a bash copy
+    of ask_your_library.dataflow's lists; a name added on one side only is a
+    variable one of the two judges and the other does not."""
+    from ask_your_library import dataflow
+    text = SCRIPT.read_text(encoding="utf-8")
+    for name in ("BACKEND_VARS", "ENDPOINT_VARS", "TRACING_V2_VARS", "TRACING_V1_VARS",
+                 "TRACING_VARS", "KEY_VARS"):
+        written = re.search(rf'^{name}="([^"$]*)"$', text, re.M)
+        assert written, name
+        assert tuple(written.group(1).split()) == getattr(dataflow, name), name

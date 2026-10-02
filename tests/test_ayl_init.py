@@ -280,6 +280,76 @@ def test_a_dotenv_outside_the_checkout_is_named_as_one(machine, capsys):
     assert f"read from {dotenv} (a .env outside this checkout)" in capsys.readouterr().out
 
 
+def test_an_exported_hosted_embedder_gets_its_own_remedy(machine, capsys):
+    """Choosing the other mode does not fix this one: both embed locally."""
+    machine.mp.setattr(config, "EXPORTED", frozenset({"EMBED_BACKEND"}))
+    machine.mp.setattr(config, "EMBED_BACKEND", "openrouter")
+    assert init("--mode", "hosted") == 2
+    err = capsys.readouterr().err
+    assert "EMBED_BACKEND=openrouter is exported in this shell" in err
+    assert "both modes `ayl init` writes embed on this machine" in err
+    assert "--mode local" not in err
+
+
+def test_an_exported_switch_is_named_as_the_source_over_an_existing_file(machine, capsys):
+    dotenv = machine.tmp / "work" / ".env"
+    dotenv.parent.mkdir()
+    dotenv.write_text("LLM_BACKEND=ollama\nEMBED_BACKEND=ollama\n")
+    machine.mp.setattr(config, "PROJECT_ENV", dotenv)
+    machine.mp.setattr(config, "EXPORTED", frozenset({"LLM_BACKEND"}))
+    init()
+    assert ("LLM_BACKEND=ollama comes from a variable exported in this shell, which wins "
+            "over that file") in capsys.readouterr().out
+
+
+# --- the local mode is held to "nothing leaves this machine" -------------------------
+
+@pytest.mark.parametrize("url, shown", [
+    ("http://gpu-box.example.com:11434", "OLLAMA_URL=http://gpu-box.example.com:11434"),
+    ("http://reader:hunter2@ollama.example.com:11434",
+     "OLLAMA_URL=http://<credentials>@ollama.example.com:11434"),
+])
+def test_a_local_mode_with_a_remote_ollama_is_refused(machine, capsys, url, shown):
+    machine.mp.setattr(config, "OLLAMA_URL", url)
+    assert init() == 2
+    err = capsys.readouterr().err
+    assert shown in err and "is not this machine" in err and "hunter2" not in err
+    assert machine.tags.calls == 0 and not machine.home.exists()
+
+
+def test_a_tracing_flag_on_is_refused_in_the_local_mode(machine, monkeypatch, capsys):
+    monkeypatch.setenv("LANGSMITH_TRACING_V2", "true")
+    assert init() == 2
+    assert "LANGSMITH_TRACING_V2=true" in capsys.readouterr().err
+
+
+def test_a_v1_tracing_flag_langchain_counts_as_set_is_refused(machine, monkeypatch, capsys):
+    monkeypatch.setenv("LANGCHAIN_HANDLER", "langchain")
+    assert init() == 2
+    assert "LANGCHAIN_HANDLER" in capsys.readouterr().err
+
+
+def test_a_langsmith_key_alone_is_refused_only_when_no_file_turns_tracing_off(machine,
+                                                                            monkeypatch,
+                                                                            capsys):
+    """The file this run writes sets LANGCHAIN_TRACING_V2=false; an existing
+    configuration may not, and then the key alone turns tracing on."""
+    monkeypatch.setenv("LANGCHAIN_API_KEY", "lsv2-not-a-real-key")
+    monkeypatch.delenv("LANGCHAIN_TRACING_V2", raising=False)
+    assert init() == 0, "written now: the file turns it off"
+    machine.mp.setattr(config, "HOME_CONFIG", machine.home / "config.env")
+    capsys.readouterr()
+    assert init() == 2
+    err = capsys.readouterr().err
+    assert "LANGCHAIN_API_KEY" in err and "lsv2-not-a-real-key" not in err
+
+
+def test_the_hosted_mode_is_not_held_to_the_local_rule(machine, monkeypatch):
+    monkeypatch.setenv("LANGSMITH_TRACING_V2", "true")
+    machine.check_status = preflight.EXIT_NO_KEY
+    assert init("--mode", "hosted") == 0
+
+
 def test_no_ollama_stops_at_step_1_with_exit_5_and_the_preflight_s_remedy(machine, capsys):
     machine.tags.down = True
     assert init() == preflight.EXIT_NO_LOCAL_RUNTIME
@@ -477,3 +547,17 @@ def test_the_env_resolution_names_each_source_and_never_a_key(machine, monkeypat
     assert "sk-not-a-real-key" not in out
     assert "OPENROUTER_API_KEY=<set, 17 chars>  [exported]" in out
     assert "OLLAMA_URL=" in out and machine.tags.calls == 0 and machine.pulls == []
+    # the installer's whole data-flow list, and the opt-in key file
+    for name in ("LANGSMITH_TRACING", "LANGCHAIN_TRACING", "LANGCHAIN_HANDLER",
+                 "LANGCHAIN_ENDPOINT", "LANGSMITH_ENDPOINT", "LANGSMITH_API_KEY",
+                 "OPENROUTER_ENV_FILE", "OLLAMA_HOST"):
+        assert f"  {name}=" in out, name
+
+
+def test_the_env_resolution_never_prints_a_credential_written_into_a_url(machine,
+                                                                        monkeypatch, capsys):
+    monkeypatch.setenv("LANGCHAIN_ENDPOINT", "https://user:s3cret@smith.example.com")
+    init("--print-env-resolution")
+    out = capsys.readouterr().out
+    assert "s3cret" not in out
+    assert "LANGCHAIN_ENDPOINT=https://<credentials>@smith.example.com" in out

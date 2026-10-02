@@ -43,7 +43,7 @@ import lancedb
 import yaml
 from dotenv import dotenv_values
 
-from . import config, home, ollama, preflight
+from . import config, dataflow, home, ollama, preflight
 from .cli import say
 from .i18n import t
 from .ingest.ledger import INDEXED, open_ledger
@@ -90,11 +90,12 @@ ESTIMATE = {"starter": "a few minutes", "full": "about 30 minutes"}
 FIRST_QUESTION = "What does Marcus Aurelius say about anger?"
 
 # Printed by --print-env-resolution: the settings that decide where a
-# question, a passage or a trace goes, and where the data is kept.
-RESOLVED = ("LLM_BACKEND", "EMBED_BACKEND", "OLLAMA_URL", "OLLAMA_LLM_MODEL",
-            "OLLAMA_EMBED_MODEL", "OPENROUTER_BASE_URL", "ORCHESTRATOR_MODEL",
-            "OPENROUTER_API_KEY", "LIBRARY_DB_PATH", "AYL_HOME", "LANGSMITH_TRACING_V2",
-            "LANGCHAIN_TRACING_V2", "LANGCHAIN_API_KEY")
+# question, a passage or a trace goes (`dataflow.DATA_FLOW_VARS`, the list the
+# installer reports too), the models and the key that go with them, and where
+# the data is kept.
+RESOLVED = (*dataflow.DATA_FLOW_VARS, "OLLAMA_LLM_MODEL", "OLLAMA_EMBED_MODEL",
+            "ORCHESTRATOR_MODEL", "OPENROUTER_API_KEY", "OPENROUTER_ENV_FILE",
+            "LIBRARY_DB_PATH", "AYL_HOME")
 SECRET_PARTS = ("KEY", "TOKEN", "SECRET", "PASSWORD")
 
 
@@ -200,13 +201,53 @@ def mode_of(llm_backend: str, embed_backend: str) -> str | None:
 
 
 def contradictions(mode: str) -> list[str]:
-    """Exported switches that would override the file this run writes:
-    python-dotenv never overrides an exported name, so the file would say one
-    mode and every command would run another."""
+    """Exported switches that would override the file this run writes, each
+    as the sentence that says what to do about it: python-dotenv never
+    overrides an exported name, so the file would say one mode and every
+    command would run another."""
     wanted = MODES[mode]
     loaded = {"LLM_BACKEND": config.LLM_BACKEND, "EMBED_BACKEND": config.EMBED_BACKEND}
-    return [f"{name}={loaded[name]}" for name in SWITCHES
-            if name in config.EXPORTED and loaded[name] != wanted[name]]
+    found = []
+    for name in SWITCHES:
+        if name not in config.EXPORTED or loaded[name] == wanted[name]:
+            continue
+        if name == "EMBED_BACKEND":
+            # No mode of `ayl init` embeds anywhere but here, so choosing the
+            # other one is no remedy for this one.
+            found.append(f"EMBED_BACKEND={loaded[name]} is exported in this shell, and both "
+                         f"modes `ayl init` writes embed on this machine (EMBED_BACKEND=ollama); "
+                         f"unset it in this shell to use one, or write the configuration by "
+                         f"hand from .env.example")
+        else:
+            other = mode_of(loaded[name], wanted["EMBED_BACKEND"])
+            found.append(f"{name}={loaded[name]} is exported in this shell and would decide "
+                         f"every command instead of the {mode} mode this run writes; unset it"
+                         + (f", or run `ayl init --mode {other}`" if other else ""))
+    return found
+
+
+def local_mode_problems(writing: bool) -> list[str]:
+    """What stops a run from being the fully local one it is called: an
+    Ollama that is not on this machine, a tracing flag that uploads, a v1
+    flag langchain_core counts as set, and a LangSmith key with no flag — the
+    rule `scripts/install-mac.sh` holds its local mode to (`dataflow`), each
+    named with where its value came from. A key alone turns tracing on
+    (`graph.enable_tracing_if_key_present`) only while LANGCHAIN_TRACING_V2 is
+    unset, which the file this run writes (`writing`) is not."""
+    found = []
+    if not dataflow.is_loopback(config.OLLAMA_URL):
+        found.append(f"OLLAMA_URL={dataflow.without_credentials(config.OLLAMA_URL)} "
+                     f"[{config.setting_source('OLLAMA_URL')}] is not this machine")
+    on = dataflow.tracing_on()
+    found += [f"{name}={os.environ.get(name, '')} [{config.setting_source(name)}] uploads traces"
+              for name in on]
+    found += [f"{name} [{config.setting_source(name)}] is set as langchain_core reads it"
+              for name in dataflow.v1_tracing_set() if name not in on]
+    if (not writing and os.environ.get("LANGCHAIN_API_KEY", "").strip()
+            and "LANGCHAIN_TRACING_V2" not in os.environ):
+        found.append(f"LANGCHAIN_API_KEY [{config.setting_source('LANGCHAIN_API_KEY')}] is set "
+                     f"and LANGCHAIN_TRACING_V2 is not, which turns tracing on")
+    return found
 
 
 def config_text(mode: str) -> str:
@@ -316,8 +357,10 @@ def ask(question: str) -> bool:
 # --- --print-env-resolution -----------------------------------------------------
 
 def print_env_resolution() -> int:
+    project = (described(config.PROJECT_ENV) if config.PROJECT_ENV is not None
+               else "the project's .env (none found)")
     say("Where each setting comes from, highest first: exported, then "
-        f"{config.PROJECT_ENV or 'a .env in the working directory (none found)'}, then "
+        f"{project}, then "
         f"{config.HOME_CONFIG}{'' if config.HOME_CONFIG.is_file() else ' (absent)'}, "
         f"then the default.")
     for name in RESOLVED:
@@ -327,7 +370,7 @@ def print_env_resolution() -> int:
         elif any(part in name for part in SECRET_PARTS):
             shown = f"<set, {len(value)} chars>" if value else "(blank)"
         else:
-            shown = value
+            shown = dataflow.without_credentials(value)
         say(f"  {name}={shown}  [{config.setting_source(name)}]")
     say(f"  -> answering: {config.LLM_BACKEND}, embeddings: {config.EMBED_BACKEND}, "
         f"index: {config.DB_PATH} ({config.DB_CHOICE.reason})")
@@ -389,12 +432,23 @@ def _run(args) -> int:
         mode = args.mode or "local"
         clash = contradictions(mode)
         if clash:
-            problem(f"{', '.join(clash)} is exported in this shell, and an exported variable "
-                    f"wins over the file this run would write: every command would run that, "
-                    f"not the {mode} mode. Unset it (or choose the mode it names with --mode) "
-                    f"and run `ayl init` again. Nothing was changed.")
+            for sentence in clash:
+                problem(f"{sentence}.")
+            problem("Nothing was changed.")
             return 2
         llm, embed = MODES[mode]["LLM_BACKEND"], MODES[mode]["EMBED_BACKEND"]
+    if mode == "local":
+        # "Nothing leaves this machine" is what the local mode is, so a run
+        # that would send something elsewhere is not one, whatever file says so.
+        leaks = local_mode_problems(writing=existing is None)
+        if leaks:
+            for leak in leaks:
+                problem(f"{leak}.")
+            problem("The local mode is the one in which nothing leaves this machine, and these "
+                    "would. Unset them (or point OLLAMA_URL at this machine), or choose "
+                    "`--mode hosted` if sending the question elsewhere is what you want. Nothing "
+                    "was changed.")
+            return 2
 
     # --- 1 ---
     url = config.OLLAMA_URL
@@ -422,6 +476,12 @@ def _run(args) -> int:
     step(2, f"Mode: {MODE_LINE.get(mode, f'LLM_BACKEND={llm}, EMBED_BACKEND={embed}')}")
     if existing is not None:
         note(f"read from {described(existing)}, which already configures this machine")
+        for name, value in (("LLM_BACKEND", llm), ("EMBED_BACKEND", embed)):
+            source = config.setting_source(name)
+            if source != str(existing):
+                note(f"{name}={value} comes from "
+                     + ("a variable exported in this shell, which wins over that file" if
+                        source == "exported" else source))
         if args.mode and args.mode != mode:
             note(f"--mode {args.mode} was NOT applied: an existing configuration decides, and "
                  f"`ayl init` never rewrites one. Edit it (or move it aside) and run again.")

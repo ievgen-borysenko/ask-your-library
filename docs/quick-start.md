@@ -30,6 +30,9 @@ changes nothing and says so:
    `ayl init` never takes a key). A configuration that already exists decides instead and is
    never rewritten; an exported `LLM_BACKEND` or `EMBED_BACKEND` that contradicts the mode is
    refused (exit 2) before anything changes, because an exported variable would win over the file.
+   The local mode is held to what it promises, the rule `install-mac.sh` applies: an `OLLAMA_URL`
+   that is not this machine, a tracing flag that uploads, or a `LANGCHAIN_API_KEY` that would turn
+   tracing on is refused (exit 2), each named with where its value came from.
 3. **Models** — pulls what that mode needs and Ollama does not have (by default `qwen2.5:14b`,
    9.0 GB, and `bge-m3`; the names come from `OLLAMA_LLM_MODEL` / `OLLAMA_EMBED_MODEL`), with the
    progress streamed. An interrupted pull resumes on the next run.

@@ -235,6 +235,9 @@ hosted_env() {
 # LangSmith key, which needs no flag of its own: graph.py turns a key with no
 # LANGCHAIN_TRACING_V2 set into LANGCHAIN_TRACING_V2=true before the first node
 # runs, so a key alone is a tracing switch that none of the five flags shows.
+# The same names, in the same order, are ask_your_library/dataflow.py, which
+# step 12 and `ayl init` use; this copy exists because nothing is installed yet
+# when it is read, and tests/test_install_script.py holds the two equal.
 BACKEND_VARS="LLM_BACKEND EMBED_BACKEND"
 ENDPOINT_VARS="OLLAMA_URL OLLAMA_HOST OPENROUTER_BASE_URL LANGCHAIN_ENDPOINT LANGSMITH_ENDPOINT"
 # The tracing names are read by two libraries with two different truth tables,
@@ -1465,19 +1468,16 @@ fi
 preflight_code='
 import os
 import sys
-from urllib.parse import urlsplit
 
 try:
     from ask_your_library.config import (DB_PATH, EMBED_BACKEND, LLM_BACKEND, LLM_BASE_URL,
                                          OLLAMA_URL, TABLES)
+    # The data-flow names and the "fully local" rule, from the one Python
+    # definition `ayl init` judges its local mode with.
+    from ask_your_library.dataflow import is_loopback, tracing_on, v1_tracing_set
     from ask_your_library.graph import enable_tracing_if_key_present
     from ask_your_library.i18n import t
     from ask_your_library.preflight import check_environment
-    # The rule that decides the v1 names, imported rather than copied: it is
-    # what CallbackManager.configure() itself calls, and a second copy of it
-    # here is exactly the drift this check exists to catch.
-    from langchain_core.utils.env import env_var_is_set
-
     # Tracing is not decided by the flags alone. build_graph calls this before
     # the first node, and it turns a LANGCHAIN_API_KEY with no
     # LANGCHAIN_TRACING_V2 set into LANGCHAIN_TRACING_V2=true. Reading the
@@ -1492,21 +1492,13 @@ except Exception as error:
 
 expected = sys.argv[1].split() if len(sys.argv) > 1 else []
 mode = sys.argv[2] if len(sys.argv) > 2 else ""
-# Both prefixes, and two truth tables rather than one. These four are what
-# langsmith reads for "is tracing on", and any value that is not one of these
-# spellings of off is taken as an upload.
-TRACING = ("LANGSMITH_TRACING_V2", "LANGCHAIN_TRACING_V2", "LANGSMITH_TRACING",
-           "LANGCHAIN_TRACING")
-OFF = ("", "false", "0", "no", "off")
-tracing_on = [name for name in TRACING
-              if os.environ.get(name, "").strip().lower() not in OFF]
-# The v1 names are judged by the rule langchain_core applies, not by that list:
-# env_var_is_set counts every value but "", "0", "false" and "False" as set, so
-# LANGCHAIN_TRACING=off is set. Set, with v2 tracing off, is what makes
-# CallbackManager.configure() raise RuntimeError on the first model call — while
-# the list above reported "tracing: off" and this run finished.
-TRACING_V1 = ("LANGCHAIN_TRACING", "LANGCHAIN_HANDLER")
-v1_tracing_set = [name for name in TRACING_V1 if env_var_is_set(name)]
+# Both prefixes, and two truth tables rather than one (ask_your_library.dataflow):
+# the four v2 names langsmith reads, any value that is not a spelling of off
+# taken as an upload; and the v1 names by the rule langchain_core applies,
+# env_var_is_set, imported there rather than copied — LANGCHAIN_TRACING=off is
+# set, and set with v2 tracing off makes the first model call raise.
+tracing_on = tracing_on()
+v1_tracing_set = v1_tracing_set()
 print(f"       LLM_BACKEND={LLM_BACKEND}, EMBED_BACKEND={EMBED_BACKEND}")
 print(f"       LLM_BASE_URL={LLM_BASE_URL}, OLLAMA_URL={OLLAMA_URL}")
 if tracing_on:
@@ -1544,7 +1536,7 @@ if mode == "local":
     wrong = [f"{name}={value}" for name, value in
              (("LLM_BACKEND", LLM_BACKEND), ("EMBED_BACKEND", EMBED_BACKEND))
              if value != "ollama"]
-    if urlsplit(OLLAMA_URL).hostname not in ("localhost", "127.0.0.1", "::1"):
+    if not is_loopback(OLLAMA_URL):
         wrong.append(f"OLLAMA_URL={OLLAMA_URL}")
     wrong += tracing_on
     wrong += [name for name in v1_tracing_set if name not in tracing_on]
