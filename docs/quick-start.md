@@ -80,12 +80,13 @@ two LibriVox books are not fetched, their transcripts being committed — and st
 them in `~/AskYourLibrary/demo/cache` (it runs `ingest_demo_corpus.py --cache-dir` with that
 folder, and such a run writes nothing into the clone), so the build is safe to interrupt: running
 `ayl init` with `--demo` again resumes it. Run directly, `ingest_demo_corpus.py` caches in the
-clone's `data/` as it always did unless given that option. Run by hand, `ingest_demo_corpus.py` writes whatever `LIBRARY_DB_PATH` names, so name the
-demo library (and add `--starter` for the six-book one); run bare, it would aim at your own index,
-and it refuses one that holds books `ayl add` indexed:
+clone's `data/` as it always did unless given that option. Run by hand, it writes whatever
+`LIBRARY_DB_PATH` names, so name the demo library; run bare, it would aim at your own index, and it
+refuses one that holds books `ayl add` indexed. What `ayl init --demo` runs is:
 
 ```bash
-LIBRARY_DB_PATH=~/AskYourLibrary/demo/index uv run scripts/ingest_demo_corpus.py --starter --stage ingest
+LIBRARY_DB_PATH=~/AskYourLibrary/demo/index uv run scripts/ingest_demo_corpus.py \
+    --starter --cache-dir ~/AskYourLibrary/demo/cache     # without --starter: --demo --full
 ```
 
 It takes `--stage prepare-text|prepare-audio|prepare-canaries|ingest|cards` for one stage,

@@ -1087,3 +1087,16 @@ def test_a_staging_table_of_other_books_makes_the_folder_foreign(tmp_path):
     demo_state_folder(folder, STARTER, STARTER, t_staging=["my-own-notes"])
     assert init_cmd.demo_state(folder, "ollama", {n: MANIFEST_KEYS[n] for n in STARTER}) == (
         "foreign", "it holds books that are not the demo corpus's")
+
+
+def test_a_demo_library_stamped_by_an_older_chunker_is_rebuilt_by_init(machine):
+    """What the rebuild hints now say (F7-hints): `ayl init --demo` is the
+    demo library's rebuild after a chunker bump, so it must see one."""
+    folder = machine.home / "demo" / "index"
+    demo_library(folder, STARTER)
+    write_index_meta(lancedb.connect(folder), "transcripts_ollama", "ollama",
+                     OllamaEmbedder.model, OllamaEmbedder.dims, chunker="sentence-pack-1")
+    assert init_cmd.demo_state(folder, "ollama",
+                               {n: MANIFEST_KEYS[n] for n in STARTER})[0] == "partial"
+    machine.check_status = 0
+    assert init("--demo") == 0 and machine.builds == [(folder, "ollama", False)]

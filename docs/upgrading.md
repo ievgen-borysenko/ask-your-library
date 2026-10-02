@@ -147,19 +147,19 @@ says exactly this, naming them; `--rebuild --force` goes ahead and reports every
 folder).
 
 **The demo corpus** has its own rebuild and does not go through `ayl add`. It lives in an index of
-its own (`ayl init --demo` builds it in `~/AskYourLibrary/demo/index`), and the script writes
-whatever `LIBRARY_DB_PATH` names, so name it — run bare, the script would aim at your own index,
-and it refuses one that holds books `ayl add` indexed:
+its own, `~/AskYourLibrary/demo/index`, and `ayl init` rebuilds it there: it sees the old chunker's
+stamp, calls the library unfinished, and runs the demo build the way it first did:
 
 ```bash
-LIBRARY_DB_PATH=~/AskYourLibrary/demo/index uv run scripts/ingest_demo_corpus.py --stage ingest
+uv run ayl init --demo          # --demo --full for the whole corpus
 ```
 
-The cards table is untouched by the bump, so `--stage cards` is not part of this upgrade.
+The cards table is untouched by the bump, so the cards stage of `scripts/ingest_demo_corpus.py`
+(`--stage cards`) is not part of this upgrade.
 
 **If you do not want to rebuild yet**, nothing forces you: keep reading the index and postpone
 adding books to it. What you must not do is silence the warning by re-stamping the table
-(`--stage stamp-meta --chunker …`) — the stamp would then claim something the rows do not have,
+(`ingest_demo_corpus.py --stage stamp-meta --chunker …`) — the stamp would then claim something the rows do not have,
 which is worse than no stamp at all. Since #75 the command refuses that attempt itself: claiming the
 version this code chunks at samples the rows first and refuses when they cannot have come from it.
 
@@ -172,8 +172,8 @@ transcripts_ollama was built by chunker 'sentence-pack-1', this code chunks as
 'sentence-pack-2'. The index still answers, from the chunks it already holds. The way out
 is a rebuild, which replaces every row: `uv run ayl add <folder> --rebuild --backup <dir>`
 takes a copy first, drops the table and re-indexes (`--rebuild --force` skips the copy).
-For the demo library, `LIBRARY_DB_PATH=~/AskYourLibrary/demo/index uv run
-scripts/ingest_demo_corpus.py --stage ingest` (its own index, ADR-028) is already a full rebuild.
+For the demo library, `uv run ayl init --demo` (`--demo --full` for the whole corpus) rebuilds it
+in its own index (ADR-028).
 ```
 
 ### What the refusal looks like
@@ -213,7 +213,8 @@ reads with a warning, and the warning, the refusal and `--doctor` name the quick
 rebuilds only the cards from the card files and leaves the full text alone:
 
 ```bash
-LIBRARY_DB_PATH=~/AskYourLibrary/demo/index uv run scripts/ingest_demo_corpus.py --stage cards
+LIBRARY_DB_PATH=~/AskYourLibrary/demo/index uv run scripts/ingest_demo_corpus.py --stage cards \
+    --starter                    # the six-book demo library; without --starter, the whole corpus
 LIBRARY_DB_PATH=~/ayl-tech uv run scripts/ingest_demo_corpus.py --stage cards \
     --cards-dir corpus-tech/cards --cards-dir "${AYL_HOME:-$HOME/AskYourLibrary}/cards/tech"
 ```
@@ -414,7 +415,7 @@ uv run ayl add ~/books --db ~/ayl-index
 uv run ayl add ~/books --db ~/ayl-index                       # refused, and it names --rebuild
 uv run ayl add ~/books --rebuild --backup ~/ayl-backups --db ~/ayl-index   # copy, drop, re-index
 # for the demo library, in its own index, a full rebuild is the repair (it replaces every row):
-LIBRARY_DB_PATH=~/AskYourLibrary/demo/index uv run scripts/ingest_demo_corpus.py --stage ingest
+uv run ayl init --demo                                      # --demo --full for the whole corpus
 
 # 5. only now, and only if step 4b succeeded, is the index what the stamp would claim
 uv run ayl doctor --db ~/ayl-index
@@ -430,14 +431,15 @@ line ends the run instead of the next line going ahead on top of it:
 #!/usr/bin/env bash
 set -euo pipefail                  # any failing line ends the run
 
-LIBRARY_DB_PATH=~/AskYourLibrary/demo/index uv run scripts/ingest_demo_corpus.py --stage ingest
+uv run ayl init --demo
 uv run ayl doctor --db ~/ayl-index
 ```
 
-**A failed ingest stops the chain: never stamp after one.** `scripts/ingest_demo_corpus.py --stage ingest`
-exits non-zero when it has nothing to ingest — a missing `data/prepared` is the ordinary case, and
-it names the directory it looked in — so the `set -euo pipefail` above is what keeps the rest of
-the script from running. #75 is what its absence costs: the ingest skipped all 35 books and exited
+**A failed ingest stops the chain: never stamp after one.** `ayl init --demo` exits non-zero
+when the demo build stops, and the build (`scripts/ingest_demo_corpus.py`) exits non-zero when it
+has nothing to ingest — a missing prepared folder is the ordinary case, and it names the directory
+it looked in — so the `set -euo pipefail` above is what keeps the rest of the script from
+running. #75 is what its absence costs: the ingest skipped all 35 books and exited
 1, the next line stamped the chunker anyway onto the rows the old one had left, `--doctor` said
 "no drift", and an hour of measurement ran on an index that claimed one chunker and held another.
 The stamp now samples the rows and would refuse that write — but a chain that runs on after a

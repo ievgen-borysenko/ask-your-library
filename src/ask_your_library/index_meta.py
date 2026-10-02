@@ -221,8 +221,8 @@ def check_index(db, table_name: str, model: str, dims: int) -> str | None:
 REBUILD_HINT = ("The way out is a rebuild, which replaces every row: "
                 "`uv run ayl add <folder> --rebuild --backup <dir>` takes a copy first, drops the "
                 "table and re-indexes (`--rebuild --force` skips the copy). For the demo library, "
-                "`LIBRARY_DB_PATH=~/AskYourLibrary/demo/index uv run scripts/ingest_demo_corpus.py "
-                "--stage ingest` (its own index, ADR-028) is already a full rebuild.")
+                "`uv run ayl init --demo` (`--demo --full` for the whole corpus) rebuilds it in "
+                "its own index (ADR-028).")
 
 # One table kind, one chunking rule. Cards are cut on their "## section"
 # headings and transcripts by the sentence packer, so the packer's version says
@@ -238,7 +238,8 @@ CARDS_PREFIX = "cards"
 CARDS_REBUILD_HINT = ("The way out for a cards table is rebuilding it from the card files, a "
                       "quick stage that leaves the full text alone: "
                       "`LIBRARY_DB_PATH=~/AskYourLibrary/demo/index uv run "
-                      "scripts/ingest_demo_corpus.py --stage cards` for the demo library; for "
+                      "scripts/ingest_demo_corpus.py --stage cards --starter` for the demo "
+                      "library (without `--starter` for the whole corpus); for "
                       "the engineer's shelf the same, with "
                       "its `LIBRARY_DB_PATH` and `--cards-dir corpus-tech/cards --cards-dir "
                       "\"${AYL_HOME:-$HOME/AskYourLibrary}/cards/tech\"`.")
