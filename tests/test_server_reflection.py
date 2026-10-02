@@ -58,6 +58,25 @@ def test_with_a_credential_configured_server_text_is_withheld(monkeypatch):
     assert dataflow.server_text("disk full") is None
 
 
+@pytest.mark.parametrize("password", ["Pa/ss-S3cret", "Pa?ss-S3cret", "Pa#ss-S3cret",
+                                      "Pa@ss-S3cret", "Pa:ss-S3cret"])
+def test_a_password_with_a_url_delimiter_still_counts_as_a_credential(monkeypatch, password):
+    """The authority was cut at the first / ? or #, which left no @ to find
+    in `reader:Pa/ss...@host` (F7-authority-last-at)."""
+    url = f"http://reader:{password}@127.0.0.1:11434"
+    assert dataflow.carries_credential(url)
+    assert dataflow.without_credentials(url) == "http://<credentials>@127.0.0.1:11434"
+    assert dataflow.server_text("disk full", url) is None
+    monkeypatch.setattr(config, "OLLAMA_URL", url)
+    assert dataflow.credential_configured() and dataflow.server_text("disk full") is None
+
+
+def test_an_at_only_in_a_path_is_over_redacted_the_safe_way():
+    assert dataflow.without_credentials("http://host/path@x") == "http://<credentials>@x"
+    assert dataflow.carries_credential("http://host/path@x")
+    assert not dataflow.carries_credential("http://localhost:11434/path")
+
+
 def test_with_no_credential_server_text_is_shown_sanitised():
     shown = dataflow.server_text("disk\n\n full \x1b[2J‮" + "x" * 500, "http://h:1")
     assert shown.startswith("disk full [2J") and "\x1b" not in shown and "‮" not in shown

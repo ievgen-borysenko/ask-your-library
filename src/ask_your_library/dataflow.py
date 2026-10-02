@@ -55,21 +55,24 @@ def v1_tracing_set() -> list[str]:
 
 
 def without_credentials(value: str) -> str:
-    """A value with any `user:password@` in front of its host replaced by
+    """A value with the credential in front of its host replaced by
     `<credentials>@`, so a printed endpoint never carries the credential
-    written into it. The host and everything after it are kept.
+    written into it.
 
-    Read as text, not through `urlsplit`, and the same way with or without a
-    scheme: `user:secret@host:11434` written without `http://` is still a
-    credential, and a value that is not a URL at all (a model name, a path)
-    has no `@` before its first `/` and comes back unchanged. The installer's
-    bash `shown_url` applies the same rule."""
+    When the value holds an `@` anywhere, everything after `scheme://` (or
+    from the start, without a scheme) up to its LAST `@` is taken for the
+    credential. Not the authority up to the first `/`, `?` or `#`: a password
+    may hold any of those unencoded (`reader:Pa/ss@host`), and cutting there
+    left no `@` in what was read and printed the value whole. A value whose
+    only `@` sits in a path or a query is over-redacted — its host is hidden
+    too — which is the safe direction: printing a credential is the failure
+    this exists to prevent, hiding a host is not. A value with no `@` at all
+    (a model name, a path, a URL with no userinfo) comes back unchanged. The
+    installer's bash `shown_url` applies the same rule."""
     scheme, rest = value.split("://", 1) if "://" in value else ("", value)
-    authority = re.split(r"[/?#]", rest, maxsplit=1)[0]
-    if "@" not in authority:
+    if "@" not in rest:
         return value
-    return (f"{scheme + '://' if scheme else ''}<credentials>@"
-            f"{authority.rsplit('@', 1)[1]}{rest[len(authority):]}")
+    return f"{scheme + '://' if scheme else ''}<credentials>@{rest.rsplit('@', 1)[1]}"
 
 
 # --- text a server sent back -----------------------------------------------------
@@ -85,10 +88,11 @@ WITHHELD = "its text is withheld because the configured URL carries a credential
 
 
 def carries_credential(url: str) -> bool:
-    """Whether `url` has a `user:password@` (or `user@`) in front of its host,
-    with or without a scheme — the rule `without_credentials` applies."""
+    """Whether `url` is taken to carry a credential: an `@` anywhere after
+    its scheme — the rule `without_credentials` applies, and over-counting in
+    the same safe direction (an `@` in a path counts)."""
     rest = url.split("://", 1)[1] if "://" in url else url
-    return "@" in re.split(r"[/?#]", rest, maxsplit=1)[0]
+    return "@" in rest
 
 
 def credential_configured(*urls: str) -> bool:

@@ -636,15 +636,18 @@ while [ "${ollama_url%/}" != "$ollama_url" ]; do ollama_url="${ollama_url%/}"; d
 # line that prints OLLAMA_URL, OLLAMA_HOST, OPENROUTER_BASE_URL, the two trace
 # endpoints, or a .env value goes through it (or through shown_value, which
 # calls it); tests/test_install_script.py plants a credential in all of them.
+# Up to the LAST @, not the authority up to the first / ? or #: a password may
+# hold any of those unencoded (reader:Pa/ss@host), and cutting there left no @
+# to find and printed the value whole. An @ only in a path or query is
+# over-redacted (the host is hidden too): the safe direction.
 shown_url() {
-    local url="$1" scheme="" rest authority
+    local url="$1" scheme="" rest
     case "$url" in
         *://*) scheme="${url%%://*}://"; rest="${url#*://}" ;;
         *) rest="$url" ;;
     esac
-    authority="${rest%%[/?#]*}"
-    case "$authority" in
-        *@*) printf '%s<credentials>@%s%s\n' "$scheme" "${authority##*@}" "${rest#"$authority"}" ;;
+    case "$rest" in
+        *@*) printf '%s<credentials>@%s\n' "$scheme" "${rest##*@}" ;;
         *) printf '%s\n' "$url" ;;
     esac
 }

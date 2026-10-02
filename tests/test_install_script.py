@@ -1839,13 +1839,23 @@ def test_the_preflight_snippet_prints_no_credential_written_into_a_url(tmp_path)
 # another, and no output of the installer's dry run (both modes), `ayl init
 # --dry-run`, `ayl init --print-env-resolution` or `ayl doctor` may contain it.
 PLANTED = "planted-s3cret-in-every-url"
-URL_SETTINGS = {
-    "OLLAMA_URL": f"http://reader:{PLANTED}@127.0.0.1:9",
-    "OLLAMA_HOST": f"reader:{PLANTED}@127.0.0.1:11434",
-    "OPENROUTER_BASE_URL": f"https://reader:{PLANTED}@openrouter.example/api/v1",
-    "LANGCHAIN_ENDPOINT": f"https://reader:{PLANTED}@smith.example",
-    "LANGSMITH_ENDPOINT": f"https://reader:{PLANTED}@smith.example",
-}
+# And passwords that hold, unencoded, the characters that used to end the
+# authority before its @ was found (F7-authority-last-at): / ? # @ and :.
+SECRETS = [PLANTED, "pl/anted-s3cret", "pl?anted-s3cret", "pl#anted-s3cret",
+           "pl@anted-s3cret", "pl:anted:s3cret", "p/l?a#n@t:ed-s3cret"]
+
+
+def url_settings(secret=PLANTED):
+    return {
+        "OLLAMA_URL": f"http://reader:{secret}@127.0.0.1:9",
+        "OLLAMA_HOST": f"reader:{secret}@127.0.0.1:11434",
+        "OPENROUTER_BASE_URL": f"https://reader:{secret}@openrouter.example/api/v1",
+        "LANGCHAIN_ENDPOINT": f"https://reader:{secret}@smith.example",
+        "LANGSMITH_ENDPOINT": f"https://reader:{secret}@smith.example",
+    }
+
+
+URL_SETTINGS = url_settings()
 
 
 def test_every_url_valued_setting_is_named_in_the_planted_set():
@@ -1855,51 +1865,58 @@ def test_every_url_valued_setting_is_named_in_the_planted_set():
     assert set(URL_SETTINGS) == set(dataflow.ENDPOINT_VARS)
 
 
-def assert_no_planted(result):
+def assert_no_planted(result, secret=PLANTED):
     printed = result.stdout + result.stderr
-    assert PLANTED not in printed, printed[printed.find(PLANTED) - 200:][:400]
+    # The whole secret, and each run of six or more characters of it between
+    # its special characters: a value printed whole would carry those.
+    pieces = {secret} | {part for part in re.split(r"[/?#@:]", secret) if len(part) >= 6}
+    leaked = sorted(piece for piece in pieces if piece in printed)
+    assert not leaked, (leaked, printed[printed.find(leaked[0]) - 200:][:400] if leaked else "")
     return printed
 
 
 @mac_only
+@pytest.mark.parametrize("secret", SECRETS)
 @pytest.mark.parametrize("where", ["exported", "dotenv"])
 @pytest.mark.parametrize("mode", [(), ("--hosted",)])
-def test_the_installer_dry_run_prints_no_planted_credential(sandbox, where, mode):
+def test_the_installer_dry_run_prints_no_planted_credential(sandbox, where, mode, secret):
     root, _, env = sandbox
+    settings = url_settings(secret)
     if where == "exported":
-        env.update(URL_SETTINGS)
+        env.update(settings)
     else:
         (root / ".env").write_text("".join(f"{name}={value}\n"
-                                           for name, value in URL_SETTINGS.items()))
+                                           for name, value in settings.items()))
     result = subprocess.run([BASH, "scripts/install-mac.sh", "--dry-run", *mode], cwd=root,
                             env=env, capture_output=True, text=True)
-    printed = assert_no_planted(result)
+    printed = assert_no_planted(result, secret)
     assert "<credentials>@" in printed, "the run never reached a line that names a URL"
     resolution = subprocess.run([BASH, "scripts/install-mac.sh", "--print-env-resolution"],
                                 cwd=root, env=env, capture_output=True, text=True)
-    assert_no_planted(resolution)
+    assert_no_planted(resolution, secret)
 
 
 @pytest.mark.skipif(not have_package, reason="the package is not importable here")
+@pytest.mark.parametrize("secret", SECRETS)
 @pytest.mark.parametrize("where", ["exported", "dotenv"])
 @pytest.mark.parametrize("argv", [["init", "--dry-run", "--no-demo"],
                                   ["init", "--print-env-resolution"],
                                   ["init", "--no-demo", "--yes"],
                                   ["doctor"]])
-def test_the_package_prints_no_planted_credential(tmp_path, where, argv):
+def test_the_package_prints_no_planted_credential(tmp_path, where, argv, secret):
     """`ayl init` and `ayl doctor` in a fresh interpreter, Ollama on a port
     nothing answers (the remedy text names the URL), a temp AYL_HOME."""
     from conftest import run_fresh
     work = tmp_path / "work"
     work.mkdir()
-    planted = dict(URL_SETTINGS)
+    planted = url_settings(secret)
     if where == "dotenv":
         (work / ".env").write_text("".join(f"{n}={v}\n" for n, v in planted.items()))
         planted = {}
     result = run_fresh("import sys\nfrom ask_your_library import ayl\n"
                        f"sys.exit(ayl.main({argv!r}))\n",
                        cwd=work, check=False, **planted)
-    printed = assert_no_planted(result)
+    printed = assert_no_planted(result, secret)
     assert "Traceback" not in printed, printed
     assert "<credentials>@" in printed, "no line named a URL: the check checked nothing"
 
