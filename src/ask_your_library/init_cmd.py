@@ -49,6 +49,7 @@ from .cli import say
 from .embeddings import OllamaEmbedder, OpenRouterEmbedder
 from .i18n import t
 from .index_meta import expected_chunker, read_index_meta, rows_by_book
+from .ingest.doctor import check_ledger
 from .ingest.ledger import INDEXED, open_ledger
 from .ingest.publish import STAGING_SUFFIX, table_names
 from .paths import REPO_ROOT
@@ -176,7 +177,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="ask nothing; the demo library is then built only with --demo")
     parser.add_argument("--dry-run", action="store_true",
                         help="print what each step would do and change nothing: no request to "
-                             "Ollama, no file written, no index created")
+                             "Ollama, no file written, no index created. Ends on the status the "
+                             "real run would, wherever that can be told without a request, and "
+                             "names what it did not check")
     parser.add_argument("--print-env-resolution", action="store_true",
                         help="print each setting that decides where your data goes, its value "
                              "(credentials as <set, N chars>) and where it came from — "
@@ -647,6 +650,10 @@ def _run(args) -> int:
     # Whether this run changed anything at all: a second run over a ready
     # machine has to say that it did nothing, not leave it to be inferred.
     changed = False
+    # Failures a step could tell without a write or a request: each ends the
+    # run, real or dry, on EXIT_NOT_READY (see `final_status`).
+    refused: list[str] = []
+    will_build = False
 
     # --- 3 ---
     step(3, "Models: pull what Ollama does not have yet")
@@ -678,6 +685,15 @@ def _run(args) -> int:
         target = home.ayl_home() / "config.env"
         text = config_text(written)
         if dry:
+            # What the write would be refused for is knowable without writing:
+            # the folder or the file inside a git work tree, or a link at the
+            # file's name. The real run stops here on it with status 1.
+            try:
+                home.private_dir()
+                home.private_file(target)
+            except RuntimeError as error:
+                problem(f"{error}")
+                refused.append("the configuration file would be refused")
             plan(f"write {target} (mode 0600):")
             for line in text.splitlines():
                 if not line.startswith("#"):
@@ -706,7 +722,11 @@ def _run(args) -> int:
         try:
             home.refuse_in_work_tree(reader_index, "index")
         except RuntimeError as error:
+            # An error state, not a remark: every command that opens this index
+            # refuses it, so the run is not set up — and says so in its status,
+            # the dry run's included, even when a demo library is built.
             problem(str(error))
+            refused.append("your index's folder is refused")
     legacy = legacy_indexes()
     for path, notice in legacy:
         note(notice)
@@ -756,6 +776,7 @@ def _run(args) -> int:
                         f"{label} there.")
                 demo_missed = True
             elif dry:
+                will_build = True
                 plan(f"build {label} ({len(wanted)} books, {ESTIMATE[which]}) into {target}: "
                      f"{command('scripts/ingest_demo_corpus.py' if full else 'scripts/ingest_demo_corpus.py --starter')}"
                      f" --backend {embed} --cache-dir {quoted(demo_cache())}, with "
@@ -773,12 +794,29 @@ def _run(args) -> int:
                 demo_index = target
                 changed = True
 
+    if demo_missed:
+        refused.append("the demo library asked for would not be built")
+    # The closing check's index and ledger halves read files only, so they
+    # are judged here for the dry run and the real run alike — over the demo
+    # library when that is what the closing `ayl doctor` reads, else over the
+    # reader's index; not over a demo library this run has yet to build.
+    reads = demo_index if demo_index is not None else (None if will_build else reader_index)
+    known, known_lines = (knowable_closing(reads, reads == reader_index, embed)
+                          if reads is not None else (0, []))
     say("")
     if dry:
+        for line in known_lines:
+            problem(line)
         say("Dry run finished. Nothing was pulled, written or built.")
-        # The status the real run would end on, where the plan already knows
-        # it: a demo library asked for that would not be built.
-        return preflight.EXIT_NOT_READY if demo_missed else 0
+        unknown = []
+        if "ollama" in (llm, embed):
+            unknown.append("whether Ollama answers and has the models, and the pulls")
+        if will_build:
+            unknown.append("the demo build and the check over it")
+        if unknown:
+            say("Not checked without a request, so not part of this status: "
+                + "; ".join(unknown) + ".")
+        return final_status(refused, known, None, demo_index, llm, embed)
 
     if not changed:
         say("Nothing to do: every step was already done, and nothing was changed.")
@@ -786,18 +824,56 @@ def _run(args) -> int:
     say("Check: `ayl doctor` " + ("over the demo library" if demo_index else
                                   "(with no books added yet, a missing index is expected)"))
     status = closing_check(demo_index)
-    leftover = []
-    if status == preflight.EXIT_NO_INDEX and demo_index is None:
-        leftover.append(f"your index is empty until you add books: `{command('ayl add <folder>')}`")
-    elif status == preflight.EXIT_NO_KEY and llm == "openrouter":
-        leftover.append("the hosted mode needs OPENROUTER_API_KEY, which is yours to set")
+    leftover = leftovers(status, demo_index, llm, embed)
     say("")
     for line in leftover:
         say(f"Left to you: {line}.")
     next_steps(demo_index, llm, reader_index)
-    if demo_missed:
-        return preflight.EXIT_NOT_READY
-    return 0 if leftover or status == 0 else status
+    return final_status(refused, known, status, demo_index, llm, embed)
+
+
+def knowable_closing(index: Path, reader: bool, embed: str) -> tuple[int, list[str]]:
+    """(status, problems) of the closing `ayl doctor`'s two halves that read
+    files only: the index half of the preflight (no Ollama, no key) and the
+    ledger reconciled against the tables. What needs a request is not here.
+    An absent index of the reader's is what a first run leaves (0); a key
+    a hosted configuration needs is the reader's to set (not a problem)."""
+    problems = preflight.check_environment(index_only=True, db_path=index, backend=embed)
+    kinds = set(problems.kinds) - {"no_key"}
+    if kinds & {"no_db", "no_tables"}:
+        return (0 if reader else preflight.EXIT_NO_INDEX), []
+    if kinds:
+        return preflight.EXIT_NOT_READY, [p for p, k in zip(problems, problems.kinds)
+                                          if k != "no_key"]
+    report = check_ledger(lancedb.connect(index), [f"transcripts_{embed}", f"cards_{embed}"])
+    if not report.ok:
+        return preflight.EXIT_NOT_READY, [f"the ledger and the index at {index} disagree "
+                                          f"(`ayl doctor` lists where)"]
+    return 0, []
+
+
+def leftovers(status: int, demo_index: Path | None, llm: str, embed: str) -> list[str]:
+    """What the closing check found that is the reader's to do, not a failure."""
+    if status == preflight.EXIT_NO_INDEX and demo_index is None:
+        return [f"your index is empty until you add books: `{command('ayl add <folder>')}`"]
+    if status == preflight.EXIT_NO_KEY and "openrouter" in (llm, embed):
+        return ["this configuration needs OPENROUTER_API_KEY, which is yours to set"]
+    return []
+
+
+def final_status(refused: list[str], known: int, doctor: int | None,
+                 demo_index: Path | None, llm: str, embed: str) -> int:
+    """One rule for the status of a run and of its dry run. A failure a step
+    could tell without a write or a request is EXIT_NOT_READY in both; so is
+    what the closing check's file-only halves find; the dry run stops there
+    (`doctor` None), the real run adds what the doctor's request-bound half
+    found, less what is the reader's to do (`leftovers`)."""
+    if refused or known:
+        return preflight.EXIT_NOT_READY if refused or known != preflight.EXIT_NO_INDEX \
+            else known
+    if doctor is None or doctor == 0 or leftovers(doctor, demo_index, llm, embed):
+        return 0
+    return doctor
 
 
 def next_steps(demo_index: Path | None, llm: str, reader_index: Path) -> None:

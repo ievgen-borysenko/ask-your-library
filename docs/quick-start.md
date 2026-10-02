@@ -49,7 +49,10 @@ changes nothing and says so:
    move it ([upgrading](upgrading.md#the-index-moved-to-ayl_homeindex)); nothing is moved for you,
    and no second index is built beside it.
 
-Then it runs `ayl doctor` and prints the next commands. `--yes` asks nothing;
+Then it runs `ayl doctor` and prints the next commands. `--dry-run` ends on the status the real
+run would, wherever that can be told without a request (a refused folder, a demo that would not be
+built, an index or ledger the doctor would fail), and names what it did not check. `--yes` asks
+nothing;
 `ayl init --print-env-resolution` prints where each setting that decides where your data goes
 comes from.
 

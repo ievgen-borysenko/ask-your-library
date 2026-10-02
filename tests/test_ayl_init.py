@@ -111,7 +111,9 @@ class Machine:
         def build(path, backend, full, cache):
             assert cache == self.home / "demo" / "cache", "the cache is under AYL_HOME"
             self.builds.append((path, backend, full))
-            demo_library(path, STARTER if not full else STARTER + ["moby-dick"])
+            # What the script leaves: the requested library, whole, and only it.
+            shutil.rmtree(path, ignore_errors=True)
+            demo_library(path, STARTER if not full else list(MANIFEST_KEYS))
             return 0
         mp.setattr(init_cmd, "build_demo", build)
 
@@ -148,12 +150,15 @@ MANIFEST_KEYS = {entry["id"]: f"{entry['title']} — {entry['author']}"
 CARDED = {path.stem for path in (REPO / "corpus" / "cards").glob("*.md")}
 
 
-def _table(db, name, keys, fts=True, meta=True):
-    """A table as the script publishes one: a row per book key, then (unless
-    the interruption came first) its full-text index, then its stamp."""
-    rows = [{"chunk_id": f"{i}", "book": key, "text": f"text of {key}"}
+def _table(db, name, keys, fts=True, meta=True, ids=None):
+    """A table as the script publishes one: a row per book key (with the
+    ledger's book_id, as the ingest writes it), then (unless the interruption
+    came first) its full-text index, then its stamp."""
+    ids = ids or {}
+    rows = [{"chunk_id": f"{i}", "book": key, "book_id": ids.get(key, ""),
+             "text": f"text of {key}"}
             for i, key in enumerate(sorted(keys))] or [
-        {"chunk_id": "x", "book": "", "text": "t"}]
+        {"chunk_id": "x", "book": "", "book_id": "", "text": "t"}]
     db.create_table(name, rows, mode="overwrite")
     if fts:
         db.open_table(name).create_fts_index("text", use_tantivy=False, replace=True)
@@ -172,8 +177,18 @@ def demo_state_folder(path: Path, transcripts=None, cards=None, *, ledger=None,
     path.mkdir(parents=True, exist_ok=True)
     db = lancedb.connect(path)
     key = lambda note: MANIFEST_KEYS.get(note, f"{note.title()} — Someone")  # noqa: E731
+    statuses = ledger if ledger is not None else {n: "indexed" for n in (transcripts or [])}
+    book_ledger = open_ledger(db)
+    ids = {}
+    for note, status in statuses.items():
+        ref = f"manifest:{note}" if note in MANIFEST_KEYS else f"local:{note}"
+        book_id = book_ledger.resolve(*key(note).split(" — ", 1), source_ref=ref)
+        book_ledger.begin(book_id, key=key(note), source_ref=ref, embedding_model="fake")
+        if status == "indexed":
+            book_ledger.commit(book_id, rows=1)
+        ids[key(note)] = book_id
     if transcripts is not None:
-        _table(db, "transcripts_ollama", {key(n) for n in transcripts}, t_fts, t_meta)
+        _table(db, "transcripts_ollama", {key(n) for n in transcripts}, t_fts, t_meta, ids)
     if t_staging:
         db.create_table("transcripts_ollama__staging", [{"chunk_id": "s", "book": "", "text": "t"}],
                         mode="overwrite")
@@ -182,14 +197,6 @@ def demo_state_folder(path: Path, transcripts=None, cards=None, *, ledger=None,
     if c_staging:
         db.create_table("cards_ollama__staging", [{"chunk_id": "s", "book": "", "text": "t"}],
                         mode="overwrite")
-    statuses = ledger if ledger is not None else {n: "indexed" for n in (transcripts or [])}
-    book_ledger = open_ledger(db)
-    for note, status in statuses.items():
-        ref = f"manifest:{note}" if note in MANIFEST_KEYS else f"local:{note}"
-        book_id = book_ledger.resolve(*key(note).split(" — ", 1), source_ref=ref)
-        book_ledger.begin(book_id, key=key(note), source_ref=ref, embedding_model="fake")
-        if status == "indexed":
-            book_ledger.commit(book_id, rows=1)
 
 
 def demo_library(path: Path, notes, source="manifest", ledger_notes=None, cards=True):
@@ -302,7 +309,7 @@ def test_the_hosted_mode_pulls_only_the_embedder_and_leaves_the_key_to_the_reade
     assert "\nLLM_BACKEND=openrouter\n" in written and "\nEMBED_BACKEND=ollama\n" in written
     assert "\nLLM_TIMEOUT_S=120\n" in written and "\nOPENROUTER_API_KEY=\n" in written
     assert "OPENROUTER_API_KEY is left empty on purpose" in out
-    assert "Left to you: the hosted mode needs OPENROUTER_API_KEY" in out
+    assert "Left to you: this configuration needs OPENROUTER_API_KEY" in out
 
 
 def test_an_exported_switch_that_contradicts_the_mode_is_refused_before_anything(machine,
@@ -954,3 +961,110 @@ def test_the_gate_s_case_starter_transcripts_over_full_cards_is_rebuilt(machine,
     machine.check_status = 0
     assert init("--demo") == 0
     assert machine.builds == [(folder, "ollama", False)]
+
+
+# --- a dry run ends on the status the real run ends on (F3-dry-run-status) -------------------
+# Every way the real run ends non-zero that can be told without a write or a
+# request is set up below, once per case; the dry run goes first (it changes
+# nothing), then the real run over the same machine. The closing `ayl doctor`
+# is a recorder (it needs a request); where a case is about what it reads, the
+# recorder answers what the doctor answers for that index — the status
+# tests/test_preflight.py pins for the same condition.
+
+def _in_a_work_tree(machine, with_config):
+    (machine.tmp / ".git").mkdir()
+    if with_config:
+        machine.home.mkdir(parents=True)
+        (machine.home / "config.env").write_text("LLM_BACKEND=ollama\nEMBED_BACKEND=ollama\n")
+        machine.mp.setattr(config, "HOME_CONFIG", machine.home / "config.env")
+    machine.check_status = 1                       # the doctor's index_in_checkout
+
+
+def _outside_a_checkout(machine):
+    machine.mp.setattr(init_cmd, "REPO_ROOT", "")
+
+
+def _old_index_here(machine):
+    old = machine.tmp / "cwd" / "data" / "lancedb"
+    demo_library(old, STARTER)
+    choice = config.DbPathChoice(old, 2, "an index at the old default")
+    machine.mp.setattr(config, "DB_CHOICE", choice)
+    machine.mp.setattr(config, "DB_PATH", old)
+
+
+def _foreign_demo_folder(machine):
+    demo_library(machine.home / "demo" / "index", ["my-book"], source="local")
+
+
+def _reader_index_stamped_by_another_embedder(machine):
+    index = machine.home / "index"
+    index.mkdir(parents=True)
+    db = lancedb.connect(index)
+    db.create_table("transcripts_ollama", [{"chunk_id": "1", "book": "Mine — Me", "book_id": "",
+                                            "text": "t", "vector": [0.0] * 1024}])
+    write_index_meta(db, "transcripts_ollama", "ollama", "another-model", 1024,
+                     chunker=expected_chunker("transcripts_ollama"))
+    machine.check_status = 1                       # the doctor's index_mismatch
+
+
+def _reader_index_with_ledger_drift(machine):
+    demo_state_folder(machine.home / "index", STARTER, STARTER,
+                      ledger={**{n: "indexed" for n in STARTER}, "moby-dick": "indexed"})
+    machine.check_status = 1                       # the doctor's ledger drift
+
+
+def _built_demo(machine):
+    demo_library(machine.home / "demo" / "index", STARTER)
+    machine.check_status = 0
+
+
+def _hosted_without_a_key(machine):
+    machine.check_status = preflight.EXIT_NO_KEY   # the reader's to set: a leftover
+
+
+PARITY = [
+    ("first run", [], None, 0),
+    ("home in a work tree, no config yet", [], lambda m: _in_a_work_tree(m, False), 1),
+    ("home in a work tree, config exists", [], lambda m: _in_a_work_tree(m, True), 1),
+    ("demo outside a checkout", ["--demo"], _outside_a_checkout, 1),
+    ("demo over an old index", ["--demo"], _old_index_here, 1),
+    ("demo folder holds other books", ["--demo"], _foreign_demo_folder, 1),
+    ("reader index of another embedder", [], _reader_index_stamped_by_another_embedder, 1),
+    ("reader index with ledger drift", [], _reader_index_with_ledger_drift, 1),
+    ("demo already built", ["--demo"], _built_demo, 0),
+    ("hosted, key not set", ["--mode", "hosted"], _hosted_without_a_key, 0),
+]
+
+
+@pytest.mark.parametrize("case", PARITY, ids=[c[0] for c in PARITY])
+def test_the_dry_run_ends_on_the_real_run_s_status(machine, case):
+    _, flags, setup, status = case
+    if setup:
+        setup(machine)
+    dry = init("--dry-run", "--no-demo" if "--demo" not in flags else "--demo",
+               *[f for f in flags if f != "--demo"])
+    real = init("--no-demo" if "--demo" not in flags else "--demo",
+                *[f for f in flags if f != "--demo"])
+    assert (dry, real) == (status, status)
+
+
+@pytest.mark.parametrize("env, exit_status", [({"EMBED_BACKEND": "ollma"}, 2),
+                                              ({"LANGSMITH_TRACING_V2": "true"}, 2)])
+def test_a_refusal_from_configuration_is_the_same_status_dry_or_real(machine, monkeypatch,
+                                                                    env, exit_status):
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    if "EMBED_BACKEND" in env:
+        machine.mp.setattr(config, "EMBED_BACKEND", env["EMBED_BACKEND"])
+    assert init("--dry-run", "--no-demo") == init("--no-demo") == exit_status
+
+
+def test_what_a_dry_run_cannot_know_it_says_it_did_not_check(machine, capsys):
+    """Whether Ollama answers, the pulls and a demo build need a request: a
+    real run can end on 5 or 1 over them, and the dry run says so rather than
+    implying a 0 covers them."""
+    assert init("--dry-run", "--demo") == 0
+    out = capsys.readouterr().out
+    assert ("Not checked without a request, so not part of this status: whether Ollama "
+            "answers and has the models, and the pulls; the demo build and the check over it."
+            in out)
