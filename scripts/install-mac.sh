@@ -732,6 +732,8 @@ esac
 env_backend=""
 if [ -f .env ]; then
     env_backend="$(planned_value LLM_BACKEND)"
+    # Blank or whitespace-only is the default, as config.py reads it.
+    [ -n "${env_backend//[[:space:]]/}" ] || env_backend=""
 fi
 setup_backend="${env_backend:-$requested_backend}"
 if [ "$setup_backend" = "ollama" ]; then
@@ -776,7 +778,8 @@ effective_value() {
         config_default "$1"
         return 0
     fi
-    if [ -z "$value" ] && blank_is_default "$1"; then
+    # Whitespace-only is blank, as config.py's _env reads it.
+    if [ -z "${value//[[:space:]]/}" ] && blank_is_default "$1"; then
         config_default "$1"
         return 0
     fi
@@ -787,7 +790,7 @@ effective_value() {
 # script cannot rewrite, and the only one whose remedy is `unset`.
 value_source() {
     if [ -n "${!1+set}" ]; then
-        if [ -z "${!1}" ] && blank_is_default "$1"; then
+        if [ -z "${!1//[[:space:]]/}" ] && blank_is_default "$1"; then
             printf 'exported empty in this shell, which config.py reads as the default\n'
         else
             printf 'exported in this shell\n'

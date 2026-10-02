@@ -2015,3 +2015,23 @@ def test_yes_with_a_credential_in_a_url_is_refused_by_both_before_anything(sandb
     assert init.returncode == 2, init.stdout + init.stderr
     # Without --yes nothing asks for the demo: the run goes on.
     assert real_run(sandbox, OLLAMA_URL=url).returncode == 0
+
+
+@mac_only
+@pytest.mark.skipif(not have_package, reason="the package is not importable here")
+@pytest.mark.parametrize("where", ["exported", "dotenv"])
+def test_a_whitespace_only_llm_backend_is_the_default_for_both(sandbox, tmp_path, where):
+    """config.py reads a blank or whitespace-only LLM_BACKEND as the default
+    (`_env`); the installer refused it as "not a backend" (F7-blank-llm-backend)."""
+    from conftest import run_fresh
+    root, _, env = sandbox
+    exported = {"LLM_BACKEND": "   "} if where == "exported" else {}
+    if where == "dotenv":
+        (root / ".env").write_text("LLM_BACKEND=   \nEMBED_BACKEND=ollama\n")
+    installer = real_run(sandbox, "--no-demo", **exported)
+    assert installer.returncode == 0, installer.stdout + installer.stderr
+    assert "not a backend" not in installer.stderr
+    init = run_fresh("import sys\nfrom ask_your_library import ayl\n"
+                     "sys.exit(ayl.main(['init', '--dry-run', '--no-demo']))\n",
+                     cwd=root, check=False, AYL_HOME=str(tmp_path / "ayl-home"), **exported)
+    assert init.returncode == 0, init.stdout + init.stderr
