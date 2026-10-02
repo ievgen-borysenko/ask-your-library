@@ -78,7 +78,22 @@ MODES = {
 SWITCHES = ("LLM_BACKEND", "EMBED_BACKEND")
 MODE_LINE = {"local": "local — Ollama answers and embeds on this machine; no account, no key",
              "hosted": "hosted — OpenRouter answers (a key, billed per question); "
-                       "embeddings stay on this machine"}
+                       "embeddings stay on this machine",
+             # The two valid pairs `ayl init` never writes but an existing
+             # configuration may hold. Named, so no path leaves the mode
+             # undecided: both embed on OpenRouter, which is where every
+             # passage of the library goes.
+             "custom": "neither mode `ayl init` writes — {llm} answers, OpenRouter embeds: "
+                       "every passage of the library is sent there (a key, billed)"}
+# The values config.py accepts for each switch, and whether a blank value means
+# the default there: LLM_BACKEND is read through `_env` (blank is the default),
+# EMBED_BACKEND with `os.environ.get` (blank is a blank backend, which no
+# embedder answers to). Checked before any step, like config.py's own refusal
+# of a bad LLM_BACKEND — which stops the import before `ayl init` can run —
+# because a typo in EMBED_BACKEND passes the import and fails only at the
+# first `ayl add` or question.
+BACKENDS = ("ollama", "openrouter")
+BLANK_IS_DEFAULT = {"LLM_BACKEND": True, "EMBED_BACKEND": False}
 
 # How long the demo build takes, said before the question. The whole corpus is
 # the figure the project has always stated (about 30 minutes for 33 books and
@@ -195,11 +210,30 @@ def described(path: Path) -> str:
     return f"{path} (a .env outside this checkout)" if REPO_ROOT else f"{path} (a .env)"
 
 
-def mode_of(llm_backend: str, embed_backend: str) -> str | None:
+def mode_of(llm_backend: str, embed_backend: str) -> str:
+    """The name of a valid pair: one `ayl init` writes, or `custom` for the
+    two it does not (hosted embeddings). `switch_problems` has refused every
+    other value before this is asked."""
     for name, values in MODES.items():
         if (values["LLM_BACKEND"], values["EMBED_BACKEND"]) == (llm_backend, embed_backend):
             return name
-    return None
+    return "custom"
+
+
+def switch_problems() -> list[str]:
+    """Each mode switch whose value config.py would not run with, named with
+    its value, where it came from and what it may be."""
+    found = []
+    for name in SWITCHES:
+        raw = os.environ.get(name)
+        if raw is None or (BLANK_IS_DEFAULT[name] and not raw.strip()):
+            continue
+        if raw not in BACKENDS:
+            found.append(f"{name}={raw!r} [{config.setting_source(name)}] is not a backend: "
+                         f"it must be one of {', '.join(BACKENDS)}"
+                         + ("" if BLANK_IS_DEFAULT[name] else " (blank is not the default "
+                            "for this one)"))
+    return found
 
 
 def contradictions(mode: str) -> list[str]:
@@ -224,7 +258,7 @@ def contradictions(mode: str) -> list[str]:
             other = mode_of(loaded[name], wanted["EMBED_BACKEND"])
             found.append(f"{name}={loaded[name]} is exported in this shell and would decide "
                          f"every command instead of the {mode} mode this run writes; unset it"
-                         + (f", or run `ayl init --mode {other}`" if other else ""))
+                         + (f", or run `ayl init --mode {other}`" if other in MODES else ""))
     return found
 
 
@@ -458,6 +492,15 @@ def _run(args) -> int:
         say("Dry run: the plan only. Nothing is pulled, written or built.")
     say("")
 
+    bad = switch_problems()
+    if bad:
+        for sentence in bad:
+            problem(f"{sentence}.")
+        problem("Every command would refuse this configuration (`ayl add` and `ayl ask` with "
+                "\"unknown embedding backend\"). Fix the value where it came from and run "
+                "`ayl init` again. Nothing was changed.")
+        return 2
+
     # Step 2 is decided first, silently: step 1 needs to know whether this
     # configuration uses Ollama at all.
     existing = existing_configuration()
@@ -513,7 +556,7 @@ def _run(args) -> int:
         note(f"answering; {len(pulled)} model(s) pulled")
 
     # --- 2 ---
-    step(2, f"Mode: {MODE_LINE.get(mode, f'LLM_BACKEND={llm}, EMBED_BACKEND={embed}')}")
+    step(2, f"Mode: {MODE_LINE[mode].format(llm='Ollama' if llm == 'ollama' else 'OpenRouter')}")
     if existing is not None:
         note(f"read from {described(existing)}, which already configures this machine")
         for name, value in (("LLM_BACKEND", llm), ("EMBED_BACKEND", embed)):

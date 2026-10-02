@@ -747,3 +747,55 @@ def test_full_over_a_starter_library_rebuilds_even_with_a_stale_full_ledger(mach
     demo_library(machine.home / "demo" / "index", STARTER, ledger_notes=list(MANIFEST_KEYS))
     assert init("--demo", "--full") == 0
     assert machine.builds and machine.builds[-1][2] is True
+
+
+# --- the two switches are validated before any step (F2-embed-backend-typo) --------------
+
+def test_a_typo_in_embed_backend_from_a_dotenv_is_refused_with_its_source(machine,
+                                                                         monkeypatch, capsys):
+    dotenv = machine.tmp / "work" / ".env"
+    dotenv.parent.mkdir()
+    dotenv.write_text("EMBED_BACKEND=ollma\n")
+    machine.mp.setattr(config, "PROJECT_ENV", dotenv)
+    machine.mp.setattr(config, "EMBED_BACKEND", "ollma")
+    monkeypatch.setenv("EMBED_BACKEND", "ollma")
+    assert init("--no-demo") == 2
+    err = capsys.readouterr().err
+    assert f"EMBED_BACKEND='ollma' [{dotenv}] is not a backend" in err
+    assert "one of ollama, openrouter" in err
+    assert machine.tags.calls == 0 and machine.pulls == [] and not machine.home.exists()
+
+
+def test_a_dry_run_refuses_the_typo_too(machine, monkeypatch):
+    monkeypatch.setenv("EMBED_BACKEND", "ollma")
+    machine.mp.setattr(config, "EMBED_BACKEND", "ollma")
+    assert init("--dry-run", "--no-demo") == 2
+
+
+def test_blank_is_the_default_for_llm_backend_and_not_for_embed_backend(machine, monkeypatch,
+                                                                       capsys):
+    """As config.py reads them: LLM_BACKEND through `_env`, EMBED_BACKEND as
+    it stands, which no embedder answers to."""
+    monkeypatch.setenv("LLM_BACKEND", "  ")
+    assert init("--no-demo") == 0
+    capsys.readouterr()
+    monkeypatch.setenv("EMBED_BACKEND", "")
+    assert init("--no-demo") == 2
+    assert "blank is not the default for this one" in capsys.readouterr().err
+
+
+def test_a_valid_pair_init_does_not_write_is_named_not_left_undecided(machine, monkeypatch,
+                                                                      capsys):
+    """Local answers with hosted embeddings: a supported configuration, which
+    sends every passage to OpenRouter — said, never an empty mode."""
+    dotenv = machine.tmp / "work" / ".env"
+    dotenv.parent.mkdir()
+    dotenv.write_text("LLM_BACKEND=ollama\nEMBED_BACKEND=openrouter\n")
+    machine.mp.setattr(config, "PROJECT_ENV", dotenv)
+    machine.mp.setattr(config, "EMBED_BACKEND", "openrouter")
+    monkeypatch.setenv("EMBED_BACKEND", "openrouter")
+    machine.check_status = 0
+    assert init("--no-demo") == 0
+    out = capsys.readouterr().out
+    assert "Mode: neither mode `ayl init` writes — Ollama answers, OpenRouter embeds" in out
+    assert init_cmd.mode_of("openrouter", "openrouter") == "custom"
