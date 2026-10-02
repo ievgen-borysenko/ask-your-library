@@ -27,7 +27,7 @@ Every `.txt`, `.md` and `.epub` file under the folder (recursively) is **one boo
 reported on stderr: hidden files and directories; **symlinks** — in or out of the folder, including
 files under a symlinked directory; files that are not UTF-8 text; files with nothing but a front
 matter block or a title line; a folder named `*.epub` (an unpacked EPUB, the way Apple Books keeps
-one: zip it, or export it as a file); and an EPUB that is refused ([below](#an-epub)):
+one: zip it, or export it as a file; nothing inside it is read as a book of its own); and an EPUB that is refused ([below](#an-epub)):
 DRM-protected, malformed, with an unsafe member path or an XML entity declaration in its package
 files, not readable in the encoding a document declares, over the archive limits, or without text.
 A link is not followed, so nothing outside the folder is ever read or embedded; copy the file in
@@ -282,8 +282,10 @@ the folder is indexed as usual:
 - **Not readable in its declared encoding**: see above.
 - **Could not be read**: anything else that goes wrong reading the file. The line names the kind
   of error and nothing of what it said, and the rest of the folder is indexed as usual.
-- **Too large**: more than 10,000 files in the archive, any one file over 64 MiB uncompressed, or
-  over 512 MiB uncompressed in total. What is read is read into memory by name — nothing is ever
+- **Too large**: more than 10,000 files in the archive, a directory over 16 MiB, any one file
+  over 64 MiB uncompressed, or over 512 MiB uncompressed in total. The file count is checked from
+  the archive's end record and its directory, before the archive is opened, so a directory of a
+  million entries costs no memory to refuse. What is read is read into memory by name — nothing is ever
   extracted to disk — and every read is cut off at the per-file cap, whatever the archive claims.
 - **No text**: a spine with no XHTML/HTML document, or one whose documents hold no text (a book of
   images).
