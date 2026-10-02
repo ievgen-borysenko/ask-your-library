@@ -88,7 +88,9 @@ uv run ayl ask "..."
 ```
 
 `ayl init` checks that Ollama answers, pulls the two models the configuration names, writes
-`~/AskYourLibrary/config.env`, and says where your books go; run it again and it changes nothing.
+`~/AskYourLibrary/config.env` (unless that file, or a `.env` that sets `LLM_BACKEND` or
+`EMBED_BACKEND`, already chooses the mode), and says where your books go; run it again and it
+changes nothing.
 On a Mac, `bash scripts/install-mac.sh` (with `--dry-run` to read it first) also installs uv and
 Ollama through Homebrew, then runs `ayl init`.
 

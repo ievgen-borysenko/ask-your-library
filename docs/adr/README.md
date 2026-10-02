@@ -1238,7 +1238,8 @@ layer decided a name, and `ayl init --print-env-resolution` prints it.
 
 `ayl init` writes the third layer, through `home.write_private` (mode 0600, refused inside a git
 work tree, never written through a link), and only when no file already chooses the mode: a
-`.env` that sets `LLM_BACKEND` or `EMBED_BACKEND`, or an existing `config.env`, is the reader's
+`.env` that sets `LLM_BACKEND` or `EMBED_BACKEND` to a non-blank value, or an existing
+`config.env`, is the reader's
 and is never rewritten; a `.env` that sets neither is read above the file `ayl init` writes. A
 `.env` outside the checkout is named as one wherever `ayl init` prints it. The `.env` stays the developer's layer —
 `cp .env.example .env` in a clone works as before, from inside the clone — and the home file is

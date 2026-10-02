@@ -27,9 +27,11 @@ changes nothing and says so:
    `OLLAMA_URL`).
 2. **Mode** — `--mode local` (the default: Ollama answers and embeds, no key) or `--mode hosted`
    (OpenRouter answers, the embeddings stay local, and you set `OPENROUTER_API_KEY` yourself;
-   `ayl init` never takes a key). A configuration that already exists decides instead and is
+   `ayl init` never takes a key). A configuration that already chooses the mode — a `.env` that
+   sets `LLM_BACKEND` or `EMBED_BACKEND`, or an existing `config.env` — decides instead and is
    never rewritten; an exported `LLM_BACKEND` or `EMBED_BACKEND` that contradicts the mode is
-   refused (exit 2) before anything changes, because an exported variable would win over the file.
+   refused (exit 2) before anything changes, because an exported variable would win over the file,
+   and so is a value of either that is not `ollama` or `openrouter`, wherever it came from.
    The local mode is held to what it promises, the rule `install-mac.sh` applies: an `OLLAMA_URL`
    that is not this machine, a tracing flag that uploads, or a `LANGCHAIN_API_KEY` that would turn
    tracing on is refused (exit 2), each named with where its value came from.
@@ -37,8 +39,9 @@ changes nothing and says so:
    9.0 GB, and `bge-m3`; the names come from `OLLAMA_LLM_MODEL` / `OLLAMA_EMBED_MODEL`), with the
    progress streamed. An interrupted pull resumes on the next run.
 4. **Configuration** — writes `~/AskYourLibrary/config.env` (`$AYL_HOME/config.env`, readable by
-   you only) unless a `.env` in the working directory or that file already exists. It is read
-   beneath exported variables and a `.env` ([configuration](configuration.md)).
+   you only), unless that file already exists or the project's `.env` already sets
+   `LLM_BACKEND` or `EMBED_BACKEND`; a `.env` that sets neither does not stop it. It is read
+   beneath exported variables and the project's `.env` ([configuration](configuration.md)).
 5. **Libraries** — names your index (`~/AskYourLibrary/index`) and what `ayl add` puts in it. An
    index or chat history an earlier version kept in the clone is reported with the commands that
    move it ([upgrading](upgrading.md#the-index-moved-to-ayl_homeindex)); nothing is moved for you,
