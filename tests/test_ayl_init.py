@@ -10,6 +10,7 @@ recorders standing where the two child processes would start. `AYL_HOME`,
 the configuration files and the checkout are all under `tmp_path`.
 """
 import os
+import shutil
 import stat
 import sys
 from pathlib import Path
@@ -71,6 +72,7 @@ class Machine:
         (self.clone / "corpus" / "manifest.yaml").write_text(
             (REPO / "corpus" / "manifest.yaml").read_text(encoding="utf-8"), encoding="utf-8")
         (self.clone / "scripts" / "ingest_demo_corpus.py").write_text("# stand-in\n")
+        shutil.copytree(REPO / "corpus" / "cards", self.clone / "corpus" / "cards")
         self.pulls, self.builds, self.checks = [], [], []
         self.check_status = preflight.EXIT_NO_INDEX
         self.tags = Tags([f"{EMBEDS}:latest"])
@@ -137,17 +139,34 @@ def machine(tmp_path, monkeypatch):
     return Machine(tmp_path, monkeypatch)
 
 
-def demo_library(path: Path, notes, source="manifest"):
-    """An index as the demo build leaves one: a transcripts table and a
-    ledger row per book, every one indexed."""
+MANIFEST_KEYS = {entry["id"]: f"{entry['title']} — {entry['author']}"
+                 for entry in (lambda m: m["books"] + m["canaries"])(
+                     __import__("yaml").safe_load((REPO / "corpus" / "manifest.yaml")
+                                                  .read_text(encoding="utf-8")))}
+CARDED = {path.stem for path in (REPO / "corpus" / "cards").glob("*.md")}
+
+
+def demo_library(path: Path, notes, source="manifest", ledger_notes=None, cards=True):
+    """An index as the demo build leaves one: a transcripts row per book under
+    its manifest book key, a cards row for each book that has a card, and a
+    ledger row per book (`ledger_notes`, when the ledger says something else
+    than the table), every one indexed."""
     path.mkdir(parents=True, exist_ok=True)
     db = lancedb.connect(path)
-    db.create_table("transcripts_ollama", [{"chunk_id": "x", "text": "t"}], mode="overwrite")
+    keys = {note: MANIFEST_KEYS.get(note, f"{note.title()} — Someone") for note in notes}
+    db.create_table("transcripts_ollama",
+                    [{"chunk_id": note, "book": key, "text": "t"} for note, key in keys.items()]
+                    or [{"chunk_id": "x", "book": "", "text": "t"}], mode="overwrite")
+    carded = [{"chunk_id": note, "book": key, "text": "t"} for note, key in keys.items()
+              if note in CARDED]
+    if cards and carded:
+        db.create_table("cards_ollama", carded, mode="overwrite")
     ledger = open_ledger(db)
-    for note in notes:
+    for note in (notes if ledger_notes is None else ledger_notes):
         ref = f"{source}:{note}"
-        book_id = ledger.resolve(note.title(), "Someone", source_ref=ref)
-        ledger.begin(book_id, key=f"{note} — Someone", source_ref=ref, embedding_model="fake")
+        key = MANIFEST_KEYS.get(note, f"{note.title()} — Someone")
+        book_id = ledger.resolve(*key.split(" — ", 1), source_ref=ref)
+        ledger.begin(book_id, key=key, source_ref=ref, embedding_model="fake")
         ledger.commit(book_id, rows=1)
 
 
@@ -409,7 +428,7 @@ def test_a_built_demo_library_is_not_built_again(machine, capsys):
     capsys.readouterr()
     assert init("--demo") == 0
     assert machine.builds == []
-    assert "already built (6 of 6 books indexed); nothing to do" in capsys.readouterr().out
+    assert "already built (6 of 6 books in the index); nothing to do" in capsys.readouterr().out
 
 
 def test_full_rebuilds_a_starter_library_as_the_whole_corpus(machine):
@@ -523,7 +542,7 @@ def test_an_old_chat_database_gets_its_move_printed(machine, capsys):
 # --- demo_state and --print-env-resolution -------------------------------------------
 
 def test_what_an_existing_folder_is_as_a_demo_library(tmp_path):
-    wanted = set(STARTER)
+    wanted = {note: MANIFEST_KEYS[note] for note in STARTER}
     assert init_cmd.demo_state(tmp_path / "none", "ollama", wanted)[0] == "absent"
     other = tmp_path / "other"
     (other / "transcripts_openrouter.lance").mkdir(parents=True)
@@ -531,7 +550,7 @@ def test_what_an_existing_folder_is_as_a_demo_library(tmp_path):
                                                             "transcripts_openrouter")
     demo_library(tmp_path / "partial", STARTER[:2])
     assert init_cmd.demo_state(tmp_path / "partial", "ollama", wanted) == (
-        "partial", "2 of 6 books indexed")
+        "partial", "2 of 6 books in the index")
     demo_library(tmp_path / "complete", STARTER)
     assert init_cmd.demo_state(tmp_path / "complete", "ollama", wanted)[0] == "complete"
     unledgered = tmp_path / "unledgered"
@@ -547,7 +566,8 @@ def test_an_interrupted_first_build_s_staging_table_is_not_another_backend(machi
     demo = machine.home / "demo" / "index"
     demo.mkdir(parents=True)
     lancedb.connect(demo).create_table("transcripts_ollama__staging", [{"x": 1}])
-    assert init_cmd.demo_state(demo, "ollama", set(STARTER)) == ("absent", "")
+    assert init_cmd.demo_state(demo, "ollama", {n: MANIFEST_KEYS[n] for n in STARTER}) == (
+        "absent", "")
     machine.check_status = 0
     assert init("--demo") == 0
     assert machine.builds == [(demo, "ollama", False)]
@@ -696,3 +716,34 @@ def test_an_embedding_http_error_carries_no_credential(monkeypatch):
         embeddings.OllamaEmbedder(CREDENTIAL_URL)._embed(["text"])
     assert SECRET not in str(raised.value)
     assert "http://<credentials>@localhost:11434/api/embed" in str(raised.value)
+
+
+# --- completeness is read from the tables (F2-demo-completeness) -------------------------
+
+def test_a_full_ledger_over_a_starter_table_is_not_the_full_corpus(tmp_path):
+    """A full run, then a `--starter` one: the ledger (before the script
+    reconciled it) said every book was indexed while the table held six."""
+    full = {note: MANIFEST_KEYS[note] for note in MANIFEST_KEYS}
+    demo_library(tmp_path / "demo", STARTER, ledger_notes=list(MANIFEST_KEYS))
+    state, detail = init_cmd.demo_state(tmp_path / "demo", "ollama", full)
+    assert state == "partial" and detail == f"6 of {len(full)} books in the index"
+
+
+def test_a_book_without_its_card_is_not_built(tmp_path):
+    wanted = {note: MANIFEST_KEYS[note] for note in STARTER}
+    demo_library(tmp_path / "demo", STARTER, cards=False)
+    assert init_cmd.demo_state(tmp_path / "demo", "ollama", wanted)[0] == "partial"
+
+
+def test_a_row_of_a_book_no_manifest_entry_names_is_foreign(tmp_path):
+    wanted = {note: MANIFEST_KEYS[note] for note in STARTER}
+    demo_library(tmp_path / "demo", STARTER + ["my-own-notes"], ledger_notes=STARTER)
+    assert init_cmd.demo_state(tmp_path / "demo", "ollama", wanted) == (
+        "foreign", "it holds books that are not the demo corpus's")
+
+
+def test_full_over_a_starter_library_rebuilds_even_with_a_stale_full_ledger(machine):
+    machine.check_status = 0
+    demo_library(machine.home / "demo" / "index", STARTER, ledger_notes=list(MANIFEST_KEYS))
+    assert init("--demo", "--full") == 0
+    assert machine.builds and machine.builds[-1][2] is True

@@ -46,7 +46,9 @@ from dotenv import dotenv_values
 from . import config, dataflow, home, ollama, preflight
 from .cli import say
 from .i18n import t
-from .ingest.ledger import INDEXED, open_ledger
+from .bookkey import book_key
+from .index_meta import rows_by_book
+from .ingest.ledger import open_ledger
 from .ingest.publish import STAGING_SUFFIX
 from .paths import REPO_ROOT
 from .ui import launcher
@@ -274,21 +276,36 @@ def demo_path() -> Path:
     return home.private_dir("demo", "index")
 
 
-def manifest_ids(full: bool) -> list[str]:
-    """The manifest entries a demo build covers: the starter subset, or every
-    entry (books and canaries) for `--full` — what the script builds for the
-    same flag."""
+def manifest_books(full: bool | None) -> dict[str, str]:
+    """{manifest id: book key} for the entries a demo build covers: the starter
+    subset, or every entry (books and canaries) for `--full` — what the script
+    builds for the same flag; None, every entry. The key is what the index
+    rows carry (`bookkey.book_key`, the function the ingest mints it with)."""
     manifest = yaml.safe_load((Path(REPO_ROOT) / "corpus" / "manifest.yaml")
                               .read_text(encoding="utf-8"))
     entries = manifest["books"] + manifest["canaries"]
-    return [entry["id"] for entry in entries if full or entry.get("starter") is True]
+    return {entry["id"]: book_key(entry["title"], entry["author"]) for entry in entries
+            if full is not False or entry.get("starter") is True}
 
 
-def demo_state(path: Path, backend: str, wanted: set[str]) -> tuple[str, str]:
-    """(state, detail) of the index at `path` as a demo library for
-    `wanted` manifest ids. Reads only an index that exists; never creates one.
+def card_ids() -> set[str]:
+    """The manifest ids with a committed card: the books a demo cards table
+    must hold (the canaries have none)."""
+    return {path.stem for path in (Path(REPO_ROOT) / "corpus" / "cards").glob("*.md")}
 
-    `absent` nothing is built; `complete` every wanted book is indexed;
+
+def demo_state(path: Path, backend: str, wanted: dict[str, str]) -> tuple[str, str]:
+    """(state, detail) of the index at `path` as a demo library for `wanted`
+    ({manifest id: book key}). Reads only an index that exists; never creates
+    one.
+
+    What is built is read from the TABLES, not from the ledger: a full ingest
+    followed by a `--starter` one left `indexed` ledger rows for the whole
+    corpus over a table holding the subset, and `--demo --full` called it
+    built. A book counts when its key is in the transcripts table and, if it
+    has a committed card, in the cards table too.
+
+    `absent` nothing is built; `complete` every wanted book is there;
     `partial` a demo library holding fewer (a starter one, asked for --full);
     `other_backend` an index whose transcripts another embedding backend built
     — building beside it would be a second index in one folder; `foreign` an
@@ -308,16 +325,24 @@ def demo_state(path: Path, backend: str, wanted: set[str]) -> tuple[str, str]:
         if others:
             return "other_backend", ", ".join(others)
         return "absent", ""
-    rows = open_ledger(lancedb.connect(path)).all_rows()
+    db = lancedb.connect(path)
+    rows = open_ledger(db).all_rows()
     refs = [str(row.get("source_ref") or "") for row in rows]
     if not rows or any(not ref.startswith("manifest:") for ref in refs):
         return "foreign", ("no ledger describes its books" if not rows
                            else "it holds books that are not the demo corpus's")
-    indexed = {str(row["source_ref"]).split(":", 1)[1] for row in rows
-               if row.get("status") == INDEXED}
-    if wanted <= indexed:
-        return "complete", f"{len(wanted)} of {len(wanted)} books indexed"
-    return "partial", f"{len(wanted & indexed)} of {len(wanted)} books indexed"
+    present = set(rows_by_book(db, table))
+    if REPO_ROOT and present - set(manifest_books(None).values()):
+        return "foreign", "it holds books that are not the demo corpus's"
+    cards_table = f"cards_{backend}"
+    carded = (set(rows_by_book(db, cards_table)) if (path / f"{cards_table}.lance").is_dir()
+              else set())
+    with_cards = card_ids() if REPO_ROOT else set()
+    there = {note for note, key in wanted.items()
+             if key in present and (note not in with_cards or key in carded)}
+    if there == set(wanted):
+        return "complete", f"{len(wanted)} of {len(wanted)} books in the index"
+    return "partial", f"{len(there)} of {len(wanted)} books in the index"
 
 
 def legacy_indexes() -> list[tuple[Path, str]]:
@@ -589,7 +614,7 @@ def _run(args) -> int:
     legacy = legacy_indexes()
     for path, notice in legacy:
         note(notice)
-        if path.name == "lancedb" and demo_state(path, embed, set())[0] == "complete":
+        if path.name == "lancedb" and demo_state(path, embed, {})[0] == "complete":
             # Every book in it came from the manifest: it IS a demo library,
             # and restoring it there keeps the reader's own index empty.
             note(f"it holds only the demo corpus, so `--db "
@@ -621,7 +646,7 @@ def _run(args) -> int:
             target = None
             demo_missed = True
         if target is not None:
-            wanted = set(manifest_ids(full))
+            wanted = manifest_books(full)
             state, detail = demo_state(target, embed, wanted)
             label = "the whole demo corpus" if full else "the starter demo library"
             if state == "complete":

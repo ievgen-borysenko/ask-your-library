@@ -688,7 +688,8 @@ def ingest_transcripts_table(backend: str, book_filter: str | None, entry_ids: l
             yield doc["note"], rows_for(chunks, vectors, book_id,
                                         revision_of(ledger.get(book_id).get("sha256") or ""))
 
-    if book_filter and name in table_names(db):
+    whole_table = not (book_filter and name in table_names(db))
+    if not whole_table:
         # Re-ingest selected books in place: replace their rows, never append.
         # One table, one embedding model: an upsert with a different embedder
         # would leave a table of mixed vectors and re-stamp it as if it were not.
@@ -712,6 +713,19 @@ def ingest_transcripts_table(backend: str, book_filter: str | None, entry_ids: l
                      chunker=CHUNKER_VERSION)
     for book_id, rows in written.items():
         ledger.commit(book_id, rows=rows, fts_seconds=fts_seconds)
+    if whole_table:
+        # A whole-table rebuild leaves exactly the books it wrote, so a ledger
+        # row of any other book now describes rows that are gone — a full run
+        # followed by a `--starter` one kept `indexed` rows for the whole
+        # corpus, and `ayl init --demo --full` read them as built. Pruned here,
+        # in this script's rebuild and nowhere else: `refuse_foreign_books`
+        # has already established that every row is the demo corpus's, and
+        # the reader's own index never comes through this path.
+        stale = [row["book_id"] for row in ledger.all_rows() if row["book_id"] not in written]
+        for book_id in stale:
+            ledger.delete(book_id)
+        if stale:
+            print(f"  ledger: {len(stale)} row(s) of books this rebuild no longer holds removed")
     print(f"transcripts done: {total} chunks in {(time.time() - started) / 60:.1f} min "
           f"(FTS rebuild {fts_seconds:.1f}s)")
 

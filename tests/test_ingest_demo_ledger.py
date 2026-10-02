@@ -229,3 +229,32 @@ def test_a_foreign_cards_row_with_no_ledger_is_refused_for_the_classics_cards(de
     lancedb.connect(demo_index).create_table("cards_ollama", rows)
     with pytest.raises(SystemExit, match="My Own Notes — Me"):
         demo.ingest_cards_table("ollama")
+
+
+# --- a whole-table rebuild reconciles the ledger (F2-demo-completeness) ------------
+
+def test_a_whole_table_rebuild_prunes_ledger_rows_of_books_it_no_longer_holds(demo_index,
+                                                                             monkeypatch):
+    """A full ingest, then a starter one: the table holds the subset, and the
+    ledger used to keep `indexed` rows for every book of the full run — which
+    is what made `ayl init --demo --full` call the full corpus built."""
+    demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
+    monkeypatch.setattr(demo, "prepared_docs", lambda ids, known=None: [
+        doc("moby-dick", "Moby Dick", "Herman Melville")])
+    demo.ingest_transcripts_table("ollama", None, ["moby-dick"], ["moby-dick", "emma"])
+    db = lancedb.connect(demo_index)
+    assert sorted(row["key"] for row in open_ledger(db).all_rows()) == [
+        "Moby Dick — Herman Melville"]
+    books = {row["book"] for row in db.open_table("transcripts_ollama").to_arrow().to_pylist()}
+    assert books == {"Moby Dick — Herman Melville"}
+
+
+def test_a_single_book_upsert_prunes_nothing(demo_index, monkeypatch):
+    """Only the whole-table rebuild reconciles: `--book` replaces one book's
+    rows and leaves every other book, and its ledger row, where it was."""
+    demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
+    monkeypatch.setattr(demo, "prepared_docs", lambda ids: [
+        doc("moby-dick", "Moby Dick", "Herman Melville")])
+    demo.ingest_transcripts_table("ollama", "moby", ["moby-dick"])
+    assert sorted(row["key"] for row in open_ledger(lancedb.connect(demo_index)).all_rows()) \
+        == ["Emma — Jane Austen", "Moby Dick — Herman Melville"]
