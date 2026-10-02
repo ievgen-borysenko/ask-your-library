@@ -13,13 +13,14 @@
   **What is measured is the decision, offline, and nothing else.** A replay of `reflect` on the
   stored states (`deepseek/deepseek-v4-flash-0731`, temperature 0, 149 calls) continued on 30 of 30
   h14 samples against 16 of 30 with the shipped line, on 6 of 6 c03 samples against 0 of 6, and
-  kept `enough` on 12 of 12 controls where stopping was right; a `reflect` prompt grows from about
-  613 to 700 tokens. **The effect on answers is not measured yet**: whether the extra step finds the
-  missing fact is for the eval run (core, then extended) that follows, which also has to read out
-  two side effects the replay showed — chapter reads named a looser `looking_for` (only "Beatrice"
-  in 12 of 28 h14 reads) and the malformed book key with the section folded into the title came up
-  more often (6 of 28 reads against 1 of 16). The eval numbers of this change are comparable with
-  the last run's on the data, not on the `reflect` prompt.
+  kept `enough` on 12 of 12 controls where stopping was right. On those replayed step-1 states a
+  `reflect` prompt grew from about 613 to 700 tokens; it is bounded by the evidence, as
+  `synthesize`'s is. **On answers, the eval run against a same-index control (core ×3, extended ×3)
+  shows a modest gain:** about +0.7 to +1.0 correct per core attempt by hand grade, carried by c06,
+  with behaviour neutral and 8% more steps. h14 now reads its chapter in 3 of 3 attempts, but
+  `beheaded` is still out of the window (#81). One risk to watch: h22, a two-book identify
+  question, skipped its clarify in 1 of 3 attempts where the shipped rules clarified 9 of 9.
+  Neither side effect the replay named (looser `looking_for`, malformed book keys) appeared.
 
 - **What this machine builds for the reader lives in `AYL_HOME`, not in the directory a command
   was typed in** (#30, [ADR-026](adr/README.md#adr-026-ayl_home-is-the-home-of-everything-built-on-this-machine-the-index-the-scratchpads-the-chat-database-the-private-shelf)).
