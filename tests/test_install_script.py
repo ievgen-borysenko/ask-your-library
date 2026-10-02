@@ -392,9 +392,12 @@ def test_a_non_loopback_ollama_host_is_refused(sandbox, bind):
     rest: ':11434' is a host/port pair whose empty host is every interface, and
     '0' is 0.0.0.0 — the two spellings that read most like loopback and are not."""
     _, records, _ = sandbox
+    from ask_your_library.dataflow import without_credentials
     result = real_run(sandbox, "--no-demo", OLLAMA_HOST=bind)
     assert result.returncode == 1, result.stdout
-    assert f"OLLAMA_HOST={bind}" in result.stderr
+    # Named as every URL-valued setting is printed: what is in front of an @ is
+    # replaced (it may be a credential), the host the request would reach is kept.
+    assert f"OLLAMA_HOST={without_credentials(bind)}" in result.stderr
     assert "unset OLLAMA_HOST" in result.stderr           # the fix is named
     # The gate is judged with the rest of the resolution, ahead of step 3, so
     # nothing at all runs in front of it — `uv python find` included.
@@ -1440,9 +1443,12 @@ def test_a_host_that_only_looks_like_loopback_is_refused(sandbox, bind):
     compared exactly; a bind address has no userinfo at all, so an @ in one is
     refused outright."""
     _, records, _ = sandbox
+    from ask_your_library.dataflow import without_credentials
     result = real_run(sandbox, "--no-demo", OLLAMA_HOST=bind)
     assert result.returncode == 1, result.stdout
-    assert f"OLLAMA_HOST={bind}" in result.stderr
+    # Named as every URL-valued setting is printed: what is in front of an @ is
+    # replaced (it may be a credential), the host the request would reach is kept.
+    assert f"OLLAMA_HOST={without_credentials(bind)}" in result.stderr
     assert invoked(records) == [], "the gate let a tool run past it"
 
 
@@ -1802,3 +1808,74 @@ def test_the_preflight_snippet_prints_no_credential_written_into_a_url(tmp_path)
     assert SECRET not in result.stdout + result.stderr
     assert "OLLAMA_URL=http://<credentials>@127.0.0.1:9" in result.stdout
     assert "-> https://<credentials>@smith.example.com" in result.stdout
+
+
+# --- a credential planted in EVERY URL-valued setting at once (F2-installer-url) --------
+# The class, not one line: each URL-valued setting the installer or the package
+# reads carries the same secret, exported in one run and written into the .env in
+# another, and no output of the installer's dry run (both modes), `ayl init
+# --dry-run`, `ayl init --print-env-resolution` or `ayl doctor` may contain it.
+PLANTED = "planted-s3cret-in-every-url"
+URL_SETTINGS = {
+    "OLLAMA_URL": f"http://reader:{PLANTED}@127.0.0.1:9",
+    "OLLAMA_HOST": f"reader:{PLANTED}@127.0.0.1:11434",
+    "OPENROUTER_BASE_URL": f"https://reader:{PLANTED}@openrouter.example/api/v1",
+    "LANGCHAIN_ENDPOINT": f"https://reader:{PLANTED}@smith.example",
+    "LANGSMITH_ENDPOINT": f"https://reader:{PLANTED}@smith.example",
+}
+
+
+def test_every_url_valued_setting_is_named_in_the_planted_set():
+    """The planted set has to grow with the list the code reports, or a new
+    endpoint name would go untested."""
+    from ask_your_library import dataflow
+    assert set(URL_SETTINGS) == set(dataflow.ENDPOINT_VARS)
+
+
+def assert_no_planted(result):
+    printed = result.stdout + result.stderr
+    assert PLANTED not in printed, printed[printed.find(PLANTED) - 200:][:400]
+    return printed
+
+
+@mac_only
+@pytest.mark.parametrize("where", ["exported", "dotenv"])
+@pytest.mark.parametrize("mode", [(), ("--hosted",)])
+def test_the_installer_dry_run_prints_no_planted_credential(sandbox, where, mode):
+    root, _, env = sandbox
+    if where == "exported":
+        env.update(URL_SETTINGS)
+    else:
+        (root / ".env").write_text("".join(f"{name}={value}\n"
+                                           for name, value in URL_SETTINGS.items()))
+    result = subprocess.run([BASH, "scripts/install-mac.sh", "--dry-run", *mode], cwd=root,
+                            env=env, capture_output=True, text=True)
+    printed = assert_no_planted(result)
+    assert "<credentials>@" in printed, "the run never reached a line that names a URL"
+    resolution = subprocess.run([BASH, "scripts/install-mac.sh", "--print-env-resolution"],
+                                cwd=root, env=env, capture_output=True, text=True)
+    assert_no_planted(resolution)
+
+
+@pytest.mark.skipif(not have_package, reason="the package is not importable here")
+@pytest.mark.parametrize("where", ["exported", "dotenv"])
+@pytest.mark.parametrize("argv", [["init", "--dry-run", "--no-demo"],
+                                  ["init", "--print-env-resolution"],
+                                  ["init", "--no-demo", "--yes"],
+                                  ["doctor"]])
+def test_the_package_prints_no_planted_credential(tmp_path, where, argv):
+    """`ayl init` and `ayl doctor` in a fresh interpreter, Ollama on a port
+    nothing answers (the remedy text names the URL), a temp AYL_HOME."""
+    from conftest import run_fresh
+    work = tmp_path / "work"
+    work.mkdir()
+    planted = dict(URL_SETTINGS)
+    if where == "dotenv":
+        (work / ".env").write_text("".join(f"{n}={v}\n" for n, v in planted.items()))
+        planted = {}
+    result = run_fresh("import sys\nfrom ask_your_library import ayl\n"
+                       f"sys.exit(ayl.main({argv!r}))\n",
+                       cwd=work, check=False, **planted)
+    printed = assert_no_planted(result)
+    assert "Traceback" not in printed, printed
+    assert "<credentials>@" in printed, "no line named a URL: the check checked nothing"

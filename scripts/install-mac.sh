@@ -567,6 +567,12 @@ print_env_resolution() {
             fi
             continue
         fi
+        # A URL's credential is not in the record either. Only a value with an
+        # @ is passed through shown_url: a command substitution drops trailing
+        # newlines, and every other value has to come back exactly as read.
+        case "$value" in
+            *@*) value="$(shown_url "$value")" ;;
+        esac
         out=""
         index=0
         while [ "$index" -lt "${#value}" ]; do
@@ -622,16 +628,19 @@ ollama_url="$(setting OLLAMA_URL)"
 # value; without the same here a URL written with one asks for //api/tags.
 while [ "${ollama_url%/}" != "$ollama_url" ]; do ollama_url="${ollama_url%/}"; done
 
-# A URL as this script prints it: a `user:password@` written into it becomes
-# `<credentials>@`, so a credential never reaches the terminal or a log; the
-# value itself is what is requested. Only a value with a scheme has a userinfo
-# production — in a bare host[:port] (OLLAMA_HOST) an @ is the text a refusal
-# is about, and is shown as it is.
+# A URL-valued setting as this script prints it: a `user:password@` in front
+# of the host becomes `<credentials>@`, so a credential never reaches the
+# terminal or a log; the value itself is what is requested. The same rule with
+# or without a scheme (a credential written as user:secret@host:11434 is still
+# one), and the same as ask_your_library.dataflow.without_credentials. Every
+# line that prints OLLAMA_URL, OLLAMA_HOST, OPENROUTER_BASE_URL, the two trace
+# endpoints, or a .env value goes through it (or through shown_value, which
+# calls it); tests/test_install_script.py plants a credential in all of them.
 shown_url() {
-    local url="$1" scheme rest authority
+    local url="$1" scheme="" rest authority
     case "$url" in
         *://*) scheme="${url%%://*}://"; rest="${url#*://}" ;;
-        *) printf '%s\n' "$url"; return 0 ;;
+        *) rest="$url" ;;
     esac
     authority="${rest%%[/?#]*}"
     case "$authority" in
@@ -661,8 +670,8 @@ fi
 case "$ollama_url" in
     *://*) ;;
     *)
-        fail "OLLAMA_URL=$ollama_url has no scheme, and config.py uses the value as it"
-        fail "stands: the answering model would be asked for at $ollama_url/v1, which is"
+        fail "OLLAMA_URL=$ollama_shown has no scheme, and config.py uses the value as it"
+        fail "stands: the answering model would be asked for at $ollama_shown/v1, which is"
         fail "not an address. Write it in full (http://localhost:11434), or unset"
         fail "OLLAMA_URL to use that default, and re-run."
         exit 2
@@ -1021,7 +1030,7 @@ fi
 # is not digits and anything carrying a path.
 ollama_bind="${OLLAMA_HOST-}"
 if ! ollama_host_is_loopback "$ollama_bind"; then
-    fail "OLLAMA_HOST=$ollama_bind is not one of the loopback forms this script will"
+    fail "OLLAMA_HOST=$(shown_url "$ollama_bind") is not one of the loopback forms this script will"
     fail "start a server on, or send an 'ollama pull' to, so it could listen — or"
     fail "fetch — beyond this machine. Run 'unset OLLAMA_HOST' and re-run, or start"
     fail "Ollama yourself with the binding you want."
@@ -1091,14 +1100,14 @@ fi
 if [ "$setup_mode" != "fully local" ]; then
     if [ "$loaded_embed_backend" = "ollama" ]; then
         if ! url_is_loopback "$(effective_value OLLAMA_URL)"; then
-            note "warning: EMBED_BACKEND=ollama with OLLAMA_URL=$(effective_value OLLAMA_URL), which is"
+            note "warning: EMBED_BACKEND=ollama with OLLAMA_URL=$(shown_url "$(effective_value OLLAMA_URL)"), which is"
             note "not on this machine — every passage of your library would be sent there to be"
             note "embedded. --hosted asks for a hosted answering model, not for that. Unset"
             note "OLLAMA_URL, or set EMBED_BACKEND=openrouter if the remote endpoint is meant."
         fi
     else
         if [ "$loaded_embed_backend" = "openrouter" ]; then
-            embed_destination="$(effective_value OPENROUTER_BASE_URL)"
+            embed_destination="$(shown_url "$(effective_value OPENROUTER_BASE_URL)")"
         else
             embed_destination="whatever endpoint the $loaded_embed_backend backend calls"
         fi
@@ -1331,7 +1340,11 @@ SUMMARY_KEYS="$SUMMARY_KEYS|ORCHESTRATOR_MODEL|PRICE_IN_PER_MTOK|PRICE_OUT_PER_M
 
 env_summary() {
     # `|| true`: no match is an empty summary, not a failed script under `set -e`.
-    { grep -E "^($SUMMARY_KEYS)=" || true; } | while IFS= read -r line; do note "$line"; done
+    # A .env value may be a URL with a credential in it (OLLAMA_URL is one of
+    # these keys): the value is shown through shown_url, the name as it is.
+    { grep -E "^($SUMMARY_KEYS)=" || true; } | while IFS= read -r line; do
+        note "${line%%=*}=$(shown_url "${line#*=}")"
+    done
 }
 
 step "Configuration: .env in the repository root"
@@ -1558,7 +1571,7 @@ if mode == "local":
              (("LLM_BACKEND", LLM_BACKEND), ("EMBED_BACKEND", EMBED_BACKEND))
              if value != "ollama"]
     if not is_loopback(OLLAMA_URL):
-        wrong.append(f"OLLAMA_URL={OLLAMA_URL}")
+        wrong.append(f"OLLAMA_URL={without_credentials(OLLAMA_URL)}")
     wrong += tracing_on
     wrong += [name for name in v1_tracing_set if name not in tracing_on]
     if wrong:

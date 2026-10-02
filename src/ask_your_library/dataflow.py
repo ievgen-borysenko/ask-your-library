@@ -14,6 +14,7 @@ value is "", "0", "false" or "False"; set, with v2 tracing off, it makes the
 first model call raise. LANGCHAIN_TRACING is in both lists on purpose.
 """
 import os
+import re
 from urllib.parse import urlsplit
 
 BACKEND_VARS = ("LLM_BACKEND", "EMBED_BACKEND")
@@ -52,13 +53,18 @@ def v1_tracing_set() -> list[str]:
 
 
 def without_credentials(value: str) -> str:
-    """A URL with any `user:password@` replaced, so a printed endpoint never
-    carries the credential written into it; anything else unchanged."""
-    try:
-        parts = urlsplit(value)
-    except ValueError:
+    """A value with any `user:password@` in front of its host replaced by
+    `<credentials>@`, so a printed endpoint never carries the credential
+    written into it. The host and everything after it are kept.
+
+    Read as text, not through `urlsplit`, and the same way with or without a
+    scheme: `user:secret@host:11434` written without `http://` is still a
+    credential, and a value that is not a URL at all (a model name, a path)
+    has no `@` before its first `/` and comes back unchanged. The installer's
+    bash `shown_url` applies the same rule."""
+    scheme, rest = value.split("://", 1) if "://" in value else ("", value)
+    authority = re.split(r"[/?#]", rest, maxsplit=1)[0]
+    if "@" not in authority:
         return value
-    if not (parts.scheme and parts.netloc) or "@" not in parts.netloc:
-        return value
-    host = parts.netloc.rsplit("@", 1)[1]
-    return parts._replace(netloc=f"<credentials>@{host}").geturl()
+    return (f"{scheme + '://' if scheme else ''}<credentials>@"
+            f"{authority.rsplit('@', 1)[1]}{rest[len(authority):]}")
