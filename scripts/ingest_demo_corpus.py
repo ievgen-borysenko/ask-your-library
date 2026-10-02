@@ -566,6 +566,35 @@ def refuse_unsafe_partial_reingest(db, name: str, embedder) -> None:
                                  f"refusing partial re-ingest of {name}", 1))
 
 
+def refuse_foreign_books(db, what: str) -> None:
+    """Refuse to write the demo corpus into an index that holds the reader's
+    own books.
+
+    Unset, LIBRARY_DB_PATH is the reader's index ($AYL_HOME/index, ADR-026),
+    which `ayl add` fills — and a full rebuild here replaces the whole
+    transcripts table, so a bare run of this script dropped every book the
+    reader had added and left the classics in their place. The ledger says
+    which books are whose: `manifest:<id>` for one this corpus built, a file
+    reference for one `ayl add` indexed. An index with no ledger, or only
+    manifest rows, is this corpus's to rebuild, as it always was.
+
+    The demo corpus has an index of its own (ADR-028), named here."""
+    if not open_ledger(db).exists():
+        return
+    foreign = sorted({strip_control_chars(str(row.get("key") or row.get("title") or "?"))
+                      for row in open_ledger(db).all_rows()
+                      if not str(row.get("source_ref") or "").startswith("manifest:")})
+    if foreign:
+        sys.exit(
+            f"refusing to {what} {DB_PATH}: its ledger holds {len(foreign)} book(s) that are "
+            f"not the demo corpus's — {', '.join(foreign[:3])}"
+            + (f" (+{len(foreign) - 3} more)" if len(foreign) > 3 else "") +
+            f" — books `ayl add` indexed, which this would "
+            f"{'replace' if what.startswith('rebuild') else 'mix with the classics'}. The demo "
+            f"corpus has an index of its own: `ayl init --demo`, or this script with "
+            f"LIBRARY_DB_PATH=$AYL_HOME/demo/index (~/AskYourLibrary/demo/index by default).")
+
+
 def ingest_transcripts_table(backend: str, book_filter: str | None, entry_ids: list[str],
                              known: list[str] | None = None) -> None:
     docs = prepared_docs(entry_ids) if known is None else prepared_docs(entry_ids, known)
@@ -577,6 +606,7 @@ def ingest_transcripts_table(backend: str, book_filter: str | None, entry_ids: l
     embedder = get_embedder(backend)
     db = lancedb.connect(DB_PATH)
     name = f"transcripts_{backend}"
+    refuse_foreign_books(db, "re-ingest books into" if book_filter else "rebuild the transcripts of")
     # Before the recoveries: both guards are reads (`read_index_meta` never
     # recovers), so a run that is going to be refused promotes and drops
     # nothing on its way to saying no.
@@ -685,6 +715,12 @@ def ingest_cards_table(backend: str, cards_dirs: list[Path] | None = None,
     starter subset's — so its cards table holds no card of a book its
     transcripts table does not: a card hit there would name a book no chapter
     read could open."""
+    if not cards_dirs:
+        # The classics' cards, into an index of the reader's own books, would
+        # be cards of books that index does not hold. A folder named with
+        # --cards-dir is the engineer's shelf's path (cards over books `ayl
+        # add` indexed), and is the operator's to name.
+        refuse_foreign_books(lancedb.connect(DB_PATH), "write the demo corpus's cards into")
     cards_dirs = cards_dirs or [CARDS_DIR]
     where = ", ".join(str(folder) for folder in cards_dirs)
     cards = card_files(cards_dirs)

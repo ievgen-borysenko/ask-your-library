@@ -134,3 +134,49 @@ def test_a_single_book_reingest_into_a_pre_ledger_table_migrates_it_first(demo_i
     assert {r["book"] for r in rows} == set(ids)
     for row in rows:
         assert row["book_id"] == ids[row["book"]]
+
+
+# --- the reader's own books are not the demo corpus's to rebuild ------------------
+
+def reader_s_book(db_path):
+    """A ledger row as `ayl add` leaves one: a file reference, not a manifest id."""
+    ledger = open_ledger(lancedb.connect(db_path))
+    book_id = ledger.resolve("My Own Notes", "Me", source_ref="local:books/notes.md")
+    ledger.begin(book_id, key="My Own Notes — Me", source_ref="local:books/notes.md",
+                 embedding_model="fake-embed")
+    ledger.commit(book_id, rows=3)
+
+
+@pytest.mark.parametrize("book", [None, "moby"])
+def test_a_rebuild_into_an_index_holding_the_reader_s_books_is_refused(demo_index, book):
+    """Unset, LIBRARY_DB_PATH is the reader's index; a bare run of this script
+    rebuilt its whole transcripts table from the classics and dropped the
+    books `ayl add` had put there. A `--book` upsert would mix them in."""
+    demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
+    reader_s_book(demo_index)
+    before = lancedb.connect(demo_index).open_table("transcripts_ollama").count_rows()
+    with pytest.raises(SystemExit) as refused:
+        demo.ingest_transcripts_table("ollama", book, ["moby-dick", "emma"])
+    message = str(refused.value.code)
+    assert "My Own Notes — Me" in message and "books `ayl add` indexed" in message
+    assert "LIBRARY_DB_PATH=$AYL_HOME/demo/index" in message and "ayl init --demo" in message
+    assert lancedb.connect(demo_index).open_table("transcripts_ollama").count_rows() == before
+
+
+def test_the_classics_cards_are_refused_there_and_a_named_cards_folder_is_not(demo_index,
+                                                                            tmp_path):
+    """The engineer's shelf writes its own cards over books `ayl add` indexed
+    (`--cards-dir`); only the default, the classics' cards, is refused."""
+    reader_s_book(demo_index)
+    with pytest.raises(SystemExit, match="write the demo corpus's cards into"):
+        demo.ingest_cards_table("ollama")
+    cards = tmp_path / "shelf-cards"
+    cards.mkdir()
+    (cards / "notes.md").write_text("# My Own Notes — Me\n\n## Plot\n\n- a thing\n")
+    demo.ingest_cards_table("ollama", [cards])
+    assert lancedb.connect(demo_index).open_table("cards_ollama").count_rows() > 0
+
+
+def test_an_index_with_only_the_demo_corpus_s_books_is_rebuilt_as_before(demo_index):
+    demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
+    demo.ingest_transcripts_table("ollama", None, ["moby-dick", "emma"])
