@@ -11,6 +11,7 @@ import struct
 import sys
 import threading
 import time
+import tracemalloc
 import zipfile
 
 import lancedb
@@ -418,6 +419,104 @@ def test_too_many_members_are_refused(tmp_path, monkeypatch):
     monkeypatch.setattr(epub, "MAX_MEMBERS", 8)
     with pytest.raises(epub.EpubRefused, match="too many files"):
         epub.read_epub(make_epub(tmp_path / "b.epub", three_chapters()))
+
+
+# --- the archive's directory, before zipfile reads it -----------------------------------
+
+def many_entries(path, n: int):
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_STORED) as zf:
+        for i in range(n):
+            zf.writestr(f"m/{i:05d}", b"")
+    return path
+
+
+def eocd_at(data: bytes) -> int:
+    return data.rfind(b"PK\x05\x06")
+
+
+def peak_bytes(call) -> int:
+    tracemalloc.start()
+    try:
+        call()
+    finally:
+        peak = tracemalloc.get_traced_memory()[1]
+        tracemalloc.stop()
+    return peak
+
+
+def refused(path):
+    with pytest.raises(epub.EpubRefused) as refusal:
+        epub.read_epub(path)
+    return str(refusal.value)
+
+
+def test_a_directory_over_the_cap_is_refused_before_zipfile_reads_it(tmp_path):
+    """20,000 entries in under 2 MiB: refusing it after `zipfile` opened it
+    took over 10 MiB, one ZipInfo an entry. Refused from the end record now,
+    with memory flat."""
+    path = many_entries(tmp_path / "many.epub", 20_000)
+    peak = peak_bytes(lambda: refused(path))
+    assert refused(path) == "too many files in the archive (20000, the limit is 10000)"
+    assert peak < 2 * 1024 * 1024, peak
+
+
+def test_a_count_that_lies_low_is_caught_by_walking_the_directory(tmp_path):
+    """`zipfile` walks the directory's bytes, not its declared count, so a
+    count of 3 over 20,000 entries is no protection; the walk counts headers
+    without allocating per entry."""
+    path = many_entries(tmp_path / "many.epub", 20_000)
+    data = bytearray(path.read_bytes())
+    at = eocd_at(data)
+    struct.pack_into("<2H", data, at + 8, 3, 3)
+    path.write_bytes(bytes(data))
+    peak = peak_bytes(lambda: refused(path))
+    assert refused(path) == "too many files in the archive (over 10000, the limit is 10000)"
+    assert peak < 2 * 1024 * 1024, peak
+
+
+def zip64_declaring(path, count: int):
+    """A small valid EPUB whose end record defers to a ZIP64 end record that
+    declares `count` entries — the shape a million-entry archive has."""
+    data = make_epub(path, three_chapters()).read_bytes()
+    at = eocd_at(data)
+    _, _, _, _, total, cd_size, cd_offset, _ = struct.unpack("<4s4H2LH", data[at:at + 22])
+    zip64 = struct.pack("<4sQ2H2L4Q", b"PK\x06\x06", 44, 45, 45, 0, 0, count, count,
+                        cd_size, cd_offset)
+    locator = struct.pack("<4sLQL", b"PK\x06\x07", 0, at, 1)
+    eocd = bytearray(data[at:])
+    struct.pack_into("<2H", eocd, 8, 0xFFFF, 0xFFFF)
+    path.write_bytes(data[:at] + zip64 + locator + bytes(eocd))
+    return path
+
+
+@pytest.mark.parametrize("count", [1_000_000, 2 ** 40])
+def test_a_zip64_end_record_declaring_a_huge_count_is_refused(tmp_path, count):
+    path = zip64_declaring(tmp_path / "z.epub", count)
+    peak = peak_bytes(lambda: refused(path))
+    assert refused(path) == f"too many files in the archive ({count}, the limit is 10000)"
+    assert peak < 1024 * 1024, peak
+
+
+def test_a_zip64_end_record_with_an_honest_count_still_opens(tmp_path):
+    with zipfile.ZipFile(make_epub(tmp_path / "plain.epub", three_chapters())) as zf:
+        honest = len(zf.infolist())
+    book = epub.read_epub(zip64_declaring(tmp_path / "z.epub", honest))
+    assert titles(book) == ["Chapter One", "Chapter Two", "Chapter Three"]
+
+
+def test_a_count_the_file_is_too_small_to_hold_is_malformed(tmp_path):
+    path = make_epub(tmp_path / "b.epub", three_chapters())
+    data = bytearray(path.read_bytes())
+    struct.pack_into("<2H", data, eocd_at(data) + 8, 9_000, 9_000)
+    path.write_bytes(bytes(data))
+    assert refused(path) == ("malformed: its directory declares more files than the archive "
+                             "could hold")
+
+
+def test_a_directory_larger_than_its_cap_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setattr(epub, "MAX_DIRECTORY_BYTES", 256)
+    assert refused(make_epub(tmp_path / "b.epub", three_chapters())).startswith(
+        "the archive's directory is larger than")
 
 
 def _level(i: int) -> str:

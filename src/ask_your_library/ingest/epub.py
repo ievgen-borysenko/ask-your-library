@@ -37,6 +37,12 @@ An EPUB is untrusted input. What is bounded, and how:
 - the archive is read member by member, by name, into memory; nothing is ever
   extracted to disk, and a member name that is absolute or contains `..` makes
   the whole file refused;
+- the archive's directory is checked before `zipfile` reads it: the entry
+  count its end record declares (ZIP64 included), whether the file is large
+  enough to hold that many entries, the directory's size, and the entries the
+  directory actually holds, counted without allocating anything per entry —
+  so a directory of a million entries is refused before a single `ZipInfo`
+  exists;
 - member count, the declared size of each member and of all of them, and the
   bytes actually read from each member are capped (`MAX_MEMBERS`,
   `MAX_MEMBER_BYTES`, `MAX_TOTAL_BYTES`): a zip bomb is refused before it is
@@ -69,6 +75,7 @@ says which file and why, and nothing of what is in it.
 import codecs
 import posixpath
 import re
+import struct
 import zipfile
 import zlib
 from collections import Counter
@@ -88,6 +95,15 @@ from .chapters import FRONT_MATTER_SECTION, FULL_TEXT_SECTION, unique_titles
 MAX_MEMBERS = 10_000
 MAX_MEMBER_BYTES = 64 * 1024 * 1024          # declared and actually read, per member
 MAX_TOTAL_BYTES = 512 * 1024 * 1024          # declared, all members together
+# The central directory is read whole by `zipfile`; 16 MiB is over 1.6 KiB an
+# entry at MAX_MEMBERS, several times what a real EPUB's entry takes.
+MAX_DIRECTORY_BYTES = 16 * 1024 * 1024
+
+# Zip record signatures and fixed sizes (APPNOTE 4.3).
+EOCD_SIG, EOCD_LEN = b"PK\x05\x06", 22
+ZIP64_LOCATOR_SIG, ZIP64_LOCATOR_LEN = b"PK\x06\x07", 20
+ZIP64_EOCD_SIG, ZIP64_EOCD_LEN = b"PK\x06\x06", 56
+CENTRAL_SIG, CENTRAL_LEN = b"PK\x01\x02", 46
 
 CONTAINER = "META-INF/container.xml"
 ENCRYPTION = "META-INF/encryption.xml"
@@ -136,19 +152,84 @@ def unsafe_name(name: str) -> bool:
     return any(part == ".." for part in re.split(r"[/\\]", name))
 
 
+def too_many(count: int | str) -> EpubRefused:
+    return EpubRefused(f"too many files in the archive ({count}, the limit is {MAX_MEMBERS})")
+
+
+def check_directory(fp) -> None:
+    """Refuse an archive whose directory is too large BEFORE `zipfile` reads it.
+
+    `zipfile.ZipFile` materialises one `ZipInfo` per central-directory entry
+    while it opens the file, so a count checked afterwards (`Archive`) is
+    checked after the memory is spent — a 20,000-entry archive of under 2 MiB
+    took over 10 MiB to refuse. Here the end record is read from the file's
+    tail and three numbers are checked first: the declared entry count (from
+    the ZIP64 end record when there is one), whether the file is large enough
+    to hold that many entries (46 bytes each at least), and the directory's
+    declared size. The count alone can lie, and `zipfile` walks the
+    directory's BYTES, not its count; so the entries are then counted over the
+    same bytes the same way `zipfile` will walk them — a header at a time, with
+    nothing allocated per entry — and the walk stops at MAX_MEMBERS + 1.
+
+    Anything that does not parse is left for `zipfile` to call damaged: this
+    function only ever refuses on numbers, it never decides that a file is a
+    zip archive."""
+    fp.seek(0, 2)
+    size = fp.tell()
+    tail_len = min(size, 0xFFFF + EOCD_LEN)
+    fp.seek(size - tail_len)
+    tail = fp.read(tail_len)
+    pos = tail.rfind(EOCD_SIG)
+    while pos >= 0 and pos + EOCD_LEN > len(tail):
+        pos = tail.rfind(EOCD_SIG, 0, pos)
+    if pos < 0:
+        return
+    eocd_at = size - tail_len + pos
+    _, _, _, on_disk, total, cd_size, _, _ = struct.unpack("<4s4H2LH", tail[pos:pos + EOCD_LEN])
+    count, record_at = max(on_disk, total), eocd_at
+    locator_at = eocd_at - ZIP64_LOCATOR_LEN
+    if locator_at >= 0:
+        fp.seek(locator_at)
+        locator = fp.read(ZIP64_LOCATOR_LEN)
+        zip64_at = locator_at - ZIP64_EOCD_LEN       # where `zipfile` looks for it
+        if locator[:4] == ZIP64_LOCATOR_SIG and zip64_at >= 0:
+            fp.seek(zip64_at)
+            record = fp.read(ZIP64_EOCD_LEN)
+            if record[:4] == ZIP64_EOCD_SIG:
+                fields = struct.unpack("<4sQ2H2L4Q", record)
+                count, cd_size, record_at = max(fields[6], fields[7]), fields[8], zip64_at
+    if count > MAX_MEMBERS:
+        raise too_many(count)
+    if count * CENTRAL_LEN > size:
+        raise EpubRefused("malformed: its directory declares more files than the archive "
+                          "could hold")
+    if cd_size > MAX_DIRECTORY_BYTES:
+        raise EpubRefused(f"the archive's directory is larger than "
+                          f"{MAX_DIRECTORY_BYTES // (1024 * 1024)} MiB")
+    cd_at = record_at - cd_size
+    if cd_at < 0:
+        return
+    fp.seek(cd_at)
+    directory = fp.read(cd_size)
+    seen = at = 0
+    while at + CENTRAL_LEN <= len(directory) and directory[at:at + 4] == CENTRAL_SIG:
+        name_len, extra_len, comment_len = struct.unpack_from("<3H", directory, at + 28)
+        at += CENTRAL_LEN + name_len + extra_len + comment_len
+        seen += 1
+        if seen > MAX_MEMBERS:
+            raise too_many(f"over {MAX_MEMBERS}")
+
+
 class Archive:
     """A zip archive read by member name into memory, within the caps."""
 
     def __init__(self, zf: zipfile.ZipFile):
         infos = zf.infolist()
-        # By the time this count is taken, `zipfile` has already read the whole
-        # central directory into ZipInfo objects: the memory that costs is
-        # bounded by the file's own size (a few hundred bytes an entry, so a
-        # 300,000-entry archive is ~160 MB), not by this cap. What the cap
-        # bounds is everything after it — the per-member checks and reads.
+        # The second line of the same check: `check_directory` has already
+        # refused a directory over the cap before `zipfile` read it, so this
+        # holds only if the two ever count differently.
         if len(infos) > MAX_MEMBERS:
-            raise EpubRefused(f"too many files in the archive ({len(infos)}, "
-                              f"the limit is {MAX_MEMBERS})")
+            raise too_many(len(infos))
         total = 0
         for info in infos:
             if unsafe_name(info.filename):
@@ -571,25 +652,27 @@ def build_sections(documents: list[tuple[str, str, bool]], titles: dict[str, str
 def read_epub(path: Path) -> EpubBook:
     """The whole read. Raises `EpubRefused` for anything that is not indexed."""
     try:
-        with zipfile.ZipFile(path) as zf:
-            archive = Archive(zf)
-            refuse_drm(archive)
-            package = read_package(archive, package_path(archive))
-            ordered = ([(m, True) for m, linear in package.spine if linear]
-                       + [(m, False) for m, linear in package.spine if not linear])
-            # The contents page is not text of the book: its entries are the
-            # section titles already.
-            ordered = [(m, linear) for m, linear in ordered if m != package.nav]
-            if not ordered:
-                raise EpubRefused("no readable spine: it lists no XHTML/HTML document")
-            documents, seen = [], set()
-            for member, linear in ordered:
-                if member in seen:
-                    continue
-                seen.add(member)
-                documents.append((member, extract_text(read_text_member(archive, member)),
-                                  linear))
-            sections = build_sections(documents, titles_by_document(archive, package))
+        with open(path, "rb") as fp:
+            check_directory(fp)
+            with zipfile.ZipFile(fp) as zf:
+                archive = Archive(zf)
+                refuse_drm(archive)
+                package = read_package(archive, package_path(archive))
+                ordered = ([(m, True) for m, linear in package.spine if linear]
+                           + [(m, False) for m, linear in package.spine if not linear])
+                # The contents page is not text of the book: its entries are the
+                # section titles already.
+                ordered = [(m, linear) for m, linear in ordered if m != package.nav]
+                if not ordered:
+                    raise EpubRefused("no readable spine: it lists no XHTML/HTML document")
+                documents, seen = [], set()
+                for member, linear in ordered:
+                    if member in seen:
+                        continue
+                    seen.add(member)
+                    documents.append((member, extract_text(read_text_member(archive, member)),
+                                      linear))
+                sections = build_sections(documents, titles_by_document(archive, package))
     except zipfile.BadZipFile as error:
         raise EpubRefused("malformed: not a readable zip archive") from error
     except (UnicodeError, ValueError) as error:
