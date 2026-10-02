@@ -474,34 +474,66 @@ def test_a_count_that_lies_low_is_caught_by_walking_the_directory(tmp_path):
     assert peak < 2 * 1024 * 1024, peak
 
 
-def zip64_declaring(path, count: int):
-    """A small valid EPUB whose end record defers to a ZIP64 end record that
-    declares `count` entries — the shape a million-entry archive has."""
-    data = make_epub(path, three_chapters()).read_bytes()
+ZIP64_REFUSAL = "ZIP64 archives are not read (an EPUB never needs one)"
+
+
+def as_zip64(path, data: bytes, count: int, *, sector: bytes = b"",
+             legacy=(0xFFFF, 0xFFFF, None, None)):
+    """`data` rewritten to defer to a ZIP64 end record declaring `count`
+    entries, with an extensible-data sector of `sector`; `legacy` sets the old
+    end record's two counts, directory size and offset (None keeps a field)."""
     at = eocd_at(data)
-    _, _, _, _, total, cd_size, cd_offset, _ = struct.unpack("<4s4H2LH", data[at:at + 22])
-    zip64 = struct.pack("<4sQ2H2L4Q", b"PK\x06\x06", 44, 45, 45, 0, 0, count, count,
-                        cd_size, cd_offset)
+    _, _, _, _, _, cd_size, cd_offset, _ = struct.unpack("<4s4H2LH", data[at:at + 22])
+    zip64 = struct.pack("<4sQ2H2L4Q", b"PK\x06\x06", 44 + len(sector), 45, 45, 0, 0,
+                        count, count, cd_size, cd_offset) + sector
     locator = struct.pack("<4sLQL", b"PK\x06\x07", 0, at, 1)
     eocd = bytearray(data[at:])
-    struct.pack_into("<2H", eocd, 8, 0xFFFF, 0xFFFF)
+    for offset, fmt, value in zip((8, 10, 12, 16), ("<H", "<H", "<L", "<L"), legacy):
+        if value is not None:
+            struct.pack_into(fmt, eocd, offset, value)
     path.write_bytes(data[:at] + zip64 + locator + bytes(eocd))
     return path
 
 
-@pytest.mark.parametrize("count", [1_000_000, 2 ** 40])
-def test_a_zip64_end_record_declaring_a_huge_count_is_refused(tmp_path, count):
-    path = zip64_declaring(tmp_path / "z.epub", count)
+def test_a_zip64_archive_with_an_extensible_sector_is_refused_before_zipfile_reads_it(
+        tmp_path):
+    """The shape that got past a check which parsed ZIP64 with a fixed record
+    size: a 64-byte extensible-data sector, 20,000 real entries and the old
+    end record's fields all zero. ZIP64 is not parsed at all now, so its
+    record's length cannot matter: the locator alone refuses it."""
+    data = many_entries(tmp_path / "many.zip", 20_000).read_bytes()
+    path = as_zip64(tmp_path / "z.epub", data, 20_000, sector=b"\x00" * 64,
+                    legacy=(0, 0, 0, 0))
     peak = peak_bytes(lambda: refused(path))
-    assert refused(path) == f"too many files in the archive ({count}, the limit is 10000)"
+    assert refused(path) == ZIP64_REFUSAL
     assert peak < 1024 * 1024, peak
 
 
-def test_a_zip64_end_record_with_an_honest_count_still_opens(tmp_path):
-    with zipfile.ZipFile(make_epub(tmp_path / "plain.epub", three_chapters())) as zf:
+@pytest.mark.parametrize("count", [1_000_000, 2 ** 40])
+def test_a_zip64_end_record_declaring_a_huge_count_is_refused(tmp_path, count):
+    data = make_epub(tmp_path / "plain.epub", three_chapters()).read_bytes()
+    path = as_zip64(tmp_path / "z.epub", data, count)
+    peak = peak_bytes(lambda: refused(path))
+    assert refused(path) == ZIP64_REFUSAL
+    assert peak < 1024 * 1024, peak
+
+
+def test_a_zip64_archive_is_refused_even_with_an_honest_count(tmp_path):
+    plain = make_epub(tmp_path / "plain.epub", three_chapters())
+    with zipfile.ZipFile(plain) as zf:
         honest = len(zf.infolist())
-    book = epub.read_epub(zip64_declaring(tmp_path / "z.epub", honest))
-    assert titles(book) == ["Chapter One", "Chapter Two", "Chapter Three"]
+    assert refused(as_zip64(tmp_path / "z.epub", plain.read_bytes(), honest)) == ZIP64_REFUSAL
+
+
+@pytest.mark.parametrize("offset, fmt, value", [
+    (8, "<H", 0xFFFF), (10, "<H", 0xFFFF), (12, "<L", 0xFFFFFFFF), (16, "<L", 0xFFFFFFFF)])
+def test_a_zip64_escape_value_in_the_end_record_is_refused(tmp_path, offset, fmt, value):
+    """No locator, but the old end record says "see ZIP64" in one field."""
+    path = make_epub(tmp_path / "b.epub", three_chapters())
+    data = bytearray(path.read_bytes())
+    struct.pack_into(fmt, data, eocd_at(data) + offset, value)
+    path.write_bytes(bytes(data))
+    assert refused(path) == ZIP64_REFUSAL
 
 
 def test_a_count_the_file_is_too_small_to_hold_is_malformed(tmp_path):

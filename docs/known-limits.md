@@ -289,7 +289,8 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   `Full text` section. The retrieval and answer-quality numbers under
   [Evaluation](evaluation.md) were measured on the demo corpus, not on an arbitrary folder.
 - **An EPUB is read as a reflowable book of XHTML, and only that.** No **DRM**: a protected file
-  is refused with one line, and nothing is decrypted. No **MOBI or AZW** (Kindle formats): convert
+  is refused with one line, and nothing is decrypted. No **ZIP64** archive: an EPUB never needs
+  one, and one is refused before it is opened. No **MOBI or AZW** (Kindle formats): convert
   a DRM-free one to EPUB first. No **fixed layout**: a pre-paginated EPUB (a picture book, a comic)
   is read as if it reflowed, so text placed over a page image comes out in markup order, and a
   book that is only images has no text and is refused. **Footnotes are inline**: a note's text

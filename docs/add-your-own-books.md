@@ -285,7 +285,8 @@ the folder is indexed as usual:
 - **Too large**: more than 10,000 files in the archive, a directory over 16 MiB, any one file
   over 64 MiB uncompressed, or over 512 MiB uncompressed in total. The file count is checked from
   the archive's end record and its directory, before the archive is opened, so a directory of a
-  million entries costs no memory to refuse. What is read is read into memory by name — nothing is ever
+  million entries costs no memory to refuse. A **ZIP64** archive is refused outright: ZIP64 exists
+  for more than 65,535 files or a file over 4 GiB, which no EPUB needs. What is read is read into memory by name — nothing is ever
   extracted to disk — and every read is cut off at the per-file cap, whatever the archive claims.
 - **No text**: a spine with no XHTML/HTML document, or one whose documents hold no text (a book of
   images).

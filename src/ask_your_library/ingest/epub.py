@@ -37,12 +37,12 @@ An EPUB is untrusted input. What is bounded, and how:
 - the archive is read member by member, by name, into memory; nothing is ever
   extracted to disk, and a member name that is absolute or contains `..` makes
   the whole file refused;
-- the archive's directory is checked before `zipfile` reads it: the entry
-  count its end record declares (ZIP64 included), whether the file is large
-  enough to hold that many entries, the directory's size, and the entries the
-  directory actually holds, counted without allocating anything per entry —
-  so a directory of a million entries is refused before a single `ZipInfo`
-  exists;
+- the archive's directory is checked before `zipfile` reads it: a ZIP64
+  archive is refused outright (an EPUB never needs one), and then the entry
+  count the end record declares, whether the file is large enough to hold
+  that many entries, the directory's size, and the entries the directory
+  actually holds, counted without allocating anything per entry — so a
+  directory of a million entries is refused before a single `ZipInfo` exists;
 - member count, the declared size of each member and of all of them, and the
   bytes actually read from each member are capped (`MAX_MEMBERS`,
   `MAX_MEMBER_BYTES`, `MAX_TOTAL_BYTES`): a zip bomb is refused before it is
@@ -102,7 +102,6 @@ MAX_DIRECTORY_BYTES = 16 * 1024 * 1024
 # Zip record signatures and fixed sizes (APPNOTE 4.3).
 EOCD_SIG, EOCD_LEN = b"PK\x05\x06", 22
 ZIP64_LOCATOR_SIG, ZIP64_LOCATOR_LEN = b"PK\x06\x07", 20
-ZIP64_EOCD_SIG, ZIP64_EOCD_LEN = b"PK\x06\x06", 56
 CENTRAL_SIG, CENTRAL_LEN = b"PK\x01\x02", 46
 
 CONTAINER = "META-INF/container.xml"
@@ -163,10 +162,19 @@ def check_directory(fp) -> None:
     while it opens the file, so a count checked afterwards (`Archive`) is
     checked after the memory is spent — a 20,000-entry archive of under 2 MiB
     took over 10 MiB to refuse. Here the end record is read from the file's
-    tail and three numbers are checked first: the declared entry count (from
-    the ZIP64 end record when there is one), whether the file is large enough
-    to hold that many entries (46 bytes each at least), and the directory's
-    declared size. The count alone can lie, and `zipfile` walks the
+    tail first.
+
+    A ZIP64 archive is refused before anything else: a ZIP64 locator before
+    the end record, or any end-record field at its ZIP64 escape value (0xFFFF,
+    0xFFFFFFFF). ZIP64 exists for more than 65,535 entries or a member or
+    archive over 4 GiB, both far past the caps here, so an EPUB never needs
+    it — and its end record has an extensible-data sector of any length, which
+    a check that assumed a fixed size let a 20,000-entry directory past. Not
+    parsing it at all is the bound.
+
+    Then three numbers: the declared entry count, whether the file is large
+    enough to hold that many entries (46 bytes each at least), and the
+    directory's declared size. The count alone can lie, and `zipfile` walks the
     directory's BYTES, not its count; so the entries are then counted over the
     same bytes the same way `zipfile` will walk them — a header at a time, with
     nothing allocated per entry — and the walk stops at MAX_MEMBERS + 1.
@@ -185,19 +193,17 @@ def check_directory(fp) -> None:
     if pos < 0:
         return
     eocd_at = size - tail_len + pos
-    _, _, _, on_disk, total, cd_size, _, _ = struct.unpack("<4s4H2LH", tail[pos:pos + EOCD_LEN])
-    count, record_at = max(on_disk, total), eocd_at
+    _, disk, cd_disk, on_disk, total, cd_size, cd_offset, _ = struct.unpack(
+        "<4s4H2LH", tail[pos:pos + EOCD_LEN])
     locator_at = eocd_at - ZIP64_LOCATOR_LEN
+    locator = b""
     if locator_at >= 0:
         fp.seek(locator_at)
-        locator = fp.read(ZIP64_LOCATOR_LEN)
-        zip64_at = locator_at - ZIP64_EOCD_LEN       # where `zipfile` looks for it
-        if locator[:4] == ZIP64_LOCATOR_SIG and zip64_at >= 0:
-            fp.seek(zip64_at)
-            record = fp.read(ZIP64_EOCD_LEN)
-            if record[:4] == ZIP64_EOCD_SIG:
-                fields = struct.unpack("<4sQ2H2L4Q", record)
-                count, cd_size, record_at = max(fields[6], fields[7]), fields[8], zip64_at
+        locator = fp.read(4)
+    if (locator == ZIP64_LOCATOR_SIG or 0xFFFF in (disk, cd_disk, on_disk, total)
+            or 0xFFFFFFFF in (cd_size, cd_offset)):
+        raise EpubRefused("ZIP64 archives are not read (an EPUB never needs one)")
+    count = max(on_disk, total)
     if count > MAX_MEMBERS:
         raise too_many(count)
     if count * CENTRAL_LEN > size:
@@ -206,7 +212,7 @@ def check_directory(fp) -> None:
     if cd_size > MAX_DIRECTORY_BYTES:
         raise EpubRefused(f"the archive's directory is larger than "
                           f"{MAX_DIRECTORY_BYTES // (1024 * 1024)} MiB")
-    cd_at = record_at - cd_size
+    cd_at = eocd_at - cd_size
     if cd_at < 0:
         return
     fp.seek(cd_at)

@@ -1417,7 +1417,9 @@ are read by name into memory and never extracted, so a member path is never a fi
 absolute or `..` member name refuses the file all the same, since nothing legitimate needs one;
 member count, per-member and total uncompressed size are capped by three constants, and every read
 is cut off at the per-member cap whatever the archive's header claims; a reference that resolves
-outside the archive root is ignored. XML is parsed by ElementTree, which never fetches an external
+outside the archive root is ignored. A ZIP64 archive is refused before `zipfile` opens it, rather
+than parsed: an EPUB never needs one, and its end record's variable-length sector is a format
+detail a bound should not depend on. XML is parsed by ElementTree, which never fetches an external
 entity, and a package file that declares any entity is refused before a parser sees it — a
 literal check over the whole decoded document, so no DOCTYPE shape hides one. Content documents
 are read by `html.parser`, which never expands a declared entity, so a DTD there is dropped, not
