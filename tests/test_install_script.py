@@ -432,21 +432,24 @@ def test_a_loopback_ollama_host_passes_the_gate(sandbox, bind):
 
 @mac_only
 @pytest.mark.skipif(os.geteuid() == 0, reason="root reads a chmod 000 file anyway")
-def test_a_failed_env_write_leaves_no_env_behind(sandbox):
-    """`local_env > .env` truncated the file into existence before sed produced a
-    byte, so a sed that failed left an empty .env — which the next run refuses to
-    overwrite and config.py resolves to the hosted defaults. The fully local run
-    became a hosted one, silently. Now the write lands beside it and only a
-    complete file is moved into place."""
-    root, _, _ = sandbox
+def test_an_unreadable_env_example_stops_the_run_before_anything(sandbox):
+    """`local_env > .env` once truncated the file into existence before sed
+    produced a byte, and an unreadable .env.example was the way to show it;
+    the write still lands beside .env and only a complete file is moved into
+    place. Since F9-installer-unreadable-env the run does not get that far: the
+    file it writes .env from is checked before step 3, and nothing is
+    installed or written."""
+    root, records, _ = sandbox
     reaches_the_start_path(sandbox)
     (root / ".env.example").chmod(0o000)
     try:
         result = real_run(sandbox, "--no-demo")
     finally:
         (root / ".env.example").chmod(0o644)
-    assert result.returncode == 1, result.stdout
-    assert "no usable .env" in result.stderr
+    assert result.returncode == 2, result.stdout
+    assert ".env.example cannot be read (PermissionError): this run writes .env from it" \
+        in result.stderr
+    assert invoked(records) == []
     assert not (root / ".env").exists(), "a .env was left behind by a failed write"
     assert [p.name for p in root.glob(".env.tmp.*")] == []
 
@@ -2015,6 +2018,10 @@ SAME_INPUT = [
     ("config-env-unreadable", False, {}, None, "LLM_BACKEND=ollama\n"),
     ("config-env-interpolation", False, {}, None, "OLLAMA_URL=${SOMEWHERE}\n"),
     ("config-env-line-without-equals", False, {}, None, "LLM_BACKEND\n"),
+    # The project .env (F9-installer-unreadable-env): the installer used to read
+    # it with `cat ... 2>/dev/null || true` and judge the empty result.
+    ("dotenv-unreadable", False, {}, "LLM_BACKEND=ollama\n"),
+    ("dotenv-not-utf8", False, {}, "LLM_BACKEND=ollama\n"),
 ]
 
 
@@ -2035,11 +2042,17 @@ def test_what_ayl_init_refuses_the_installer_refuses_before_installing(sandbox, 
     written = sorted(home.rglob("*"))
     if dotenv is not None:
         (root / ".env").write_text(dotenv)
-    before = (root / ".env").read_text() if dotenv is not None else None
+        if case[0] == "dotenv-unreadable":
+            (root / ".env").chmod(0)
+        if case[0] == "dotenv-not-utf8":
+            (root / ".env").write_bytes(b"LLM_BACKEND=oll\xffama\n")
+    before = (root / ".env").read_bytes() if case[0] != "dotenv-unreadable" and \
+        dotenv is not None else None
     installer = real_run(sandbox, *(["--hosted"] if hosted else []), **exported)
     assert installer.returncode == 2, installer.stdout + installer.stderr
     assert invoked(records) == [], "a tool ran before the refusal"
-    assert ((root / ".env").read_text() if (root / ".env").exists() else None) == before
+    if case[0] != "dotenv-unreadable":
+        assert ((root / ".env").read_bytes() if (root / ".env").exists() else None) == before
 
     argv = ["init", "--no-demo", *(["--mode", "hosted"] if hosted else [])]
     init = run_fresh("import sys\nfrom ask_your_library import ayl\n"
@@ -2055,6 +2068,12 @@ def test_what_ayl_init_refuses_the_installer_refuses_before_installing(sandbox, 
     if case[0] == "config-env-unreadable":
         assert "config.env cannot be read" in init.stderr
         assert "config.env cannot be read" in installer.stderr
+    if case[0].startswith("dotenv-"):
+        kind = "PermissionError" if case[0] == "dotenv-unreadable" else "UnicodeDecodeError"
+        line = (f".env cannot be read ({kind}): every command reads it at its start. Fix its "
+                f"permissions or its encoding (UTF-8), or move it aside, and run again.")
+        assert "Traceback" not in init.stderr
+        assert line in init.stderr and line in installer.stderr
     if case[0] in ("config-env-interpolation", "config-env-line-without-equals"):
         rule = "Write config.env as plain NAME=value lines (every line with an =, no ${...})"
         assert rule in init.stderr and rule in installer.stderr

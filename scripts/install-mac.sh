@@ -41,6 +41,24 @@ note() { printf '       %s\n' "$1"; }
 plan() { printf '       would %s\n' "$1"; }
 fail() { printf 'error: %s\n' "$1" >&2; }
 
+# A configuration file this script must read, refused before anything is
+# installed when it cannot be read or is not UTF-8 — the two failures
+# python-dotenv raises on (PermissionError, UnicodeDecodeError). A read
+# swallowed by `2>/dev/null || true` used to come back empty and be judged as
+# an empty, valid configuration. $2 is what the file is to this run; for the
+# files config.py reads, the line is the one config.py prints.
+refuse_unreadable() {
+    local path="$1" what="$2" kind=""
+    if [ ! -r "$path" ]; then
+        kind="PermissionError"
+    elif ! iconv -f UTF-8 -t UTF-8 "$path" >/dev/null 2>&1; then
+        kind="UnicodeDecodeError"
+    fi
+    [ -z "$kind" ] && return 0
+    fail "$path cannot be read ($kind): $what. Fix its permissions or its encoding (UTF-8), or move it aside, and run again."
+    exit 2
+}
+
 # The first line of a possibly multi-line value. `| head -1` would be shorter,
 # but `set -o pipefail` turns the SIGPIPE it can send the writer into a failure.
 first_line() { printf '%s\n' "${1%%$'\n'*}"; }
@@ -223,6 +241,8 @@ if [ ! -f pyproject.toml ] || ! grep -q '^name = "ask-your-library"' pyproject.t
     exit 2
 fi
 note "$(pwd)"
+# Read with sed for the defaults below; a failed read would come back empty.
+refuse_unreadable "$PWD/src/ask_your_library/config.py" "this script reads the defaults from it"
 
 # The model names and the endpoint come from the code, so this script cannot
 # pull a model the app will never ask for. Exported value first, then .env, then
@@ -333,13 +353,16 @@ DATA_FLOW_VARS="$BACKEND_VARS $ENDPOINT_VARS $TRACING_VARS $KEY_VARS"
 # judgement is the same either way, and it is the values that changed.
 planned_env_read=1
 if [ -f .env ]; then
-    planned_env="$(cat .env 2>/dev/null || true)"
+    refuse_unreadable "$PWD/.env" "every command reads it at its start"
+    planned_env="$(cat .env)"
     planned_env_source="the .env already in this clone"
 elif [ "$hosted" -eq 1 ]; then
+    refuse_unreadable "$PWD/.env.example" "this run writes .env from it"
     planned_env="$(hosted_env 2>/dev/null || true)"
     planned_env_source="the .env this run writes"
     [ -n "$planned_env" ] || planned_env_read=0
 else
+    refuse_unreadable "$PWD/.env.example" "this run writes .env from it"
     planned_env="$(local_env 2>/dev/null || true)"
     planned_env_source="the .env this run writes"
     [ -n "$planned_env" ] || planned_env_read=0
@@ -701,12 +724,10 @@ esac
 case "$home_dir" in
     "~"*) ;;
     *)
-        if [ -f "$home_dir/config.env" ] && [ ! -r "$home_dir/config.env" ]; then
+        if [ -f "$home_dir/config.env" ]; then
             # config.py would stop at every command's import on it (exit 2):
             # stopped here instead, before anything is installed.
-            fail "$home_dir/config.env cannot be read: every command reads it at its start."
-            fail "Fix its permissions, or move it aside, and re-run."
-            exit 2
+            refuse_unreadable "$home_dir/config.env" "every command reads it at its start"
         fi
         if [ -f "$home_dir/config.env" ]; then
             saved_names="$dotenv_names" saved_source="$planned_env_source"
