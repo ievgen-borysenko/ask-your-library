@@ -904,7 +904,7 @@ def final_status(refused: list[str], known: int, doctor: int | None,
 def next_steps(demo_index: Path | None, llm: str, reader_index: Path) -> None:
     say("Next steps:")
     say(f"  {command('ayl add ~/books')}")
-    say(f"      index your own .txt / .md books into {reader_index}, then ask:")
+    say(f"      index your own .txt / .md / .epub books into {reader_index}, then ask:")
     say(f"      {command('ayl ask')} \"...\"")
     if demo_index is not None:
         say(f"  LIBRARY_DB_PATH={quoted(demo_index)} {command('ayl ask')} \"{FIRST_QUESTION}\"")
