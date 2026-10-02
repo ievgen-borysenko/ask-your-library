@@ -32,11 +32,19 @@ def foreign_books(db, manifest_keys: set[str]) -> list[str]:
     for name in table_names(db):
         if not name.startswith(("transcripts_", "cards_")):
             continue
-        table = db.open_table(name)
-        if table.count_rows() and "book" not in table.schema.names:
+        try:
+            table = db.open_table(name)
+            keyless = table.count_rows() and "book" not in table.schema.names
+            keys = set() if keyless else set(rows_by_book(db, name))
+        except Exception:
+            # A table that cannot be read cannot be shown to be the demo
+            # corpus's: counted as foreign, the safe way round.
+            found.add(f"{name} (unreadable)")
+            continue
+        if keyless:
             found.add(NO_KEY)
             continue
-        found |= {key or NO_KEY for key in rows_by_book(db, name)} - set(manifest_keys)
+        found |= {key or NO_KEY for key in keys} - set(manifest_keys)
     for row in open_ledger(db).all_rows():
         if not str(row.get("source_ref") or "").startswith("manifest:"):
             found.add(str(row.get("key") or row.get("title") or NO_KEY))

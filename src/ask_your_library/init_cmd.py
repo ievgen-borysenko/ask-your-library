@@ -380,6 +380,13 @@ def demo_state(path: Path, backend: str, wanted: dict[str, str]) -> tuple[str, s
     its ledger (`ingest.foreign`, the demo script's own rule) — rebuilding
     the table would replace them."""
     table = f"transcripts_{backend}"
+    # Whose books the folder holds is asked first, of every table in it —
+    # staging ones included — by the demo script's own rule (`ingest.foreign`):
+    # a folder holding only a foreign staging table is not "absent", it is
+    # what the script would refuse to build over.
+    if path.is_dir() and REPO_ROOT and foreign_books(lancedb.connect(path),
+                                                     set(manifest_books(None).values())):
+        return "foreign", "it holds books that are not the demo corpus's"
     if not (path / f"{table}.lance").is_dir():
         built = (p.name[:-len(".lance")] for p in path.glob("transcripts_*.lance")) \
             if path.is_dir() else ()
@@ -388,10 +395,6 @@ def demo_state(path: Path, backend: str, wanted: dict[str, str]) -> tuple[str, s
             return "other_backend", ", ".join(others)
         return "absent", ""
     db = lancedb.connect(path)
-    # The demo script's own rule (`ingest.foreign`), so the two cannot
-    # disagree about whose books a folder holds.
-    if REPO_ROOT and foreign_books(db, set(manifest_books(None).values())):
-        return "foreign", "it holds books that are not the demo corpus's"
     rows = open_ledger(db).all_rows()
     present = set(rows_by_book(db, table))
 

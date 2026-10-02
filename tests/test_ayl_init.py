@@ -611,7 +611,9 @@ def test_what_an_existing_folder_is_as_a_demo_library(tmp_path):
     wanted = {note: MANIFEST_KEYS[note] for note in STARTER}
     assert init_cmd.demo_state(tmp_path / "none", "ollama", wanted)[0] == "absent"
     other = tmp_path / "other"
-    (other / "transcripts_openrouter.lance").mkdir(parents=True)
+    other.mkdir()
+    lancedb.connect(other).create_table("transcripts_openrouter", [
+        {"chunk_id": "1", "book": MANIFEST_KEYS["meditations"], "text": "t"}])
     assert init_cmd.demo_state(other, "ollama", wanted) == ("other_backend",
                                                             "transcripts_openrouter")
     demo_library(tmp_path / "partial", STARTER[:2])
@@ -631,7 +633,8 @@ def test_an_interrupted_first_build_s_staging_table_is_not_another_backend(machi
     and no built table; the rerun has to resume it, not refuse it."""
     demo = machine.home / "demo" / "index"
     demo.mkdir(parents=True)
-    lancedb.connect(demo).create_table("transcripts_ollama__staging", [{"x": 1}])
+    lancedb.connect(demo).create_table("transcripts_ollama__staging", [
+        {"chunk_id": "1", "book": MANIFEST_KEYS["meditations"], "text": "t"}])
     assert init_cmd.demo_state(demo, "ollama", {n: MANIFEST_KEYS[n] for n in STARTER}) == (
         "absent", "")
     machine.check_status = 0
@@ -1101,3 +1104,19 @@ def test_a_demo_library_stamped_by_an_older_chunker_is_rebuilt_by_init(machine):
                                {n: MANIFEST_KEYS[n] for n in STARTER})[0] == "partial"
     machine.check_status = 0
     assert init("--demo") == 0 and machine.builds == [(folder, "ollama", False)]
+
+
+def test_a_folder_holding_only_a_foreign_staging_table_is_foreign(machine, capsys):
+    """F8-foreign-staging-state: init called it "absent", started the build,
+    the script refused, and init said the build "resumes"."""
+    folder = machine.home / "demo" / "index"
+    folder.mkdir(parents=True)
+    lancedb.connect(folder).create_table(
+        "transcripts_ollama__staging",
+        [{"chunk_id": "m1", "book": "My Own Notes — Me", "text": "t"}])
+    assert init_cmd.demo_state(folder, "ollama", {n: MANIFEST_KEYS[n] for n in STARTER}) == (
+        "foreign", "it holds books that are not the demo corpus's")
+    assert init("--demo") == preflight.EXIT_NOT_READY
+    err = capsys.readouterr().err
+    assert "is not built over: it holds books that are not the demo corpus's" in err
+    assert "resumes" not in err and machine.builds == []
