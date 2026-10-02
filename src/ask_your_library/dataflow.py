@@ -17,7 +17,6 @@ import os
 import re
 from urllib.parse import urlsplit
 
-from .sanitize import strip_control_chars
 
 BACKEND_VARS = ("LLM_BACKEND", "EMBED_BACKEND")
 ENDPOINT_VARS = ("OLLAMA_URL", "OLLAMA_HOST", "OPENROUTER_BASE_URL", "LANGCHAIN_ENDPOINT",
@@ -82,30 +81,27 @@ def shown_url(value: str) -> str:
     return f"{scheme}://{host}{port or ''}{PATH_NOT_SHOWN if rest else ''}"
 
 
-# --- text a server sent back -----------------------------------------------------
-# A server reached through a URL with `user:password@` in it receives that
-# credential (requests sends it as Basic auth) and can put it, or any fragment
-# of it, into anything it answers. Taking what it sent back out of its text
-# cannot be made complete, so it is not tried: while any configured URL
-# carries a credential, no text from a response is printed at all, and the
-# message is our own words. Without one, the text is shown through
-# `server_text`.
-SERVER_TEXT_LIMIT = 160
-WITHHELD = "its text is withheld because the configured URL carries a credential"
+# --- whether a URL may go to a child whose errors are not ours to word ---------
+# The demo build `ayl init --demo` starts is a child process whose error output
+# can print the URL it requested (the embedders' HTTP errors, issue #107). It is
+# started only for URLs that cannot carry anything secret: plain ones whose path
+# is one of these. Deciding by what a value looks like failed for an `@`, for a
+# query and for a path; this is a short list of what is known to be safe, and
+# everything else counts. scripts/install-mac.sh's SAFE_URL_PATHS is the same
+# list (the empty path is always safe there), and a test holds the two equal.
+SAFE_URL_PATHS = ("", "/", "/v1", "/v1/", "/api/v1", "/api/v1/")
 
 
 def carries_credential(value: str) -> bool:
-    """True when `value` is not printable under `shown_url` (an `@` anywhere,
-    or no strict match), and also when the strict match found a query or a
-    fragment — a `?` or `#` part, where a token rides along to the server and
-    can come back in its answer. A bare path does not count: the default
-    OPENROUTER_BASE_URL has one (`/api/v1`). Counted the safe way round — a
-    value this cannot read is taken to carry one. scripts/install-mac.sh's
-    `carries_credential` is the same rule."""
+    """True unless `value` is a plain URL (`shown_url` can print it) whose
+    path part is one of SAFE_URL_PATHS — so any other path, any query, any
+    fragment, any `@` and any value the strict pattern does not match count.
+    Decides only whether the demo build may start (and the installer's
+    `--yes` refusal). scripts/install-mac.sh's `carries_credential` is the
+    same rule."""
     if shown_url(value) == NOT_SHOWN:
         return True
-    rest = PLAIN_URL.fullmatch(str(value)).group(4) or ""
-    return "?" in rest or "#" in rest
+    return (PLAIN_URL.fullmatch(str(value)).group(4) or "") not in SAFE_URL_PATHS
 
 
 # The settings a request is sent to. OLLAMA_HOST is not one of them, by
@@ -125,15 +121,3 @@ def credential_configured(*urls: str) -> bool:
     every = (*urls, config.OLLAMA_URL, config.OPENROUTER_BASE_URL,
              *(os.environ.get(name, "") for name in REQUEST_URL_VARS[2:]))
     return any(carries_credential(url) for url in every if url)
-
-
-def server_text(text, url: str = "", limit: int = SERVER_TEXT_LIMIT) -> str | None:
-    """`text` from a server's response, fit to print — or None, when `url` or
-    any configured URL carries a credential and the text is not printed at
-    all (the caller then says so in its own words). Fit to print means control
-    characters stripped, whitespace folded to single spaces, the length
-    capped."""
-    if credential_configured(url):
-        return None
-    text = re.sub(r"\s+", " ", strip_control_chars(str(text))).strip()
-    return text if len(text) <= limit else text[:limit - 1] + "…"

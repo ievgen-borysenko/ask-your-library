@@ -2137,13 +2137,19 @@ def test_the_remedy_names_config_env_when_the_value_came_from_it(sandbox):
 
 @mac_only
 def test_yes_with_a_token_in_a_url_s_query_is_refused_before_anything(sandbox):
-    """F8-query-token: a query or fragment counts as credential-bearing for
-    the --yes demo refusal, as dataflow.carries_credential counts it."""
+    """F8-query-token, F9-server-text-never: for the --yes demo refusal a URL
+    counts unless it is plain with a known-safe path, as
+    dataflow.carries_credential counts it — a query does, and so does any
+    path but /, /v1 and /api/v1."""
     root, records, _ = sandbox
-    result = real_run(sandbox, "--yes", OLLAMA_URL="http://127.0.0.1:11434/?key=zqzqxvxvzqzqxv")
-    assert result.returncode == 2, result.stdout + result.stderr
-    assert "not built while a URL-valued" in result.stderr
-    assert invoked(records) == [] and "zqzq" not in result.stdout + result.stderr
-    # A bare path does not count.
-    bare = real_run(sandbox, "--yes", OLLAMA_URL="http://127.0.0.1:11434/some/path")
-    assert "not built while a URL-valued" not in bare.stderr
+    for url in ("http://127.0.0.1:11434/?key=zqzqxvxvzqzqxv",
+                "http://127.0.0.1:11434/vxvxpathvxvx"):
+        result = real_run(sandbox, "--yes", OLLAMA_URL=url)
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "not built while a URL-valued" in result.stderr
+        assert invoked(records) == []
+        assert "zqzq" not in result.stdout + result.stderr
+        assert "vxvx" not in result.stdout + result.stderr
+    # A known-safe path does not count.
+    safe = real_run(sandbox, "--yes", OLLAMA_URL="http://127.0.0.1:11434/v1")
+    assert "not built while a URL-valued" not in safe.stderr

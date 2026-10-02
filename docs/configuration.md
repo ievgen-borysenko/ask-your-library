@@ -31,7 +31,9 @@ setting that decides where your data goes, its value and which of the three plac
 configuration before installing anything. Neither prints a URL-valued setting as written: only
 its `scheme://host[:port]`, with "(path not shown)" when a path or query followed, and for a value
 with an `@` anywhere, or one that is not a plain URL, the words
-`<not shown: the value carries a credential or is not a plain URL>`.
+`<not shown: the value carries a credential or is not a plain URL>`. Nothing a server sends
+back — an error, an error body, a progress stage — is printed either: `ayl init` says in its own
+words that the server reported an error, with the HTTP status, and points to Ollama's own log.
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -114,7 +116,8 @@ that fix them, `bash scripts/install-mac.sh` included. `ayl init` exits with the
 (5 when Ollama does not answer; 2 when `LLM_BACKEND` or `EMBED_BACKEND` is neither `ollama` nor
 `openrouter`, when an exported one contradicts the local mode it would write, when a local
 mode would send something off this machine, or when `--demo` is asked for while a URL-valued
-setting carries a credential — the demo build's error output could print it, issue #107 — and
+setting is anything but a plain URL with no path beyond `/v1` or `/api/v1` — the demo build's
+error output could print it, issue #107 — and
 the installer refuses the same, before step 3),
 and with 0 when the only things left are yours to do: adding books, and a key the configuration
 needs. A refused folder for your index is 1 even when a demo library was built. `--dry-run` ends on

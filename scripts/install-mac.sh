@@ -71,17 +71,22 @@ shown_url() {
     fi
 }
 
-# The same rule as ask_your_library.dataflow.carries_credential: not printable
-# under shown_url, or a query or fragment (a ? or # part) after the host, where
-# a token rides along. A bare path does not count.
+# The same rule as ask_your_library.dataflow.carries_credential, over the same
+# list (dataflow.SAFE_URL_PATHS; the empty path is always safe here): true
+# unless the value is a plain URL whose path is one of these — any other path,
+# any query or fragment, any @, any non-match counts. It decides only the --yes
+# refusal: the demo build's child can print the URL it requested (#107).
+SAFE_URL_PATHS='/ /v1 /v1/ /api/v1 /api/v1/'
 carries_credential() {
-    local value="$1" LC_ALL=C
+    local value="$1" LC_ALL=C path safe
     [ "$(shown_url "$value")" = "$NOT_SHOWN" ] && return 0
     [[ "$value" =~ $PLAIN_URL_RE ]] || return 0
-    case "${BASH_REMATCH[4]}" in
-        *'?'*|*'#'*) return 0 ;;
-    esac
-    return 1
+    path="${BASH_REMATCH[4]}"
+    [ -z "$path" ] && return 1
+    for safe in $SAFE_URL_PATHS; do
+        [ "$path" = "$safe" ] && return 1
+    done
+    return 0
 }
 
 # Any setting as this script prints it: a URL-valued one (ENDPOINT_VARS, the
@@ -1063,7 +1068,7 @@ done
 # same words, rather than there, after everything was.
 # The settings a request goes to (dataflow.REQUEST_URL_VARS), and "carries a
 # credential" exactly as dataflow.carries_credential reads it (carries_credential
-# above): not printable under shown_url, or a query or fragment.
+# above): anything but a plain URL with a known-safe path.
 if [ "$want_demo" -eq 1 ] && [ "$assume_yes" -eq 1 ]; then
     for name in OLLAMA_URL OPENROUTER_BASE_URL LANGCHAIN_ENDPOINT LANGSMITH_ENDPOINT; do
         value="$(effective_value "$name")"

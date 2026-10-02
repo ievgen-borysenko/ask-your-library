@@ -59,8 +59,9 @@ def test_a_pull_streams_its_progress_and_ends_on_success(monkeypatch):
                                     "stream": True},
                            "stream": True, "timeout": (ollama.CONNECT_TIMEOUT_S,
                                                        ollama.READ_TIMEOUT_S)}]
-    assert seen[0] == ("pulling manifest", None, None)
-    assert ("pulling 0a1b2c", 500, 1000) in seen
+    # Our own words for the stages, never the server's; integers for the bytes.
+    assert seen[0] == ("working", None, None)
+    assert ("downloading", 500, 1000) in seen
     assert seen[-1] == ("success", None, None)
 
 
@@ -69,8 +70,10 @@ def test_an_error_line_inside_a_200_stream_is_a_failure(monkeypatch):
     with 200, then says `error`."""
     monkeypatch.setattr(ollama, "requests", FakeRequests(Stream(
         [{"status": "pulling manifest"}, {"error": "pull model manifest: file does not exist"}])))
-    with pytest.raises(ollama.PullError, match="file does not exist"):
+    with pytest.raises(ollama.PullError) as failed:
         ollama.pull("no-such-model")
+    assert "reported an error while pulling no-such-model" in str(failed.value)
+    assert "file does not exist" not in str(failed.value), "the server's text is not printed"
 
 
 def test_a_stream_that_never_says_success_is_a_failure(monkeypatch):
@@ -79,11 +82,13 @@ def test_a_stream_that_never_says_success_is_a_failure(monkeypatch):
         ollama.pull("some-model")
 
 
-def test_an_http_error_names_the_status_and_ollama_s_reason(monkeypatch):
+def test_an_http_error_names_the_status_and_not_the_server_s_text(monkeypatch):
     monkeypatch.setattr(ollama, "requests", FakeRequests(Stream(
         [], status=500, text='{"error": "disk full"}')))
-    with pytest.raises(ollama.PullError, match="HTTP 500 — it said: disk full"):
+    with pytest.raises(ollama.PullError) as failed:
         ollama.pull("some-model")
+    assert "HTTP 500; its own text is not printed" in str(failed.value)
+    assert "disk full" not in str(failed.value)
 
 
 def test_a_reply_that_is_not_ollama_s_is_a_failure_not_a_crash(monkeypatch):

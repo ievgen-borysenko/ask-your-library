@@ -1,21 +1,23 @@
-"""Text a server sends back is never printed while a credential is configured
-(F4-reflected-error, F5-fragment).
+"""Nothing a server sends back is printed (F4-reflected-error, F5-fragment,
+F9-server-text-never).
 
-A server reached through `OLLAMA_URL=http://user:password@host` receives that
-credential (requests sends it as Basic auth) and can put it — or any fragment
-of it — into anything it answers: an `error` field in a pull stream, an HTTP
-error body, a progress stage. Removing what it sent back cannot be made
-complete, so it is not tried: while any configured URL carries a credential,
-the server's text is withheld and the message is our own words only. With no
-credential configured, the server's text is shown through
-`dataflow.server_text` (control characters stripped, whitespace folded, the
-length capped).
+A server can put anything into what it answers — an error, an error body, a
+progress stage — including what it was sent: a credential in the URL's
+userinfo (requests sends it as Basic auth), a token in its path or query.
+Deciding which URLs make that dangerous failed three times, so the rule is
+unconditional: `ollama.pull` and everything `ayl init` or the preflight shows
+from a reply is our own words plus integers we parsed (an HTTP status, byte
+counts), credential or no credential.
 
-The end-to-end half runs a real loopback server that reflects fragments of
-the credential it receives — the first four characters, the last four, a
-middle slice, the user name, each bare and inside a sentence — and asserts
-that no slice of four characters or more of the user name or the password
-appears in anything `ayl init`, `ayl init --dry-run` or `ayl doctor` prints.
+The end-to-end half runs a loopback server that puts a MARKER at both ends
+of every reply, and between them reflects what it was sent (the userinfo,
+the path, the query — whole and in fragments) or arbitrary text (control
+characters, 10 kB). `ayl init`, its dry run and `ayl doctor` are run against
+it with and without a credential-shaped URL: neither the marker nor any
+four-character slice of what was planted appears in what they print.
+
+Planted values are low-entropy placeholders, so no secret scanner mistakes a
+test for a leak.
 """
 import base64
 import json
@@ -23,13 +25,14 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
-import requests
 
-from ask_your_library import config, dataflow, ollama
+from ask_your_library import ollama
 from conftest import run_fresh
 
-# Not words, so a slice of either cannot turn up in ordinary output by chance.
-USER, PASSWORD = "uQ7zK9x2", "Zq8Lr2Vx7Wn4Tg5Jp"
+MARKER = "qzqzmarkerqzqz"
+USER, PASSWORD = "xvxvuser", "zqzqxvxvzqzq"
+PATH_TOKEN, QUERY_TOKEN = "vxvxpathvxvx", "zqzqxvxvqueryzq"
+PLANTED = (USER, PASSWORD, PATH_TOKEN, QUERY_TOKEN)
 
 
 def slices(secret, width=4):
@@ -37,54 +40,13 @@ def slices(secret, width=4):
 
 
 def assert_clean(text):
-    found = sorted(piece for piece in slices(USER) | slices(PASSWORD) if piece in text)
+    assert MARKER not in text, text
+    found = sorted({piece for secret in PLANTED for piece in slices(secret)
+                    if piece in text} - {"user", "path", "quer", "uery"})
     assert not found, (found, text)
 
 
-FRAGMENTS = {
-    "first four": lambda user, pw: pw[:4],
-    "last four": lambda user, pw: pw[-4:],
-    "middle": lambda user, pw: pw[5:11],
-    "user name": lambda user, pw: user,
-    "in a sentence": lambda user, pw: f"pull model manifest: {pw[:4]} and {pw[-4:]} for {user}",
-}
-
-
-# --- the rule ---------------------------------------------------------------------
-
-def test_with_a_credential_configured_server_text_is_withheld(monkeypatch):
-    assert dataflow.server_text("disk full", f"http://{USER}:{PASSWORD}@h:1") is None
-    monkeypatch.setattr(config, "OLLAMA_URL", f"http://{USER}:{PASSWORD}@h:1")
-    assert dataflow.server_text("disk full") is None
-
-
-@pytest.mark.parametrize("value", [
-    "http://reader:Pa/ss-S3cret@127.0.0.1:11434", "http://reader:Pa?ss@127.0.0.1:11434",
-    "http://reader:Pa#ss@127.0.0.1:11434", "http://reader:Pa@ss@127.0.0.1:11434",
-    "reader:S3cretPW@127.0.0.1:11434/via/http://gw", "reader:S3cr://x@127.0.0.1:11434",
-    "127.0.0.1:11434", ""])
-def test_a_value_shown_url_cannot_print_counts_as_a_credential(monkeypatch, value):
-    """carries_credential is exactly "not printable under shown_url"
-    (F8-url-allowlist), and server text is withheld then."""
-    assert dataflow.carries_credential(value) or value == ""
-    assert dataflow.shown_url(value) == dataflow.NOT_SHOWN
-    if value:
-        assert dataflow.server_text("disk full", value) is None
-        monkeypatch.setattr(config, "OLLAMA_URL", value)
-        assert dataflow.credential_configured() and dataflow.server_text("disk full") is None
-
-
-def test_a_plain_url_is_printable_and_its_path_is_not_printed():
-    assert dataflow.shown_url("http://127.0.0.1:11434/?key=Tok") == \
-        "http://127.0.0.1:11434 (path not shown)"
-    assert not dataflow.carries_credential("http://localhost:11434/path")
-
-
-def test_with_no_credential_server_text_is_shown_sanitised():
-    shown = dataflow.server_text("disk\n\n full \x1b[2J‮" + "x" * 500, "http://h:1")
-    assert shown.startswith("disk full [2J") and "\x1b" not in shown and "‮" not in shown
-    assert len(shown) == dataflow.SERVER_TEXT_LIMIT
-
+# --- the pull, unit by unit ------------------------------------------------------------
 
 class Stream:
     def __init__(self, lines, status=200, text=""):
@@ -101,66 +63,57 @@ class Stream:
             yield line if isinstance(line, bytes) else json.dumps(line).encode()
 
 
-URL = f"http://{USER}:{PASSWORD}@127.0.0.1:11434"
-
-
 def answering(monkeypatch, response):
     monkeypatch.setattr(ollama, "requests", type("R", (), {"post": lambda *a, **k: response})())
 
 
-@pytest.mark.parametrize("fragment", list(FRAGMENTS))
+URLS = [f"http://{USER}:{PASSWORD}@127.0.0.1:11434", f"http://127.0.0.1:11434/{PATH_TOKEN}",
+        f"http://127.0.0.1:11434/?key={QUERY_TOKEN}", "http://127.0.0.1:11434"]
+SENT = f"{MARKER} {PASSWORD} {PASSWORD[:4]} {PATH_TOKEN[-4:]} {QUERY_TOKEN[3:9]} {MARKER}"
+
+
+@pytest.mark.parametrize("url", URLS)
 @pytest.mark.parametrize("shape", ["stream error line", "HTTP error body"])
-def test_a_pull_error_with_a_credential_is_our_own_words(monkeypatch, shape, fragment):
-    reflected = FRAGMENTS[fragment](USER, PASSWORD)
-    answering(monkeypatch, Stream([{"error": reflected}]) if shape == "stream error line"
-              else Stream([], status=500, text=json.dumps({"error": reflected})))
+def test_a_pull_error_is_our_own_words_with_or_without_a_credential(monkeypatch, shape, url):
+    answering(monkeypatch, Stream([{"error": SENT}]) if shape == "stream error line"
+              else Stream([], status=500, text=json.dumps({"error": SENT})))
     with pytest.raises(ollama.PullError) as failed:
-        ollama.pull("some-model", url=URL)
+        ollama.pull("some-model", url=url)
     assert_clean(str(failed.value))
-    assert "withheld because the configured URL carries a credential" in str(failed.value)
+    assert "its own text is not printed: see Ollama's own log" in str(failed.value)
 
 
-def test_without_a_credential_the_server_s_reason_is_shown_sanitised(monkeypatch):
-    answering(monkeypatch, Stream([], status=500, text=json.dumps({"error": "disk\x1b[2J full"})))
-    with pytest.raises(ollama.PullError, match=r"HTTP 500 — it said: disk\[2J full"):
-        ollama.pull("some-model", url="http://127.0.0.1:11434")
-
-
-def test_a_progress_stage_with_a_credential_is_our_own_word(monkeypatch):
+@pytest.mark.parametrize("url", URLS)
+def test_a_progress_stage_is_our_own_word_with_or_without_a_credential(monkeypatch, url):
     seen = []
-    answering(monkeypatch, Stream([{"status": f"pulling {PASSWORD[:4]}", "total": 10,
-                                    "completed": 5},
-                                   {"status": PASSWORD[-4:]}, {"status": "success"}]))
-    ollama.pull("some-model", lambda *args: seen.append(args), url=URL)
+    answering(monkeypatch, Stream([{"status": SENT, "total": 10, "completed": 5},
+                                   {"status": SENT + "\x1b[2J"}, {"status": "success"}]))
+    ollama.pull("some-model", lambda *args: seen.append(args), url=url)
     assert seen == [("downloading", 5, 10), ("working", None, None), ("success", None, None)]
 
 
-def test_a_progress_stage_without_a_credential_is_the_server_s_sanitised(monkeypatch):
-    seen = []
-    answering(monkeypatch, Stream([{"status": "pulling manifest\x1b[2J"}, {"status": "success"}]))
-    ollama.pull("some-model", lambda *args: seen.append(args), url="http://127.0.0.1:11434")
-    assert seen[0] == ("pulling manifest[2J", None, None)
-
-
-# --- end to end: a server that reflects fragments of what it was sent ---------------------
+# --- end to end: a server that reflects what it was sent, or anything at all ----------------
 
 class Reflector(BaseHTTPRequestHandler):
-    mode, fragment, source = "stream", "first four", "auth"
+    mode, payload = "stream", "reflect"
 
     def log_message(self, *args):
         pass
 
-    def _echo(self):
-        if self.source == "query":
-            # The token the URL's query carried, as this request arrived with it.
-            import re as _re
-            found = _re.search(r"key=([^/&#]*)", self.path)
-            token = found.group(1) if found else ""
-            return FRAGMENTS[self.fragment](token, token)
-        auth = self.headers.get("Authorization", "")
-        sent = base64.b64decode(auth.split(" ", 1)[1]).decode() if auth.startswith("Basic ") else ":"
-        user, _, password = sent.partition(":")
-        return FRAGMENTS[self.fragment](user, password)
+    def _said(self):
+        if self.payload == "control":
+            body = "\x1b[2J\x1b]0;title\x07‮\x00 arbitrary text"
+        elif self.payload == "long":
+            body = "x" * 10_000
+        else:
+            auth = self.headers.get("Authorization", "")
+            sent = (base64.b64decode(auth.split(" ", 1)[1]).decode()
+                    if auth.startswith("Basic ") else "")
+            echo = f"{sent} {self.path}"
+            body = " ".join([echo] + [piece for word in echo.replace("/", " ").replace(
+                "?", " ").replace("=", " ").replace(":", " ").split()
+                                      for piece in (word[:4], word[-4:], word[2:8])])
+        return f"{MARKER} {body} {MARKER}"
 
     def _send(self, code, body):
         data = body.encode()
@@ -171,23 +124,23 @@ class Reflector(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.mode == "tags":
-            return self._send(200, f"<html>{self._echo()}</html>")
+            return self._send(200, f"<html>{self._said()}</html>")
         if self.mode == "tags-error":
-            return self._send(500, json.dumps({"error": self._echo()}))
+            return self._send(500, json.dumps({"error": self._said()}))
         self._send(200, json.dumps({"models": [{"name": "bge-m3:latest"}]}))
 
     def do_POST(self):
         self.rfile.read(int(self.headers.get("Content-Length") or 0))
-        echo = self._echo()
+        said = self._said()
         if self.mode == "http":
-            return self._send(500, json.dumps({"error": echo}))
+            return self._send(500, json.dumps({"error": said}))
         if self.mode == "garbage":
-            return self._send(200, f"not json {echo}\n")
+            return self._send(200, f"not json {said}\n")
         if self.mode == "status":
-            return self._send(200, json.dumps({"status": echo, "total": 10, "completed": 5})
+            return self._send(200, json.dumps({"status": said, "total": 10, "completed": 5})
                               + "\n" + json.dumps({"status": "success"}) + "\n")
         self._send(200, json.dumps({"status": "pulling manifest"}) + "\n"
-                   + json.dumps({"error": echo}) + "\n")
+                   + json.dumps({"error": said}) + "\n")
 
 
 @pytest.fixture
@@ -199,56 +152,43 @@ def reflector():
     server.shutdown()
 
 
-@pytest.mark.parametrize("fragment", list(FRAGMENTS))
-@pytest.mark.parametrize("mode", ["stream", "http", "garbage", "status", "tags", "tags-error"])
-@pytest.mark.parametrize("argv", [["init", "--no-demo", "--yes"],
-                                  ["init", "--dry-run", "--no-demo"],
-                                  ["doctor"]])
-def test_no_fragment_a_reflecting_server_sends_reaches_the_terminal(reflector, tmp_path,
-                                                                  mode, argv, fragment):
-    Reflector.mode, Reflector.fragment = mode, fragment
-    url = f"http://{USER}:{PASSWORD}@127.0.0.1:{reflector.server_address[1]}"
+def _url(kind, port):
+    return {"userinfo": f"http://{USER}:{PASSWORD}@127.0.0.1:{port}",
+            "path": f"http://127.0.0.1:{port}/{PATH_TOKEN}",
+            "query": f"http://127.0.0.1:{port}/?key={QUERY_TOKEN}",
+            "plain": f"http://127.0.0.1:{port}"}[kind]
+
+
+def _run(argv, url, tmp_path):
     work = tmp_path / "work"
-    work.mkdir()
+    work.mkdir(exist_ok=True)
     result = run_fresh("import sys\nfrom ask_your_library import ayl\n"
                        f"sys.exit(ayl.main({argv!r}))\n", cwd=work, check=False,
                        AYL_HOME=str(tmp_path / "home"), OLLAMA_URL=url)
     printed = result.stdout + result.stderr
     assert "Traceback" not in printed, printed
     assert_clean(printed)
+    return printed
 
 
-
-# --- a token in the query counts too (F8-query-token) --------------------------------------
-TOKEN = "zqzqxvxvzqzqxv"
-
-
-def test_a_token_in_the_query_counts_and_withholds_the_server_s_text(monkeypatch):
-    url = f"http://127.0.0.1:11434/?key={TOKEN}"
-    assert dataflow.shown_url(url) == "http://127.0.0.1:11434 (path not shown)"
-    assert dataflow.carries_credential(url) and dataflow.server_text("x", url) is None
-    answering(monkeypatch, Stream([{"error": f"bad key {TOKEN}"}]))
-    with pytest.raises(ollama.PullError) as failed:
-        ollama.pull("some-model", url=url)
-    assert TOKEN[:4] not in str(failed.value) and "withheld" in str(failed.value)
+@pytest.mark.parametrize("url", ["userinfo", "path", "query", "plain"])
+@pytest.mark.parametrize("payload", ["reflect", "control", "long"])
+@pytest.mark.parametrize("mode", ["stream", "http", "garbage", "status", "tags", "tags-error"])
+def test_nothing_the_server_sent_reaches_ayl_init(reflector, tmp_path, mode, payload, url):
+    Reflector.mode, Reflector.payload = mode, payload
+    _run(["init", "--no-demo", "--yes"], _url(url, reflector.server_address[1]), tmp_path)
 
 
-@pytest.mark.parametrize("fragment", list(FRAGMENTS))
-@pytest.mark.parametrize("mode", ["stream", "http"])
-def test_no_piece_of_a_query_token_a_server_reflects_is_printed(reflector, tmp_path, mode,
-                                                                fragment):
-    Reflector.mode, Reflector.fragment, Reflector.source = mode, fragment, "query"
-    try:
-        url = f"http://127.0.0.1:{reflector.server_address[1]}/?key={TOKEN}"
-        work = tmp_path / "work"
-        work.mkdir()
-        result = run_fresh("import sys\nfrom ask_your_library import ayl\n"
-                           "sys.exit(ayl.main(['init', '--no-demo', '--yes']))\n", cwd=work,
-                           check=False, AYL_HOME=str(tmp_path / "home"), OLLAMA_URL=url)
-    finally:
-        Reflector.source = "auth"
-    printed = result.stdout + result.stderr
-    assert "Traceback" not in printed, printed
-    assert "withheld" in printed, "the pull never failed: the check checked nothing"
-    leaked = sorted(piece for piece in slices(TOKEN) if piece in printed)
-    assert not leaked, (leaked, printed)
+@pytest.mark.parametrize("url", ["userinfo", "path", "query", "plain"])
+@pytest.mark.parametrize("payload", ["reflect", "control", "long"])
+@pytest.mark.parametrize("mode", ["tags", "tags-error"])
+def test_nothing_the_server_sent_reaches_ayl_doctor(reflector, tmp_path, mode, payload, url):
+    """The doctor asks only /api/tags."""
+    Reflector.mode, Reflector.payload = mode, payload
+    _run(["doctor"], _url(url, reflector.server_address[1]), tmp_path)
+
+
+@pytest.mark.parametrize("url", ["userinfo", "path", "query", "plain"])
+def test_the_dry_run_sends_nothing_and_prints_nothing_of_the_url(reflector, tmp_path, url):
+    Reflector.mode, Reflector.payload = "stream", "reflect"
+    _run(["init", "--dry-run", "--no-demo"], _url(url, reflector.server_address[1]), tmp_path)

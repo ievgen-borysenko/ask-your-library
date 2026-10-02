@@ -17,7 +17,14 @@ import requests
 from requests import RequestException
 
 from .config import OLLAMA_URL
-from .dataflow import WITHHELD, server_text, shown_url
+from .dataflow import shown_url
+
+# What a message says in place of anything the server sent back. Text from a
+# reply is never printed — not its error, not its error body, not its stage
+# names: a server can put anything there, including what it was sent (a
+# credential in the URL, a token in its path or query). Our own words and the
+# integers we parsed (an HTTP status, byte counts) are what is printed.
+NOT_PRINTED = "its own text is not printed: see Ollama's own log for it"
 
 # A pull of a 9 GB model streams for minutes; what is bounded is the wait for
 # the NEXT line, not the whole download. Ollama sends a progress line every
@@ -50,15 +57,10 @@ def pull(model: str, on_progress: Progress | None = None, url: str | None = None
         with requests.post(f"{base}/api/pull", json=body, stream=True,
                            timeout=(CONNECT_TIMEOUT_S, READ_TIMEOUT_S)) as response:
             if response.status_code >= 400:
-                # The status is ours to print; the body is the server's, and
-                # is withheld while a credential is configured — a server
-                # that was sent one can answer with it (server_text).
-                reason = _error_of(response.text)
-                said = server_text(reason, base) if reason else ""
+                # The status is an integer we parsed; the body is the
+                # server's, and is not printed.
                 raise PullError(f"Ollama at {shown} refused to pull {model}: HTTP "
-                                f"{int(response.status_code)}"
-                                + ("" if said == "" else f" — {WITHHELD}" if said is None
-                                   else f" — it said: {said}"))
+                                f"{int(response.status_code)}; {NOT_PRINTED}")
             for raw in response.iter_lines():
                 if not raw:
                     continue
@@ -71,38 +73,21 @@ def pull(model: str, on_progress: Progress | None = None, url: str | None = None
                     raise PullError(f"Ollama at {shown} sent something that is not a pull "
                                     f"progress line while pulling {model}")
                 if line.get("error"):
-                    said = server_text(line["error"], base)
                     raise PullError(f"Ollama at {shown} reported an error while pulling "
-                                    f"{model}; " + (WITHHELD if said is None
-                                                    else f"it said: {said}"))
-                status = str(line.get("status", ""))
-                if status == "success":
+                                    f"{model}; {NOT_PRINTED}")
+                if line.get("status") == "success":
                     if on_progress is not None:
-                        on_progress(status, None, None)
+                        on_progress("success", None, None)
                     return
                 if on_progress is not None:
-                    # The stage name is the server's text too, and is printed:
-                    # with a credential configured, our own word instead.
+                    # The stage name is the server's text too: our own word
+                    # instead, and the byte counts when they are integers.
                     done, total = _bytes(line.get("completed")), _bytes(line.get("total"))
-                    stage = server_text(status, base, 60)
-                    if stage is None:
-                        stage = "downloading" if total else "working"
-                    on_progress(stage, done, total)
+                    on_progress("downloading" if total else "working", done, total)
     except RequestException as error:
         raise PullError(f"the connection to Ollama at {shown} failed while pulling {model}: "
                         f"{type(error).__name__}") from None
     raise PullError(f"Ollama at {shown} ended the pull of {model} without saying it succeeded")
-
-
-def _error_of(text: str) -> str:
-    """The `error` field of a JSON error body, or nothing: a body that is not
-    Ollama's is not repeated to the reader. Not yet fit to print: the caller
-    passes it through `server_text`."""
-    try:
-        value = json.loads(text)
-    except ValueError:
-        return ""
-    return str(value["error"]) if isinstance(value, dict) and value.get("error") else ""
 
 
 def _bytes(value) -> int | None:

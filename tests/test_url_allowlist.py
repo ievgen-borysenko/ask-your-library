@@ -23,16 +23,23 @@ BASH = shutil.which("bash")
 NS = dataflow.NOT_SHOWN
 
 # (value, what is printed, whether it counts as credential-bearing). It counts
-# when it is not printable, or when it holds a query or a fragment, where a
-# token rides along to the server (F8-query-token); a bare path does not.
+# unless it is a plain URL whose path is in SAFE_URL_PATHS (F9-server-text-never):
+# any other path, any query or fragment, any @, any non-match counts.
 CASES = [
+    ("http://127.0.0.1:11434/", "http://127.0.0.1:11434 (path not shown)", False),
+    ("http://127.0.0.1:11434/v1", "http://127.0.0.1:11434 (path not shown)", False),
+    ("http://127.0.0.1:11434/v1/", "http://127.0.0.1:11434 (path not shown)", False),
+    ("https://openrouter.ai/api/v1/", "https://openrouter.ai (path not shown)", False),
+    ("http://127.0.0.1:11434/vxvxpathvxvx", "http://127.0.0.1:11434 (path not shown)", True),
+    ("http://127.0.0.1:11434/api/v1/x", "http://127.0.0.1:11434 (path not shown)", True),
+    ("http://127.0.0.1:11434/v1?", "http://127.0.0.1:11434 (path not shown)", True),
     ("http://localhost:11434", "http://localhost:11434", False),
     ("http://127.0.0.1:11434", "http://127.0.0.1:11434", False),
     ("https://openrouter.ai/api/v1", "https://openrouter.ai (path not shown)", False),
     ("http://[::1]:11434", "http://[::1]:11434", False),
     ("http://127.0.0.1:11434/?key=zqzqxvxv", "http://127.0.0.1:11434 (path not shown)", True),
     ("http://127.0.0.1:11434/api?token=zqzq", "http://127.0.0.1:11434 (path not shown)", True),
-    ("http://127.0.0.1:11434/Pz8Xk2Nj/api", "http://127.0.0.1:11434 (path not shown)", False),
+    ("http://127.0.0.1:11434/Pz8Xk2Nj/api", "http://127.0.0.1:11434 (path not shown)", True),
     ("http://127.0.0.1:11434#Fr4g", "http://127.0.0.1:11434 (path not shown)", True),
     ("http://reader:Gx7Rk2Tq@127.0.0.1:11434", NS, True),
     ("http://reader:Gx7/Rk2@127.0.0.1:11434", NS, True),
@@ -129,3 +136,13 @@ def test_nothing_inserted_reaches_the_printed_form(seed):
     for (value, inserted, allowed), printed in zip(built, printed_py):
         for piece in inserted:
             assert not _leaks(printed, piece, allowed), (value, printed)
+
+
+
+def test_the_safe_path_list_is_the_same_in_both_languages():
+    """Stated once in each language (F9-server-text-never); the empty path is
+    always safe in bash, where it cannot sit in a space-separated list."""
+    text = SCRIPT.read_text(encoding="utf-8")
+    bash_list = re.search(r"^SAFE_URL_PATHS='([^']*)'$", text, re.M).group(1).split()
+    assert {"", *bash_list} == set(dataflow.SAFE_URL_PATHS)
+    assert len(bash_list) + 1 == len(dataflow.SAFE_URL_PATHS)
