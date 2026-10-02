@@ -11,22 +11,38 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
-from dotenv import dotenv_values, find_dotenv, load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
 # --- where a setting comes from (ADR-027) --------------------------------------
 # Highest first, and the same for every command — `ayl ask`, `ayl ui`, a script:
 #   1. a variable exported in the environment;
-#   2. the `.env` in the WORKING DIRECTORY, or in the nearest parent that has one;
+#   2. the `.env` of the PROJECT the command is typed in (`project_env` below);
 #   3. `$AYL_HOME/config.env`, the file `ayl init` writes;
 #   4. the defaults in this file.
 # python-dotenv never overrides a name that is already set, so loading the two
-# files in this order is the whole rule. `usecwd=True` is not a detail: without
-# it `find_dotenv` walks up from the CALLING FILE — this package — so a clone
-# found its own `.env` from any directory, an installed wheel found none, and a
-# `python -c` reading the same configuration searched the working directory.
+# files in this order is the whole rule. The `.env` is looked for here and not
+# by `load_dotenv()`'s own search, which walks up from the CALLING FILE — this
+# package — so a clone found its own `.env` from any directory and an installed
+# wheel found none; and `find_dotenv(usecwd=True)` walks to `/`, so a `.env`
+# in any ancestor (a home folder's, another tool's) overrode `config.env`.
+PROJECT_MARKERS = (".git", "pyproject.toml")
+
+
+def project_env(start: Path | None = None) -> Path | None:
+    """The `.env` this process reads: in the working directory, or in a parent
+    up to and including the nearest one that marks a project (a `.git` or a
+    `pyproject.toml`), never above it. With no such marker above the working
+    directory, only the working directory's own `.env` counts."""
+    here = (Path.cwd() if start is None else Path(start)).absolute()
+    folders = [here, *here.parents]
+    boundary = next((at for at, folder in enumerate(folders)
+                     if any((folder / marker).exists() for marker in PROJECT_MARKERS)), 0)
+    return next((folder / ".env" for folder in folders[:boundary + 1]
+                 if (folder / ".env").is_file()), None)
+
+
 EXPORTED = frozenset(os.environ)
-_found = find_dotenv(usecwd=True)
-PROJECT_ENV = Path(_found) if _found else None
+PROJECT_ENV = project_env()
 if PROJECT_ENV is not None:
     load_dotenv(PROJECT_ENV)
 
@@ -43,11 +59,16 @@ if PROJECT_ENV is not None:
 _ayl_home = os.environ.get("AYL_HOME") or ""
 AYL_HOME = Path(_ayl_home if _ayl_home.strip() else "~/AskYourLibrary").expanduser()
 
-# The third layer. Read after AYL_HOME is decided, so an AYL_HOME line in this
-# file is not read as one: the file cannot move the folder it lives in.
+# The third layer. Read after AYL_HOME is decided, and never its AYL_HOME line:
+# the file cannot move the folder it lives in. Not `load_dotenv`, which would
+# export that line — this process keeps the home it found the file in, while
+# every child it starts (the web chat's server, `ayl init`'s doctor and demo
+# build) would resolve the other folder.
 HOME_CONFIG = AYL_HOME / "config.env"
 if HOME_CONFIG.is_file():
-    load_dotenv(HOME_CONFIG)
+    for _name, _value in dotenv_values(HOME_CONFIG).items():
+        if _name != "AYL_HOME" and _name not in os.environ and _value is not None:
+            os.environ[_name] = _value
 
 
 def setting_source(variable: str) -> str:
@@ -57,7 +78,11 @@ def setting_source(variable: str) -> str:
     if variable in EXPORTED:
         return "exported"
     for path in (PROJECT_ENV, HOME_CONFIG):
-        if path is not None and path.is_file() and variable in dotenv_values(path):
+        if path is None or not path.is_file():
+            continue
+        if path == HOME_CONFIG and variable == "AYL_HOME":
+            continue
+        if variable in dotenv_values(path):
             return str(path)
     return "default"
 

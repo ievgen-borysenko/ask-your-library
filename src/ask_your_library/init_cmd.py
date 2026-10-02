@@ -41,6 +41,7 @@ from pathlib import Path
 
 import lancedb
 import yaml
+from dotenv import dotenv_values
 
 from . import config, home, ollama, preflight
 from .cli import say
@@ -167,11 +168,28 @@ def build_parser() -> argparse.ArgumentParser:
 # --- step 2: the mode -----------------------------------------------------------
 
 def existing_configuration() -> Path | None:
-    """The file that already configures this machine, or None: the working
-    directory's `.env` (or a parent's) first, then `$AYL_HOME/config.env`."""
-    if config.PROJECT_ENV is not None:
-        return config.PROJECT_ENV
+    """The file that already configures this machine, or None: a `.env` that
+    sets one of the two mode switches first, then `$AYL_HOME/config.env`.
+
+    A `.env` that sets neither (an endpoint, a model name, a scratch folder)
+    does not choose a mode, so it does not stop `ayl init` from writing the
+    file that does; it is still read above that file, as ADR-027 says."""
+    if config.PROJECT_ENV is not None and config.PROJECT_ENV.is_file():
+        values = dotenv_values(config.PROJECT_ENV)
+        if any((values.get(name) or "").strip() for name in SWITCHES):
+            return config.PROJECT_ENV
     return config.HOME_CONFIG if config.HOME_CONFIG.is_file() else None
+
+
+def described(path: Path) -> str:
+    """A configuration file, named — and said to be outside this checkout when
+    it is a `.env` that is: a `.env` the reader did not expect to be read is
+    the one worth pointing at."""
+    if path == config.HOME_CONFIG:
+        return str(path)
+    if REPO_ROOT and Path(path).resolve().is_relative_to(Path(REPO_ROOT).resolve()):
+        return str(path)
+    return f"{path} (a .env outside this checkout)" if REPO_ROOT else f"{path} (a .env)"
 
 
 def mode_of(llm_backend: str, embed_backend: str) -> str | None:
@@ -403,7 +421,7 @@ def _run(args) -> int:
     # --- 2 ---
     step(2, f"Mode: {MODE_LINE.get(mode, f'LLM_BACKEND={llm}, EMBED_BACKEND={embed}')}")
     if existing is not None:
-        note(f"read from {existing}, which already configures this machine")
+        note(f"read from {described(existing)}, which already configures this machine")
         if args.mode and args.mode != mode:
             note(f"--mode {args.mode} was NOT applied: an existing configuration decides, and "
                  f"`ayl init` never rewrites one. Edit it (or move it aside) and run again.")
@@ -459,7 +477,7 @@ def _run(args) -> int:
     # --- 4 ---
     step(4, "Configuration")
     if existing is not None:
-        note(f"{existing} exists and is never rewritten; nothing was changed")
+        note(f"{described(existing)} exists and is never rewritten; nothing was changed")
     else:
         target = home.ayl_home() / "config.env"
         text = config_text(mode)

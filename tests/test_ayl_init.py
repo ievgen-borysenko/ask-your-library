@@ -260,6 +260,26 @@ def test_an_existing_dotenv_decides_and_a_contrary_mode_flag_is_named_not_applie
     assert not (machine.home / "config.env").exists()
 
 
+def test_a_dotenv_that_sets_no_mode_switch_does_not_stop_the_config_file(machine, capsys):
+    """A `.env` naming only an endpoint or a model chooses no mode: init still
+    writes config.env, which that `.env` sits above."""
+    dotenv = machine.tmp / "work" / ".env"
+    dotenv.parent.mkdir()
+    dotenv.write_text("OLLAMA_EMBED_MODEL=embeds-model\nLLM_BACKEND=\n")
+    machine.mp.setattr(config, "PROJECT_ENV", dotenv)
+    assert init() == 0
+    assert (machine.home / "config.env").is_file()
+
+
+def test_a_dotenv_outside_the_checkout_is_named_as_one(machine, capsys):
+    dotenv = machine.tmp / "elsewhere" / ".env"
+    dotenv.parent.mkdir()
+    dotenv.write_text("LLM_BACKEND=ollama\n")
+    machine.mp.setattr(config, "PROJECT_ENV", dotenv)
+    init()
+    assert f"read from {dotenv} (a .env outside this checkout)" in capsys.readouterr().out
+
+
 def test_no_ollama_stops_at_step_1_with_exit_5_and_the_preflight_s_remedy(machine, capsys):
     machine.tags.down = True
     assert init() == preflight.EXIT_NO_LOCAL_RUNTIME

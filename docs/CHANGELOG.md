@@ -25,9 +25,10 @@
   (`--yes` there is `--demo` here), and its closing lines lead with `ayl add`.
 
 - **One order for where a setting comes from, for every command** (#30,
-  [ADR-027](adr/README.md#adr-027-one-precedence-for-every-command-exported-then-the-working-directorys-env-then-ayl_homeconfigenv)):
-  exported in the shell, then the `.env` in the working directory (or the nearest parent that has
-  one), then `$AYL_HOME/config.env`, then the default. The `.env` used to be found by searching
+  [ADR-027](adr/README.md#adr-027-one-precedence-for-every-command-exported-then-the-projects-env-then-ayl_homeconfigenv)):
+  exported in the shell, then the `.env` of the project you are in (the working directory's, or a
+  parent's up to the folder holding `.git` or `pyproject.toml`, never above it), then
+  `$AYL_HOME/config.env`, then the default. The `.env` used to be found by searching
   upward from the installed package rather than from where the command was typed, so a clone read
   its own `.env` from any directory, an installed package read none, and `ayl ui` (whose Chainlit
   reads `<cwd>/.env`) could disagree with `ayl ask`. **If you ran commands from outside the clone

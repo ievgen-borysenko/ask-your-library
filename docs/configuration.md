@@ -8,13 +8,17 @@ the [Fully local, no account](#fully-local-no-account) section is what that defa
 [Cost](cost.md) is about the hosted alternative.
 
 All settings are environment variables, read from three places, highest first, the same for
-every command ([ADR-027](adr/README.md#adr-027-one-precedence-for-every-command-exported-then-the-working-directorys-env-then-ayl_homeconfigenv)):
+every command ([ADR-027](adr/README.md#adr-027-one-precedence-for-every-command-exported-then-the-projects-env-then-ayl_homeconfigenv)):
 
 1. a variable **exported** in your shell;
-2. the **`.env` in the working directory**, or in the nearest parent directory that has one —
-   so from inside the clone, the clone's `.env`;
+2. the **`.env` of the project you are in**: the working directory's, or a parent's up to the
+   nearest folder holding a `.git` or a `pyproject.toml` — so from anywhere inside the clone,
+   the clone's `.env` — and never one above that folder; outside any project, only the working
+   directory's own `.env`;
 3. **`$AYL_HOME/config.env`** (`~/AskYourLibrary/config.env` by default), the file `ayl init`
    writes. An `AYL_HOME` line in it is not read: the file cannot move the folder it lives in.
+   `ayl init` does not write it when a `.env` above it already sets `LLM_BACKEND` or
+   `EMBED_BACKEND`, or when it exists.
 
 A name none of the three sets takes the default in the table below. `.env.example` **is** the
 default configuration — copy it to `.env` and edit from there; the hosted lines ship commented out

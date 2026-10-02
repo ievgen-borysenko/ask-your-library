@@ -1207,7 +1207,7 @@ by design — so the changelog and the upgrade page tell the reader to delete th
 out of `config.py` with `sed`, and applies the three clauses in bash instead. The test suite pins
 `AYL_HOME` next to `LIBRARY_DB_PATH`, since an unpinned one would be the developer's own folder.
 
-## ADR-027: One precedence for every command: exported, then the working directory's .env, then $AYL_HOME/config.env
+## ADR-027: One precedence for every command: exported, then the project's .env, then $AYL_HOME/config.env
 
 Status: accepted (2026-10-02, #30, with `ayl init`).
 
@@ -1222,20 +1222,30 @@ read, and there was no rule to put it in.
 **Decision.** Three layers, highest first, read the same way by every entry point:
 
 1. a variable exported in the environment;
-2. the `.env` in the working directory, or the nearest parent that has one
-   (`find_dotenv(usecwd=True)`);
+2. the `.env` of the project the command is typed in (`config.project_env`): the working
+   directory's, or a parent's up to and including the nearest folder holding a `.git` or a
+   `pyproject.toml` — never above it, and with no such folder above, the working directory's
+   alone;
 3. `$AYL_HOME/config.env`, read after `AYL_HOME` is decided — so an `AYL_HOME` line in it is
-   ignored, and an `AYL_HOME` set in the `.env` decides which home file is read;
+   ignored (it is not even put into the environment, where every child process would have read
+   the other folder), and an `AYL_HOME` set in the `.env` decides which home file is read;
 
 then the defaults in `config.py`. python-dotenv never overrides a name that is already set, so
 loading the two files in that order is the whole rule. `config.setting_source(name)` says which
 layer decided a name, and `ayl init --print-env-resolution` prints it.
 
 `ayl init` writes the third layer, through `home.write_private` (mode 0600, refused inside a git
-work tree, never written through a link), and only when neither file exists: an existing `.env`
-or `config.env` is the reader's and is never rewritten. The `.env` stays the developer's layer —
+work tree, never written through a link), and only when no file already chooses the mode: a
+`.env` that sets `LLM_BACKEND` or `EMBED_BACKEND`, or an existing `config.env`, is the reader's
+and is never rewritten; a `.env` that sets neither is read above the file `ayl init` writes. A
+`.env` outside the checkout is named as one wherever `ayl init` prints it. The `.env` stays the developer's layer —
 `cp .env.example .env` in a clone works as before, from inside the clone — and the home file is
 the reader's, which works from any directory and from an installed package.
+
+**Why the search stops at the project.** `find_dotenv(usecwd=True)` walks to `/`, so a `.env`
+in a home folder — another tool's, as likely as ours — overrode `config.env` for every command
+typed anywhere below it, and made `ayl init` believe the machine was configured. The project
+markers are the ones a clone and a project of the reader's own both carry.
 
 **Alternatives.** Writing the clone's `.env`, as `scripts/install-mac.sh` does: it is read only
 from inside the clone once the search is the working directory's, and it is a file in a checkout.

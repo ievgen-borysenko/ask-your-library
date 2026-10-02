@@ -13,6 +13,8 @@ Configuration is resolved at import, so each case is a fresh interpreter.
 """
 import json
 
+import pytest
+
 from conftest import run_fresh
 
 # What a console script looks like to python-dotenv: a `__main__` with a file.
@@ -41,11 +43,36 @@ def test_the_working_directory_s_dotenv_is_read_by_a_script_entry_too(tmp_path):
     assert seen["sources"]["OLLAMA_LLM_MODEL"] == str(tmp_path / ".env")
 
 
-def test_a_parent_s_dotenv_is_found_from_a_subdirectory(tmp_path):
-    (tmp_path / ".env").write_text("OLLAMA_LLM_MODEL=from-the-parent\n", encoding="utf-8")
+@pytest.mark.parametrize("marker", [".git", "pyproject.toml"])
+def test_the_project_root_s_dotenv_is_found_from_a_subdirectory(tmp_path, marker):
+    """Inside a clone, from any folder of it: the project's `.env`."""
+    (tmp_path / marker).mkdir() if marker == ".git" else (tmp_path / marker).write_text("")
+    (tmp_path / ".env").write_text("OLLAMA_LLM_MODEL=from-the-project\n", encoding="utf-8")
     inner = tmp_path / "a" / "b"
     inner.mkdir(parents=True)
-    assert probe(inner)["values"]["OLLAMA_LLM_MODEL"] == "from-the-parent"
+    assert probe(inner)["values"]["OLLAMA_LLM_MODEL"] == "from-the-project"
+
+
+def test_a_dotenv_above_the_project_root_is_not_read(tmp_path):
+    """A `.env` in a home folder, or another tool's, above the project: it
+    used to override `config.env` from every directory below it."""
+    (tmp_path / ".env").write_text("OLLAMA_LLM_MODEL=from-above-the-project\n", encoding="utf-8")
+    project = tmp_path / "project"
+    (project / ".git").mkdir(parents=True)
+    inner = project / "src"
+    inner.mkdir()
+    seen = probe(inner)
+    assert seen["values"]["OLLAMA_LLM_MODEL"] != "from-above-the-project"
+    assert seen["sources"]["OLLAMA_LLM_MODEL"] == "default"
+
+
+def test_outside_any_project_only_the_working_directory_s_dotenv_counts(tmp_path):
+    (tmp_path / ".env").write_text("OLLAMA_LLM_MODEL=from-an-ancestor\n", encoding="utf-8")
+    inner = tmp_path / "a" / "b"
+    inner.mkdir(parents=True)
+    assert probe(inner)["sources"]["OLLAMA_LLM_MODEL"] == "default"
+    (inner / ".env").write_text("OLLAMA_LLM_MODEL=from-here\n", encoding="utf-8")
+    assert probe(inner)["values"]["OLLAMA_LLM_MODEL"] == "from-here"
 
 
 def test_exported_beats_dotenv_beats_home_config_beats_default(tmp_path):
@@ -94,3 +121,30 @@ def test_the_dotenv_s_ayl_home_decides_which_home_config_is_read(tmp_path):
                                 cwd=tmp_path).stdout)
     assert seen["values"]["AYL_HOME"] == str(home)
     assert seen["values"]["OLLAMA_LLM_MODEL"] == "from-the-chosen-home"
+
+
+def test_the_home_config_s_ayl_home_line_reaches_no_child_either(tmp_path):
+    """With AYL_HOME unset the home is ~/AskYourLibrary, and its config.env
+    may carry an AYL_HOME line. Loaded with `load_dotenv`, that line was
+    EXPORTED: this process kept its home, and every child it started — the
+    web chat's server, the doctor `ayl init` runs, the demo build — resolved
+    the other folder."""
+    reader = tmp_path / "reader"
+    (reader / "AskYourLibrary").mkdir(parents=True)
+    (reader / "AskYourLibrary" / "config.env").write_text(
+        f"AYL_HOME={tmp_path / 'elsewhere'}\nOLLAMA_LLM_MODEL=from-home\n", encoding="utf-8")
+    code = ("import os, subprocess, sys\n"
+            "os.environ.pop('AYL_HOME', None)\n" + AS_A_SCRIPT +
+            "from ask_your_library import config\n"
+            "print(config.AYL_HOME)\n"
+            "print(os.environ.get('AYL_HOME'))\n"
+            "print(config.OLLAMA_LLM_MODEL)\n"
+            "child = subprocess.run([sys.executable, '-c', 'from ask_your_library import config; "
+            "print(config.AYL_HOME)'], capture_output=True, text=True, check=True)\n"
+            "print(child.stdout.strip())\n")
+    home, exported, model, in_child = run_fresh(code, cwd=tmp_path, HOME=str(reader)) \
+        .stdout.splitlines()
+    assert home == str(reader / "AskYourLibrary")
+    assert exported == "None"
+    assert model == "from-home"
+    assert in_child == home

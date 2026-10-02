@@ -67,8 +67,8 @@ def _dotenv_files() -> list[Path]:
 
       * `<cwd>/.env` — what `chainlit/__init__.py` loads, by that literal path;
       * whatever `find_dotenv(usecwd=True)` finds walking up from the working
-        directory — what `config.load_dotenv()` reads under any other entry
-        point.
+        directory — a superset of the `.env` `config.project_env` reads, which
+        stops at the project's root; checking more files only refuses more.
 
     `dotenv` is a declared dependency of this project, but it is imported HERE
     and not at module level: the unarmed path must stay two environment reads
