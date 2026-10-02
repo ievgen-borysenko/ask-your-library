@@ -3,18 +3,19 @@
 # Ask Your Library — macOS setup (Apple silicon and Intel).
 #
 # Takes a fresh clone to a working local install: prerequisites, models,
-# dependencies, .env, the demo corpus, and the project's own preflight. Nothing
-# here runs sudo. What reaches the network: package fetches through brew, uv and
-# ollama, and — when you say yes to the demo corpus — the checksum-pinned
-# public-domain texts scripts/ingest_demo_corpus.py downloads from gutenberg.org.
+# dependencies, .env, then `ayl init` (which offers the demo library), and the
+# project's own preflight. Nothing here runs sudo. What reaches the network:
+# package fetches through brew, uv and ollama, and — when you say yes to the demo
+# library — the checksum-pinned public-domain texts scripts/ingest_demo_corpus.py
+# downloads from gutenberg.org.
 # The two LibriVox audiobooks are not fetched: their transcripts are committed
 # under corpus/prepared-audio/, so archive.org is reached only by that script's
 # --retranscribe. Nothing else leaves this machine.
 #
 #   bash scripts/install-mac.sh                 # fully local: Ollama answers and embeds
 #   bash scripts/install-mac.sh --dry-run       # print the plan, change nothing
-#   bash scripts/install-mac.sh --yes           # no confirmation before the demo build
-#   bash scripts/install-mac.sh --no-demo       # skip the demo corpus
+#   bash scripts/install-mac.sh --yes           # build the demo library without asking
+#   bash scripts/install-mac.sh --no-demo       # no demo library, and no question about it
 #   bash scripts/install-mac.sh --hosted        # keep the OpenRouter answering model
 #
 # Exit codes: 0 done, 1 a prerequisite is missing or a step failed (both are printed
@@ -50,14 +51,16 @@ Usage: bash scripts/install-mac.sh [--dry-run] [--yes] [--no-demo] [--hosted]
                                    [--print-env-resolution] [--help]
 
 Sets up Ask Your Library on macOS: uv and Ollama through Homebrew, the two
-models, the locked dependencies, a .env, and (optionally) the demo corpus.
+models, the locked dependencies, a .env, then `ayl init`, which offers the demo
+library of public-domain classics and keeps it apart from your own index.
 Run it from the repository root.
 
   --dry-run       print the plan and exit; reads files, changes nothing, installs
                   nothing, and never invokes brew, uv or ollama
-  --yes, -y       do not ask before the demo corpus build (about 30 minutes)
-  --no-demo       skip the demo corpus; the script prints how to index a folder of
-                  your own books instead
+  --yes, -y       build the demo library without asking (`ayl init --demo`, a few
+                  minutes; without --yes `ayl init` asks once, and no is the default)
+  --no-demo       no demo library, and no question about it; the script prints how
+                  to index a folder of your own books instead
   --hosted        write the hosted configuration (OpenRouter answering model)
                   instead of the fully local one. The key is never taken on the
                   command line: the script names the variable to set
@@ -1383,7 +1386,7 @@ fi
 # LIBRARY_DB_PATH is used exactly as the package uses it: config.py takes it as
 # written, with no expanduser, so a literal "~/index" is a directory called "~"
 # for the app and has to be one here too — expanding it here would have the two
-# halves of one run looking in different places. The ayl-add lines printed below
+# halves of one run looking in different places. The `ayl add` lines printed below
 # are command lines, where the shell expands the tilde long before the package
 # sees the value.
 demo_ready=0
@@ -1392,40 +1395,43 @@ for table in "$db_path"/transcripts_*.lance; do
     demo_ready=1
 done
 
-step "Demo corpus: an index at $db_path"
-if [ "$want_demo" -eq 0 ]; then
-    note "skipped (--no-demo). Index a folder of your own .txt / .md books instead:"
-    note "  LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books"
-    note "  LIBRARY_DB_PATH=~/ayl-index uv run ask-library \"...\""
-elif [ "$demo_ready" -eq 1 ]; then
+step "Library: your index at $db_path"
+if [ "$demo_ready" -eq 1 ]; then
     note "an index is already there; nothing is rebuilt"
     note "update it later with: uv run scripts/ingest_demo_corpus.py"
+elif [ "$want_demo" -eq 0 ]; then
+    note "no books yet, and no demo library (--no-demo). Index your own .txt / .md books:"
+    note "  uv run ayl add ~/books"
 else
-    note "about 30 minutes on the first run. It downloads public-domain texts from"
-    note "gutenberg.org (checksum-pinned in corpus/manifest.yaml) — the only thing"
-    note "here that reaches anywhere but a package registry — and uses the two"
-    note "audiobook transcripts already committed under corpus/prepared-audio/, so"
-    note "archive.org is not contacted. Every stage is cached in data/, so it is"
-    note "safe to interrupt and re-run."
-    build_demo=0
-    if [ "$dry_run" -eq 1 ]; then
-        plan "ask once for confirmation, then run: uv run scripts/ingest_demo_corpus.py"
-    elif [ "$assume_yes" -eq 1 ]; then
-        build_demo=1
-    elif [ ! -t 0 ]; then
-        note "no terminal to ask on, so it was skipped; re-run with --yes to build it."
-    else
-        printf '       Build it now? [y/N] '
-        reply=""
-        read -r reply || true
-        case "$reply" in
-            [yY]|[yY][eE][sS]) build_demo=1 ;;
-            *) note "skipped. Build it later: uv run scripts/ingest_demo_corpus.py" ;;
-        esac
+    # The demo library is `ayl init`'s question now, not this script's: one
+    # prompt, one estimate, one place that builds it — apart from this index,
+    # in $AYL_HOME/demo/index, so a reader's own library never starts mixed
+    # with the classics. init re-checks the server and pulls nothing already
+    # pulled; it keeps the .env step 10 wrote. --yes here is --demo there.
+    init_args=(ayl init)
+    if [ "$hosted" -eq 1 ]; then
+        init_args+=(--mode hosted)
     fi
-    if [ "$build_demo" -eq 1 ]; then
-        run uv run scripts/ingest_demo_corpus.py
-        demo_ready=1
+    if [ "$assume_yes" -eq 1 ]; then
+        init_args+=(--demo)
+    fi
+    note "no books yet. \`ayl init\` offers the demo library: six public-domain classics in"
+    note "a few minutes, kept apart from this index; it asks once, and no is the default."
+    if [ "$dry_run" -eq 1 ]; then
+        plan "run: uv run ${init_args[*]}"
+    else
+        init_status=0
+        uv run "${init_args[@]}" || init_status=$?
+        case "$init_status" in
+            # 3 and 4 are what its closing check found left to do: step 12
+            # below classifies the same two conditions for this script.
+            0|3|4) ;;
+            *)
+                fail "uv run ${init_args[*]} failed with status $init_status."
+                fail "fix what it printed and re-run: every step of both is idempotent."
+                exit 1
+                ;;
+        esac
     fi
 fi
 
@@ -1597,9 +1603,9 @@ else
             note "no problems"
             ;;
         3)
-            note "the missing index is the only problem, and it is this run's own:"
-            note "build the demo corpus, or point LIBRARY_DB_PATH at one of your own"
-            note "built with ayl-add."
+            note "the missing index is the only problem, and it is this run's own: your"
+            note "index is empty until you add books (uv run ayl add ~/books). A demo library"
+            note "ayl init built is an index of its own and does not fill this one."
             ;;
         4)
             note "the missing key is the only problem, and it is expected here:"
@@ -1607,8 +1613,8 @@ else
             ;;
         5)
             note "both problems are this run's own: no index yet, and no OPENROUTER_API_KEY."
-            note "build the demo corpus (or point LIBRARY_DB_PATH at one of your own), and"
-            note "set the key in .env before the first question."
+            note "add your books (uv run ayl add ~/books), and set the key in .env before"
+            note "the first question."
             ;;
         6)
             fail "the configuration the application loads is not the $loaded_mode one this"
@@ -1631,23 +1637,23 @@ else
     printf 'Done.\n'
 fi
 printf 'Next steps:\n'
-# The index comes first when there is none: `ask-library` without one exits 3 on
-# a preflight that says the same thing, so putting the question at the top of
-# this list would hand the reader a command that cannot work yet.
-if [ "$demo_ready" -eq 0 ] && [ "$want_demo" -eq 0 ]; then
-    # --no-demo: the reader said they have their own books, so the index step is
-    # theirs and the demo build is not offered again.
-    printf '  LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books\n'
-    printf '      index your books first — there is no index yet, and the question below\n'
-    printf '      has nothing to search until there is. Ask against the same path:\n'
-    printf '      LIBRARY_DB_PATH=~/ayl-index uv run ask-library "..."\n'
-elif [ "$demo_ready" -eq 0 ]; then
-    printf '  uv run scripts/ingest_demo_corpus.py\n'
-    printf '      build the demo corpus first — about 30 minutes. The question below has\n'
-    printf '      nothing to search until this finishes. Your own books instead:\n'
-    printf '      LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books\n'
+# The index comes first when there is none: `ayl ask` without one exits 3 on a
+# preflight that says the same thing, so putting the question at the top of
+# this list would hand the reader a command that cannot work yet. The demo
+# library, when `ayl init` built one, is its own index: `ayl init` printed the
+# line that asks it, and this index is still the reader's, still empty.
+if [ "$demo_ready" -eq 0 ]; then
+    printf '  uv run ayl add ~/books\n'
+    printf '      index your own .txt / .md books first — your index is empty, and the\n'
+    printf '      question below has nothing to search until it is not.\n'
+    if [ "$want_demo" -eq 1 ]; then
+        # --no-demo already said no; offering it again reads as not having listened.
+        printf '      Or the demo library of six classics, kept apart: uv run ayl init --demo\n'
+    fi
+    printf '  uv run ayl ask "..."\n'
+else
+    printf '  uv run ayl ask "What does Marcus Aurelius say about anger?"\n'
 fi
-printf '  uv run ask-library "What does Marcus Aurelius say about anger?"\n'
 # The one sentence this whole mode exists for, printed where the reader is about
 # to type the command: no account, no key, nothing to pay. The answering model is
 # named because it is the thing that makes that true, and it is the model this
@@ -1666,8 +1672,6 @@ printf '      the web chat on 127.0.0.1, login admin / change-me (the form asks 
 printf '      "Email address": type the username there). That variable is what\n'
 printf '      allows the placeholder password; set CHAINLIT_USERNAME and CHAINLIT_PASSWORD\n'
 printf '      for a real one and drop it.\n'
-printf '  LIBRARY_DB_PATH=~/ayl-index uv run ayl-add ~/books\n'
-printf '      index your own .txt / .md books, then ask the same way against that path.\n'
 if [ "$ollama_service" -eq 1 ]; then
     printf '  brew services start ollama\n'
     printf '      Ollama was started for this session only. This registers it as a login\n'

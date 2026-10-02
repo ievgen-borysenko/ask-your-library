@@ -53,7 +53,7 @@ PLAN = [
     "[8/12] Models",
     "[9/12] Dependencies",
     "[10/12] Configuration",
-    "[11/12] Demo corpus",
+    "[11/12] Library",
     "[12/12] Verification",
     "Next steps:",
 ]
@@ -297,19 +297,53 @@ def test_hosted_dry_run_says_it_transforms_the_example_and_shows_every_line(sand
 
 
 @mac_only
-def test_demo_build_is_confirmed_once_and_says_how_long_it_takes(sandbox):
+def test_the_demo_library_is_ayl_init_s_question_not_a_second_one_here(sandbox):
+    """One prompt, one estimate, one place that builds the demo: the script
+    hands step 11 to `ayl init`, which asks once (no is the default) and keeps
+    the demo apart from the reader's index. The script asks nothing itself."""
     out = dry_run(sandbox)
-    assert "about 30 minutes" in out
-    assert "ask once for confirmation" in out
-    assert "uv run scripts/ingest_demo_corpus.py" in out
+    assert "would run: uv run ayl init\n" in out
+    assert "it asks once, and no is the default" in out
+    assert "Build it now?" not in out and "ingest_demo_corpus.py" not in out
+
+
+@mac_only
+@pytest.mark.parametrize("flags, command", [
+    (("--yes",), "uv run ayl init --demo"),
+    (("--hosted",), "uv run ayl init --mode hosted"),
+    (("--hosted", "--yes"), "uv run ayl init --mode hosted --demo"),
+])
+def test_the_flags_reach_ayl_init_as_its_own(sandbox, flags, command):
+    """--yes meant "do not ask before the demo build"; to `ayl init` that is
+    --demo. --hosted is the mode, which init reads from the .env step 10 wrote
+    anyway and names when it disagrees."""
+    assert f"would run: {command}\n" in dry_run(sandbox, *flags)
+
+
+@mac_only
+def test_a_real_run_hands_step_11_to_ayl_init_and_a_failure_there_stops_it(sandbox):
+    """The stubbed `uv` records the call; a status other than 0, 3 or 4 from it
+    is a failed step, reported with the command and exit 1. A stub that
+    answers 7 only for `uv run ayl init` stands in for one that failed."""
+    root, records, env = sandbox
+    result = real_run(sandbox)
+    assert result.returncode == 0, result.stderr
+    assert "run ayl init\n" in (records / "uv").read_text()
+    stub = Path(env["PATH"].split(os.pathsep)[0]) / "uv"
+    stub.write_text(f'#!/bin/sh\necho "$@" >> "{records}/uv"\n'
+                    f'[ "$2" = "ayl" ] && [ "$3" = "init" ] && exit 7\nexit 0\n')
+    (root / ".env").unlink()
+    result = real_run(sandbox)
+    assert result.returncode == 1
+    assert "uv run ayl init failed with status 7." in error_lines(result.stderr)
 
 
 @mac_only
 def test_no_demo_points_at_ayl_add_instead(sandbox):
     out = dry_run(sandbox, "--no-demo")
-    assert "skipped (--no-demo)" in out
-    assert "uv run ayl-add ~/books" in out
-    assert "ingest_demo_corpus.py" not in out
+    assert "no demo library (--no-demo)" in out
+    assert "uv run ayl add ~/books" in out
+    assert "ayl init" not in out and "ingest_demo_corpus.py" not in out
 
 
 @mac_only
@@ -1578,12 +1612,14 @@ def test_the_local_env_this_script_writes_is_the_example_it_already_ships(sandbo
 def test_the_closing_message_leads_with_the_index_then_the_free_first_question(sandbox):
     """After this script finishes, one command has to answer a question — and
     the reader has to be told which, in which order, and that it costs nothing.
-    With no index yet the build comes first: `ask-library` before it exits 3 on
-    a preflight that says the same thing one step later."""
+    With no index yet the reader's own books come first: `ayl ask` before them
+    exits 3 on a preflight that says the same thing one step later. The demo
+    library is offered beside them, as its own index."""
     out = dry_run(sandbox)
-    build = out.index("uv run scripts/ingest_demo_corpus.py\n      build the demo corpus first")
-    question = out.index('uv run ask-library "What does Marcus Aurelius')
+    build = out.index("uv run ayl add ~/books\n      index your own .txt / .md books first")
+    question = out.index('uv run ayl ask "..."')
     assert build < question
+    assert "uv run ayl init --demo" in out
     assert "No account, no key, nothing to pay" in out
     # The model this run pulled, not a name the script was written against.
     _, llm_model = config_models()
@@ -1604,8 +1640,17 @@ def test_no_demo_closes_on_the_reader_s_own_books_not_the_demo_build(sandbox):
     """--no-demo already said the demo corpus is not wanted; offering it again
     as the next step reads as the script not having listened."""
     out = dry_run(sandbox, "--no-demo")
-    assert "index your books first" in out
-    assert "build the demo corpus first" not in out
+    assert "index your own .txt / .md books first" in out
+    assert "ayl init --demo" not in out
+
+
+@mac_only
+def test_an_existing_index_closes_on_the_first_question_itself(sandbox):
+    root, _, _ = sandbox
+    (root / "data" / "lancedb" / "transcripts_ollama.lance").mkdir(parents=True)
+    out = dry_run(sandbox)
+    assert 'uv run ayl ask "What does Marcus Aurelius say about anger?"' in out
+    assert "ayl init" not in out
 
 
 # --- where the demo index goes (ADR-026) --------------------------------------
@@ -1618,7 +1663,7 @@ def test_the_demo_index_defaults_under_the_home_folder_not_the_checkout(sandbox,
     root, _, env = sandbox
     env["HOME"] = str(tmp_path / "reader")
     out = dry_run(sandbox)
-    assert f"Demo corpus: an index at {tmp_path}/reader/AskYourLibrary/index" in out
+    assert f"Library: your index at {tmp_path}/reader/AskYourLibrary/index" in out
     assert str(root / "data") not in out
 
 
@@ -1628,7 +1673,7 @@ def test_the_demo_index_follows_ayl_home_with_its_tilde_expanded(sandbox, tmp_pa
     env["HOME"] = str(tmp_path / "reader")
     env["AYL_HOME"] = "~/elsewhere"
     out = dry_run(sandbox)
-    assert f"Demo corpus: an index at {tmp_path}/reader/elsewhere/index" in out
+    assert f"Library: your index at {tmp_path}/reader/elsewhere/index" in out
 
 
 @mac_only
@@ -1638,7 +1683,7 @@ def test_an_old_index_in_the_checkout_is_found_where_it_is(sandbox):
     root, _, _ = sandbox
     (root / "data" / "lancedb" / "transcripts_ollama.lance").mkdir(parents=True)
     out = dry_run(sandbox)
-    assert f"Demo corpus: an index at {root}/data/lancedb" in out
+    assert f"Library: your index at {root}/data/lancedb" in out
     assert "an index is already there; nothing is rebuilt" in out
 
 
@@ -1648,7 +1693,7 @@ def test_an_old_folder_without_the_table_is_not_the_index(sandbox, tmp_path):
     env["HOME"] = str(tmp_path / "reader")
     (root / "data" / "lancedb" / "cards_ollama.lance").mkdir(parents=True)
     out = dry_run(sandbox)
-    assert f"Demo corpus: an index at {tmp_path}/reader/AskYourLibrary/index" in out
+    assert f"Library: your index at {tmp_path}/reader/AskYourLibrary/index" in out
 
 
 @mac_only
@@ -1657,7 +1702,7 @@ def test_an_explicit_index_path_is_used_as_written(sandbox, tmp_path):
     (root / "data" / "lancedb" / "transcripts_ollama.lance").mkdir(parents=True)
     env["LIBRARY_DB_PATH"] = str(tmp_path / "mine")
     out = dry_run(sandbox)
-    assert f"Demo corpus: an index at {tmp_path}/mine" in out
+    assert f"Library: your index at {tmp_path}/mine" in out
 
 
 @mac_only
@@ -1672,7 +1717,7 @@ def test_an_exported_blank_index_path_is_unset_even_over_the_dotenv(sandbox, tmp
     env["HOME"] = str(tmp_path / "reader")
     env["LIBRARY_DB_PATH"] = exported
     out = dry_run(sandbox)
-    assert f"Demo corpus: an index at {tmp_path}/reader/AskYourLibrary/index" in out
+    assert f"Library: your index at {tmp_path}/reader/AskYourLibrary/index" in out
 
 
 @mac_only
@@ -1680,7 +1725,7 @@ def test_the_dotenv_index_path_is_used_when_nothing_is_exported(sandbox, tmp_pat
     root, _, env = sandbox
     (root / ".env").write_text(f"LIBRARY_DB_PATH={tmp_path}/from-dotenv\n")
     out = dry_run(sandbox)
-    assert f"Demo corpus: an index at {tmp_path}/from-dotenv" in out
+    assert f"Library: your index at {tmp_path}/from-dotenv" in out
 
 
 @mac_only
@@ -1690,7 +1735,7 @@ def test_a_blank_ayl_home_is_the_default_home(sandbox, tmp_path, exported):
     env["HOME"] = str(tmp_path / "reader")
     env["AYL_HOME"] = exported
     out = dry_run(sandbox)
-    assert f"Demo corpus: an index at {tmp_path}/reader/AskYourLibrary/index" in out
+    assert f"Library: your index at {tmp_path}/reader/AskYourLibrary/index" in out
 
 
 @mac_only
