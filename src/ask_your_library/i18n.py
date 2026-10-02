@@ -268,12 +268,12 @@ _T = {
               "address is really Ollama (`curl {url}/api/tags`).",
     },
     "pf_no_db": {
-        "ua": "Бази нема: {path}. Побудуй демо-корпус "
-              "(`uv run scripts/ingest_demo_corpus.py`, ~30 хв), проіндексуй свої книжки "
-              "(`uv run ayl add <тека>`) або вкажи LIBRARY_DB_PATH на свою LanceDB.",
-        "en": "Database not found: {path}. Build the demo corpus "
-              "(`uv run scripts/ingest_demo_corpus.py`, ~30 min), index your own books "
-              "(`uv run ayl add <folder>`) or point LIBRARY_DB_PATH at your LanceDB.",
+        "ua": "Бази нема: {path}. Проіндексуй свої книжки (`uv run ayl add <тека>`), "
+              "побудуй демо-бібліотеку (`uv run ayl init --demo`, кілька хвилин; вона "
+              "окремо, у $AYL_HOME/demo/index) або вкажи LIBRARY_DB_PATH на свою LanceDB.",
+        "en": "Database not found: {path}. Index your own books (`uv run ayl add <folder>`), "
+              "build the demo library (`uv run ayl init --demo`, a few minutes; it is kept "
+              "apart, in $AYL_HOME/demo/index) or point LIBRARY_DB_PATH at your LanceDB.",
     },
     "pf_no_tables": {
         "ua": "У базі {path} нема таблиць: {tables}. Заверши інжест "

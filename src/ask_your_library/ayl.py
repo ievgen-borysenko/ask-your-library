@@ -1,5 +1,6 @@
 """Ask Your Library — `ayl`, the one command the rest hang off.
 
+  uv run ayl init                 # the first run: models, configuration, where books go
   uv run ayl ask "What does Marcus Aurelius say about anger?"
   uv run ayl add ~/books          # index a folder of .txt / .md books
   uv run ayl doctor               # the environment and the index, both halves
@@ -8,7 +9,7 @@
 
 This is a router, not a second implementation. `ayl ask` is `cli.main`; `ayl
 add`, `doctor`, `backup` and `restore` are `ingest.add_folder.main`, which is
-one parser with a flag per verb. Each subcommand hands that parser the
+one parser with a flag per verb; `init` is `init_cmd.run`. Each subcommand hands that parser the
 arguments written after the command name, unread, so every flag those two
 accept keeps working verbatim under the new name and their exit codes are this
 command's exit codes. `books` is the only new code here, and `ui` is
@@ -26,12 +27,15 @@ from . import cli
 from .catalog import render_catalog, run_catalog
 from .config import DB_CHOICE, DB_PATH, EMBED_BACKEND
 from .i18n import t
+from . import init_cmd
 from .ingest import add_folder
 from .preflight import PreflightResult, check_environment, exit_code
 from .ui import launcher
 
 # The command names, and the one-line summary `ayl --help` lists each under.
 SUMMARY = {
+    "init": "the first run: check Ollama, pull the models, write the configuration "
+            "(the demo library only with --demo)",
     "ask": "ask the library a question, or open the interactive chat",
     "add": "index a folder of .txt / .md books",
     "doctor": "report the environment, then reconcile the ledger against the index",
@@ -370,7 +374,11 @@ def run_ui(rest: list[str]) -> int:
         return 1
 
 
-DISPATCH = {"ask": run_ask, "add": run_add, "doctor": run_doctor, "backup": run_backup,
+def run_init(rest: list[str]) -> int:
+    return init_cmd.run(rest)
+
+
+DISPATCH = {"init": run_init, "ask": run_ask, "add": run_add, "doctor": run_doctor, "backup": run_backup,
             "restore": run_restore, "books": run_books, "ui": run_ui}
 
 
