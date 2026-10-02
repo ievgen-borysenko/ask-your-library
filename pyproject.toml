@@ -28,6 +28,12 @@ dependencies = [
     "requests>=2.31",
     "pyyaml>=6.0",
     "python-dotenv>=1.0",
+    # The PDF text layer for `ayl add` (ingest/pdf.py, ADR-030): BSD-3-Clause,
+    # pure Python, no dependencies of its own on Python 3.11+. 6.19 is the
+    # version verified to have `apply_configuration` with every field pdf.py
+    # sets and the `decode_stream_data` / `ContentStream` names it counts at;
+    # the lockfile resolves 6.19.0.
+    "pypdf>=6.19.0",
 ]
 
 [project.urls]

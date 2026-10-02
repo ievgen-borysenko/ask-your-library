@@ -802,7 +802,7 @@ def test_missing_folder_is_reported(tmp_path, capsys):
 def test_empty_folder_is_reported(tmp_path, capsys):
     (tmp_path / "empty").mkdir()
     assert add_folder.main([str(tmp_path / "empty")]) == 1
-    assert "no .txt, .md or .epub files" in capsys.readouterr().err
+    assert "no .txt, .md, .epub or .pdf files" in capsys.readouterr().err
 
 
 def test_main_reports_books_sections_chunks_table_and_model(tmp_path, fake_embedder, capsys):
