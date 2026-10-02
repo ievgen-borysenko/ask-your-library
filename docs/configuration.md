@@ -24,7 +24,7 @@ setting that decides where your data goes, its value and which of the three plac
 | Variable | Default | Purpose |
 |---|---|---|
 | `LIBRARY_DB_PATH` | `$AYL_HOME/index` | LanceDB with `cards_<backend>` / `transcripts_<backend>`, the `books` ledger and the `_index_meta` stamps. **Set, it is used exactly as written, always** — no `~` expansion, no git-work-tree check, no notice. **Unset**, the index is `$AYL_HOME/index`, created by the first write, unless the working directory holds an index built before that default moved: a `data/lancedb` with a `transcripts_<EMBED_BACKEND>` table in it is read where it is, with one line on stderr per process naming the move, until 0.6.0, when it becomes an error ([upgrading](upgrading.md#the-index-moved-to-ayl_homeindex)). `ayl doctor` prints which of the three applied and why. It is a directory, so a backup of it is a file copy — `ayl backup <dir>` is the one that says when a copy is safe ([upgrading](upgrading.md)). While an ingest runs it holds an `flock` on `.ayl-ingest-<name>.lock` BESIDE this directory (`$AYL_HOME/.ayl-ingest-index.lock` for the default); a second `ayl add`, a backup or a restore is refused until it finishes. The lock is the operating system's, so it is released the moment the holder ends, however it ends — there is nothing to clear by hand |
-| `AYL_HOME` | `~/AskYourLibrary` | The reader's own folder, the home of everything built on this machine ([ADR-026](adr/README.md#adr-026-ayl_home-is-the-home-of-everything-built-on-this-machine-the-index-the-scratchpads-the-chat-database-the-private-shelf)): the index (`$AYL_HOME/index`), the scratchpads (`$AYL_HOME/scratch`), the web chat's app root and chat database (`$AYL_HOME/ui`), the engineer's shelf's local cards (`$AYL_HOME/cards/tech/`, [corpus-tech](../corpus-tech/README.md#local-cards-and-ayl_home)), and later the private shelf of your own books. A `~` is expanded; blank means the default. The default index and the local cards are refused when this resolves inside a git work tree — `.gitignore` is not a boundary — and the refusal of the index names `LIBRARY_DB_PATH`, the one-line way to keep an index elsewhere. The scratchpads and the web chat's state are not refused: they are working files of a run |
+| `AYL_HOME` | `~/AskYourLibrary` | The reader's own folder, the home of everything built on this machine ([ADR-026](adr/README.md#adr-026-ayl_home-is-the-home-of-everything-built-on-this-machine-the-index-the-scratchpads-the-chat-database-the-private-shelf)): the index (`$AYL_HOME/index`), the demo library `ayl init --demo` builds (`$AYL_HOME/demo/index`, apart from your index; asked by setting `LIBRARY_DB_PATH` to it), the configuration `ayl init` writes (`$AYL_HOME/config.env`), the scratchpads (`$AYL_HOME/scratch`), the web chat's app root and chat database (`$AYL_HOME/ui`), the engineer's shelf's local cards (`$AYL_HOME/cards/tech/`, [corpus-tech](../corpus-tech/README.md#local-cards-and-ayl_home)), and later the private shelf of your own books. A `~` is expanded; blank means the default. The default index and the local cards are refused when this resolves inside a git work tree — `.gitignore` is not a boundary — and the refusal of the index names `LIBRARY_DB_PATH`, the one-line way to keep an index elsewhere. The scratchpads and the web chat's state are not refused: they are working files of a run |
 | `EMBED_BACKEND` | `ollama` | `ollama` (local bge-m3) or `openrouter`; also selects the table suffix |
 | `OLLAMA_URL` | `http://localhost:11434` | Local Ollama endpoint |
 | `OLLAMA_EMBED_MODEL` | `bge-m3` | Embedding model, 1024 dims, multilingual |
@@ -93,12 +93,14 @@ on translated prose:
 | `0` | an answer |
 | `1` | the environment is not ready for a reason with no remedy of its own (an index built by another embedding model; a default index that would land inside a git work tree, which names `LIBRARY_DB_PATH`), or the run itself failed |
 | `2` | a bad command line (argparse's own) |
-| `3` | no index yet — build the demo corpus, run `ayl add`, or point `LIBRARY_DB_PATH` at one |
+| `3` | no index yet — run `ayl add`, build the demo library (`ayl init --demo`), or point `LIBRARY_DB_PATH` at one |
 | `4` | a hosted backend is configured and has no key |
 | `5` | Ollama is not reachable, does not answer as Ollama, or a configured model is not pulled |
 
 `3` and `5` are the two ordinary ways a fresh clone fails, and both messages carry the commands
-that fix them, `bash scripts/install-mac.sh` included.
+that fix them, `bash scripts/install-mac.sh` included. `ayl init` exits with the same numbers
+(5 when Ollama does not answer, 2 when an exported variable contradicts the mode it would write),
+and with 0 when the only things left are yours to do: adding books, and a hosted mode's key.
 
 ## Fully local, no account
 
@@ -111,13 +113,14 @@ Indexing needs no account either: `ayl add` chunks locally and embeds with Ollam
 So the whole system runs on this machine, and there is nothing to set:
 
 ```bash
-ollama pull qwen2.5:14b                   # the default OLLAMA_LLM_MODEL; or any chat model
+uv run ayl init                           # pulls the default models and writes the local config.env
 uv run ayl ask "..."                      # no key, cost lines read $0.0000
 uv run --extra ui ayl ui                  # the web chat; its key gate is off in this mode
 ```
 
-`bash scripts/install-mac.sh` does the pulls and writes this `.env` for you. Nothing in either
-command names a backend, because the local one is the default; `LLM_BACKEND=openrouter` is how
+`ayl init` pulls `OLLAMA_LLM_MODEL` and `OLLAMA_EMBED_MODEL` (`ollama pull` each by hand is the
+same thing) and writes `$AYL_HOME/config.env`; `bash scripts/install-mac.sh` writes a `.env` in
+the clone instead and then runs `ayl init`. Nothing in any of these commands names a backend, because the local one is the default; `LLM_BACKEND=openrouter` is how
 you leave it.
 
 **Check the loaded context, and pin `num_ctx` for any model with a large trained context.** Ollama

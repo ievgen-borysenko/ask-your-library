@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- **`ayl init`, the first run** (#30): checks that Ollama answers (exit 5 with the remedy when it
+  does not), takes `--mode local|hosted` (local by default), pulls the models that mode needs and
+  Ollama lacks over its HTTP API with the progress streamed, writes `~/AskYourLibrary/config.env`
+  unless a `.env` or that file already configures the machine, and says where your books go —
+  then runs `ayl doctor` and prints the next commands. Every step is skipped when it is already
+  done; a second run changes nothing and says so. `--dry-run` prints every step and touches
+  nothing; `--print-env-resolution` prints where each setting that decides where your data goes
+  comes from. An index or chat history from before the `AYL_HOME` move is reported with the
+  backup/restore commands that move it, and nothing is built beside it.
+
+  **The demo library is opt-in and kept apart**
+  ([ADR-028](adr/README.md#adr-028-the-demo-library-is-opt-in-and-is-an-index-of-its-own)):
+  `ayl init --demo` builds six public-domain classics in a few minutes — the manifest entries now
+  marked `starter: true`, chosen to reach every path a first question takes — and
+  `--demo --full` the whole corpus; on a terminal `ayl init` asks once, and no is the default. It
+  goes to `~/AskYourLibrary/demo/index`, never into your own index, and is asked by naming it:
+  `LIBRARY_DB_PATH=~/AskYourLibrary/demo/index uv run ayl ask "..."`. It is built by
+  `scripts/ingest_demo_corpus.py`, which gained `--starter`, so it needs a clone.
+
+  `scripts/install-mac.sh` no longer asks about the demo corpus itself: step 11 runs `ayl init`
+  (`--yes` there is `--demo` here), and its closing lines lead with `ayl add`.
+
 - **One order for where a setting comes from, for every command** (#30,
   [ADR-027](adr/README.md#adr-027-one-precedence-for-every-command-exported-then-the-working-directorys-env-then-ayl_homeconfigenv)):
   exported in the shell, then the `.env` in the working directory (or the nearest parent that has

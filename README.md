@@ -75,32 +75,44 @@ the catalogue path and the deterministic gate behind the ask-back, is in
 
 ## Quick start
 
-The fast path is a Mac:
+You need [uv](https://docs.astral.sh/uv/) and [Ollama](https://ollama.com), installed and
+running. Then, from a clone:
 
 ```bash
 git clone https://github.com/ievgen-borysenko/ask-your-library.git && cd ask-your-library
-bash scripts/install-mac.sh --dry-run    # the plan, printed; nothing is changed
-bash scripts/install-mac.sh              # mostly download time, + ~30 min for the demo corpus
+uv sync
+uv run ayl init --dry-run                # the plan, printed; nothing is changed
+uv run ayl init                          # the models (mostly download time) and the configuration
+uv run ayl add ~/books                   # your own .txt / .md books
+uv run ayl ask "..."
 ```
 
-Then the first question:
+`ayl init` checks that Ollama answers, pulls the two models the configuration names, writes
+`~/AskYourLibrary/config.env`, and says where your books go; run it again and it changes nothing.
+On a Mac, `bash scripts/install-mac.sh` (with `--dry-run` to read it first) also installs uv and
+Ollama through Homebrew, then runs `ayl init`.
+
+**The demo library is opt-in, and kept apart from yours.** `uv run ayl init --demo` builds six
+public-domain classics in a few minutes (`--demo --full`: the whole corpus of 33 books, about 30
+minutes) into `~/AskYourLibrary/demo/index`, never into your own index. Ask it by naming it:
 
 ```bash
-uv run ayl ask "What does Marcus Aurelius say about anger?"
+LIBRARY_DB_PATH=~/AskYourLibrary/demo/index uv run ayl ask "What does Marcus Aurelius say about anger?"
 ```
 
 No account, no API key, nothing to pay: the answering model and the embeddings both run on your
-own machine through Ollama, and the cost line under the answer reads $0.0000. A hosted model is
-available (`bash scripts/install-mac.sh --hosted`) and is the only thing here that needs a key.
+own machine through Ollama, and the cost line under the answer reads $0.0000. A hosted answering
+model is available (`uv run ayl init --mode hosted`) and is the only thing here that needs a key.
 
-`ayl` is the one command: `ayl ask` a question, `ayl add` a folder of your own books, `ayl books`
+`ayl` is the one command: `ayl init` the first run, `ayl ask` a question, `ayl add` a folder of your own books, `ayl books`
 for what the index holds, `ayl doctor` for whether this machine is ready, `ayl backup` /
 `ayl restore` for a verified copy, `ayl ui` for the web chat. `ayl --help` lists them, and
 `ayl <command> --help` prints what that command accepts. The two names it replaced,
 `ask-library` and `ayl-add`, still run the same code under a deprecation notice and are removed
 at `0.6.0`.
 
-What this machine builds for you — the index, the scratchpads, the web chat's history — lives in
+What this machine builds for you — your index, the demo library if you asked for it, the
+configuration `ayl init` writes, the scratchpads, the web chat's history — lives in
 `~/AskYourLibrary` (`AYL_HOME`) by default, outside the clone, rather than in the directory a
 command is typed in (a relative `LIBRARY_DB_PATH` you set is still read against that directory).
 An index an earlier version built in `data/lancedb` is still read there, with a notice, when a
@@ -116,10 +128,9 @@ research questions of the core eval set — for about $0.002 and $0.05 respectiv
 Every figure here is a measured single run, over the rows of that one kind of question, and
 [`docs/cost.md`](docs/cost.md) names which run and which rows each one comes from.
 
-**On every other system the script is the only thing missing: five commands do the same work** —
-`uv sync`, two `ollama pull`s, a copied `.env`, and the demo-corpus ingest — and they are written
-out, with your own books, the web UI and the eval commands, in
-[`docs/quick-start.md`](docs/quick-start.md).
+**On every other system the commands above are the whole install** once uv and Ollama are there;
+[`docs/quick-start.md`](docs/quick-start.md) has each step by hand as well, with your own books,
+the web UI and the eval commands.
 
 ## How it works
 

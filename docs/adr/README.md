@@ -5,13 +5,13 @@ what it was measured to buy. They were written from the code rather than ahead o
 describe the system as built; where a variant was tried and dropped, the rejected variant is part
 of the record, because it is usually the more useful half.
 
-Twenty-seven decisions, in the order they were taken. ADR-016 is written out as a file of its own
+Twenty-eight decisions, in the order they were taken. ADR-016 is written out as a file of its own
 because it changed the planner's contract and added a node to the graph; the rest are summarised
 here. ADR-017 to ADR-023 were recorded on 2026-09-16, after the fact: a review of this tree found
 seven decisions the code had made and no record named. The four that constrain what may be built
 next are written out below; the other three are reserved as stubs — number, title, one sentence —
 to be written when the code they describe is next touched, so that the numbering is taken and the
-decision is not forgotten. ADR-024 and ADR-025 were taken on 2026-09-17, ADR-026 on 2026-09-25 and ADR-027 on 2026-10-02,
+decision is not forgotten. ADR-024 and ADR-025 were taken on 2026-09-17, ADR-026 on 2026-09-25 and ADR-027 and ADR-028 on 2026-10-02,
 each written out with the code it describes. The measurements are not repeated in full: the reports under
 [`docs/eval-results/`][reports] are the primary record, and each entry below names the one that
 carries its numbers. Reports of
@@ -1249,6 +1249,38 @@ anything; a `config.env` left by an earlier `ayl init` sits under it and fills o
 `.env` does not set — the installer's guard does not read it. The test suite already pins every
 setting it depends on before the first import, and `tests/test_config_layers.py` holds the order
 in fresh interpreters that look like a console script to python-dotenv.
+
+## ADR-028: The demo library is opt-in and is an index of its own
+
+Status: accepted (2026-10-02, #30, with `ayl init`). Supersedes the plan of 22.09.2026, which had
+`ayl init` build the starter subset by default.
+
+The first-run command has to leave a reader one command away from their own books
+(`ayl add <folder>`) and a question. The plan of #30 had it build a starter subset of the demo
+corpus by default, into the index every command reads. Two independent readings of that plan
+before the code agreed on the cost: a reader who then ran `ayl add ~/books` started with their
+own library mixed into six classics, which `ayl books` lists, the catalogue counts, and retrieval
+ranks against — and nothing removes a manifest book from an index short of a rebuild. The two
+kinds of book are distinguishable after the fact (the ledger's `source_ref` is `manifest:<id>`
+for a demo book and a file reference for one `ayl add` indexed), but separable only by hand.
+
+**Decision.** `ayl init` builds no demo library unless asked: `--demo` (the starter subset, the
+manifest entries marked `starter: true`), `--demo --full` (the whole corpus), or a yes to the one
+question it asks on a terminal, whose default is no; `--yes` and `--no-demo` ask nothing. The
+demo library goes to `$AYL_HOME/demo/index`, never to the reader's index, and is asked by naming
+it with `LIBRARY_DB_PATH` — the variable every command already obeys (ADR-026 clause 1), so the
+whole mechanism is one documented line and no new flag on `ask`, `books` or `ui`. It is built by
+`scripts/ingest_demo_corpus.py --starter` (or without it, for `--full`) run as a child with that
+variable set: the same stages, checksums, staging tables and ingest lock as before, nothing
+reimplemented. One constant, `init_cmd.BUILD_DEMO_BY_DEFAULT`, holds the default; flipping it
+makes the question's default answer and `--yes` mean "build it".
+
+**Consequences.** The demo library needs a clone: the script and `corpus/` ship with it and not
+with the package, and `ayl init --demo` outside one refuses with the two ways on. A reader who
+wants the classics and their own books in one index can still point `ayl add` at the demo
+library's path; the default never does it for them. An old index found by ADR-026's clause 2, or
+in the clone when `ayl init` runs elsewhere, is not built beside: the move is printed (and, when
+every book in it came from the manifest, the demo location is offered as its destination).
 
 [reports]: ../eval-results/
 [backlog]: ../backlog.md
