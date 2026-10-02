@@ -18,7 +18,11 @@ every command ([ADR-027](adr/README.md#adr-027-one-precedence-for-every-command-
 3. **`$AYL_HOME/config.env`** (`~/AskYourLibrary/config.env` by default), the file `ayl init`
    writes. An `AYL_HOME` line in it is not read: the file cannot move the folder it lives in.
    `ayl init` does not write it when a `.env` above it already sets `LLM_BACKEND` or
-   `EMBED_BACKEND`, or when it exists.
+   `EMBED_BACKEND`, or when it exists. Write it as plain `NAME=value` lines: a line with no `=`
+   or with a `${...}` in it is refused, by every command and by the installer, with the same
+   line. A configuration file that cannot be read (its permissions, or not UTF-8) stops every
+   command at its start with one line naming it (exit 2); the installer refuses it before it
+   installs anything.
 
 A name none of the three sets takes the default in the table below. `.env.example` **is** the
 default configuration — copy it to `.env` and edit from there; the hosted lines ship commented out

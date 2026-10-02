@@ -353,6 +353,11 @@ dotenv_scanned=""
 dotenv_rest=""
 
 dotenv_refuse() {
+    if [ "${parsing_config_env-0}" -eq 1 ]; then
+        # config.py refuses the same two forms in config.env with this line.
+        fail "$planned_env_source, line $1: $2. Write config.env as plain NAME=value lines (every line with an =, no \${...}) and run again."
+        exit 2
+    fi
     fail "$planned_env_source, line $1: $2."
     fail "the application reads .env with python-dotenv, which would read that line"
     fail "differently from this script — and the difference decides where your data"
@@ -678,11 +683,19 @@ esac
 case "$home_dir" in
     "~"*) ;;
     *)
+        if [ -f "$home_dir/config.env" ] && [ ! -r "$home_dir/config.env" ]; then
+            # config.py would stop at every command's import on it (exit 2):
+            # stopped here instead, before anything is installed.
+            fail "$home_dir/config.env cannot be read: every command reads it at its start."
+            fail "Fix its permissions, or move it aside, and re-run."
+            exit 2
+        fi
         if [ -f "$home_dir/config.env" ]; then
             saved_names="$dotenv_names" saved_source="$planned_env_source"
             for name in $saved_names; do eval "saved_v_$name=\${dotenv_v_$name}"; done
-            planned_env_source="$home_dir/config.env"
+            planned_env_source="$home_dir/config.env" parsing_config_env=1
             dotenv_parse "$(cat "$home_dir/config.env")"
+            parsing_config_env=0
             for name in $dotenv_names; do
                 [ "$name" = "AYL_HOME" ] && continue
                 eval "home_v_$name=\${dotenv_v_$name}"

@@ -2000,6 +2000,11 @@ SAME_INPUT = [
      "EMBED_BACKEND=ollma\n"),
     ("config-env-own-ayl-home-line-ignored", False, {}, None,
      "AYL_HOME=/nowhere\nLANGSMITH_TRACING=true\n"),
+    # Read as config.py reads it, or refused by both with one message
+    # (F8-unreadable-config, F8-config-env-lines).
+    ("config-env-unreadable", False, {}, None, "LLM_BACKEND=ollama\n"),
+    ("config-env-interpolation", False, {}, None, "OLLAMA_URL=${SOMEWHERE}\n"),
+    ("config-env-line-without-equals", False, {}, None, "LLM_BACKEND\n"),
 ]
 
 
@@ -2015,6 +2020,8 @@ def test_what_ayl_init_refuses_the_installer_refuses_before_installing(sandbox, 
     home.mkdir()
     if config_env:
         (home / "config.env").write_text(config_env[0])
+        if case[0] == "config-env-unreadable":
+            (home / "config.env").chmod(0)
     written = sorted(home.rglob("*"))
     if dotenv is not None:
         (root / ".env").write_text(dotenv)
@@ -2033,6 +2040,14 @@ def test_what_ayl_init_refuses_the_installer_refuses_before_installing(sandbox, 
         assert init.returncode != 0 and "LLM_BACKEND must be" in init.stderr
     else:
         assert init.returncode == 2, init.stdout + init.stderr
+    if case[0].startswith("config-env-") and case[0] != "config-env-own-ayl-home-line-ignored":
+        assert "Traceback" not in init.stderr
+    if case[0] == "config-env-unreadable":
+        assert "config.env cannot be read" in init.stderr
+        assert "config.env cannot be read" in installer.stderr
+    if case[0] in ("config-env-interpolation", "config-env-line-without-equals"):
+        rule = "Write config.env as plain NAME=value lines (every line with an =, no ${...})"
+        assert rule in init.stderr and rule in installer.stderr
     assert sorted(home.rglob("*")) == written, "ayl init wrote before refusing"
 
 

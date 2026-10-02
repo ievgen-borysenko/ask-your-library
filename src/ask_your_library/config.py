@@ -44,10 +44,52 @@ def project_env(start: Path | None = None) -> Path | None:
                  if (folder / ".env").is_file()), None)
 
 
+def _unreadable(path: Path, error: Exception) -> None:
+    """A configuration file that cannot be read stops the process with one
+    line naming it and exit status 2 — the status every configuration
+    refusal of `ayl init` and the installer uses — instead of a traceback
+    out of an import."""
+    print(f"error: {path} cannot be read ({type(error).__name__}): every command reads it at its "
+          f"start. Fix its permissions or its encoding (UTF-8), or move it aside, and run again.",
+          file=sys.stderr)
+    raise SystemExit(2)
+
+
+CONFIG_ENV_LINE_RULE = ("Write config.env as plain NAME=value lines (every line with an =, "
+                        "no ${...}) and run again.")
+
+
+def _config_env_values(path: Path) -> dict:
+    """`$AYL_HOME/config.env` as python-dotenv reads it — after refusing the
+    two forms the installer's reader refuses, with the same one-line message:
+    a line with no `=` (python-dotenv holds the name with no value) and a
+    `${...}` (which it expands). `ayl init` writes neither."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        _unreadable(path, error)
+    for number, line in enumerate(text.splitlines(), 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        reason = ("no = on the line, so python-dotenv holds the name with no value at all"
+                  if "=" not in stripped else
+                  "a ${...} interpolation, which python-dotenv expands from the environment"
+                  if "${" in stripped.split("=", 1)[1] else None)
+        if reason:
+            print(f"error: {path}, line {number}: {reason}. {CONFIG_ENV_LINE_RULE}",
+                  file=sys.stderr)
+            raise SystemExit(2)
+    return dotenv_values(path)
+
+
 EXPORTED = frozenset(os.environ)
 PROJECT_ENV = project_env()
 if PROJECT_ENV is not None:
-    load_dotenv(PROJECT_ENV)
+    try:
+        load_dotenv(PROJECT_ENV)
+    except (OSError, UnicodeDecodeError) as _error:
+        _unreadable(PROJECT_ENV, _error)
 
 # --- storage ---------------------------------------------------------------
 # The reader's own folder, OUTSIDE any checkout (ADR-026): the home of what this
@@ -69,7 +111,7 @@ AYL_HOME = Path(_ayl_home if _ayl_home.strip() else "~/AskYourLibrary").expandus
 # build) would resolve the other folder.
 HOME_CONFIG = AYL_HOME / "config.env"
 if HOME_CONFIG.is_file():
-    for _name, _value in dotenv_values(HOME_CONFIG).items():
+    for _name, _value in _config_env_values(HOME_CONFIG).items():
         if _name != "AYL_HOME" and _name not in os.environ and _value is not None:
             os.environ[_name] = _value
 

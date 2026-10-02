@@ -148,3 +148,35 @@ def test_the_home_config_s_ayl_home_line_reaches_no_child_either(tmp_path):
     assert exported == "None"
     assert model == "from-home"
     assert in_child == home
+
+
+@pytest.mark.parametrize("which", ["project .env", "config.env"])
+@pytest.mark.parametrize("fault", ["unreadable", "not UTF-8"])
+def test_a_configuration_file_that_cannot_be_read_is_one_line_and_exit_2(tmp_path, which,
+                                                                       fault):
+    """Not a traceback out of an import (F8-unreadable-config)."""
+    home = tmp_path / "home"
+    home.mkdir()
+    target = tmp_path / ".env" if which == "project .env" else home / "config.env"
+    if fault == "unreadable":
+        target.write_text("OLLAMA_LLM_MODEL=x\n")
+        target.chmod(0)
+    else:
+        target.write_bytes(b"OLLAMA_LLM_MODEL=\xff\xfe\n")
+    child = run_fresh(PROBE, cwd=tmp_path, check=False, AYL_HOME=str(home))
+    assert child.returncode == 2, child.stderr
+    assert "Traceback" not in child.stderr
+    assert f"error: {target} cannot be read" in child.stderr
+
+
+@pytest.mark.parametrize("line, reason", [
+    ("OLLAMA_URL=${SOMEWHERE}", "a ${...} interpolation"),
+    ("LLM_BACKEND", "no = on the line")])
+def test_the_two_config_env_forms_the_installer_refuses_are_refused_here_too(tmp_path, line,
+                                                                           reason):
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "config.env").write_text(f"# a comment\n{line}\n")
+    child = run_fresh(PROBE, cwd=tmp_path, check=False, AYL_HOME=str(home))
+    assert child.returncode == 2 and "Traceback" not in child.stderr
+    assert f"{home / 'config.env'}, line 2: {reason}" in child.stderr
