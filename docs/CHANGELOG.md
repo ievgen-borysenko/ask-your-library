@@ -44,6 +44,23 @@
   [Add your own books](add-your-own-books.md#an-epub) has the rules,
   [Known limits](known-limits.md) what is not read.
 
+- **`ayl add` reads `.pdf`** (#34,
+  [ADR-030](adr/README.md#adr-030-pdf-is-read-through-its-text-layer-with-pypdf-bounded-before-the-work-and-encryption-is-refused)):
+  a folder may now hold PDF books with a text layer. The text is extracted by `pypdf`
+  (BSD-3-Clause, pure Python), the one new dependency, installed with `ayl`. The title and author
+  come from the information dictionary, else the XMP metadata (the file-name rule when there is no
+  title); the sections from the outline's top-level entries, each running to the page before the
+  next, or, without an outline, one per page with text (`Page N`). A scanned PDF (fewer than 200
+  characters on its first 10 pages) is refused with one line, and so is an encrypted one (no
+  password is tried), one the library cannot read (named by the kind of error only), and one over
+  the limits: 256 MiB a file, 5,000 pages, 4 MiB of drawing instructions a page and 128 MiB a file,
+  256 MiB inflated in all, 100,000 characters a page and 20 million a book — each counted before
+  the work it bounds. An outline that points at no page is named in one line and the pages are
+  indexed instead; a folder named `*.pdf` is skipped and named. No JavaScript, action, attachment,
+  rendering or external program, ever. [Add your own books](add-your-own-books.md#a-pdf) has the
+  rules, [Known limits](known-limits.md) what is not read (OCR, headers and footers, hyphenation,
+  two columns).
+
 - **One order for where a setting comes from, for every command** (#30,
   [ADR-027](adr/README.md#adr-027-one-precedence-for-every-command-exported-then-the-projects-env-then-ayl_homeconfigenv)):
   exported in the shell, then the `.env` of the project you are in (the working directory's, or a

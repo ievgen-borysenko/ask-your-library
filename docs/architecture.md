@@ -12,9 +12,9 @@ single question, with every node marked as code, a model call, or the reader.
 flowchart TB
     subgraph offline["OFFLINE — build the index, on your machine"]
         direction LR
-        BK["your .txt / .md / .epub books<br/>or the demo corpus"]:::code
+        BK["your .txt / .md / .epub / .pdf books<br/>or the demo corpus"]:::code
         CRD["book cards: one model call<br/>per book, demo corpus only"]:::ai
-        BK --> CHK["ayl add: chapters from headings (.txt / .md)<br/>or the spine and contents (.epub),<br/>chunks packed from whole sentences"]:::code
+        BK --> CHK["ayl add: chapters from headings (.txt / .md),<br/>the spine and contents (.epub),<br/>the outline or the pages (.pdf),<br/>chunks packed from whole sentences"]:::code
         CHK --> EMB["bge-m3 embeddings,<br/>local Ollama by default"]:::ai
         EMB --> DB[("LanceDB — transcripts, optional cards<br/>hybrid BM25 + vectors, model fingerprint")]:::code
         CRD --> DB

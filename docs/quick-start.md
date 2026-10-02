@@ -15,7 +15,7 @@ git clone https://github.com/ievgen-borysenko/ask-your-library.git && cd ask-you
 uv sync                                  # the locked environment
 uv run ayl init --dry-run                # every step, printed; nothing is pulled, written or built
 uv run ayl init                          # check Ollama, pull the models, write the configuration
-uv run ayl add ~/books                   # your own .txt / .md / .epub books, into your index
+uv run ayl add ~/books                   # your own .txt / .md / .epub / .pdf books, into your index
 uv run ayl ask "..."
 ```
 

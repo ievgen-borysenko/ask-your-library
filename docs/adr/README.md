@@ -5,13 +5,13 @@ what it was measured to buy. They were written from the code rather than ahead o
 describe the system as built; where a variant was tried and dropped, the rejected variant is part
 of the record, because it is usually the more useful half.
 
-Twenty-nine decisions, in the order they were taken. ADR-016 is written out as a file of its own
+Thirty decisions, in the order they were taken. ADR-016 is written out as a file of its own
 because it changed the planner's contract and added a node to the graph; the rest are summarised
 here. ADR-017 to ADR-023 were recorded on 2026-09-16, after the fact: a review of this tree found
 seven decisions the code had made and no record named. The four that constrain what may be built
 next are written out below; the other three are reserved as stubs — number, title, one sentence —
 to be written when the code they describe is next touched, so that the numbering is taken and the
-decision is not forgotten. ADR-024 and ADR-025 were taken on 2026-09-17, ADR-026 on 2026-09-25 and ADR-027 to ADR-029 on 2026-10-02,
+decision is not forgotten. ADR-024 and ADR-025 were taken on 2026-09-17, ADR-026 on 2026-09-25, ADR-027 to ADR-029 on 2026-10-02 and ADR-030 on 2026-10-03,
 each written out with the code it describes. The measurements are not repeated in full: the reports under
 [`docs/eval-results/`][reports] are the primary record, and each entry below names the one that
 carries its numbers. Reports of
@@ -1442,6 +1442,80 @@ contents' links into the middle of a file do not split it); footnotes stay where
 them; fixed-layout books are read as if they reflowed; MOBI and AZW are not read. Each is in
 [Known limits](../known-limits.md), and splitting at contents anchors is the obvious next step if
 real books show the need.
+
+## ADR-030: PDF is read through its text layer with pypdf, bounded before the work, and encryption is refused
+
+Status: accepted (2026-10-03, #34, with `ayl add` reading `.pdf`).
+
+The second half of the 0.5.0 criterion: a reader's own PDF, imported on a clean install. Three
+decisions again, and the first is the one the EPUB did not need.
+
+**A library, and which one.** A PDF's text is not stored as text. A page is a program of drawing
+instructions in a compressed stream; the characters it shows are codes in a font's encoding, mapped
+to Unicode through a `/ToUnicode` table, a standard encoding with differences, or the encoding
+inside an embedded font program; where a word ends is a matter of glyph positions, not spaces.
+Reading that with the standard library means writing a PDF object parser, the stream filters, a
+content-stream interpreter, the CMap and font-encoding machinery and the text-positioning
+arithmetic: a project of its own, larger than this one's ingest, and one more untrusted-input
+parser to get right. So a library it is, under three constraints: a permissive licence (this
+project is Apache-2.0; PyMuPDF and borb are AGPL), no native code or external program on the read
+path, and maintained. **`pypdf` 6.19.0** (2026-09-16; BSD-3-Clause, recorded in its package
+metadata and its `LICENSE` file) meets all three: pure Python, no dependency of its own on Python
+3.11 and later, text extraction and the outline and metadata in its public API, and — the deciding
+point — a configuration of resource limits (inflated stream size per filter, page-tree and outline
+size and depth, form invocations) that the reader can tighten. `pdfminer.six` (MIT) extracts text
+as well, with better layout analysis, but brings `charset-normalizer` and `cryptography` with it and
+has no such limits; `pypdfium2` (Apache-2.0/BSD) wraps PDFium, a C++ renderer, which is the attack
+surface this decision avoids. It is a main dependency, not an extra: the criterion is a clean
+install that imports a PDF, and `pyproject.toml` bounds it below at the version verified, as the
+others are. It is a dependency installed beside this project under its own licence, not
+redistributed in it, so `NOTICE`, which records third-party material this tree carries, does not
+change — as for every other dependency.
+
+**A PDF is untrusted input, and every bound applies before the work it bounds.** The reader is
+`src/ask_your_library/ingest/pdf.py`, and its docstring lists what the library bounds, what the module bounds and
+what is never done. The library is configured to cap every inflated stream at 16 MiB, to stop its
+page-tree walk at twice the page cap and its outline walk at 10,000 entries (neither is
+materialised past the cap), and never to call `jbig2dec`; it already detects reference cycles,
+forbids entity declarations in XMP and rebuilds a damaged cross-reference table by one scan. Two
+bounds have no setting there, and they are the ones that matter: memory and time. The library
+keeps every stream it inflates for as long as the file is open, so the module counts the bytes at
+the library's one inflating function, `decode_stream_data`, and refuses past 256 MiB for the file;
+and parsing and interpreting drawing instructions is what costs time (a 14 MB page of text
+operators took 36 s), so the module counts the bytes handed to the library's content parser — a
+page's own stream and each form it draws, every time it draws it — and refuses past 4 MiB a page
+and 128 MiB a file, before they are parsed. Those two counts are made by putting a counting wrapper
+in place of `pypdf.filters.decode_stream_data` and `pypdf._page.ContentStream` for the length of one
+read; a test pins that the library still looks both names up, and that they are put back. The text
+a page shows is counted per instruction through the library's public extraction callback and
+refused past 100,000 characters, which stops a compressed bomb of text operators long before its
+end. The library has no timeout and none is added — no thread, no signal: measured on an Apple
+M-series machine, the slowest instructions go at about 2 MB a second, so the worst page the caps
+admit takes under 2 s, the worst file about a minute, and a 400-page book under 3 s. The refusals
+are the EPUB's convention: one line, the file's path inside the folder and a fixed reason, never
+a quote; anything the library raises is named by its class only, and its own log lines and
+warnings are silenced while it reads, because they quote the file (an outline node it could not
+read is logged verbatim). No JavaScript is run, no action followed, no attachment read, no page
+rendered, no image decoded.
+
+**Encryption is refused, and nothing is tried.** `PdfReader` tries the empty password on any
+encrypted file as it opens it, which opens a file that has only an owner password — restrictions
+on printing or copying, a form of DRM. The reader replaces that attempt with the refusal (and
+checks `is_encrypted` again afterwards), so no password is tried and nothing is decrypted, for the
+same reason ADR-029 refuses DRM.
+
+**Sections from structure, as for an EPUB.** The outline's top-level entries open sections, each
+running to the page before the next (the level under a single root entry when that is all the top
+level holds); without an outline every page with text is `Page N`. Nothing is inferred from the
+text: no heading detection, no header or footer removal, no de-hyphenation. A scanned PDF — fewer
+than 200 characters on its first 10 pages — is refused rather than indexed empty; OCR is not in
+0.5.0.
+
+**Consequences.** Running headers and page numbers are indexed as text, a word broken at a line end
+stays broken, two-column pages come out in drawing order, a chapter that starts mid-page starts on
+the next page, and an owner-password-only PDF that any viewer opens is refused. Each is in
+[Known limits](../known-limits.md). The two counting wrappers depend on names inside the library;
+a version that moves them fails the pinning test rather than silently dropping the bounds.
 
 [reports]: ../eval-results/
 [backlog]: ../backlog.md
