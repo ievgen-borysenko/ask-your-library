@@ -38,8 +38,9 @@
   path's: the same ledger, chunker and provenance. A DRM-protected EPUB (an `encryption.xml`
   covering anything but font obfuscation) is refused with one line naming the file, and so is a
   malformed one, one over the archive limits (10,000 files, 64 MiB a file, 512 MiB in all,
-  uncompressed), one with an unsafe member path or an XML entity declaration, and one with no
-  text; the rest of the folder is indexed as before. Standard library only, no new dependency.
+  uncompressed), one with an unsafe member path or an XML entity declaration in its package
+  files, one not readable in the encoding a document declares, and one with no text — and anything
+  unforeseen costs that one file, never the run; the rest of the folder is indexed as before. Standard library only, no new dependency.
   [Add your own books](add-your-own-books.md#an-epub) has the rules,
   [Known limits](known-limits.md) what is not read.
 

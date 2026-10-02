@@ -293,8 +293,10 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   a DRM-free one to EPUB first. No **fixed layout**: a pre-paginated EPUB (a picture book, a comic)
   is read as if it reflowed, so text placed over a page image comes out in markup order, and a
   book that is only images has no text and is refused. **Footnotes are inline**: a note's text
-  sits where the book's markup puts it — at the end of the chapter, or in a notes file that
-  becomes a section of its own — and the link from the reference to the note is not kept. **One
+  sits where the book's markup puts it — at the end of the chapter, or in a notes file, which is
+  a section of its own when the contents name it or the spine marks it non-linear (`Notes`) and
+  otherwise part of the chapter before it — and the link from the reference to the note is not
+  kept. **One
   spine file is one section**: a file that holds several chapters, which some converters produce,
   is one section named after the first of them, because the contents' links into the middle of a
   file do not split it. No heading inside the text is used, so a book whose table of contents is

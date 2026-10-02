@@ -1418,8 +1418,13 @@ absolute or `..` member name refuses the file all the same, since nothing legiti
 member count, per-member and total uncompressed size are capped by three constants, and every read
 is cut off at the per-member cap whatever the archive's header claims; a reference that resolves
 outside the archive root is ignored. XML is parsed by ElementTree, which never fetches an external
-entity, and a document that declares any entity is refused before a parser sees it — a literal
-check over the whole decoded document, so no DOCTYPE shape hides one. XHTML is read with
+entity, and a package file that declares any entity is refused before a parser sees it — a
+literal check over the whole decoded document, so no DOCTYPE shape hides one. Content documents
+are read by `html.parser`, which never expands a declared entity, so a DTD there is dropped, not
+refused. Every document is decoded strictly in the encoding it declares, and UTF-7 (which can spell
+a lone surrogate) is not accepted. The text extraction is linear however the markup nests or fails
+to close, and anything the module did not foresee costs that one file: `add_folder` logs it by
+exception class, never by its text, and indexes the rest. XHTML is read with
 `html.parser`, not a regular expression, and only the spine documents with an XHTML/HTML media
 type are opened. A refusal is one line: the file's path inside the folder and a reason written by
 the module, never an exception's text or a line of the book.

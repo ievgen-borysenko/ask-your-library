@@ -26,9 +26,12 @@ and is removed at `0.6.0`.
 Every `.txt`, `.md` and `.epub` file under the folder (recursively) is **one book**. Skipped, and
 reported on stderr: hidden files and directories; **symlinks** — in or out of the folder, including
 files under a symlinked directory; files that are not UTF-8 text; files with nothing but a front
-matter block or a title line; and an EPUB that is refused ([below](#an-epub)): DRM-protected,
-malformed, over the archive limits, or without text. A link is not followed, so nothing outside the folder is ever read
-or embedded; copy the file in if you want it indexed. One bad file never aborts the run — the
+matter block or a title line; a folder named `*.epub` (an unpacked EPUB, the way Apple Books keeps
+one: zip it, or export it as a file); and an EPUB that is refused ([below](#an-epub)):
+DRM-protected, malformed, with an unsafe member path or an XML entity declaration in its package
+files, not readable in the encoding a document declares, over the archive limits, or without text.
+A link is not followed, so nothing outside the folder is ever read or embedded; copy the file in
+if you want it indexed. One bad file never aborts the run — the
 others are still indexed, and every skip is named on stderr (hidden ones as a single line with
 the count and the first few names, so one hidden directory cannot bury the rest). Only a folder
 in which *nothing* is indexable is an error, and then the existing index is left untouched.
@@ -243,14 +246,16 @@ matter and title lines do not apply: an EPUB has metadata of its own.
 **A chapter is one file of the spine.** The spine is the reading order the book itself declares;
 each of its XHTML/HTML documents is read in that order, and the documents marked `linear="no"`
 (notes, answer keys — text with no place of its own in the reading order) follow the rest rather
-than being dropped. A document is named by the book's table of contents — the EPUB 3 navigation
+than being dropped. The navigation document itself is not read as text when the spine lists it:
+it is the contents page, and its entries are the section names already. A document is named by the book's table of contents — the EPUB 3 navigation
 document (`<nav epub:type="toc">`), or the EPUB 2 `toc.ncx` when there is none — with the first
 entry that points at it, in the order the contents list them, so a part named above its chapters
 keeps its own name and a chapter keeps its name when the contents also list a scene inside it. A
 document the contents do not name continues the section before it (a chapter split over two
 files, which converters do for size); one before the first named document is `Front matter`
 (cover, title page, copyright page), the rule a `.txt` follows for text before its first heading.
-**With no usable table of contents** — none at all, or one that names none of the spine's
+An unnamed `linear="no"` document continues nothing, so it is a section of its own, `Notes`
+(`Notes (2)` for the next), and a note is never cited as the chapter read before it. **With no usable table of contents** — none at all, or one that names none of the spine's
 documents — every document with text is a section of its own, `Section 1`, `Section 2`, … in
 reading order, and a book of one document is `Full text`. Nothing is inferred from headings in
 the text. Section names are made unique as for a text book.
@@ -259,7 +264,9 @@ The text is taken out of the markup with Python's HTML parser: paragraphs and he
 paragraphs, scripts, styles, SVG and images are left out, whitespace is normalised, and the
 control and invisible characters the text path strips are stripped here too. A document may
 declare its encoding in its XML prolog (`windows-1252`, say); one that does not decode as it
-declares refuses the book rather than indexing mojibake.
+declares, or declares UTF-7 or a codec that is not a character set, refuses the book rather than
+indexing mojibake. A DTD in a content document is dropped: the HTML parser never expands an entity
+it declares, so it is not refused there, only in the package files below.
 
 **Refused, with one line naming the file and why** — never a line of its text — and the rest of
 the folder is indexed as usual:
@@ -269,8 +276,12 @@ the folder is indexed as usual:
   or worked around; a book you bought with DRM is not indexable, by design.
 - **Malformed**: not a zip archive, no package document, no spine, a package or contents file that
   is not well-formed XML, a reference to a file the archive does not hold.
-- **Unsafe**: an archive member whose path is absolute or climbs out with `..`, and any document
-  that declares an XML entity (the "billion laughs" shape; a book has no need of one).
+- **Unsafe**: an archive member whose path is absolute or climbs out with `..`, and a package
+  file (`container.xml`, the package document, `toc.ncx`, `encryption.xml`) that declares an XML
+  entity (the "billion laughs" shape; a book has no need of one).
+- **Not readable in its declared encoding**: see above.
+- **Could not be read**: anything else that goes wrong reading the file. The line names the kind
+  of error and nothing of what it said, and the rest of the folder is indexed as usual.
 - **Too large**: more than 10,000 files in the archive, any one file over 64 MiB uncompressed, or
   over 512 MiB uncompressed in total. What is read is read into memory by name — nothing is ever
   extracted to disk — and every read is cut off at the per-file cap, whatever the archive claims.
