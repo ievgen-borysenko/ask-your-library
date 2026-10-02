@@ -205,6 +205,12 @@ def book_files(folder: Path) -> list[Path]:
         if path.is_symlink():
             log.warning("%s: symlink, skipped (copy the file in to index it)", relative)
             continue
+        if path.is_dir() and path.suffix.lower() == EPUB_SUFFIX:
+            # Apple Books keeps a book as a folder named like the file. Named,
+            # not passed over: every file this run leaves out is reported.
+            log.warning("%s: an unpacked EPUB folder, skipped (zip it, or export it as "
+                        "a file)", relative)
+            continue
         if not path.is_file():
             continue
         try:
@@ -277,6 +283,14 @@ def read_epub_book(path: Path, folder: Path) -> Book | None:
         epub = read_epub(path)
     except EpubRefused as reason:
         log.warning("%s: %s, skipped", path.relative_to(folder), reason)
+        return None
+    except Exception as error:
+        # The last resort, and deliberately broad: an EPUB is untrusted input,
+        # and an input `epub` did not foresee must cost this one file, not the
+        # folder. Only the exception's class is named — its text could quote
+        # the book (a decoder names the bytes it choked on).
+        log.warning("%s: could not be read (%s), skipped", path.relative_to(folder),
+                    type(error).__name__)
         return None
     key = book_key(epub.title, epub.author) if epub.title else key_from_filename(path)
     text = "\n\n".join(body for _, body in epub.sections)

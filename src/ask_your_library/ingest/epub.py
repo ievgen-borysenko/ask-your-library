@@ -20,7 +20,10 @@ Chapters come from structure, never from heuristics over the text:
 - a spine item the navigation does not name continues the section before it
   (a chapter split over two files), and one before the first named item opens
   `Front matter` (cover, title page, copyright), the same rule as text before
-  the first heading of a `.txt`;
+  the first heading of a `.txt`; an unnamed non-linear item is a section of its
+  own, `Notes`, since it continues nothing;
+- the navigation document itself, when the spine lists it, is not read as
+  text: it is the contents page, and its entries are already the titles;
 - with no usable navigation at all, every spine item with text is a section of
   its own, `Section 1`, `Section 2`, … in reading order (`Full text` when there
   is only one).
@@ -42,13 +45,19 @@ An EPUB is untrusted input. What is bounded, and how:
 - a reference from the package or the navigation that resolves outside the
   archive's root is ignored, and one to a member that is not there is refused;
 - XML (`container.xml`, the package, the NCX, `encryption.xml`) is parsed by
-  `xml.etree.ElementTree`, which fetches no external entity; any document that
+  `xml.etree.ElementTree`, which fetches no external entity; any of those that
   declares an entity (the only way to a "billion laughs") is refused before it
-  is parsed;
+  is parsed. Content documents are read by `html.parser`, which never expands
+  a declared entity, so a DTD there is dropped rather than refused;
+- every document is decoded strictly, as the encoding it declares, and must
+  come out as text that UTF-8 can carry: UTF-7 and the escape codecs are not
+  accepted as a book's encoding;
 - only spine items with an XHTML/HTML media type are read; scripts, styles,
   SVG and images are ignored; text is taken out of the markup with
   `html.parser` (not a regular expression), its whitespace normalised and its
   control and invisible characters stripped (`sanitize.strip_control_chars`);
+  the extraction is linear in the size of the document, however the markup
+  nests or fails to close;
 - a file that is DRM-protected — an `encryption.xml` entry with any algorithm
   other than the IDPF or Adobe font obfuscation — is refused, and nothing is
   decrypted or worked around.
@@ -62,6 +71,7 @@ import posixpath
 import re
 import zipfile
 import zlib
+from collections import Counter
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
@@ -93,6 +103,7 @@ FONT_OBFUSCATION = frozenset({
 CONTENT_TYPES = frozenset({"application/xhtml+xml", "text/html"})
 NCX_TYPE = "application/x-dtbncx+xml"
 SECTION_FALLBACK = "Section {n}"
+NOTES_SECTION = "Notes"
 
 NS = {
     "c": "urn:oasis:names:tc:opendocument:xmlns:container",
@@ -130,6 +141,11 @@ class Archive:
 
     def __init__(self, zf: zipfile.ZipFile):
         infos = zf.infolist()
+        # By the time this count is taken, `zipfile` has already read the whole
+        # central directory into ZipInfo objects: the memory that costs is
+        # bounded by the file's own size (a few hundred bytes an entry, so a
+        # 300,000-entry archive is ~160 MB), not by this cap. What the cap
+        # bounds is everything after it — the per-member checks and reads.
         if len(infos) > MAX_MEMBERS:
             raise EpubRefused(f"too many files in the archive ({len(infos)}, "
                               f"the limit is {MAX_MEMBERS})")
@@ -189,7 +205,10 @@ _XML_DECL = re.compile(rb"^<\?xml[^>]*?encoding\s*=\s*[\"']([A-Za-z0-9._:-]+)[\"
 _XML_DECL_TEXT = re.compile(r"^\s*<\?xml[^>]*\?>")
 # Python codecs that decode bytes to text but are not character sets: an XML
 # declaration naming one is not an encoding a book was ever written in.
-NOT_A_CHARSET = frozenset({"unicode_escape", "raw_unicode_escape", "punycode", "idna"})
+# UTF-7 is a character set, but one that can spell a lone surrogate, which no
+# later step can encode; no book needs it.
+NOT_A_CHARSET = frozenset({"unicode_escape", "raw_unicode_escape", "punycode", "idna",
+                           "utf_7"})
 
 
 def decode(data: bytes) -> str:
@@ -207,8 +226,12 @@ def decode(data: bytes) -> str:
     try:
         if codecs.lookup(declared).name.replace("-", "_") in NOT_A_CHARSET:
             raise LookupError(declared)
-        return data.decode(declared)
-    except (LookupError, UnicodeDecodeError) as error:
+        text = data.decode(declared)
+        text.encode("utf-8")            # a lone surrogate would fail every later step
+        return text
+    # UnicodeError, not only UnicodeDecodeError: a codec that cannot decode at
+    # all (`encoding="undefined"`) raises the base class.
+    except (LookupError, UnicodeError) as error:
         raise EpubRefused("a document in it is not readable in the encoding it "
                           "declares") from error
 
@@ -232,10 +255,27 @@ def parse_xml(archive: Archive, name: str) -> ET.Element:
         raise EpubRefused("malformed: a package file in it is not well-formed XML") from error
 
 
+_DOCTYPE_SUBSET_END = re.compile(r"\]\s*>")
+
+
+def drop_doctype(text: str) -> str:
+    """A content document without its DOCTYPE. `html.parser` never expands a
+    declared entity, so a DTD in XHTML is harmless, but it does not parse an
+    internal subset either and would leave its tail (`]>`) as text."""
+    start = text.find("<!DOCTYPE")
+    if start < 0:
+        return text
+    close = text.find(">", start)
+    bracket = text.find("[", start)
+    if 0 <= bracket < close or (bracket >= 0 and close < 0):
+        end = _DOCTYPE_SUBSET_END.search(text, bracket)
+        close = end.end() - 1 if end else -1
+    return text if close < 0 else text[:start] + text[close + 1:]
+
+
 def read_text_member(archive: Archive, name: str) -> str:
-    text = decode(archive.read(name))
-    refuse_entities(text)
-    return text
+    """A content or navigation document, as text for `html.parser`."""
+    return drop_doctype(decode(archive.read(name)))
 
 
 # Elements whose content is not the book's text.
@@ -258,7 +298,17 @@ class _TextExtractor(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.paragraphs: list[str] = []
         self._current: list[str] = []
+        # The stack of open skipped elements, and how many of each tag it
+        # holds: an end tag is looked up in the counter, never in the stack,
+        # so stray end tags cost O(1) each and every push is popped at most
+        # once. A list scan here made 40,000 stray `</q>` inside an `<svg>`
+        # quadratic — seconds for a 2 KB file.
         self._skip: list[str] = []
+        self._open: Counter[str] = Counter()
+
+    def _push(self, tag: str) -> None:
+        self._skip.append(tag)
+        self._open[tag] += 1
 
     def _end_paragraph(self) -> None:
         text = re.sub(r"\s+", " ", "".join(self._current)).strip()
@@ -269,10 +319,10 @@ class _TextExtractor(HTMLParser):
     def handle_starttag(self, tag, attrs):
         if self._skip:
             if tag not in VOID:
-                self._skip.append(tag)
+                self._push(tag)
             return
         if tag in SKIPPED:
-            self._skip.append(tag)
+            self._push(tag)
             return
         if tag in BLOCKS:
             self._end_paragraph()
@@ -286,9 +336,12 @@ class _TextExtractor(HTMLParser):
             # Closes the innermost open skipped element, and anything left open
             # inside it: markup that forgets a close tag must not leak a
             # script's text into the book, nor swallow the rest of the chapter.
-            if tag in self._skip:
-                while self._skip and self._skip.pop() != tag:
-                    pass
+            if self._open[tag]:
+                while True:
+                    popped = self._skip.pop()
+                    self._open[popped] -= 1
+                    if popped == tag:
+                        break
             return
         if tag in BLOCKS:
             self._end_paragraph()
@@ -486,24 +539,33 @@ def titles_by_document(archive: Archive, package: Package) -> dict[str, str]:
     return titles
 
 
-def build_sections(documents: list[tuple[str, str]], titles: dict[str, str]
+def build_sections(documents: list[tuple[str, str, bool]], titles: dict[str, str]
                    ) -> list[tuple[str, str]]:
-    """[(member, text)] in reading order -> [(section title, text)]."""
-    named = [member for member, _ in documents if member in titles]
+    """[(member, text, linear)] in reading order -> [(section title, text)].
+
+    A section's text is collected as a list of parts and joined once: joining
+    as it grew made a chapter of a few thousand unnamed files quadratic."""
+    named = [member for member, _, _ in documents if member in titles]
     if not named:
-        with_text = [text for _, text in documents if text.strip()]
+        with_text = [text for _, text, _ in documents if text.strip()]
         if len(with_text) == 1:
             return [(FULL_TEXT_SECTION, with_text[0])]
         return [(SECTION_FALLBACK.format(n=n), text) for n, text in enumerate(with_text, 1)]
-    sections: list[list] = []
-    for member, text in documents:
+    sections: list[tuple[str, list[str]]] = []
+    for member, text, linear in documents:
         if member in titles:
-            sections.append([titles[member], text])
+            sections.append((titles[member], [text]))
+        elif not linear:
+            # Supplementary text out of the reading order continues nothing:
+            # appended to the last chapter, a note would be cited as that chapter.
+            sections.append((NOTES_SECTION, [text]))
         elif sections:
-            sections[-1][1] = f"{sections[-1][1]}\n\n{text}".strip()
+            sections[-1][1].append(text)
         else:
-            sections.append([FRONT_MATTER_SECTION, text])
-    return unique_titles([(title, text.strip()) for title, text in sections if text.strip()])
+            sections.append((FRONT_MATTER_SECTION, [text]))
+    joined = [(title, "\n\n".join(p.strip() for p in parts if p.strip()))
+              for title, parts in sections]
+    return unique_titles([(title, text) for title, text in joined if text])
 
 
 def read_epub(path: Path) -> EpubBook:
@@ -513,19 +575,27 @@ def read_epub(path: Path) -> EpubBook:
             archive = Archive(zf)
             refuse_drm(archive)
             package = read_package(archive, package_path(archive))
-            if not package.spine:
+            ordered = ([(m, True) for m, linear in package.spine if linear]
+                       + [(m, False) for m, linear in package.spine if not linear])
+            # The contents page is not text of the book: its entries are the
+            # section titles already.
+            ordered = [(m, linear) for m, linear in ordered if m != package.nav]
+            if not ordered:
                 raise EpubRefused("no readable spine: it lists no XHTML/HTML document")
-            ordered = ([m for m, linear in package.spine if linear]
-                       + [m for m, linear in package.spine if not linear])
             documents, seen = [], set()
-            for member in ordered:
+            for member, linear in ordered:
                 if member in seen:
                     continue
                 seen.add(member)
-                documents.append((member, extract_text(read_text_member(archive, member))))
+                documents.append((member, extract_text(read_text_member(archive, member)),
+                                  linear))
             sections = build_sections(documents, titles_by_document(archive, package))
     except zipfile.BadZipFile as error:
         raise EpubRefused("malformed: not a readable zip archive") from error
+    except (UnicodeError, ValueError) as error:
+        # A member name flagged UTF-8 that is not, and anything else `zipfile`
+        # reports as a bad value while reading the archive's directory.
+        raise EpubRefused("malformed: the archive's directory is not readable") from error
     except (zlib.error, EOFError, NotImplementedError) as error:
         raise EpubRefused("the archive is damaged or uses an unsupported "
                           "compression") from error

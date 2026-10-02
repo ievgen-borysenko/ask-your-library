@@ -7,6 +7,7 @@ as in test_add_folder.py, the index is a tmp_path LanceDB.
 """
 import logging
 import os
+import struct
 import sys
 import threading
 import time
@@ -374,13 +375,43 @@ def test_an_archive_too_large_in_total_is_refused(tmp_path, monkeypatch):
                                  extra=[("OEBPS/a.bin", b"\x00" * 4000)]))
 
 
-def test_a_member_whose_header_understates_its_size_is_cut_off(tmp_path, monkeypatch):
-    """The declared size is a claim of the archive; the read is bounded on its own."""
+def test_every_read_is_bounded_by_the_cap_on_its_own(tmp_path, monkeypatch):
+    """The cap applies to the bytes a read produces, not only to the size the
+    archive declares: a member past it is refused even when the header check
+    has already been passed."""
     path = make_epub(tmp_path / "b.epub", three_chapters())
     archive = epub.Archive(zipfile.ZipFile(path))
     monkeypatch.setattr(epub, "MAX_MEMBER_BYTES", 16)
     with pytest.raises(epub.EpubRefused, match="inflates past"):
         archive.read("OEBPS/content.opf")
+
+
+def understate_size(path, member: str, size: int) -> None:
+    """Rewrite the uncompressed size of `member` in its local header and its
+    central-directory entry, leaving the compressed data as it was."""
+    data = bytearray(path.read_bytes())
+    name = member.encode()
+    for signature, header_len, size_at in ((b"PK\x03\x04", 30, 22), (b"PK\x01\x02", 46, 24)):
+        at = data.find(name)
+        while at >= 0:
+            start = at - header_len
+            if start >= 0 and data[start:start + 4] == signature:
+                struct.pack_into("<I", data, start + size_at, size)
+            at = data.find(name, at + 1)
+    path.write_bytes(bytes(data))
+
+
+def test_a_member_whose_header_understates_its_size_is_refused_as_damaged(tmp_path):
+    """A header that claims 10 bytes for a chapter that inflates to far more:
+    the claim passes the size caps, the read stops at the claimed size, and
+    the checksum over what was read does not match, so the file is refused as
+    damaged rather than read past what it declared."""
+    path = make_epub(tmp_path / "b.epub", three_chapters())
+    understate_size(path, "OEBPS/text/c1.xhtml", 10)
+    with zipfile.ZipFile(path) as zf:
+        assert zf.getinfo("OEBPS/text/c1.xhtml").file_size == 10    # the lie is in place
+    with pytest.raises(epub.EpubRefused, match="damaged"):
+        epub.read_epub(path)
 
 
 def test_too_many_members_are_refused(tmp_path, monkeypatch):
@@ -411,10 +442,38 @@ def test_an_entity_bomb_in_the_package_is_refused_before_parsing(tmp_path):
     assert time.monotonic() - started < 2
 
 
-def test_an_entity_declaration_in_a_content_document_is_refused(tmp_path):
-    raw = BOMB.replace("lolz", "html") + "<html><body><p>&lol9;</p></body></html>"
+def test_an_entity_bomb_in_the_ncx_is_refused_too(tmp_path):
+    path = make_epub(tmp_path / "b.epub", three_chapters(), version=2, nav=False, ncx=True)
+    with zipfile.ZipFile(path) as zf, zipfile.ZipFile(tmp_path / "bomb.epub", "w") as out:
+        for info in zf.infolist():
+            data = zf.read(info)
+            if info.filename.endswith("toc.ncx"):
+                data = (BOMB + data.decode().split("?>", 1)[1]).encode()
+            out.writestr(info, data)
     with pytest.raises(epub.EpubRefused, match="declares XML entities"):
-        epub.read_epub(make_epub(tmp_path / "b.epub", [Doc("c1.xhtml", "", "One", raw=raw)]))
+        epub.read_epub(tmp_path / "bomb.epub")
+
+
+def test_a_dtd_in_a_content_document_is_dropped_and_never_expanded(tmp_path):
+    """`html.parser` does not expand declared entities, so a content document
+    with a DTD is read, not refused — and nothing of the DTD reaches the text."""
+    raw = (BOMB.replace("lolz", "html") + '<html><body><p>The amber room.</p>'
+           "<p>A &lol9; stays a reference.</p></body></html>")
+    book = epub.read_epub(make_epub(tmp_path / "b.epub", [Doc("c1.xhtml", "", "One", raw=raw)]))
+    text = book.sections[0][1]
+    assert text.startswith("The amber room.") and "]>" not in text and "ENTITY" not in text
+    assert text.count("lol") == 1                                   # not expanded
+
+
+@pytest.mark.parametrize("markup, expected", [
+    ('<!DOCTYPE html><p>a</p>', "a"),
+    ('<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "x.dtd"><p>a [b]</p>', "a [b]"),
+    ('<!DOCTYPE html [<!ENTITY e "x">]><p>a</p>', "a"),
+    ("<!DOCTYPE html [ unclosed <p>a</p>", "a"),                 # left to html.parser
+    ('<p>no doctype ]></p>', "no doctype ]>"),
+])
+def test_drop_doctype(markup, expected):
+    assert epub.extract_text(epub.drop_doctype(markup)) == expected
 
 
 @pytest.mark.parametrize("damage", ["not a zip", "no container", "no spine", "bad xml",
@@ -528,6 +587,120 @@ def test_ayl_add_then_ayl_books_lists_the_epub(tmp_path, fake_embedder, monkeypa
     assert "The Copper Kettle — Ada Quill" in out and "Sea Notes — B. Mate" in out
 
 
+# --- one bad file costs one file -----------------------------------------------------
+# Each of these escaped as a traceback once and stopped the whole folder. The
+# good .txt beside it is the point of every test: it is still indexed, and the
+# run still exits 0.
+
+def bad_name(path):
+    """A member name flagged UTF-8 in the archive whose bytes are not UTF-8."""
+    make_epub(path, three_chapters(), extra=[("OEBPS/x\u00e9.txt", "x")])
+    path.write_bytes(path.read_bytes().replace(b"x\xc3\xa9.txt", b"x\xff\xa9.txt"))
+
+
+def content(prolog_encoding: str, inner: str):
+    raw = (f'<?xml version="1.0" encoding="{prolog_encoding}"?>'
+           f"<html><body><p>{inner}</p></body></html>")
+    return lambda path: make_epub(path, [Doc("c1.xhtml", "", "One", raw=raw)])
+
+
+@pytest.mark.parametrize("build, reason", [
+    (content("undefined", "x"), "a document in it is not readable in the encoding it declares"),
+    (content("utf-7", "a +2D0- b"), "a document in it is not readable in the encoding it declares"),
+    (bad_name, "malformed: the archive's directory is not readable"),
+])
+def test_a_bad_epub_is_a_skip_and_the_rest_of_the_folder_is_indexed(tmp_path, fake_embedder,
+                                                                     capsys, caplog, build,
+                                                                     reason):
+    folder = tmp_path / "books"
+    write(folder, "Sea Notes - B. Mate.txt", PARA)
+    build(folder / "bad.epub")
+    with caplog.at_level("WARNING"):
+        assert add_folder.main([str(folder), "--db", str(tmp_path / "db")]) == 0
+    assert "added 1 books" in capsys.readouterr().out
+    assert [r.getMessage() for r in caplog.records if "bad.epub" in r.getMessage()] == [
+        f"bad.epub: {reason}, skipped"]
+
+
+def test_an_unexpected_exception_is_a_skip_named_without_its_text(tmp_path, fake_embedder,
+                                                                 capsys, caplog, monkeypatch):
+    def boom(path):
+        raise RuntimeError(f"the {CANARY} room said something")
+    monkeypatch.setattr(add_folder, "read_epub", boom)
+    folder = tmp_path / "books"
+    write(folder, "Sea Notes - B. Mate.txt", PARA)
+    make_epub(folder / "odd.epub", three_chapters())
+    with caplog.at_level("WARNING"):
+        assert add_folder.main([str(folder), "--db", str(tmp_path / "db")]) == 0
+    out = capsys.readouterr()
+    assert "added 1 books" in out.out
+    messages = [r.getMessage() for r in caplog.records]
+    assert "odd.epub: could not be read (RuntimeError), skipped" in messages
+    assert CANARY not in out.out + out.err + "\n".join(messages)
+
+
+def test_an_unpacked_epub_folder_is_named_not_passed_over(tmp_path, caplog):
+    folder = tmp_path / "books"
+    write(folder, "Sea Notes - B. Mate.txt", PARA)
+    (folder / "Unpacked.epub" / "META-INF").mkdir(parents=True)
+    with caplog.at_level("WARNING"):
+        books = add_folder.read_folder(folder)
+    assert [b.path.name for b in books] == ["Sea Notes - B. Mate.txt"]
+    assert [r.getMessage() for r in caplog.records] == [
+        "Unpacked.epub: an unpacked EPUB folder, skipped (zip it, or export it as a file)"]
+
+
+# --- linear time ------------------------------------------------------------------------
+# Bounds generous enough for a loaded CI machine; the quadratic versions took
+# seconds at a tenth of these sizes.
+
+def test_stray_end_tags_inside_a_skipped_element_cost_linear_time():
+    n = 100_000
+    markup = "<p>start</p><svg>" + "<g>" * n + "</q>" * n + "</svg><p>end</p>"
+    started = time.monotonic()
+    assert epub.extract_text(markup) == "start\n\nend"
+    assert time.monotonic() - started < 2
+
+
+def test_two_hundred_thousand_mixed_tags_cost_linear_time():
+    unit = "<svg><g></q><script></i></script></b></svg><p>w</p></u>"     # 10 tags
+    markup = unit * 20_000
+    started = time.monotonic()
+    assert epub.extract_text(markup).count("w") == 20_000
+    assert time.monotonic() - started < 2
+
+
+def test_a_chapter_of_many_unnamed_files_is_joined_once():
+    piece = "y " * 15_000                                               # 30 KB
+    documents = [("c0", "x", True)] + [(f"c{i}", piece, True) for i in range(1, 4000)]
+    started = time.monotonic()
+    sections = epub.build_sections(documents, {"c0": "One"})
+    assert time.monotonic() - started < 2
+    assert len(sections) == 1 and len(sections[0][1]) > 4000 * 29_000
+
+
+# --- the reading order's edges -----------------------------------------------------------
+
+def test_an_unnamed_non_linear_document_is_a_section_of_its_own(tmp_path):
+    docs = [Doc("c1.xhtml", body("amber"), "Chapter One"),
+            Doc("notes.xhtml", body("ivory", 1), linear=False),
+            Doc("c2.xhtml", body("birch"), "Chapter Two"),
+            Doc("key.xhtml", body("onyx", 1), linear=False)]
+    book = epub.read_epub(make_epub(tmp_path / "b.epub", docs))
+    assert titles(book) == ["Chapter One", "Chapter Two", "Notes", "Notes (2)"]
+    assert "ivory room" in book.sections[2][1] and "ivory" not in book.sections[1][1]
+
+
+def test_the_navigation_document_in_the_spine_is_not_read_as_text(tmp_path):
+    path = make_epub(tmp_path / "b.epub", three_chapters())
+    with zipfile.ZipFile(path) as zf:
+        opf = zf.read("OEBPS/content.opf").decode()
+    opf = opf.replace("<spine>", '<spine><itemref idref="nav"/>')
+    book = epub.read_epub(make_epub(tmp_path / "n.epub", three_chapters(), opf=opf))
+    assert titles(book) == ["Chapter One", "Chapter Two", "Chapter Three"]
+    assert not any("Contents" in text for _, text in book.sections)
+
+
 # --- the private book ----------------------------------------------------------------
 # A book from the reader's own folder is the one thing in this project that may
 # never leave the index it was added to. Two tests: where the run writes, and
@@ -575,12 +748,13 @@ def private_folder(tmp_path):
 
 def test_a_private_epub_is_written_only_to_the_index_named_for_the_run(tmp_path, monkeypatch,
                                                                       fake_embedder):
-    """Every write the run attempts from Python — the index's Python-side files,
-    the ingest lock, the ledger — is watched by an audit hook, and must land in
-    the index this run was given (or the lock file beside it) and nowhere in
-    the repository or the reader's folder. LanceDB's own native writes are not
-    visible to the hook; they go to the path it is handed, which is the same
-    index, and the last assertion reads them back from there."""
+    """Every write the run attempts from Python — the ingest lock, the
+    directories the run creates — is watched by an audit hook, and must land
+    in the index this run was given (or the lock file beside it) and nowhere
+    in the repository or the reader's folder. The index tables, the books
+    ledger among them, are written by LanceDB's native code, which the hook
+    cannot see; they go to the path it is handed, which is the same index, and
+    the last assertions read them back from there."""
     folder = private_folder(tmp_path)
     db = tmp_path / "run-index"
     monkeypatch.setattr(add_folder, "DB_PATH", db)
