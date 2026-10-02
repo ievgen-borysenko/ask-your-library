@@ -20,6 +20,8 @@ import pytest
 import requests
 
 from ask_your_library import ayl, config, home, init_cmd, ollama, preflight
+from ask_your_library.embeddings import OllamaEmbedder
+from ask_your_library.index_meta import expected_chunker, write_index_meta
 from ask_your_library.i18n import t
 from ask_your_library.ingest.ledger import open_ledger
 from ask_your_library.ui import launcher
@@ -146,28 +148,68 @@ MANIFEST_KEYS = {entry["id"]: f"{entry['title']} — {entry['author']}"
 CARDED = {path.stem for path in (REPO / "corpus" / "cards").glob("*.md")}
 
 
-def demo_library(path: Path, notes, source="manifest", ledger_notes=None, cards=True):
-    """An index as the demo build leaves one: a transcripts row per book under
-    its manifest book key, a cards row for each book that has a card, and a
-    ledger row per book (`ledger_notes`, when the ledger says something else
-    than the table), every one indexed."""
+def _table(db, name, keys, fts=True, meta=True):
+    """A table as the script publishes one: a row per book key, then (unless
+    the interruption came first) its full-text index, then its stamp."""
+    rows = [{"chunk_id": f"{i}", "book": key, "text": f"text of {key}"}
+            for i, key in enumerate(sorted(keys))] or [
+        {"chunk_id": "x", "book": "", "text": "t"}]
+    db.create_table(name, rows, mode="overwrite")
+    if fts:
+        db.open_table(name).create_fts_index("text", use_tantivy=False, replace=True)
+    if meta:
+        write_index_meta(db, name, "ollama", OllamaEmbedder.model, OllamaEmbedder.dims,
+                         chunker=expected_chunker(name))
+
+
+def demo_state_folder(path: Path, transcripts=None, cards=None, *, ledger=None,
+                      t_staging=False, c_staging=False, t_fts=True, c_fts=True,
+                      t_meta=True, c_meta=True, cards_from=None):
+    """A demo folder in any state the script can leave: `transcripts` /
+    `cards` the manifest ids each table holds (None: no table), a staging
+    table beside either, a missing full-text index or stamp, and `ledger`
+    ({id: status}, default: `indexed` for every transcripts book)."""
     path.mkdir(parents=True, exist_ok=True)
     db = lancedb.connect(path)
-    keys = {note: MANIFEST_KEYS.get(note, f"{note.title()} — Someone") for note in notes}
-    db.create_table("transcripts_ollama",
-                    [{"chunk_id": note, "book": key, "text": "t"} for note, key in keys.items()]
-                    or [{"chunk_id": "x", "book": "", "text": "t"}], mode="overwrite")
-    carded = [{"chunk_id": note, "book": key, "text": "t"} for note, key in keys.items()
-              if note in CARDED]
-    if cards and carded:
-        db.create_table("cards_ollama", carded, mode="overwrite")
-    ledger = open_ledger(db)
-    for note in (notes if ledger_notes is None else ledger_notes):
-        ref = f"{source}:{note}"
-        key = MANIFEST_KEYS.get(note, f"{note.title()} — Someone")
-        book_id = ledger.resolve(*key.split(" — ", 1), source_ref=ref)
-        ledger.begin(book_id, key=key, source_ref=ref, embedding_model="fake")
-        ledger.commit(book_id, rows=1)
+    key = lambda note: MANIFEST_KEYS.get(note, f"{note.title()} — Someone")  # noqa: E731
+    if transcripts is not None:
+        _table(db, "transcripts_ollama", {key(n) for n in transcripts}, t_fts, t_meta)
+    if t_staging:
+        db.create_table("transcripts_ollama__staging", [{"chunk_id": "s", "book": "", "text": "t"}],
+                        mode="overwrite")
+    if cards is not None:
+        _table(db, "cards_ollama", {key(n) for n in cards if n in CARDED}, c_fts, c_meta)
+    if c_staging:
+        db.create_table("cards_ollama__staging", [{"chunk_id": "s", "book": "", "text": "t"}],
+                        mode="overwrite")
+    statuses = ledger if ledger is not None else {n: "indexed" for n in (transcripts or [])}
+    book_ledger = open_ledger(db)
+    for note, status in statuses.items():
+        ref = f"manifest:{note}" if note in MANIFEST_KEYS else f"local:{note}"
+        book_id = book_ledger.resolve(*key(note).split(" — ", 1), source_ref=ref)
+        book_ledger.begin(book_id, key=key(note), source_ref=ref, embedding_model="fake")
+        if status == "indexed":
+            book_ledger.commit(book_id, rows=1)
+
+
+def demo_library(path: Path, notes, source="manifest", ledger_notes=None, cards=True):
+    """A finished demo library over `notes` (a foreign ledger with
+    source="local"; a ledger that says other than the table with
+    `ledger_notes`; no cards table with cards=False)."""
+    path.mkdir(parents=True, exist_ok=True)
+    if source != "manifest":
+        db = lancedb.connect(path)
+        _table(db, "transcripts_ollama", {f"{n.title()} — Someone" for n in notes})
+        book_ledger = open_ledger(db)
+        for note in notes:
+            book_id = book_ledger.resolve(note.title(), "Someone", source_ref=f"{source}:{note}")
+            book_ledger.begin(book_id, key=f"{note.title()} — Someone",
+                              source_ref=f"{source}:{note}", embedding_model="fake")
+            book_ledger.commit(book_id, rows=1)
+        return
+    demo_state_folder(path, notes, notes if cards else None,
+                      ledger={n: "indexed" for n in (notes if ledger_notes is None
+                                                     else ledger_notes)})
 
 
 def init(*argv) -> int:
@@ -799,3 +841,102 @@ def test_a_valid_pair_init_does_not_write_is_named_not_left_undecided(machine, m
     out = capsys.readouterr().out
     assert "Mode: neither mode `ayl init` writes — Ollama answers, OpenRouter embeds" in out
     assert init_cmd.mode_of("openrouter", "openrouter") == "custom"
+
+
+# --- every state an interrupted build can leave (F3-demo-cross-table) ----------------------
+# The script's publish points, in order, for one run from library OLD to NEW
+# (`--stage all`, no --book): the transcripts are rebuilt through a staging
+# table, then full-text indexed, then stamped; the ledger rows are begun while
+# the staging table fills, committed after the stamp, and reconciled; then the
+# cards go through the same steps. One snapshot per gap between two of them.
+FULL = list(MANIFEST_KEYS)
+
+
+def snapshot(old, new, step):
+    """The folder after an interruption at `step` of a run from `old` to
+    `new` (manifest ids; old None for a first build), as demo_state_folder
+    arguments. A rebuild keeps the old stamp until the new one is written —
+    same embedder, same chunker — so only a first build lacks it."""
+    first = old is None
+    begun = {**({n: "indexed" for n in old} if old else {}), **{n: "requested" for n in new}}
+    def t(**kw):
+        return dict(transcripts=new, cards=old, ledger=begun, t_meta=not first, **kw)
+    return {
+        "S0 before anything is published": dict(transcripts=old, cards=old),
+        "S1 transcripts staging being built": dict(transcripts=old, cards=old, ledger=begun,
+                                                   t_staging=True),
+        "S2 old transcripts dropped, staging complete": dict(transcripts=None, cards=old,
+                                                             ledger=begun, t_staging=True),
+        "S3 transcripts published, staging not dropped": t(t_staging=True, t_fts=False),
+        "S4 transcripts published, no full-text index": t(t_fts=False),
+        "S5 transcripts indexed, not stamped": t(),
+        "S6 transcripts stamped, ledger not committed": dict(
+            transcripts=new, cards=old, ledger=begun),
+        "S7 ledger committed, not reconciled": dict(
+            transcripts=new, cards=old,
+            ledger={**{n: "indexed" for n in (old or [])}, **{n: "indexed" for n in new}}),
+        "S8 ledger reconciled, cards not started": dict(transcripts=new, cards=old),
+        "S9 cards staging being built": dict(transcripts=new, cards=old, c_staging=True),
+        "S10 old cards dropped, staging complete": dict(transcripts=new, cards=None,
+                                                        c_staging=True),
+        "S11 cards published, staging not dropped": dict(transcripts=new, cards=new,
+                                                         c_staging=True, c_fts=False,
+                                                         c_meta=not first),
+        "S12 cards published, no full-text index": dict(transcripts=new, cards=new, c_fts=False,
+                                                        c_meta=not first),
+        "S13 cards indexed, not stamped": dict(transcripts=new, cards=new, c_meta=not first),
+        "S14 finished": dict(transcripts=new, cards=new),
+    }[step]
+
+
+STEPS = [
+    "S0 before anything is published", "S1 transcripts staging being built",
+    "S2 old transcripts dropped, staging complete", "S3 transcripts published, staging not dropped",
+    "S4 transcripts published, no full-text index", "S5 transcripts indexed, not stamped",
+    "S6 transcripts stamped, ledger not committed", "S7 ledger committed, not reconciled",
+    "S8 ledger reconciled, cards not started", "S9 cards staging being built",
+    "S10 old cards dropped, staging complete", "S11 cards published, staging not dropped",
+    "S12 cards published, no full-text index", "S13 cards indexed, not stamped", "S14 finished"]
+RUNS = {"first build": (None, STARTER), "starter to full": (STARTER, FULL),
+        "full to starter": (FULL, STARTER)}
+
+
+def expected(old, new, step, wanted):
+    """What a reader is owed: the library is built only where the run had not
+    started (S0, and only if the old library holds what is asked) or had
+    finished (S14, the same for the new one). S13 of a REBUILD is S14 but for
+    the stamp's date: the old stamp names the same embedder and chunker the
+    new one would, over rows, cards, index and ledger that are all final —
+    nothing a search or a write reads differs. Of a first build, it lacks
+    the stamp, and is rebuilt."""
+    finished = step.startswith("S14 ") or (step.startswith("S13 ") and old is not None)
+    held = old if step.startswith("S0 ") else new if finished else None
+    if held is not None and set(wanted) <= set(held):
+        return "complete"
+    no_table = (step.startswith("S2 ") or (old is None and step[:3] in ("S0 ", "S1 ")))
+    return "absent" if no_table else "partial"
+
+
+@pytest.mark.parametrize("step", STEPS)
+@pytest.mark.parametrize("run", list(RUNS))
+def test_an_interrupted_build_is_never_taken_for_a_built_one(tmp_path, run, step):
+    old, new = RUNS[run]
+    folder = tmp_path / "demo"
+    demo_state_folder(folder, **snapshot(old, new, step))
+    for request, wanted in (("--demo", STARTER), ("--demo --full", FULL)):
+        got = init_cmd.demo_state(folder, "ollama", {n: MANIFEST_KEYS[n] for n in wanted})[0]
+        assert got == expected(old, new, step, wanted), (run, step, request)
+
+
+def test_the_gate_s_case_starter_transcripts_over_full_cards_is_rebuilt(machine, capsys):
+    """Built --full, then `--starter` stopped after its transcripts were
+    published and reconciled and before the cards stage: the cards still hold
+    the whole corpus. init used to call it built."""
+    folder = machine.home / "demo" / "index"
+    demo_state_folder(folder, STARTER, FULL)
+    state, detail = init_cmd.demo_state(folder, "ollama",
+                                        {n: MANIFEST_KEYS[n] for n in STARTER})
+    assert state == "partial" and "its cards are not its books'" in detail
+    machine.check_status = 0
+    assert init("--demo") == 0
+    assert machine.builds == [(folder, "ollama", False)]

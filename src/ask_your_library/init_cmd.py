@@ -44,12 +44,13 @@ import yaml
 from dotenv import dotenv_values
 
 from . import config, dataflow, home, ollama, preflight
-from .cli import say
-from .i18n import t
 from .bookkey import book_key
-from .index_meta import rows_by_book
-from .ingest.ledger import open_ledger
-from .ingest.publish import STAGING_SUFFIX
+from .cli import say
+from .embeddings import OllamaEmbedder, OpenRouterEmbedder
+from .i18n import t
+from .index_meta import expected_chunker, read_index_meta, rows_by_book
+from .ingest.ledger import INDEXED, open_ledger
+from .ingest.publish import STAGING_SUFFIX, table_names
 from .paths import REPO_ROOT
 from .ui import launcher
 
@@ -328,29 +329,59 @@ def card_ids() -> set[str]:
     return {path.stem for path in (Path(REPO_ROOT) / "corpus" / "cards").glob("*.md")}
 
 
+def _has_fts(db, name: str) -> bool:
+    """A full-text index over `text` covering every row: LanceDB drops it with
+    the table, so a table published and not yet re-indexed has none."""
+    try:
+        indices = db.open_table(name).list_indices()
+    except Exception:
+        return False
+    return any(getattr(index, "index_type", "") == "FTS" and "text" in index.columns
+               and not getattr(index, "num_unindexed_rows", 0) for index in indices)
+
+
+def _stamped(db, name: str, backend: str) -> bool:
+    """`_index_meta` has a row for `name` naming the embedder this backend
+    uses and the chunker this code stamps that table with."""
+    meta = read_index_meta(db, name)
+    embedder = OllamaEmbedder if backend == "ollama" else OpenRouterEmbedder
+    return bool(meta) and meta.get("model") == embedder.model \
+        and meta.get("chunker") == expected_chunker(name)
+
+
 def demo_state(path: Path, backend: str, wanted: dict[str, str]) -> tuple[str, str]:
     """(state, detail) of the index at `path` as a demo library for `wanted`
     ({manifest id: book key}). Reads only an index that exists; never creates
     one.
 
-    What is built is read from the TABLES, not from the ledger: a full ingest
-    followed by a `--starter` one left `indexed` ledger rows for the whole
-    corpus over a table holding the subset, and `--demo --full` called it
-    built. A book counts when its key is in the transcripts table and, if it
-    has a committed card, in the cards table too.
+    `complete` is one state, reached only at the end of the script's run, and
+    every interruption between two of its publish points leaves something it
+    checks out of place — so a folder an interrupted build left is never
+    taken for a built one:
 
-    `absent` nothing is built; `complete` every wanted book is there;
-    `partial` a demo library holding fewer (a starter one, asked for --full);
-    `other_backend` an index whose transcripts another embedding backend built
-    — building beside it would be a second index in one folder; `foreign` an
-    index holding a book no manifest entry built, or none that a ledger
-    describes — rebuilding the table would replace them.
+    - no staging table (`<table>__staging`, transcripts, cards or the meta
+      table): one is what an interrupted rebuild leaves, and the script's
+      `recover_staging` finishes or drops it;
+    - the transcripts hold every wanted book, and only books the manifest
+      produces (else `foreign`);
+    - the cards hold exactly the carded books of what the transcripts hold:
+      a card of a book absent from the transcripts (a `--starter` rebuild
+      interrupted before its cards stage, over a full library) is a search hit
+      no chapter read can open, and a missing card is a library half-built;
+    - both tables carry their full-text index and a stamp of this embedder
+      and chunker;
+    - the ledger says `indexed` for exactly the books in the transcripts —
+      not `requested` (an ingest stopped before its commit), and no row of a
+      book the table no longer holds (one stopped before its reconcile).
 
-    A staging table (`<table>__staging`) is not a built table of any backend:
-    it is what an interrupted rebuild leaves, and the script's
-    `recover_staging` finishes or drops it on the next run. Counted as a
-    table, a first build stopped with Ctrl-C read as "another backend" and the
-    rerun that was promised to resume refused instead."""
+    What the transcripts hold beyond `wanted` is kept, not shrunk: a full
+    library asked for the starter subset is complete, with its own cards.
+
+    `absent` nothing is built; `partial` anything else a build finishes;
+    `other_backend` an index whose transcripts another embedding backend
+    built — building beside it would be a second index in one folder;
+    `foreign` an index holding a book no manifest entry built, or none that a
+    ledger describes — rebuilding the table would replace them."""
     table = f"transcripts_{backend}"
     if not (path / f"{table}.lance").is_dir():
         built = (p.name[:-len(".lance")] for p in path.glob("transcripts_*.lance")) \
@@ -368,15 +399,30 @@ def demo_state(path: Path, backend: str, wanted: dict[str, str]) -> tuple[str, s
     present = set(rows_by_book(db, table))
     if REPO_ROOT and present - set(manifest_books(None).values()):
         return "foreign", "it holds books that are not the demo corpus's"
+
+    there = sum(1 for key in wanted.values() if key in present)
+    detail = f"{there} of {len(wanted)} books in the index"
     cards_table = f"cards_{backend}"
-    carded = (set(rows_by_book(db, cards_table)) if (path / f"{cards_table}.lance").is_dir()
-              else set())
-    with_cards = card_ids() if REPO_ROOT else set()
-    there = {note for note, key in wanted.items()
-             if key in present and (note not in with_cards or key in carded)}
-    if there == set(wanted):
-        return "complete", f"{len(wanted)} of {len(wanted)} books in the index"
-    return "partial", f"{len(there)} of {len(wanted)} books in the index"
+    names = set(table_names(db))
+    if any(name.endswith(STAGING_SUFFIX) for name in names):
+        return "partial", detail + "; an interrupted rebuild left a staging table"
+    if there < len(wanted):
+        return "partial", detail
+    keys = manifest_books(None) if REPO_ROOT else {}
+    carded = {keys[note] for note in card_ids() if note in keys} & present if REPO_ROOT \
+        else set()
+    cards = set(rows_by_book(db, cards_table)) if cards_table in names else set()
+    if cards != carded:
+        return "partial", detail + (f"; its cards are not its books' "
+                                    f"({len(cards - present)} of books it does not hold, "
+                                    f"{len(carded - cards)} missing)")
+    for name in (table, cards_table):
+        if name in names and not (_has_fts(db, name) and _stamped(db, name, backend)):
+            return "partial", detail + f"; {name} has no full-text index or stamp yet"
+    indexed = {str(row.get("key") or "") for row in rows if row.get("status") == INDEXED}
+    if indexed != present or len(indexed) != len(rows):
+        return "partial", detail + "; its ledger does not describe its rows yet"
+    return "complete", detail
 
 
 def legacy_indexes() -> list[tuple[Path, str]]:
