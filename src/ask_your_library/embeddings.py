@@ -7,9 +7,12 @@ import os
 import re
 
 import requests
+# Bound here so the except clause survives a stubbed `requests` in tests.
+from requests import HTTPError
 
 from .config import (OLLAMA_EMBED_MODEL, OLLAMA_URL, OPENROUTER_BASE_URL,
                      OPENROUTER_EMBED_MODEL, OPENROUTER_ENV_FILE)
+from .dataflow import without_credentials
 
 
 def openrouter_api_key() -> str:
@@ -36,6 +39,22 @@ def _check_dims(vectors: list[list[float]], dims: int, model: str) -> list[list[
     return vectors
 
 
+def _raise_for_status(response) -> None:
+    """`response.raise_for_status()`, with any credential written into the URL
+    taken out of the error. requests keeps `user:password@` in the URL it puts
+    into an HTTPError's text ("... for url: http://user:secret@host/..."), and
+    that text is a traceback line on the reader's terminal — a demo build
+    `ayl init` starts prints it whole."""
+    try:
+        response.raise_for_status()
+    except HTTPError as error:
+        url = str(getattr(response, "url", "") or "")
+        shown = without_credentials(url) if url else url
+        if url and shown != url:
+            raise HTTPError(str(error).replace(url, shown), response=response) from None
+        raise
+
+
 class OllamaEmbedder:
     """bge-m3 via local Ollama: multilingual, so non-English questions retrieve
     from an English corpus without translation."""
@@ -50,7 +69,7 @@ class OllamaEmbedder:
     def _embed(self, texts: list[str]) -> list[list[float]]:
         response = requests.post(f"{self.url}/api/embed",
                                  json={"model": self.model, "input": texts}, timeout=300)
-        response.raise_for_status()
+        _raise_for_status(response)
         return _check_dims(response.json()["embeddings"], self.dims, self.model)
 
     def embed_docs(self, texts: list[str]) -> list[list[float]]:
@@ -80,7 +99,7 @@ class OpenRouterEmbedder:
             f"{OPENROUTER_BASE_URL.rstrip('/')}/embeddings",
             headers={"Authorization": f"Bearer {self.key}"},
             json={"model": self.model, "input": texts}, timeout=120)
-        response.raise_for_status()
+        _raise_for_status(response)
         data = sorted(response.json()["data"], key=lambda d: d["index"])
         return _check_dims([d["embedding"] for d in data], self.dims, self.model)
 

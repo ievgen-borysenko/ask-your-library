@@ -451,23 +451,27 @@ def _run(args) -> int:
             return 2
 
     # --- 1 ---
+    # `url` goes to the requests and nowhere else; `shown` is what is printed.
+    # A credential written into OLLAMA_URL (user:password@host) is never
+    # printed, in a step line, a plan, an error or a remedy.
     url = config.OLLAMA_URL
+    shown = dataflow.without_credentials(url)
     needs_ollama = "ollama" in (llm, embed)
-    step(1, f"Model server: Ollama at {url}")
+    step(1, f"Model server: Ollama at {shown}")
     pulled: frozenset = frozenset()
     if not needs_ollama:
         note("not needed: this configuration answers and embeds on OpenRouter")
     elif dry:
-        plan(f"ask {url}/api/tags whether Ollama answers, and what it has pulled")
+        plan(f"ask {shown}/api/tags whether Ollama answers, and what it has pulled")
     else:
         reply = preflight.ollama_tags(url)
         if reply.kind == "no_ollama":
-            problem(t("pf_no_ollama", url=url,
+            problem(t("pf_no_ollama", url=shown,
                       pulls=", ".join(f"`ollama pull {m}`"
                                       for m in preflight.pull_models(llm, embed))))
             return preflight.EXIT_NO_LOCAL_RUNTIME
         if reply.kind == "ollama_bad_reply":
-            problem(t("pf_ollama_bad_reply", url=url, status=reply.status))
+            problem(t("pf_ollama_bad_reply", url=shown, status=reply.status))
             return preflight.EXIT_NO_LOCAL_RUNTIME
         pulled = reply.names
         note(f"answering; {len(pulled)} model(s) pulled")

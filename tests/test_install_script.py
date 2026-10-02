@@ -581,7 +581,9 @@ def test_a_userinfo_host_is_not_this_machine(sandbox):
     result = real_run(sandbox, "--no-demo",
                       OLLAMA_URL="http://localhost:11434@ollama.example.com")
     assert result.returncode == 2, result.stdout
-    assert ("OLLAMA_URL=http://localhost:11434@ollama.example.com (exported in this shell)"
+    # Printed with the userinfo replaced, like any credential in a URL: what is
+    # left is the host the request goes to, which is the point of the refusal.
+    assert ("OLLAMA_URL=http://<credentials>@ollama.example.com (exported in this shell)"
             " — that endpoint is not on this machine") in error_lines(result.stderr)
     assert not (root / ".env").exists()
     assert invoked(records) == []
@@ -1772,3 +1774,31 @@ def test_the_installer_s_data_flow_names_are_the_package_s():
         written = re.search(rf'^{name}="([^"$]*)"$', text, re.M)
         assert written, name
         assert tuple(written.group(1).split()) == getattr(dataflow, name), name
+
+
+SECRET = "s3cret-not-a-real-password"
+
+
+@mac_only
+def test_a_credential_in_ollama_url_is_never_printed(sandbox):
+    """The installer requests the URL as written and prints it with the
+    credential replaced, in its own steps and in `ayl init`'s (F-url-credentials)."""
+    _, _, env = sandbox
+    env["OLLAMA_URL"] = f"http://reader:{SECRET}@localhost:11434"
+    out = dry_run(sandbox)
+    assert SECRET not in out
+    assert "answering on http://<credentials>@localhost:11434/api/tags" in out
+    result = real_run(sandbox, "--no-demo", OLLAMA_URL=f"http://reader:{SECRET}@localhost:11434")
+    assert SECRET not in result.stdout + result.stderr
+
+
+@pytest.mark.skipif(not have_package, reason="the package is not importable here")
+def test_the_preflight_snippet_prints_no_credential_written_into_a_url(tmp_path):
+    result = run_preflight("no-index", tmp_path, mode="local", LLM_BACKEND="ollama",
+                           EMBED_BACKEND="ollama",
+                           OLLAMA_URL=f"http://reader:{SECRET}@127.0.0.1:9",
+                           LANGSMITH_TRACING_V2="true",
+                           LANGSMITH_ENDPOINT=f"https://u:{SECRET}@smith.example.com")
+    assert SECRET not in result.stdout + result.stderr
+    assert "OLLAMA_URL=http://<credentials>@127.0.0.1:9" in result.stdout
+    assert "-> https://<credentials>@smith.example.com" in result.stdout

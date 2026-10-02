@@ -17,6 +17,7 @@ import requests
 from requests import RequestException
 
 from .config import OLLAMA_URL
+from .dataflow import without_credentials
 
 # A pull of a 9 GB model streams for minutes; what is bounded is the wait for
 # the NEXT line, not the whole download. Ollama sends a progress line every
@@ -40,6 +41,8 @@ def pull(model: str, on_progress: Progress | None = None, url: str | None = None
     Returns when Ollama says `success`; raises PullError otherwise, including
     a stream that ends without saying either."""
     base = (OLLAMA_URL if url is None else url).rstrip("/")
+    # `base` is requested; `shown` is printed — never a credential in the URL.
+    shown = without_credentials(base)
     # `model` is the current field name and `name` the older spelling of it;
     # a server ignores the one it does not know.
     body = {"model": model, "name": model, "stream": True}
@@ -47,7 +50,7 @@ def pull(model: str, on_progress: Progress | None = None, url: str | None = None
         with requests.post(f"{base}/api/pull", json=body, stream=True,
                            timeout=(CONNECT_TIMEOUT_S, READ_TIMEOUT_S)) as response:
             if response.status_code >= 400:
-                raise PullError(f"Ollama at {base} refused to pull {model}: HTTP "
+                raise PullError(f"Ollama at {shown} refused to pull {model}: HTTP "
                                 f"{response.status_code} {_error_of(response.text)}".rstrip())
             for raw in response.iter_lines():
                 if not raw:
@@ -55,10 +58,10 @@ def pull(model: str, on_progress: Progress | None = None, url: str | None = None
                 try:
                     line = json.loads(raw)
                 except ValueError:
-                    raise PullError(f"Ollama at {base} sent something that is not a pull "
+                    raise PullError(f"Ollama at {shown} sent something that is not a pull "
                                     f"progress line while pulling {model}") from None
                 if not isinstance(line, dict):
-                    raise PullError(f"Ollama at {base} sent something that is not a pull "
+                    raise PullError(f"Ollama at {shown} sent something that is not a pull "
                                     f"progress line while pulling {model}")
                 if line.get("error"):
                     raise PullError(f"Ollama could not pull {model}: {line['error']}")
@@ -68,9 +71,9 @@ def pull(model: str, on_progress: Progress | None = None, url: str | None = None
                 if status == "success":
                     return
     except RequestException as error:
-        raise PullError(f"the connection to Ollama at {base} failed while pulling {model}: "
+        raise PullError(f"the connection to Ollama at {shown} failed while pulling {model}: "
                         f"{type(error).__name__}") from None
-    raise PullError(f"Ollama at {base} ended the pull of {model} without saying it succeeded")
+    raise PullError(f"Ollama at {shown} ended the pull of {model} without saying it succeeded")
 
 
 def _error_of(text: str) -> str:

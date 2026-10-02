@@ -621,6 +621,25 @@ ollama_url="$(setting OLLAMA_URL)"
 # config.py strips trailing slashes before it builds an endpoint out of this
 # value; without the same here a URL written with one asks for //api/tags.
 while [ "${ollama_url%/}" != "$ollama_url" ]; do ollama_url="${ollama_url%/}"; done
+
+# A URL as this script prints it: a `user:password@` written into it becomes
+# `<credentials>@`, so a credential never reaches the terminal or a log; the
+# value itself is what is requested. Only a value with a scheme has a userinfo
+# production — in a bare host[:port] (OLLAMA_HOST) an @ is the text a refusal
+# is about, and is shown as it is.
+shown_url() {
+    local url="$1" scheme rest authority
+    case "$url" in
+        *://*) scheme="${url%%://*}://"; rest="${url#*://}" ;;
+        *) printf '%s\n' "$url"; return 0 ;;
+    esac
+    authority="${rest%%[/?#]*}"
+    case "$authority" in
+        *@*) printf '%s<credentials>@%s%s\n' "$scheme" "${authority##*@}" "${rest#"$authority"}" ;;
+        *) printf '%s\n' "$url" ;;
+    esac
+}
+ollama_shown="$(shown_url "$ollama_url")"
 embed_model="$(setting OLLAMA_EMBED_MODEL)"
 llm_model="$(setting OLLAMA_LLM_MODEL)"
 # The download sizes step 8 prints were measured on the two defaults and on
@@ -730,7 +749,7 @@ shown_value() {
     if is_secret_name "$1"; then
         if [ -n "$2" ]; then printf '<set>\n'; else printf '\n'; fi
     else
-        printf '%s\n' "$2"
+        shown_url "$2"
     fi
 }
 
@@ -866,7 +885,7 @@ trace_endpoint() {
     endpoint="$(effective_value LANGSMITH_ENDPOINT)"
     [ -n "$endpoint" ] || endpoint="$(effective_value LANGCHAIN_ENDPOINT)"
     [ -n "$endpoint" ] || endpoint="https://api.smith.langchain.com (the LangSmith default)"
-    printf '%s\n' "$endpoint"
+    shown_url "$endpoint"
 }
 
 # What contradicts "fully local". OLLAMA_HOST is reported but not judged here:
@@ -1154,7 +1173,7 @@ fi
 # --- 7. Ollama --------------------------------------------------------------
 ollama_ready() { curl -fsS --max-time 3 "$ollama_url/api/tags" >/dev/null 2>&1; }
 
-step "Ollama: the binary, and a server answering on $ollama_url/api/tags"
+step "Ollama: the binary, and a server answering on $ollama_shown/api/tags"
 # OLLAMA_HOST — what a server started below binds, and where step 8's `ollama
 # pull` goes — was judged with the rest of the resolution, before step 3. The
 # gate used to sit here, and it sat inside the branch that starts a server, so a
@@ -1171,14 +1190,14 @@ ollama_service=0        # ... and it was brew services, which the last block nam
 ollama_pid=""           # ... or a bare `ollama serve`, whose pid is how to stop it
 if [ "$dry_run" -eq 1 ]; then
     plan "start it for this session (brew services run ollama, else 'ollama serve')"
-    plan "wait up to ${OLLAMA_WAIT_S}s for $ollama_url/api/tags to answer"
+    plan "wait up to ${OLLAMA_WAIT_S}s for $ollama_shown/api/tags to answer"
 elif ollama_ready; then
     note "already answering"
 else
     # Only a server on this machine is ours to start, by the same rule the guard
     # above holds an Ollama endpoint to.
     if ! url_is_loopback "$ollama_url"; then
-        fail "nothing answers on $ollama_url, and it is not an address on this machine."
+        fail "nothing answers on $ollama_shown, and it is not an address on this machine."
         fail "start Ollama there (or unset OLLAMA_URL to use the default) and re-run."
         exit 1
     fi
@@ -1205,7 +1224,7 @@ else
         waited=$((waited + 1))
     done
     if ! ollama_ready; then
-        fail "Ollama did not answer on $ollama_url/api/tags within ${OLLAMA_WAIT_S}s."
+        fail "Ollama did not answer on $ollama_shown/api/tags within ${OLLAMA_WAIT_S}s."
         fail "start it in another terminal ('ollama serve'), then re-run."
         exit 1
     fi
@@ -1474,7 +1493,8 @@ try:
                                          OLLAMA_URL, TABLES)
     # The data-flow names and the "fully local" rule, from the one Python
     # definition `ayl init` judges its local mode with.
-    from ask_your_library.dataflow import is_loopback, tracing_on, v1_tracing_set
+    from ask_your_library.dataflow import (is_loopback, tracing_on, v1_tracing_set,
+                                           without_credentials)
     from ask_your_library.graph import enable_tracing_if_key_present
     from ask_your_library.i18n import t
     from ask_your_library.preflight import check_environment
@@ -1500,7 +1520,8 @@ mode = sys.argv[2] if len(sys.argv) > 2 else ""
 tracing_on = tracing_on()
 v1_tracing_set = v1_tracing_set()
 print(f"       LLM_BACKEND={LLM_BACKEND}, EMBED_BACKEND={EMBED_BACKEND}")
-print(f"       LLM_BASE_URL={LLM_BASE_URL}, OLLAMA_URL={OLLAMA_URL}")
+print(f"       LLM_BASE_URL={without_credentials(LLM_BASE_URL)}, "
+      f"OLLAMA_URL={without_credentials(OLLAMA_URL)}")
 if tracing_on:
     # A flag says that traces leave; the endpoint says where to. Neither name is
     # required, so the destination of a run that sets neither is the default the
@@ -1508,7 +1529,7 @@ if tracing_on:
     endpoint = (os.environ.get("LANGSMITH_ENDPOINT", "").strip()
                 or os.environ.get("LANGCHAIN_ENDPOINT", "").strip()
                 or "https://api.smith.langchain.com (the LangSmith default)")
-    print("       tracing: " + ", ".join(tracing_on) + " -> " + endpoint)
+    print("       tracing: " + ", ".join(tracing_on) + " -> " + without_credentials(endpoint))
 else:
     print("       tracing: off")
 if v1_tracing_set:

@@ -25,6 +25,10 @@ from ask_your_library.ui import launcher
 from conftest import REPO
 
 ANSWERS, EMBEDS = "answers-model:7b", "embeds-model"
+# The real pull, kept before any fixture replaces it with a recorder.
+REAL_PULL = ollama.pull
+SECRET = "s3cret-not-a-real-password"
+CREDENTIAL_URL = f"http://reader:{SECRET}@localhost:11434"
 STARTER = ["frankenstein", "meditations", "senecas-morals", "alice-in-wonderland",
            "hound-of-the-baskervilles", "study-in-scarlet"]
 
@@ -596,3 +600,93 @@ def test_the_demo_build_and_the_doctor_are_started_with_these_arguments(monkeypa
         == str(demo)
     assert doctor == doctor_own == [sys.executable, "-m", "ask_your_library.ayl", "doctor"]
     assert env4["LIBRARY_DB_PATH"] == "/the/reader/s/own", "the reader's own, untouched"
+
+
+# --- a credential written into OLLAMA_URL is never printed (F-url-credentials) -----------
+
+def no_secret(capsys):
+    out, err = capsys.readouterr()
+    assert SECRET not in out and SECRET not in err, (out, err)
+    return out + err
+
+
+def test_the_dry_run_prints_the_url_without_its_credential(machine, capsys):
+    machine.mp.setattr(config, "OLLAMA_URL", CREDENTIAL_URL)
+    assert init("--dry-run", "--no-demo") == 0
+    printed = no_secret(capsys)
+    assert "Ollama at http://<credentials>@localhost:11434" in printed
+    assert "would ask http://<credentials>@localhost:11434/api/tags" in printed
+
+
+def test_a_real_step_prints_the_url_without_its_credential(machine, capsys):
+    machine.mp.setattr(config, "OLLAMA_URL", CREDENTIAL_URL)
+    assert init("--no-demo") == 0
+    assert "Ollama at http://<credentials>@localhost:11434" in no_secret(capsys)
+
+
+def test_a_failed_tags_call_names_the_url_without_its_credential(machine, capsys):
+    machine.mp.setattr(config, "OLLAMA_URL", CREDENTIAL_URL)
+    machine.tags.down = True
+    assert init("--no-demo") == preflight.EXIT_NO_LOCAL_RUNTIME
+    assert "Could not reach Ollama at http://<credentials>@localhost:11434" in no_secret(capsys)
+
+
+@pytest.mark.parametrize("answer", ["http_error", "error_line", "connection"])
+def test_a_failed_pull_names_the_url_without_its_credential(machine, capsys, answer):
+    from test_ollama_pull import FakeRequests, Stream
+    machine.mp.setattr(config, "OLLAMA_URL", CREDENTIAL_URL)
+    machine.mp.setattr(ollama, "pull", REAL_PULL)
+    fake = {"http_error": FakeRequests(Stream([], status=500, text='{"error": "disk full"}')),
+            "error_line": FakeRequests(Stream([{"error": "file does not exist"}])),
+            "connection": FakeRequests(error=requests.ConnectionError(
+                f"HTTPConnectionPool: Max retries exceeded with url {CREDENTIAL_URL}"))}[answer]
+    machine.mp.setattr(ollama, "requests", fake)
+    machine.mp.setattr(ollama, "RequestException", requests.RequestException)
+    assert init("--no-demo") == preflight.EXIT_NO_LOCAL_RUNTIME
+    assert fake.calls[0]["url"] == f"{CREDENTIAL_URL}/api/pull", "the request keeps it"
+    no_secret(capsys)
+
+
+def test_the_preflight_s_ollama_texts_carry_no_credential(monkeypatch):
+    """What `ayl doctor` (init's closing check) and `ayl ask` print."""
+    monkeypatch.setattr(preflight, "OLLAMA_URL", CREDENTIAL_URL)
+    monkeypatch.setattr(preflight, "LLM_BACKEND", "ollama")
+    monkeypatch.setattr(preflight, "DB_PATH", Path("/nonexistent/index"))
+    monkeypatch.setattr(config, "_db_confirmed", True)
+    for fake in (Tags(down=True), BadTags()):
+        monkeypatch.setattr(preflight, "requests", fake)
+        problems = preflight.check_environment(db_path=Path("/nonexistent/index"))
+        text = " ".join(problems)
+        assert SECRET not in text and "http://<credentials>@localhost:11434" in text
+
+
+class BadTags:
+    def get(self, url, timeout=None):
+        class Reply:
+            status_code = 503
+
+            def raise_for_status(self):
+                raise requests.HTTPError(f"503 Server Error for url: {url}")
+        return Reply()
+
+
+def test_an_embedding_http_error_carries_no_credential(monkeypatch):
+    """requests keeps `user:password@` in the URL of an HTTPError's text; a
+    demo build's traceback would print it."""
+    from ask_your_library import embeddings
+
+    class Response:
+        status_code = 500
+        url = f"{CREDENTIAL_URL}/api/embed"
+
+        def raise_for_status(self):
+            raise requests.HTTPError(f"500 Server Error: boom for url: {self.url}")
+
+    class Post:
+        def post(self, *args, **kwargs):
+            return Response()
+    monkeypatch.setattr(embeddings, "requests", Post())
+    with pytest.raises(requests.HTTPError) as raised:
+        embeddings.OllamaEmbedder(CREDENTIAL_URL)._embed(["text"])
+    assert SECRET not in str(raised.value)
+    assert "http://<credentials>@localhost:11434/api/embed" in str(raised.value)

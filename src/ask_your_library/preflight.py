@@ -28,6 +28,7 @@ from requests import HTTPError, RequestException
 
 from .config import (DB_PATH, EMBED_BACKEND, LLM_BACKEND, OLLAMA_EMBED_MODEL, OLLAMA_LLM_MODEL, OLLAMA_URL,
                      OPENROUTER_NEEDS_KEY, ORCHESTRATOR_MODEL, TABLES, confirm_db_path, tables_for)
+from .dataflow import without_credentials
 from .embeddings import get_embedder, openrouter_api_key
 from .i18n import t
 from .index_meta import check_index, warn_version_mismatch
@@ -239,12 +240,15 @@ def check_environment(index_only: bool = False, db_path: Path | None = None,
     if checks_local_runtime:
         reply = ollama_tags()
         if reply.kind == "ollama_bad_reply":
-            problem("ollama_bad_reply", t("pf_ollama_bad_reply", url=OLLAMA_URL, status=reply.status))
+            # The URL as printed never carries a credential written into it.
+            problem("ollama_bad_reply", t("pf_ollama_bad_reply", url=without_credentials(OLLAMA_URL),
+                                          status=reply.status))
         elif reply.kind == "no_ollama":
             # The first-run failure of the shipped default, so the message
             # carries the whole remedy: install, start, pull, or the one command
             # that does all three.
-            problem("no_ollama", t("pf_no_ollama", url=OLLAMA_URL, pulls=pull_commands()))
+            problem("no_ollama", t("pf_no_ollama", url=without_credentials(OLLAMA_URL),
+                                   pulls=pull_commands()))
         else:
             names = reply.names
             if LLM_BACKEND == "ollama" and not _pulled(ORCHESTRATOR_MODEL, names):
