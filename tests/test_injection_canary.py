@@ -208,6 +208,20 @@ def test_detection_stage_fails_when_the_evidence_why_leaks_into_synthesize(monke
         canary.detection_stage({})
 
 
+def test_detection_stage_fails_when_the_evidence_why_leaks_into_reflect(monkeypatch):
+    """Same negative control for reflect (#93): it decides from the verified
+    quotes, and a reflect that read `observe`'s note again must fail the stage."""
+    real = canary.reflect
+
+    def leaky(state):
+        evidence = [dict(e, quote=f"{e['quote']} {e['why']}") for e in state.get("evidence") or []]
+        return real({**state, "evidence": evidence})
+
+    monkeypatch.setattr(canary, "reflect", leaky)
+    with pytest.raises(AssertionError):
+        canary.detection_stage({})
+
+
 # ---------------------------------------------- the fake transport's roles
 def test_the_transport_reads_messages_by_role_not_by_position():
     """The harness must not assume a two-message list: roles are the contract."""
