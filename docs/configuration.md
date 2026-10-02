@@ -23,7 +23,8 @@ every command ([ADR-027](adr/README.md#adr-027-one-precedence-for-every-command-
 A name none of the three sets takes the default in the table below. `.env.example` **is** the
 default configuration — copy it to `.env` and edit from there; the hosted lines ship commented out
 with what they cost written beside them. `ayl init --print-env-resolution` prints, for every
-setting that decides where your data goes, its value and which of the three places it came from.
+setting that decides where your data goes, its value and which of the three places it came from. `scripts/install-mac.sh` reads the same three layers, in the same order, when it judges a
+configuration before installing anything.
 
 | Variable | Default | Purpose |
 |---|---|---|

@@ -1948,6 +1948,17 @@ SAME_INPUT = [
      "LLM_BACKEND=ollama\nEMBED_BACKEND=ollama\n"),
     ("hosted-but-exported-local-with-tracing", True,
      {"LLM_BACKEND": "ollama", "LANGSMITH_TRACING_V2": "true"}, None),
+    # $AYL_HOME/config.env, the third layer (F7-installer-config-env). Keys the
+    # .env this script writes does not set, or a .env already in the clone that
+    # does not set them: there, config.env is what both read.
+    ("config-env-tracing", False, {}, None, "LANGSMITH_TRACING=true\n"),
+    ("config-env-tracing-v1", False, {}, None, "LANGCHAIN_HANDLER=langchain\n"),
+    ("config-env-remote-ollama-under-a-dotenv", False, {}, "LLM_BACKEND=ollama\nEMBED_BACKEND=ollama\n",
+     "OLLAMA_URL=http://ollama.example.com:11434\n"),
+    ("config-env-invalid-embed-under-a-dotenv", False, {}, "LLM_BACKEND=ollama\n",
+     "EMBED_BACKEND=ollma\n"),
+    ("config-env-own-ayl-home-line-ignored", False, {}, None,
+     "AYL_HOME=/nowhere\nLANGSMITH_TRACING=true\n"),
 ]
 
 
@@ -1957,8 +1968,13 @@ SAME_INPUT = [
 def test_what_ayl_init_refuses_the_installer_refuses_before_installing(sandbox, tmp_path,
                                                                      case):
     from conftest import run_fresh
-    _, hosted, exported, dotenv = case
+    _, hosted, exported, dotenv, *config_env = case
     root, records, env = sandbox
+    home = Path(env["HOME"]) / "AskYourLibrary"
+    home.mkdir()
+    if config_env:
+        (home / "config.env").write_text(config_env[0])
+    written = sorted(home.rglob("*"))
     if dotenv is not None:
         (root / ".env").write_text(dotenv)
     before = (root / ".env").read_text() if dotenv is not None else None
@@ -1967,7 +1983,6 @@ def test_what_ayl_init_refuses_the_installer_refuses_before_installing(sandbox, 
     assert invoked(records) == [], "a tool ran before the refusal"
     assert ((root / ".env").read_text() if (root / ".env").exists() else None) == before
 
-    home = tmp_path / "ayl-home"
     argv = ["init", "--no-demo", *(["--mode", "hosted"] if hosted else [])]
     init = run_fresh("import sys\nfrom ask_your_library import ayl\n"
                      f"sys.exit(ayl.main({argv!r}))\n",
@@ -1977,7 +1992,7 @@ def test_what_ayl_init_refuses_the_installer_refuses_before_installing(sandbox, 
         assert init.returncode != 0 and "LLM_BACKEND must be" in init.stderr
     else:
         assert init.returncode == 2, init.stdout + init.stderr
-    assert not home.exists(), "ayl init wrote before refusing"
+    assert sorted(home.rglob("*")) == written, "ayl init wrote before refusing"
 
 
 @mac_only

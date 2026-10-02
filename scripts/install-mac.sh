@@ -598,6 +598,49 @@ if [ "$print_resolution" -eq 1 ]; then
     exit 0
 fi
 
+# --- the third layer: $AYL_HOME/config.env, the file `ayl init` writes ---------
+# config.py reads it beneath exported variables and the project's .env (ADR-027),
+# so the judgement below has to as well: a LANGSMITH_TRACING=true there made a
+# run this script let through refused by `ayl init` at step 11, after the
+# installs. Parsed with the same reader, then kept apart from the .env's values
+# (home_v_NAME, home_names); its AYL_HOME line is ignored, as config.py ignores
+# it. AYL_HOME itself: exported, else the .env's, else ~/AskYourLibrary. A
+# ~user spelling is not resolved here (step 11 refuses it), so no file is read.
+home_names=""
+home_dir="${AYL_HOME-}"
+if [ -z "${AYL_HOME+set}" ] && dotenv_defines AYL_HOME; then
+    home_dir="$(planned_value AYL_HOME)"
+fi
+[ -n "${home_dir//[[:space:]]/}" ] || home_dir="$HOME/AskYourLibrary"
+case "$home_dir" in
+    "~") home_dir="$HOME" ;;
+    "~/"*) home_dir="$HOME/${home_dir#"~/"}" ;;
+esac
+case "$home_dir" in
+    "~"*) ;;
+    *)
+        if [ -f "$home_dir/config.env" ]; then
+            saved_names="$dotenv_names" saved_source="$planned_env_source"
+            for name in $saved_names; do eval "saved_v_$name=\${dotenv_v_$name}"; done
+            planned_env_source="$home_dir/config.env"
+            dotenv_parse "$(cat "$home_dir/config.env")"
+            for name in $dotenv_names; do
+                [ "$name" = "AYL_HOME" ] && continue
+                eval "home_v_$name=\${dotenv_v_$name}"
+                home_names="$home_names $name"
+                unset "dotenv_v_$name"
+            done
+            dotenv_names="$saved_names" planned_env_source="$saved_source"
+            for name in $saved_names; do eval "dotenv_v_$name=\${saved_v_$name}"; done
+        fi
+        ;;
+esac
+home_defines() {
+    case " $home_names " in *" $1 "*) return 0 ;; esac
+    return 1
+}
+home_value() { local variable="home_v_$1"; printf '%s\n' "${!variable-}"; }
+
 # The value that .env gives a name, as python-dotenv would give it.
 planned_value() {
     local variable="dotenv_v_$1"
@@ -619,6 +662,7 @@ setting() {
     local name="$1" value
     value="${!name-}"
     [ -n "$value" ] || value="$(planned_value "$name")"
+    [ -n "$value" ] || value="$(home_value "$name")"
     [ -n "$value" ] || value="$(config_default "$name")"
     printf '%s\n' "$value"
 }
@@ -726,6 +770,8 @@ effective_value() {
         value="${!1}"
     elif dotenv_defines "$1"; then
         value="$(planned_value "$1")"
+    elif home_defines "$1"; then
+        value="$(home_value "$1")"
     else
         config_default "$1"
         return 0
@@ -748,6 +794,8 @@ value_source() {
         fi
     elif dotenv_defines "$1"; then
         printf '%s\n' "$planned_env_source"
+    elif home_defines "$1"; then
+        printf '%s\n' "$home_dir/config.env"
     else
         printf 'the default in config.py\n'
     fi
