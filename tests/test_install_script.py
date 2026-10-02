@@ -772,11 +772,21 @@ def run_preflight(expected, tmp_path, mode="", **environment):
     with them."""
     env = {k: v for k, v in os.environ.items() if k not in SCRUBBED}
     env["PYTHONPATH"] = str(REPO)
+    # SCRUBBED drops AYL_HOME, so the default, $HOME/AskYourLibrary, would be the
+    # developer's real one, config.env included: a home of the test's own.
+    (tmp_path / "home").mkdir(exist_ok=True)
+    env["HOME"] = str(tmp_path / "home")
     env.update({"LLM_BACKEND": "openrouter", "EMBED_BACKEND": "openrouter",
                 "OPENROUTER_API_KEY": "not-a-real-key",
                 "LIBRARY_DB_PATH": str(tmp_path / "nothing-here"), **environment})
     return subprocess.run([sys.executable, "-c", preflight_snippet(), expected, mode],
                           cwd=tmp_path, env=env, capture_output=True, text=True)
+
+
+def test_the_snippet_s_child_has_a_home_of_its_own(tmp_path):
+    """F8-preflight-home: the child never reads the developer's ~/AskYourLibrary."""
+    run_preflight("", tmp_path)
+    assert (tmp_path / "home").is_dir()
 
 
 @pytest.mark.skipif(not have_package, reason="the package is not importable here")
