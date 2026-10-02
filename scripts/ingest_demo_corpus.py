@@ -36,7 +36,10 @@ The LanceDB lives in $AYL_HOME/index by default (LIBRARY_DB_PATH overrides, the
 same variable the agent reads; an index already built at the old default,
 data/lancedb, is read there until it is moved — ADR-026). Table names:
 cards_<backend> / transcripts_<backend>. The downloads and the prepared texts
-stay in the checkout's data/raw and data/prepared.
+go to the checkout's data/raw and data/prepared, and the contents pages are
+regenerated into corpus/toc/ — unless --cache-dir names another folder, in
+which case the run writes nothing under the checkout (`ayl init --demo` runs it
+that way, into $AYL_HOME/demo/cache, ADR-028).
 """
 import argparse
 import hashlib
@@ -88,6 +91,20 @@ TOC_DIR = REPO / "corpus" / "toc"
 DATA = REPO / "data"
 RAW_DIR = DATA / "raw"            # downloaded texts / mp3s, as fetched
 PREPARED_DIR = DATA / "prepared"  # one json per book: {note, book, chapters}
+# Whether a prepare stage regenerates corpus/toc/<id>.json. The default run is
+# the developer's and CI's, which keep the committed contents pages in step
+# with the editions; a run given --cache-dir (the one `ayl init --demo` starts)
+# treats the checkout as read-only input and writes nothing under it.
+WRITE_TOC = True
+
+
+def shown(path: Path) -> str:
+    """A path as the runbooks spell it: relative to the checkout when it is in
+    it, whole when it is not (a --cache-dir under AYL_HOME)."""
+    try:
+        return str(Path(path).relative_to(REPO))
+    except ValueError:
+        return str(path)
 
 WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo"
 
@@ -255,9 +272,10 @@ def save_prepared(entry: dict, chapters: list[tuple[str, str]], provenance: str)
         "source": provenance,
         "chapters": [{"title": t, "text": b} for t, b in chapters],
     }, ensure_ascii=False), encoding="utf-8")
-    TOC_DIR.mkdir(parents=True, exist_ok=True)
-    (TOC_DIR / f"{entry['id']}.json").write_text(
-        json.dumps([t for t, _ in chapters], ensure_ascii=False, indent=0), encoding="utf-8")
+    if WRITE_TOC:
+        TOC_DIR.mkdir(parents=True, exist_ok=True)
+        (TOC_DIR / f"{entry['id']}.json").write_text(
+            json.dumps([t for t, _ in chapters], ensure_ascii=False, indent=0), encoding="utf-8")
     total = sum(len(b) for _, b in chapters)
     print(f"  {entry['id']}: {len(chapters)} chapters, {total:,} chars")
 
@@ -285,7 +303,7 @@ def refuse_overwriting_backups(entries: list[dict]) -> None:
              if backup_path(raw).exists()]
     if not taken:
         return
-    listing = "\n".join(f"  {book}: {prev.relative_to(REPO)}" for book, _raw, prev in taken)
+    listing = "\n".join(f"  {book}: {shown(prev)}" for book, _raw, prev in taken)
     _book, raw, prev = taken[0]
     sys.exit(
         f"--refetch would overwrite a backup that already exists:\n{listing}\n"
@@ -294,7 +312,7 @@ def refuse_overwriting_backups(entries: list[dict]) -> None:
         f"mirror serves the newer file. Overwriting it leaves you diffing one fresh download "
         f"against another.\n"
         f"Finish the investigation with the backup you have "
-        f"(diff {prev.relative_to(REPO)} {raw.relative_to(REPO)}), or move it aside by hand "
+        f"(diff {shown(prev)} {shown(raw)}), or move it aside by hand "
         f"under a name of your own, and then run --refetch again.")
 
 
@@ -979,6 +997,12 @@ def main(argv: list[str] | None = None) -> None:
                     help="only the starter subset: the manifest entries marked `starter: true`, "
                          "and their cards (what `ayl init --demo` builds; a few minutes "
                          "instead of about thirty)")
+    ap.add_argument("--cache-dir", type=lambda value: Path(value).expanduser(), metavar="DIR",
+                    help="where the downloads (DIR/raw) and the prepared texts (DIR/prepared) "
+                         "go, instead of the checkout's data/; with it the run writes nothing "
+                         "under the checkout, corpus/toc/ included (`ayl init --demo` passes "
+                         "$AYL_HOME/demo/cache). The sources are still verified against the "
+                         "manifest's pins")
     ap.add_argument("--no-verify", action="store_true",
                     help="skip manifest checksum verification of sources")
     ap.add_argument("--chunker", metavar="VERSION",
@@ -1037,8 +1061,16 @@ def main(argv: list[str] | None = None) -> None:
         # on the manifest itself would each make it something else.
         ap.error("--starter builds the starter subset as a whole: it does not combine with "
                  "--book, --cards-dir, --stage stamp-meta or --stage checksums")
-    global VERIFY_CHECKSUMS
+    if args.cache_dir and args.stage == "checksums":
+        # That stage rewrites corpus/manifest.yaml, the one write a --cache-dir
+        # run promises not to make.
+        ap.error("--cache-dir keeps the checkout read-only, and --stage checksums writes "
+                 "corpus/manifest.yaml: pin checksums from a run without --cache-dir")
+    global VERIFY_CHECKSUMS, RAW_DIR, PREPARED_DIR, WRITE_TOC
     VERIFY_CHECKSUMS = not args.no_verify
+    if args.cache_dir:
+        RAW_DIR, PREPARED_DIR, WRITE_TOC = (args.cache_dir / "raw", args.cache_dir / "prepared",
+                                            False)
 
     manifest = load_manifest()
     entries = starter_entries(manifest) if args.starter else all_entries(manifest)

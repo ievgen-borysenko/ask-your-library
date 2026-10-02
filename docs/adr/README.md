@@ -1126,11 +1126,13 @@ builds for the reader points, and nothing of it defaults into the working direct
 | local cards of the engineer's shelf | `$AYL_HOME/cards/tech` | — | yes |
 | the private shelf (the reader's own books, cards, index) | under `$AYL_HOME` | — | yes (not built yet) |
 
-What is **not** moved: the demo corpus's downloads and prepared texts (`data/raw/`,
-`data/prepared/`), which `scripts/ingest_demo_corpus.py` still stages in the checkout. The corpus
-pin job in CI and every developer checkout depend on that layout, and they are derived inputs of
-the checkout's own manifest, not something built for the reader; moving them is a later slice
-(with `ayl init`, which will run the same stages). Nor the committed inputs — `corpus/`,
+What is **not** moved by default: the demo corpus's downloads and prepared texts (`data/raw/`,
+`data/prepared/`), which `scripts/ingest_demo_corpus.py` stages in the checkout when it is run
+directly. The corpus pin job in CI and every developer checkout depend on that layout, and they
+are derived inputs of the checkout's own manifest, not something built for the reader. *Amended
+2026-10-02 (#30, ADR-028):* a demo build `ayl init --demo` starts passes `--cache-dir
+$AYL_HOME/demo/cache`, and such a run keeps both there and writes nothing under the checkout —
+the committed `corpus/toc/` included, which only a direct run regenerates. Nor the committed inputs — `corpus/`,
 `corpus-tech/`, the golden sets — which are versioned with the code and pinned by checksum.
 
 **The backward-compatibility rule, for the index**, in `config.resolve_db_path`, in this order:
@@ -1284,6 +1286,17 @@ whole mechanism is one documented line and no new flag on `ask`, `books` or `ui`
 variable set: the same stages, checksums, staging tables and ingest lock as before, nothing
 reimplemented. One constant, `init_cmd.BUILD_DEMO_BY_DEFAULT`, holds the default; flipping it
 makes the question's default answer and `--yes` mean "build it".
+
+**Where it writes.** Only under `AYL_HOME`: the index in `demo/index`, and the downloads and
+prepared texts in `demo/cache`, which `ayl init` names to the script with `--cache-dir`. A run
+given that option treats the checkout as read-only input — it reads the manifest, the committed
+transcripts and cards, and verifies every source against the manifest's pins, but it does not
+regenerate `corpus/toc/` and refuses `--stage checksums`, the stage that rewrites the manifest. So
+a first `ayl init --demo` does not write into the clone, cannot be stopped by a read-only one,
+and cannot rewrite a committed file. The cache is public-domain text, but it sits beside the demo
+library and is refused inside a git work tree by the same check (`home.private_dir`), so one
+refusal covers both. A direct run of the script keeps the checkout layout, for CI's pin job and a
+developer's runbooks.
 
 **Consequences.** The demo library needs a clone: the script and `corpus/` ship with it and not
 with the package, and `ayl init --demo` outside one refuses with the two ways on. A reader who

@@ -19,7 +19,12 @@
   `--demo --full` the whole corpus; on a terminal `ayl init` asks once, and no is the default. It
   goes to `~/AskYourLibrary/demo/index`, never into your own index, and is asked by naming it:
   `LIBRARY_DB_PATH=~/AskYourLibrary/demo/index uv run ayl ask "..."`. It is built by
-  `scripts/ingest_demo_corpus.py`, which gained `--starter`, so it needs a clone.
+  `scripts/ingest_demo_corpus.py`, which gained `--starter`, so it needs a clone — but it writes
+  nothing into it: the script also gained `--cache-dir`, and `ayl init` passes
+  `~/AskYourLibrary/demo/cache`, so the downloads and prepared texts go there and the committed
+  `corpus/toc/` is not regenerated. Run directly, the script keeps its `data/` layout. It now also
+  refuses to write the classics into an index that holds books `ayl add` indexed — told by the
+  ledger, or by the rows of an index built before the ledger.
 
   `scripts/install-mac.sh` no longer asks about the demo corpus itself: step 11 runs `ayl init`
   (`--yes` there is `--demo` here), and its closing lines lead with `ayl add`.

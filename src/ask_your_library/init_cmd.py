@@ -390,13 +390,24 @@ def closing_check(db: Path | None) -> int:
     return subprocess.call([sys.executable, "-m", "ask_your_library.ayl", "doctor"], env=env)
 
 
-def build_demo(path: Path, backend: str, full: bool) -> int:
+def demo_cache() -> Path:
+    """Where a demo build `ayl init` starts keeps its downloads and prepared
+    texts: under AYL_HOME, beside the demo library, never in the checkout. The
+    same work-tree refusal as the demo library itself (`demo_path`), which it
+    is only ever used with: one check, not a second with other semantics."""
+    return home.private_dir("demo", "cache")
+
+
+def build_demo(path: Path, backend: str, full: bool, cache: Path) -> int:
     """The demo library, built by the script that has always built it, with
     its own stages, checksums, staging tables and ingest lock: run as that
     script, with `LIBRARY_DB_PATH` naming `path` (clause 1, so no notice and
-    no second resolution)."""
+    no second resolution) and `--cache-dir` naming `cache`, so the run writes
+    nothing under the checkout — not its data/, not the committed
+    corpus/toc/ — and a read-only clone builds as well as any."""
     script = Path(REPO_ROOT) / "scripts" / "ingest_demo_corpus.py"
-    argv = [sys.executable, str(script), "--backend", backend, *([] if full else ["--starter"])]
+    argv = [sys.executable, str(script), "--backend", backend, "--cache-dir", str(cache),
+            *([] if full else ["--starter"])]
     sys.stdout.flush()
     return subprocess.call(argv, env={**os.environ, "LIBRARY_DB_PATH": str(path)})
 
@@ -626,12 +637,13 @@ def _run(args) -> int:
             elif dry:
                 plan(f"build {label} ({len(wanted)} books, {ESTIMATE[which]}) into {target}: "
                      f"{command('scripts/ingest_demo_corpus.py' if full else 'scripts/ingest_demo_corpus.py --starter')}"
-                     f" --backend {embed}, with LIBRARY_DB_PATH={quoted(target)}")
+                     f" --backend {embed} --cache-dir {quoted(demo_cache())}, with "
+                     f"LIBRARY_DB_PATH={quoted(target)}")
             else:
                 note(f"demo library: building {label} into {target}"
                      + (f" ({detail} so far)" if state == "partial" else "")
                      + f" — {ESTIMATE[which]}; safe to interrupt and resume")
-                status = build_demo(target, embed, full)
+                status = build_demo(target, embed, full, demo_cache())
                 if status != 0:
                     problem(f"the demo build stopped (status {status}). Every stage is cached: "
                             f"`{command('ayl init --demo' + (' --full' if full else ''))}` "

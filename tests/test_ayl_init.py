@@ -104,7 +104,8 @@ class Machine:
                 on_progress("success", None, None)
         mp.setattr(ollama, "pull", pull)
 
-        def build(path, backend, full):
+        def build(path, backend, full, cache):
+            assert cache == self.home / "demo" / "cache", "the cache is under AYL_HOME"
             self.builds.append((path, backend, full))
             demo_library(path, STARTER if not full else STARTER + ["moby-dick"])
             return 0
@@ -185,7 +186,8 @@ def test_dry_run_prints_every_step_in_order_and_changes_nothing(machine, capsys)
     assert f"would ask http://localhost:11434/api/tags" in out
     assert f"would pull {ANSWERS}" in out and f"would pull {EMBEDS}" in out
     assert f"would write {machine.home / 'config.env'}" in out and "LLM_BACKEND=ollama" in out
-    assert "scripts/ingest_demo_corpus.py --starter --backend ollama" in out
+    assert ("scripts/ingest_demo_corpus.py --starter --backend ollama --cache-dir "
+            f"{machine.home / 'demo' / 'cache'}") in out
     assert str(machine.home / "demo" / "index") in out
     assert "Nothing was pulled, written or built" in out
     assert machine.tags.calls == 0, "no request to Ollama"
@@ -588,14 +590,18 @@ def test_the_demo_build_and_the_doctor_are_started_with_these_arguments(monkeypa
     monkeypatch.setattr(init_cmd, "REPO_ROOT", str(tmp_path / "clone"))
     monkeypatch.setenv("LIBRARY_DB_PATH", "/the/reader/s/own")
     demo = tmp_path / "home" / "demo" / "index"
-    assert init_cmd.build_demo(demo, "ollama", full=False) == 0
-    assert init_cmd.build_demo(demo, "ollama", full=True) == 0
+    cache = tmp_path / "home" / "demo" / "cache"
+    assert init_cmd.build_demo(demo, "ollama", full=False, cache=cache) == 0
+    assert init_cmd.build_demo(demo, "ollama", full=True, cache=cache) == 0
     assert init_cmd.closing_check(demo) == 0
     assert init_cmd.closing_check(None) == 0
     script = str(tmp_path / "clone" / "scripts" / "ingest_demo_corpus.py")
     (starter, env1), (full, env2), (doctor, env3), (doctor_own, env4) = calls
-    assert starter == [sys.executable, script, "--backend", "ollama", "--starter"]
-    assert full == [sys.executable, script, "--backend", "ollama"]
+    # --cache-dir: the downloads and prepared texts under AYL_HOME, and
+    # nothing written under the checkout (F-demo-writes-checkout)
+    assert starter == [sys.executable, script, "--backend", "ollama", "--cache-dir", str(cache),
+                       "--starter"]
+    assert full == [sys.executable, script, "--backend", "ollama", "--cache-dir", str(cache)]
     assert env1["LIBRARY_DB_PATH"] == env2["LIBRARY_DB_PATH"] == env3["LIBRARY_DB_PATH"] \
         == str(demo)
     assert doctor == doctor_own == [sys.executable, "-m", "ask_your_library.ayl", "doctor"]
