@@ -83,7 +83,7 @@ git clone https://github.com/ievgen-borysenko/ask-your-library.git && cd ask-you
 uv sync
 uv run ayl init --dry-run                # the plan, printed; nothing is changed
 uv run ayl init                          # the models (mostly download time) and the configuration
-uv run ayl add ~/books                   # your own .txt / .md books
+uv run ayl add ~/books                   # your own .txt / .md / .epub books
 uv run ayl ask "..."
 ```
 

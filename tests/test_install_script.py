@@ -1652,7 +1652,7 @@ def test_the_closing_message_leads_with_the_index_then_the_free_first_question(s
     exits 3 on a preflight that says the same thing one step later. The demo
     library is offered beside them, as its own index."""
     out = dry_run(sandbox)
-    build = out.index("uv run ayl add ~/books\n      index your own .txt / .md books first")
+    build = out.index("uv run ayl add ~/books\n      index your own .txt / .md / .epub books first")
     question = out.index('uv run ayl ask "..."')
     assert build < question
     assert "uv run ayl init --demo" in out
@@ -1676,7 +1676,7 @@ def test_no_demo_closes_on_the_reader_s_own_books_not_the_demo_build(sandbox):
     """--no-demo already said the demo corpus is not wanted; offering it again
     as the next step reads as the script not having listened."""
     out = dry_run(sandbox, "--no-demo")
-    assert "index your own .txt / .md books first" in out
+    assert "index your own .txt / .md / .epub books first" in out
     assert "ayl init --demo" not in out
 
 

@@ -10,9 +10,9 @@ in code against the exact passage it was copied from (the answer's own sentences
 question, and the demo corpus (33 public-domain books plus 2 synthetic canaries), the golden
 sets and every eval run are fingerprinted. A reference implementation with an honest eval
 harness, not a "chat with your PDFs" demo. Your own books go in with one command
-(`uv run ayl-add <folder>` over a folder of `.txt` / `.md` files, embedded locally by default); the
-distilled book cards the demo corpus also carries still need an LLM per book and are not
-generated for you.
+(`uv run ayl add <folder>` over a folder of `.txt`, `.md` and `.epub` files, embedded locally by
+default); the distilled book cards the demo corpus also carries still need an LLM per book and
+are not generated for you.
 
 The most instructive artifact is a failure: an answer that passes every automated gate and still
 does not answer the question, because the passage that would have answered it was never retrieved -

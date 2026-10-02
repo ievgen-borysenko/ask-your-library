@@ -5,13 +5,13 @@ what it was measured to buy. They were written from the code rather than ahead o
 describe the system as built; where a variant was tried and dropped, the rejected variant is part
 of the record, because it is usually the more useful half.
 
-Twenty-eight decisions, in the order they were taken. ADR-016 is written out as a file of its own
+Twenty-nine decisions, in the order they were taken. ADR-016 is written out as a file of its own
 because it changed the planner's contract and added a node to the graph; the rest are summarised
 here. ADR-017 to ADR-023 were recorded on 2026-09-16, after the fact: a review of this tree found
 seven decisions the code had made and no record named. The four that constrain what may be built
 next are written out below; the other three are reserved as stubs — number, title, one sentence —
 to be written when the code they describe is next touched, so that the numbering is taken and the
-decision is not forgotten. ADR-024 and ADR-025 were taken on 2026-09-17, ADR-026 on 2026-09-25 and ADR-027 and ADR-028 on 2026-10-02,
+decision is not forgotten. ADR-024 and ADR-025 were taken on 2026-09-17, ADR-026 on 2026-09-25 and ADR-027 to ADR-029 on 2026-10-02,
 each written out with the code it describes. The measurements are not repeated in full: the reports under
 [`docs/eval-results/`][reports] are the primary record, and each entry below names the one that
 carries its numbers. Reports of
@@ -1391,6 +1391,57 @@ wants the classics and their own books in one index can still point `ayl add` at
 library's path; the default never does it for them. An old index found by ADR-026's clause 2, or
 in the clone when `ayl init` runs elsewhere, is not built beside: the move is printed (and, when
 every book in it came from the manifest, the demo location is offered as its destination).
+
+## ADR-029: EPUB is read with the standard library, as untrusted input, and DRM is refused
+
+Status: accepted (2026-10-02, #34, with `ayl add` reading `.epub`).
+
+The 0.5.0 release criterion is a reader importing their own EPUB or PDF. EPUB came first, and three
+decisions came with it.
+
+**The standard library, not an EPUB library.** The common Python EPUB libraries are AGPL-licensed,
+and this project is Apache-2.0: depending on one would change what anyone redistributing it may
+do. What `ayl add` needs from an EPUB is small — the container, the package's metadata, manifest
+and spine, the navigation document or the NCX, the text of the XHTML documents — and `zipfile`,
+`xml.etree.ElementTree` and `html.parser` read all of it. The reader is one module,
+`src/ask_your_library/ingest/epub.py`, and it returns what a text book gives `add_folder`: a
+title, an author and `[(section, text)]`, so the ledger, chunker, embedding and provenance are the
+text path's, unchanged. Chapters come from the book's structure — one spine document a section,
+named by the first contents entry pointing at it; an unnamed document continues the section before
+it; with no usable contents, `Section N` — and never from headings guessed out of the text, the
+heuristic the `.txt` path cannot avoid and an EPUB does not need.
+
+**An EPUB is untrusted input.** It is the first input `ayl add` takes that is a container rather
+than text, and its bounds are stated in the module and enforced before anything is read: members
+are read by name into memory and never extracted, so a member path is never a file path; an
+absolute or `..` member name refuses the file all the same, since nothing legitimate needs one;
+member count, per-member and total uncompressed size are capped by three constants, and every read
+is cut off at the per-member cap whatever the archive's header claims; a reference that resolves
+outside the archive root is ignored. A ZIP64 archive is refused before `zipfile` opens it, rather
+than parsed: an EPUB never needs one, and its end record's variable-length sector is a format
+detail a bound should not depend on. XML is parsed by ElementTree, which never fetches an external
+entity, and a package file that declares any entity is refused before a parser sees it — a
+literal check over the whole decoded document, so no DOCTYPE shape hides one. Content documents
+are read by `html.parser`, which never expands a declared entity, so a DTD there is dropped, not
+refused. Every document is decoded strictly in the encoding it declares, and UTF-7 (which can spell
+a lone surrogate) is not accepted. The text extraction is linear however the markup nests or fails
+to close, and anything the module did not foresee costs that one file: `add_folder` logs it by
+exception class, never by its text, and indexes the rest. XHTML is read with
+`html.parser`, not a regular expression, and only the spine documents with an XHTML/HTML media
+type are opened. A refusal is one line: the file's path inside the folder and a reason written by
+the module, never an exception's text or a line of the book.
+
+**DRM is refused, not worked around.** An `encryption.xml` entry with any algorithm other than the
+IDPF or Adobe font obfuscation means encrypted content, and the file is refused with one line
+saying it is protected. Font obfuscation alone is accepted: it mangles an embedded font and touches
+no text. Decrypting anything would circumvent DRM, which this project does not do whatever is
+technically possible.
+
+**Consequences.** A file that holds several chapters is one section named after the first (the
+contents' links into the middle of a file do not split it); footnotes stay where the markup puts
+them; fixed-layout books are read as if they reflowed; MOBI and AZW are not read. Each is in
+[Known limits](../known-limits.md), and splitting at contents anchors is the obvious next step if
+real books show the need.
 
 [reports]: ../eval-results/
 [backlog]: ../backlog.md

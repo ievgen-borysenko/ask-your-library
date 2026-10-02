@@ -281,13 +281,28 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   moment of the swap instead. Re-ask the question, or index when nobody is asking.
 - **English corpus assumption.** The planner prompt hardcodes English search queries. Questions
   in other languages work (bge-m3 is multilingual), the queries do not.
-- **"Your own library" covers plain text only, and without cards.** `ayl-add` takes `.txt` and
-  `.md`; EPUB, PDF and audio are not handled (the demo corpus's audio path is Whisper in
+- **"Your own library" covers plain text and EPUB, and without cards.** `ayl add` takes `.txt`,
+  `.md` and `.epub`; PDF and audio are not handled yet (the demo corpus's audio path is Whisper in
   `scripts/ingest_demo_corpus.py`, driven by the manifest). It builds the transcripts table
-  only — book-card generation needs an LLM per book and is not implemented — and its chapter
-  detection is the demo heuristic, so an unusual edition may fall back to one `Full text`
-  section. The retrieval and answer-quality numbers under [Evaluation](evaluation.md) were
-  measured on the demo corpus, not on an arbitrary folder.
+  only — book-card generation needs an LLM per book and is not implemented — and the chapter
+  detection of a text file is the demo heuristic, so an unusual edition may fall back to one
+  `Full text` section. The retrieval and answer-quality numbers under
+  [Evaluation](evaluation.md) were measured on the demo corpus, not on an arbitrary folder.
+- **An EPUB is read as a reflowable book of XHTML, and only that.** No **DRM**: a protected file
+  is refused with one line, and nothing is decrypted. No **ZIP64** archive: an EPUB never needs
+  one, and one is refused before it is opened. No **MOBI or AZW** (Kindle formats): convert
+  a DRM-free one to EPUB first. No **fixed layout**: a pre-paginated EPUB (a picture book, a comic)
+  is read as if it reflowed, so text placed over a page image comes out in markup order, and a
+  book that is only images has no text and is refused. **Footnotes are inline**: a note's text
+  sits where the book's markup puts it — at the end of the chapter, or in a notes file, which is
+  a section of its own when the contents name it or the spine marks it non-linear (`Notes`) and
+  otherwise part of the chapter before it — and the link from the reference to the note is not
+  kept. **One
+  spine file is one section**: a file that holds several chapters, which some converters produce,
+  is one section named after the first of them, because the contents' links into the middle of a
+  file do not split it. No heading inside the text is used, so a book whose table of contents is
+  missing gets `Section 1`, `Section 2`, … rather than its chapter names. Every rule and refusal:
+  [Add your own books](add-your-own-books.md#an-epub).
 - **Prompt delimiters are a convention, not a boundary.** Retrieved text is wrapped in
   XML-like blocks with `<` neutralized; the sanitizer is a small EN/UA regex set. An injection
   cannot forge a source (provenance is checked against the stored passage), but it can steer

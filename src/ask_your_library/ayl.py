@@ -2,7 +2,7 @@
 
   uv run ayl init                 # the first run: models, configuration, where books go
   uv run ayl ask "What does Marcus Aurelius say about anger?"
-  uv run ayl add ~/books          # index a folder of .txt / .md books
+  uv run ayl add ~/books          # index a folder of .txt / .md / .epub books
   uv run ayl doctor               # the environment and the index, both halves
   uv run ayl books                # what the index holds, without a model call
   uv run ayl ui                   # the Chainlit web chat
@@ -37,7 +37,7 @@ SUMMARY = {
     "init": "the first run: check Ollama, pull the models, write the configuration "
             "(the demo library only with --demo)",
     "ask": "ask the library a question, or open the interactive chat",
-    "add": "index a folder of .txt / .md books",
+    "add": "index a folder of .txt / .md / .epub books",
     "doctor": "report the environment, then reconcile the ledger against the index",
     "backup": "copy the index and the web UI's chat database into DIR/<timestamp>/",
     "restore": "verify a backup directory against its manifest and put it back",
