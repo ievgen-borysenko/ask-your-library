@@ -22,55 +22,69 @@ SCRIPT = REPO / "scripts" / "install-mac.sh"
 BASH = shutil.which("bash")
 NS = dataflow.NOT_SHOWN
 
+# (value, what is printed, whether it counts as credential-bearing). It counts
+# when it is not printable, or when it holds a query or a fragment, where a
+# token rides along to the server (F8-query-token); a bare path does not.
 CASES = [
-    ("http://localhost:11434", "http://localhost:11434"),
-    ("http://127.0.0.1:11434", "http://127.0.0.1:11434"),
-    ("https://openrouter.ai/api/v1", "https://openrouter.ai (path not shown)"),
-    ("http://[::1]:11434", "http://[::1]:11434"),
-    ("http://127.0.0.1:11434/?key=Tq9Wz3Lm", "http://127.0.0.1:11434 (path not shown)"),
-    ("http://127.0.0.1:11434/Pz8Xk2Nj/api", "http://127.0.0.1:11434 (path not shown)"),
-    ("http://127.0.0.1:11434#Fr4g", "http://127.0.0.1:11434 (path not shown)"),
-    ("http://reader:Gx7Rk2Tq@127.0.0.1:11434", NS),
-    ("http://reader:Gx7/Rk2@127.0.0.1:11434", NS),
-    ("http://reader:Gx7?Rk2@127.0.0.1:11434", NS),
-    ("http://reader:Gx7#Rk2@127.0.0.1:11434", NS),
-    ("http://reader:Gx7@Rk2@127.0.0.1:11434", NS),
-    ("uQ7zK9:Zq8Lr2Vx@127.0.0.1:11434/via/http://gw", NS),
-    ("uQ7zK9:Kp4v://Yz6w@127.0.0.1:11434", NS),
-    ("http://uQ7%40zK9:Mv5%40Rq3@127.0.0.1:11434", NS),
-    ("http://uQ7zK9:Hn3Bv7Qs@[::1]:11434", NS),
-    ("http://host/path@x", NS),
-    ("127.0.0.1:11434", NS),
-    ("localhost:11434", NS),
-    ("http://", NS),
-    ("http://:11434", NS),
-    ("http://h st", NS),
-    ("1http://h", NS),
-    ("", NS),
+    ("http://localhost:11434", "http://localhost:11434", False),
+    ("http://127.0.0.1:11434", "http://127.0.0.1:11434", False),
+    ("https://openrouter.ai/api/v1", "https://openrouter.ai (path not shown)", False),
+    ("http://[::1]:11434", "http://[::1]:11434", False),
+    ("http://127.0.0.1:11434/?key=Tq9Wz3Lm", "http://127.0.0.1:11434 (path not shown)", True),
+    ("http://127.0.0.1:11434/api?token=Tq9W", "http://127.0.0.1:11434 (path not shown)", True),
+    ("http://127.0.0.1:11434/Pz8Xk2Nj/api", "http://127.0.0.1:11434 (path not shown)", False),
+    ("http://127.0.0.1:11434#Fr4g", "http://127.0.0.1:11434 (path not shown)", True),
+    ("http://reader:Gx7Rk2Tq@127.0.0.1:11434", NS, True),
+    ("http://reader:Gx7/Rk2@127.0.0.1:11434", NS, True),
+    ("http://reader:Gx7?Rk2@127.0.0.1:11434", NS, True),
+    ("http://reader:Gx7#Rk2@127.0.0.1:11434", NS, True),
+    ("http://reader:Gx7@Rk2@127.0.0.1:11434", NS, True),
+    ("uQ7zK9:Zq8Lr2Vx@127.0.0.1:11434/via/http://gw", NS, True),
+    ("uQ7zK9:Kp4v://Yz6w@127.0.0.1:11434", NS, True),
+    ("http://uQ7%40zK9:Mv5%40Rq3@127.0.0.1:11434", NS, True),
+    ("http://uQ7zK9:Hn3Bv7Qs@[::1]:11434", NS, True),
+    ("http://host/path@x", NS, True),
+    ("127.0.0.1:11434", NS, True),
+    ("localhost:11434", NS, True),
+    ("http://", NS, True),
+    ("http://:11434", NS, True),
+    ("http://h st", NS, True),
+    ("1http://h", NS, True),
+    ("", NS, True),
 ]
 
 
-def bash_shown(values):
+def bash_shown(values, function="shown_url"):
     """The installer's own function, sourced from the script, over `values`
-    (one per line, none holding a newline)."""
-    program = ("eval \"$(sed -n '/^NOT_SHOWN=/,/^}/p' \"$1\")\"\n"
-               "while IFS= read -r value; do shown_url \"$value\"; done\n")
+    (one per line, none holding a newline). For `carries_credential` each
+    line is "yes" or "no"."""
+    call = ('shown_url "$value"' if function == "shown_url" else
+            'if carries_credential "$value"; then echo yes; else echo no; fi')
+    # From NOT_SHOWN= up to (not including) shown_setting: the words, the
+    # pattern, shown_url and carries_credential, as the script defines them.
+    program = ("set -e\n"
+               "eval \"$(sed -n '/^NOT_SHOWN=/,/^shown_setting() {/{/^shown_setting() {/!p;}' "
+               "\"$1\")\"\n"
+               "set +e\n"
+               f"while IFS= read -r value; do {call}; done\n")
     result = subprocess.run([BASH, "-c", program, "-", str(SCRIPT)],
                             input="".join(f"{v}\n" for v in values),
                             capture_output=True, text=True, check=True)
     return result.stdout.splitlines()
 
 
-@pytest.mark.parametrize("value, printed", CASES)
-def test_the_python_function(value, printed):
+@pytest.mark.parametrize("value, printed, counts", CASES)
+def test_the_python_functions(value, printed, counts):
     assert dataflow.shown_url(value) == printed
-    assert dataflow.carries_credential(value) is (printed == NS)
+    assert dataflow.carries_credential(value) is counts
 
 
 @pytest.mark.skipif(BASH is None, reason="no bash on this system")
-def test_the_bash_function_prints_exactly_what_the_python_one_does():
-    values = [value for value, _ in CASES]
-    assert bash_shown(values) == [printed for _, printed in CASES]
+def test_the_bash_functions_answer_exactly_what_the_python_ones_do():
+    values = [value for value, _, _ in CASES]
+    assert bash_shown(values) == [printed for _, printed, _ in CASES]
+    assert bash_shown(values, "carries_credential") == [
+        "yes" if counts else "no" for _, _, counts in CASES]
 
 
 def test_the_two_patterns_and_words_are_the_same_text():

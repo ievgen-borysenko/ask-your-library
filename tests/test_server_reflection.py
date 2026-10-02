@@ -145,12 +145,18 @@ def test_a_progress_stage_without_a_credential_is_the_server_s_sanitised(monkeyp
 # --- end to end: a server that reflects fragments of what it was sent ---------------------
 
 class Reflector(BaseHTTPRequestHandler):
-    mode, fragment = "stream", "first four"
+    mode, fragment, source = "stream", "first four", "auth"
 
     def log_message(self, *args):
         pass
 
     def _echo(self):
+        if self.source == "query":
+            # The token the URL's query carried, as this request arrived with it.
+            import re as _re
+            found = _re.search(r"key=([^/&#]*)", self.path)
+            token = found.group(1) if found else ""
+            return FRAGMENTS[self.fragment](token, token)
         auth = self.headers.get("Authorization", "")
         sent = base64.b64decode(auth.split(" ", 1)[1]).decode() if auth.startswith("Basic ") else ":"
         user, _, password = sent.partition(":")
@@ -210,3 +216,39 @@ def test_no_fragment_a_reflecting_server_sends_reaches_the_terminal(reflector, t
     printed = result.stdout + result.stderr
     assert "Traceback" not in printed, printed
     assert_clean(printed)
+
+
+
+# --- a token in the query counts too (F8-query-token) --------------------------------------
+TOKEN = "Tq9Wz3LmKx7Pv4"
+
+
+def test_a_token_in_the_query_counts_and_withholds_the_server_s_text(monkeypatch):
+    url = f"http://127.0.0.1:11434/?key={TOKEN}"
+    assert dataflow.shown_url(url) == "http://127.0.0.1:11434 (path not shown)"
+    assert dataflow.carries_credential(url) and dataflow.server_text("x", url) is None
+    answering(monkeypatch, Stream([{"error": f"bad key {TOKEN}"}]))
+    with pytest.raises(ollama.PullError) as failed:
+        ollama.pull("some-model", url=url)
+    assert TOKEN[:4] not in str(failed.value) and "withheld" in str(failed.value)
+
+
+@pytest.mark.parametrize("fragment", list(FRAGMENTS))
+@pytest.mark.parametrize("mode", ["stream", "http"])
+def test_no_piece_of_a_query_token_a_server_reflects_is_printed(reflector, tmp_path, mode,
+                                                                fragment):
+    Reflector.mode, Reflector.fragment, Reflector.source = mode, fragment, "query"
+    try:
+        url = f"http://127.0.0.1:{reflector.server_address[1]}/?key={TOKEN}"
+        work = tmp_path / "work"
+        work.mkdir()
+        result = run_fresh("import sys\nfrom ask_your_library import ayl\n"
+                           "sys.exit(ayl.main(['init', '--no-demo', '--yes']))\n", cwd=work,
+                           check=False, AYL_HOME=str(tmp_path / "home"), OLLAMA_URL=url)
+    finally:
+        Reflector.source = "auth"
+    printed = result.stdout + result.stderr
+    assert "Traceback" not in printed, printed
+    assert "withheld" in printed, "the pull never failed: the check checked nothing"
+    leaked = sorted(piece for piece in slices(TOKEN) if piece in printed)
+    assert not leaked, (leaked, printed)

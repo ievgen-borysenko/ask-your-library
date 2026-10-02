@@ -71,6 +71,19 @@ shown_url() {
     fi
 }
 
+# The same rule as ask_your_library.dataflow.carries_credential: not printable
+# under shown_url, or a query or fragment (a ? or # part) after the host, where
+# a token rides along. A bare path does not count.
+carries_credential() {
+    local value="$1" LC_ALL=C
+    [ "$(shown_url "$value")" = "$NOT_SHOWN" ] && return 0
+    [[ "$value" =~ $PLAIN_URL_RE ]] || return 0
+    case "${BASH_REMATCH[4]}" in
+        *'?'*|*'#'*) return 0 ;;
+    esac
+    return 1
+}
+
 # Any setting as this script prints it: a URL-valued one (ENDPOINT_VARS, the
 # names dataflow.ENDPOINT_VARS holds) through shown_url; any other as it is,
 # unless it holds an @, which none of them needs.
@@ -1049,12 +1062,12 @@ done
 # print it: issue #107) — refused here, before anything is installed, with the
 # same words, rather than there, after everything was.
 # The settings a request goes to (dataflow.REQUEST_URL_VARS), and "carries a
-# credential" exactly as dataflow.carries_credential reads it: not printable
-# under shown_url.
+# credential" exactly as dataflow.carries_credential reads it (carries_credential
+# above): not printable under shown_url, or a query or fragment.
 if [ "$want_demo" -eq 1 ] && [ "$assume_yes" -eq 1 ]; then
     for name in OLLAMA_URL OPENROUTER_BASE_URL LANGCHAIN_ENDPOINT LANGSMITH_ENDPOINT; do
         value="$(effective_value "$name")"
-        if [ -n "$value" ] && [ "$(shown_url "$value")" = "$NOT_SHOWN" ]; then
+        if [ -n "$value" ] && carries_credential "$value"; then
             fail "--yes asks for the demo library, which is not built while a URL-valued"
             fail "setting carries a credential ($name, $(value_source "$name")): the demo"
             fail "build's error output is not yet safe for one (issue #107). Move the"
