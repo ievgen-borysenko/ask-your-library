@@ -738,10 +738,17 @@ def test_an_unexpected_exception_is_a_skip_named_without_its_text(tmp_path, fake
     assert CANARY not in out.out + out.err + "\n".join(messages)
 
 
-def test_an_unpacked_epub_folder_is_named_not_passed_over(tmp_path, caplog):
+def test_an_unpacked_epub_folder_is_named_once_and_nothing_inside_it_is_read(tmp_path, caplog):
+    """Apple Books' layout: the book is a folder named like the file. It is
+    reported once, and the traversal does not go on to index the files inside
+    it as books of their own — a notes.txt in there is part of that book."""
     folder = tmp_path / "books"
     write(folder, "Sea Notes - B. Mate.txt", PARA)
-    (folder / "Unpacked.epub" / "META-INF").mkdir(parents=True)
+    unpacked = folder / "Unpacked.epub"
+    (unpacked / "META-INF").mkdir(parents=True)
+    write(unpacked, "notes.txt", PARA)
+    write(unpacked / "OEBPS" / "Inner.epub", "notes.md", PARA)
+    write(unpacked / "OEBPS", ".hidden.txt", PARA)
     with caplog.at_level("WARNING"):
         books = add_folder.read_folder(folder)
     assert [b.path.name for b in books] == ["Sea Notes - B. Mate.txt"]

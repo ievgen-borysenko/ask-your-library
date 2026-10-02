@@ -195,6 +195,11 @@ def book_files(folder: Path) -> list[Path]:
     hidden = []
     for path in folder.rglob("*"):
         relative = path.relative_to(folder)
+        if any(part.lower().endswith(EPUB_SUFFIX) for part in relative.parts[:-1]):
+            # Inside an unpacked EPUB folder, which is reported once, below, as
+            # the folder it is: the files in it are parts of that book, and a
+            # notes.txt among them is not a book of its own.
+            continue
         if path.suffix.lower() not in BOOK_SUFFIXES:
             continue
         if any(part.startswith(".") for part in relative.parts):
