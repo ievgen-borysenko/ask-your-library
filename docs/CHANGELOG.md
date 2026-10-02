@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **`reflect` decides whether to stop from the verified quotes, not from `observe`'s notes on
+  them** (#93, [ADR-005](adr/README.md#adr-005-observe-sees-a-fixed-budget-of-each-hit-the-rest-of-the-loop-sees-only-evidence)).
+  Its evidence line was `- book (section): why`, the model's own unchecked paraphrase, and on the
+  extended set h14 a note that stated an outcome its quote does not carry ("though it did not
+  ultimately save her") ended the loop after one step on 22.09, where the same hits had led to a
+  chapter read on 19.09. The line is now `- book (section): "quote"`, and `REFLECT_RULES` gains one
+  sentence under `enough`: "enough" is justified only when the quotes themselves cover every part
+  of the question. Nothing else in the loop changed, and `why` now reaches no prompt.
+  **What is measured is the decision, offline, and nothing else.** A replay of `reflect` on the
+  stored states (`deepseek/deepseek-v4-flash-0731`, temperature 0, 149 calls) continued on 30 of 30
+  h14 samples against 16 of 30 with the shipped line, on 6 of 6 c03 samples against 0 of 6, and
+  kept `enough` on 12 of 12 controls where stopping was right; a `reflect` prompt grows from about
+  613 to 700 tokens. **The effect on answers is not measured yet**: whether the extra step finds the
+  missing fact is for the eval run (core, then extended) that follows, which also has to read out
+  two side effects the replay showed — chapter reads named a looser `looking_for` (only "Beatrice"
+  in 12 of 28 h14 reads) and the malformed book key with the section folded into the title came up
+  more often (6 of 28 reads against 1 of 16). The eval numbers of this change are comparable with
+  the last run's on the data, not on the `reflect` prompt.
+
 - **What this machine builds for the reader lives in `AYL_HOME`, not in the directory a command
   was typed in** (#30, [ADR-026](adr/README.md#adr-026-ayl_home-is-the-home-of-everything-built-on-this-machine-the-index-the-scratchpads-the-chat-database-the-private-shelf)).
   Three defaults moved: the index from `data/lancedb` (relative, so the same command typed in two
