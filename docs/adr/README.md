@@ -293,22 +293,23 @@ gate, and every hosted model under it.
 ## ADR-005: `observe` sees a fixed budget of each hit; the rest of the loop sees only evidence
 
 Status: accepted; the size of the budget was revised by ADR-012 and its MEANING by ADR-025
-(2026-09-17), and 2026-09-16 added one number to what `reflect` sees (see below). The budget
-itself is unchanged.
+(2026-09-17), 2026-09-16 added one number to what `reflect` sees, and 2026-10-02 replaced the
+note `reflect` decided on with the verified quote (see below). The budget itself is unchanged.
 
 Raw hits never reach `plan`, `reflect` or `synthesize`. `observe` receives one `<result>` block
 per hit, carrying that hit's id, book and section, with the text cut to `SEARCH_HIT_CHARS`
-(`CHAPTER_HIT_CHARS` for a chapter read), and returns quotes with a `why`; `reflect` decides on
-book / section / why lines. The alternative, passing the retrieved text down the loop, pays input
+(`CHAPTER_HIT_CHARS` for a chapter read), and returns quotes with a `why`; `reflect` decided on
+book / section / why lines until 2026-10-02, and decides on book / section / quote lines since
+(amendment below). The alternative, passing the retrieved text down the loop, pays input
 tokens at every node and widens the surface an injected instruction can reach.
 
 What this buys is cost control, the pinning of ADR-004, and an injection blast radius that stops at
 `observe`. The cut is also the mechanism behind two published failures: at 1,200 characters c03
 named only one of the two women its question asks about, which ADR-012 fixed, while c06's answering
 passage is not in the window at any size — a retrieval problem, traced in
-[`docs/examples/c06-fogg-missing-day.md`][c06-trace]. That `reflect` decides on a thin summary,
-with no quotes and no candidate set, is the mechanism behind "identify rarely clarifies", which
-ADR-013 addressed.
+[`docs/examples/c06-fogg-missing-day.md`][c06-trace]. That `reflect` decided on a thin summary,
+with no quotes (until the 2026-10-02 amendment) and no candidate set, is the mechanism behind
+"identify rarely clarifies", which ADR-013 addressed.
 
 Amended 2026-09-17 (#28, ADR-025): **the budget is the same number and it is no longer a cut.** A
 transcript chunk is packed to 2,400 characters, under `SEARCH_HIT_CHARS`, so a search hit arrives
@@ -326,6 +327,81 @@ unchanged; the reason it is there is that without it "evidence so far: (none)" a
 retrieved plenty reads to the planner as a silent library, and the next query would be chosen on
 that misreading. The line is added only when the count is non-zero, so a run that drops nothing
 sends the prompt it has always sent.
+
+Amended 2026-10-02 (#93): **`reflect` decides from the verified quotes, not from `observe`'s notes
+on them.** Its evidence line was `- book (section): why`, and `why` is the model's own one-line
+paraphrase, which nothing checks. On the extended set h14 (Beatrice Cenci: why the public sympathy,
+and did it save her?) stopped after one step on 22.09 and read the chapter on 19.09, on the same hits and,
+in one attempt, the same two quotes: only the second note's wording differed, and the 22.09 note
+asserted an outcome ("though it did not ultimately save her") its quote does not carry. The line is
+now `- book (section): "quote"`, the quote that passed the provenance gate (ADR-004), shown as
+`synthesize` shows it, and `REFLECT_RULES` gains one sentence under the `enough` bullet: "enough"
+is justified only when the quotes themselves cover every part of the question. `why` still goes to
+the scratchpad log and reaches no prompt.
+
+**This widens what an injection reaches past `observe`, and the frame above has to say so.**
+`reflect` now receives the same verified spans `synthesize` receives — book text, up to
+`MAX_QUOTE_CHARS` each (the hit budget) — where the note it read before was model text capped at
+300 characters. An instruction inside a quoted span can therefore steer the decision: stop early,
+read a chapter, pick the next query. The sinks of that decision are bounded in code: the decision
+itself is an enum read through `str_field`; `next_query` goes only to the local search, and a
+reserved action marker in it is rejected; book, section and `looking_for` reach `act` only through
+`chapter_marker`; the clarify candidates are built by code from the evidence and `hits_log`. The
+clarify question is model text shown to the reader, as it was before this change, and stays
+covered by the canary and the UI's neutralization (ADR-008).
+
+Measured offline before it was written, on the decision only: `reflect` replayed on stored states
+with everything but the evidence line and the rule byte-identical, `deepseek/deepseek-v4-flash-0731`
+through OpenRouter, reasoning off, temperature 0, 149 calls (about $0.007). With the shipped rules
+the replay reproduced 47 of the 48 stored decisions. Three arms: shipped, quote plus note (with a
+sentence saying a note is not evidence), and quotes only.
+
+| states | shipped | quote + note | quotes only |
+|---|---|---|---|
+| h14, six stored step-1 states (two runs × three attempts), n=5: continued | 16/30 | 23/30 | 30/30 |
+| c03 attempt 3 after step 3, facts incomplete, n=3: continued | 0/6 | 6/6 | 6/6 |
+| controls where stopping was right (h15, h16, c05 ×2), n=3: `enough` | 12/12 | 12/12 | 12/12 |
+
+With the note beside the quote the note still decided (the 22.09 attempt-1 state stayed `enough`
+5/5); without notes, four of the six h14 states became byte-identical prompts. Cost per `reflect`
+call, prompt / completion tokens: 613 / 19.9 shipped, 700 / 34.2 quotes only (a chapter read is a
+longer reply than `enough`).
+
+The replay named two side effects for the eval run to read out: chapter reads aimed less
+precisely (in 12 of 28 h14 reads `looking_for` was only "Beatrice") and more malformed book keys
+(the section folded into the title, 6 of 28 reads against 1 of 16). The limits of the replay: n=5
+and n=3, a queue rebuilt by replaying `plan`, four easy controls, and a hosted model that is not
+deterministic at temperature 0.
+
+**The eval run (2026-10-02), with a same-index control.** Core ×3 and extended ×3, the same model
+and command line, three runs: the 22.09 baseline on the index of 18.09, a control (`main` before
+this change) on today's index, rebuilt after #97, and the fix on today's index. The control is
+what the fix is compared with, because the index changed in between.
+
+| per attempt | baseline 22.09 | control | fix |
+|---|---|---|---|
+| behaviour PASS, core / extended | 10/10/11, 18/18/18 | 11/11/11, 17/18/18 | 11/11/11, 18/18/17 |
+| hand grade, core, correct of 11 | 6/6/8 | 7/6/8 | 8–9/9/6 |
+| step-limit stops, core + extended | 0 | 1 | 3 |
+
+Fix against control: about +0.7 to +1.0 correct answers per core attempt by hand grade, carried by
+c06 (its chapter read 3/3 against 0/3) and offset by one c07 attempt that read the wrong scene —
+one grader, n=3, inside the attempt-to-attempt spread on record. Behaviour is neutral (33 vs 33
+passes on core, 53 vs 53 on extended). Steps per question +8%, set cost +10–14%, step-limit stops
+1 → 3, two of them a repeated identical query.
+
+For h14 the decision is fixed and the answer is not complete: the chapter is read in 3 of 3
+attempts (control 2/3, baseline 0/3), every `looking_for` names the open part of the question, and
+every answer says the sympathy did not save her, but `beheaded` is still not reached — the windows
+end about 700 characters before it, and the control's one wider window held it and `observe` kept
+nothing. That remainder is window reach and `observe`'s selection, #81's classes, not `reflect`.
+Neither side effect from the replay appeared: malformed book keys 0 of 35 reads (control 1 of 28);
+a `looking_for` that is only a name about 7 of 35 (control about 10 of 28).
+
+**The one risk found: a two-book identify question answered without a clarify.** h22 skipped the
+clarify in 1 of 3 attempts, where the shipped rules clarified in 9 of 9 attempts across three runs.
+It fits the mechanism: with quotes from only one of the two books, the quotes do "cover" the
+question. Watched, not fixed here.
 
 ## ADR-006: Clarify as an interrupt with a candidate list and a code resolver
 

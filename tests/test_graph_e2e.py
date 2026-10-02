@@ -231,7 +231,12 @@ def test_one_search_enough_answer_and_confirmed_provenance(run, tmp_path):
     scratch = scratchpads[0].read_text()
     assert "<<<hit>>> s1h1" in scratch and "Call me Ishmael" in scratch
     assert "Call me Ishmael" in model.nth("observe")["user"]        # observe saw the passage
-    assert "Call me Ishmael" not in model.nth("reflect")["user"]    # reflect saw evidence lines only
+    # reflect saw evidence lines only: the verified quote with the book and the
+    # section the hit record pinned (#93), never the rest of the passage and
+    # never observe's note on it
+    reflect_user = model.nth("reflect")["user"]
+    assert f'- {MOBY} (Chapter 1): "Call me Ishmael."' in reflect_user
+    assert "never mind how long" not in reflect_user and "answers it" not in reflect_user
     assert 'hit_id="s1h2"' in model.nth("observe")["user"]
     # the conversation reaches the planner and the answer writer, nobody else
     assert "white whale" in model.nth("plan")["user"] and "white whale" in model.nth("synthesize")["user"]
