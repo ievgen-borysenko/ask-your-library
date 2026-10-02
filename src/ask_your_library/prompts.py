@@ -76,6 +76,8 @@ again otherwise, whatever its status.
 
 Decide ONE of:
 - Evidence is enough to answer well -> {{"decision": "enough"}}
+  "enough" is justified only when the quotes themselves cover every part of the
+  question.
 - mode is "identify" AND evidence points to SEVERAL different plausible books, and we
   cannot tell which one the user means -> {{"decision": "clarify",
   "clarify_question": "<short question to the user {clarify_lang}, listing ONLY

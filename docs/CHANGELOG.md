@@ -46,6 +46,26 @@
   and `ayl-add` go. A test now fails when the package version reaches the sunset while the old
   location still answers, so the change cannot ship by accident.
 
+- **`reflect` decides whether to stop from the verified quotes, not from `observe`'s notes on
+  them** (#93, [ADR-005](adr/README.md#adr-005-observe-sees-a-fixed-budget-of-each-hit-the-rest-of-the-loop-sees-only-evidence)).
+  Its evidence line was `- book (section): why`, the model's own unchecked paraphrase, and on the
+  extended set h14 a note that stated an outcome its quote does not carry ("though it did not
+  ultimately save her") ended the loop after one step on 22.09, where the same hits had led to a
+  chapter read on 19.09. The line is now `- book (section): "quote"`, and `REFLECT_RULES` gains one
+  sentence under `enough`: "enough" is justified only when the quotes themselves cover every part
+  of the question. Nothing else in the loop changed, and `why` now reaches no prompt.
+  **What is measured is the decision, offline, and nothing else.** A replay of `reflect` on the
+  stored states (`deepseek/deepseek-v4-flash-0731`, temperature 0, 149 calls) continued on 30 of 30
+  h14 samples against 16 of 30 with the shipped line, on 6 of 6 c03 samples against 0 of 6, and
+  kept `enough` on 12 of 12 controls where stopping was right. On those replayed step-1 states a
+  `reflect` prompt grew from about 613 to 700 tokens; it is bounded by the evidence, as
+  `synthesize`'s is. **On answers, the eval run against a same-index control (core ×3, extended ×3)
+  shows a modest gain:** about +0.7 to +1.0 correct per core attempt by hand grade, carried by c06,
+  with behaviour neutral and 8% more steps. h14 now reads its chapter in 3 of 3 attempts, but
+  `beheaded` is still out of the window (#81). One risk to watch: h22, a two-book identify
+  question, skipped its clarify in 1 of 3 attempts where the shipped rules clarified 9 of 9.
+  Neither side effect the replay named (looser `looking_for`, malformed book keys) appeared.
+
 - **What this machine builds for the reader lives in `AYL_HOME`, not in the directory a command
   was typed in** (#30, [ADR-026](adr/README.md#adr-026-ayl_home-is-the-home-of-everything-built-on-this-machine-the-index-the-scratchpads-the-chat-database-the-private-shelf)).
   Three defaults moved: the index from `data/lancedb` (relative, so the same command typed in two

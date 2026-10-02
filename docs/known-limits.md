@@ -150,6 +150,12 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   planner's next queued query before `reflect` may say "enough" with a single book, which is
   what brought Gulliver (c09) and the second gothic candidate (h22) into the clarify list; q06
   still does not clarify, and a book no query retrieves cannot be offered.
+- **A two-book identify question can be answered without a clarify** (#93). `reflect` stops when
+  the quotes cover the question, and quotes from only one of the two candidate books can: h22
+  skipped its clarify in 1 of 3 attempts on 2026-10-02, where the earlier rules clarified 9 of 9.
+- **The loop can re-issue an identical search query until the step limit.** Nothing stops `reflect`
+  from naming a query it already ran; two of the three step-limit stops in the eval run of
+  2026-10-02 were that: steps spent on a search the run had already made.
 - **Comparative and aggregation questions may miss a work.** The planner issues queries centred
   on one side of the comparison and the other book is never retrieved. Decomposition per implied
   work is v0.2.

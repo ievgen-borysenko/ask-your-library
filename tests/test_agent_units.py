@@ -753,6 +753,46 @@ def test_reflect_sees_read_status_and_ignores_it_in_the_repeat_guard(monkeypatch
     assert result["current_query"] == "" and "attempted" in result["stop_reason"]
 
 
+def test_reflect_decides_from_the_verified_quote_not_from_the_note(monkeypatch):
+    """#93: `reflect` used to see `- book (section): why`, observe's unverified
+    paraphrase, and a note that stated an outcome its quote did not carry ended
+    the loop early. The evidence line now carries the quote that passed the
+    provenance gate, built as synthesize builds its own; the note reaches no
+    prompt. The quote goes through data_block like any other evidence text, so
+    a control character in it is dropped there."""
+    from ask_your_library import nodes
+
+    seen = {}
+
+    def fake_ask_json(system, user, role):
+        seen["user"] = user
+        return {"decision": "enough"}
+
+    monkeypatch.setattr(llm, "ask_json", fake_ask_json)
+    state = {"question": "Was she pardoned?", "mode": "answer", "empty_streak": 0, "steps_taken": 1,
+             "evidence": [{"hit_id": "s1h8", "book": "Celebrated Crimes", "section": "THE CENCI",
+                           "quote": "the advocates\u0007 entertained hopes of a pardon",
+                           "why": "public sympathy, though it did not save her"}],
+             "queries": [], "read_chapters": [], "clarify_asked": False}
+    nodes.reflect(state)
+    assert '- Celebrated Crimes (THE CENCI): "the advocates entertained hopes of a pardon"' in seen["user"]
+    assert "did not save her" not in seen["user"] and "public sympathy" not in seen["user"]
+
+
+def test_reflect_rules_tie_enough_to_the_quotes():
+    """#93: the one sentence the replay of 02.10 measured, under the `enough`
+    bullet and nowhere else, and the template still formats."""
+    from ask_your_library import prompts
+
+    sentence = ('  "enough" is justified only when the quotes themselves cover every part of the\n'
+                '  question.\n')
+    enough = '- Evidence is enough to answer well -> {{"decision": "enough"}}\n'
+    assert prompts.REFLECT_RULES.count(enough + sentence) == 1
+    rendered = prompts.REFLECT_RULES.format(clarify_lang="in English")
+    assert ('"enough" is justified only when the quotes themselves cover every part of the\n'
+            '  question.') in rendered and "{" in rendered
+
+
 def test_the_answer_cites_labels_off_the_evidence_and_the_rules_name_no_book(monkeypatch):
     """The synthesize rules used to show a worked citation from the demo corpus
     — a real Don Quixote title and chapter — in the SHARED system message of
