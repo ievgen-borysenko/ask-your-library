@@ -1659,10 +1659,33 @@ def test_an_existing_index_closes_on_the_first_question_itself(sandbox):
     out = dry_run(sandbox)
     assert 'uv run ayl ask "..."' in out
     assert "What does Marcus Aurelius" not in out, "that index may be the reader's own books"
-    # The hint for the demo library leads to its own index, never to a bare
-    # run of the demo script, which writes this one.
-    assert "uv run ayl init --demo" in out
+    # The demo library is offered by running `ayl init`, never by a bare run
+    # of the demo script, which writes this one.
+    assert "would run: uv run ayl init\n" in out
     assert "ingest_demo_corpus.py" not in out
+
+
+@mac_only
+def test_yes_builds_the_demo_library_for_a_reader_who_already_has_an_index(sandbox):
+    """--yes promises the separate demo library; an index of the reader's own
+    is no reason to skip `ayl init --demo`, which builds apart from it and has
+    its own safeguards (F2-installer-yes)."""
+    root, _, _ = sandbox
+    (root / "data" / "lancedb" / "transcripts_ollama.lance").mkdir(parents=True)
+    out = dry_run(sandbox, "--yes")
+    assert "an index is already there; nothing is rebuilt" in out
+    assert "would run: uv run ayl init --demo\n" in out
+    out = dry_run(sandbox, "--no-demo")
+    assert "ayl init" not in out.split("[11/12]")[1].split("[12/12]")[0]
+
+
+@mac_only
+def test_a_real_run_over_an_existing_index_still_runs_ayl_init(sandbox):
+    root, records, _ = sandbox
+    (root / "data" / "lancedb" / "transcripts_ollama.lance").mkdir(parents=True)
+    result = real_run(sandbox, "--yes")
+    assert result.returncode == 0, result.stderr
+    assert "run ayl init --demo\n" in (records / "uv").read_text()
 
 
 # --- where the demo index goes (ADR-026) --------------------------------------

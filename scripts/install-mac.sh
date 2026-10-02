@@ -1435,14 +1435,20 @@ done
 step "Library: your index at $db_path"
 if [ "$demo_ready" -eq 1 ]; then
     note "an index is already there; nothing is rebuilt"
-    # Not `scripts/ingest_demo_corpus.py`: run bare it writes THIS index, and a
-    # full rebuild would replace the books `ayl add` put in it with the
-    # classics (the script now refuses that; the hint should not lead there).
-    note "the demo library is an index of its own, apart from this one: uv run ayl init --demo"
-elif [ "$want_demo" -eq 0 ]; then
-    note "no books yet, and no demo library (--no-demo). Index your own .txt / .md books:"
-    note "  uv run ayl add ~/books"
+fi
+if [ "$want_demo" -eq 0 ]; then
+    if [ "$demo_ready" -eq 0 ]; then
+        note "no books yet, and no demo library (--no-demo). Index your own .txt / .md books:"
+        note "  uv run ayl add ~/books"
+    fi
 else
+    # `ayl init` runs whether or not this index exists: the demo library is a
+    # separate index, so a reader who already has books is offered it too, and
+    # --yes keeps its promise for them. init applies its own safeguards — an
+    # old index here is reported with its move and nothing is built beside it,
+    # a demo library already built is not built again — and never touches
+    # this index. (Not `scripts/ingest_demo_corpus.py`: run bare it writes
+    # THIS index, and refuses to when it holds the reader's books.)
     # The demo library is `ayl init`'s question now, not this script's: one
     # prompt, one estimate, one place that builds it — apart from this index,
     # in $AYL_HOME/demo/index, so a reader's own library never starts mixed
@@ -1455,8 +1461,8 @@ else
     if [ "$assume_yes" -eq 1 ]; then
         init_args+=(--demo)
     fi
-    note "no books yet. \`ayl init\` offers the demo library: six public-domain classics in"
-    note "a few minutes, kept apart from this index; it asks once, and no is the default."
+    note "\`ayl init\` offers the demo library: six public-domain classics in a few"
+    note "minutes, kept apart from this index; it asks once, and no is the default."
     if [ "$dry_run" -eq 1 ]; then
         plan "run: uv run ${init_args[*]}"
     else
