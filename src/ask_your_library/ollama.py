@@ -17,7 +17,7 @@ import requests
 from requests import RequestException
 
 from .config import OLLAMA_URL
-from .dataflow import server_text, without_credentials
+from .dataflow import WITHHELD, server_text, without_credentials
 
 # A pull of a 9 GB model streams for minutes; what is bounded is the wait for
 # the NEXT line, not the whole download. Ollama sends a progress line every
@@ -51,12 +51,14 @@ def pull(model: str, on_progress: Progress | None = None, url: str | None = None
                            timeout=(CONNECT_TIMEOUT_S, READ_TIMEOUT_S)) as response:
             if response.status_code >= 400:
                 # The status is ours to print; the body is the server's, and
-                # goes through server_text — a server that was sent a
-                # credential in the URL can answer with it.
+                # is withheld while a credential is configured — a server
+                # that was sent one can answer with it (server_text).
                 reason = _error_of(response.text)
+                said = server_text(reason, base) if reason else ""
                 raise PullError(f"Ollama at {shown} refused to pull {model}: HTTP "
-                                f"{response.status_code}"
-                                + (f" — it said: {server_text(reason, base)}" if reason else ""))
+                                f"{int(response.status_code)}"
+                                + ("" if said == "" else f" — {WITHHELD}" if said is None
+                                   else f" — it said: {said}"))
             for raw in response.iter_lines():
                 if not raw:
                     continue
@@ -69,17 +71,23 @@ def pull(model: str, on_progress: Progress | None = None, url: str | None = None
                     raise PullError(f"Ollama at {shown} sent something that is not a pull "
                                     f"progress line while pulling {model}")
                 if line.get("error"):
+                    said = server_text(line["error"], base)
                     raise PullError(f"Ollama at {shown} reported an error while pulling "
-                                    f"{model}; it said: {server_text(line['error'], base)}")
+                                    f"{model}; " + (WITHHELD if said is None
+                                                    else f"it said: {said}"))
                 status = str(line.get("status", ""))
                 if status == "success":
                     if on_progress is not None:
                         on_progress(status, None, None)
                     return
                 if on_progress is not None:
-                    # The stage name is the server's text too, and is printed.
-                    on_progress(server_text(status, base, 60), _bytes(line.get("completed")),
-                                _bytes(line.get("total")))
+                    # The stage name is the server's text too, and is printed:
+                    # with a credential configured, our own word instead.
+                    done, total = _bytes(line.get("completed")), _bytes(line.get("total"))
+                    stage = server_text(status, base, 60)
+                    if stage is None:
+                        stage = "downloading" if total else "working"
+                    on_progress(stage, done, total)
     except RequestException as error:
         raise PullError(f"the connection to Ollama at {shown} failed while pulling {model}: "
                         f"{type(error).__name__}") from None
