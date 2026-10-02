@@ -62,7 +62,8 @@ classics (`starter: true` in `corpus/manifest.yaml`, chosen to reach every path 
 takes) built in a few minutes into `~/AskYourLibrary/demo/index`, **apart from your own index**, so
 your library never starts mixed with the classics. It is not built while a URL-valued setting
 (`OLLAMA_URL`, `OPENROUTER_BASE_URL`, a trace endpoint) carries a credential — anything but a
-plain `scheme://host[:port]` with no `@`, such as `user:password@` in it, counts:
+plain `scheme://host[:port]` with no `@`, such as `user:password@` in it, counts, and so does a
+query or fragment (`?key=…`), where a token rides along; a bare path does not:
 the build's error output could print it (issue #107), so `ayl init --demo` refuses that step
 (exit 2, after steps 1–4), and `install-mac.sh --yes` refuses before installing anything; move the
 credential out of the URL first. `--demo --full` builds the whole demo corpus

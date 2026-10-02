@@ -95,17 +95,25 @@ WITHHELD = "its text is withheld because the configured URL carries a credential
 
 
 def carries_credential(value: str) -> bool:
-    """True exactly when `value` is not printable under `shown_url`: an `@`
-    anywhere, or no strict match. Counted the safe way round — a value this
-    cannot read is taken to carry one."""
-    return shown_url(value) == NOT_SHOWN
+    """True when `value` is not printable under `shown_url` (an `@` anywhere,
+    or no strict match), and also when the strict match found a query or a
+    fragment — a `?` or `#` part, where a token rides along to the server and
+    can come back in its answer. A bare path does not count: the default
+    OPENROUTER_BASE_URL has one (`/api/v1`). Counted the safe way round — a
+    value this cannot read is taken to carry one. scripts/install-mac.sh's
+    `carries_credential` is the same rule."""
+    if shown_url(value) == NOT_SHOWN:
+        return True
+    rest = PLAIN_URL.fullmatch(str(value)).group(4) or ""
+    return "?" in rest or "#" in rest
 
 
-# The settings a request is sent to. OLLAMA_HOST is not one of them: it is
-# the Ollama server's own bind address, `host[:port]` without a scheme, which
-# this project never requests — counting it would call every machine that sets
-# it to 127.0.0.1:11434 credential-bearing. It is still printed through
-# `shown_url`.
+# The settings a request is sent to. OLLAMA_HOST is not one of them, by
+# decision: it is printed through `shown_url` like every URL-valued setting,
+# and NOT counted in `credential_configured`. It is the Ollama server's own
+# bind address, `host[:port]` without a scheme, which this project never
+# requests — counting it would call every machine that sets it to
+# 127.0.0.1:11434 credential-bearing.
 REQUEST_URL_VARS = ("OLLAMA_URL", "OPENROUTER_BASE_URL", "LANGCHAIN_ENDPOINT",
                     "LANGSMITH_ENDPOINT")
 
