@@ -1,9 +1,12 @@
 """Runtime settings, all overridable through environment variables.
 
-Defaults target the demo corpus built by scripts/ingest_demo_corpus.py and a
-local Ollama. Point LIBRARY_DB_PATH at any LanceDB with the same table layout
-(cards_<backend> / transcripts_<backend>) to run the agent over a private
-library instead.
+With LIBRARY_DB_PATH unset, the index is the reader's own library,
+$AYL_HOME/index (ADR-026), which `ayl add` fills. The demo library
+`ayl init --demo` builds is a separate index, $AYL_HOME/demo/index, asked by
+pointing LIBRARY_DB_PATH at it (ADR-028); so is any other LanceDB with the same
+table layout (cards_<backend> / transcripts_<backend>). The answering model and
+the embeddings default to a local Ollama. Where each setting is read from —
+exported, the project's .env, $AYL_HOME/config.env — is ADR-027, below.
 """
 import os
 import shlex

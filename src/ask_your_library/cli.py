@@ -10,8 +10,9 @@ prints one deprecation line and is removed at 0.6.0.
 The web UI (ui/app.py, Chainlit) shares the same core: runner.run_question.
 Answering a question requires an answering model and an embedding backend —
 both a local Ollama by default (qwen2.5:14b and bge-m3), so a fresh clone needs
-no account and no key — plus a LanceDB built by scripts/ingest_demo_corpus.py or
-`ayl-add`, or pointed to by LIBRARY_DB_PATH. OPENROUTER_API_KEY is needed only
+no account and no key — plus an index: the reader's own ($AYL_HOME/index, filled
+by `ayl add`), or another LanceDB named by LIBRARY_DB_PATH, the demo library
+`ayl init --demo` builds ($AYL_HOME/demo/index) among them. OPENROUTER_API_KEY is needed only
 when the answering model or the embeddings are moved to OpenRouter. All of it is
 checked by the preflight, which runs only when a run is actually about to start.
 

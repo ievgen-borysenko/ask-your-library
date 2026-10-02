@@ -8,7 +8,10 @@ pipeline is exercised for real.
 Chunking, embedding and the FTS index come from ask_your_library.ingest — the
 same code that serves the agent, so every corpus is processed identically.
 
-Stages (all cached in data/, safe to re-run):
+Stages (all cached in data/, or in --cache-dir, safe to re-run). Each command
+below writes the index LIBRARY_DB_PATH names: for the demo library put
+LIBRARY_DB_PATH=~/AskYourLibrary/demo/index in front, as `ayl init --demo`
+does (see below):
   uv run scripts/ingest_demo_corpus.py                     # everything
   uv run scripts/ingest_demo_corpus.py --stage prepare-text
   uv run scripts/ingest_demo_corpus.py --stage prepare-audio   # slow: Whisper
@@ -32,9 +35,11 @@ reused, so investigating a drifted pin needs --refetch, which downloads again
 and keeps the old copy as pg<id>.txt.prev to diff against; a second --refetch
 over the same book refuses rather than overwrite that backup.
 
-The LanceDB lives in $AYL_HOME/index by default (LIBRARY_DB_PATH overrides, the
-same variable the agent reads; an index already built at the old default,
-data/lancedb, is read there until it is moved — ADR-026). Table names:
+The LanceDB is the one LIBRARY_DB_PATH names, the same variable the agent reads.
+Name the demo library's own index, $AYL_HOME/demo/index (ADR-028), which is
+what `ayl init --demo` does: unset, the variable means the READER's index,
+$AYL_HOME/index (ADR-026), and this script refuses to write the classics into
+one that holds books `ayl add` indexed. Table names:
 cards_<backend> / transcripts_<backend>. The downloads and the prepared texts
 go to the checkout's data/raw and data/prepared, and the contents pages are
 regenerated into corpus/toc/ — unless --cache-dir names another folder, in
