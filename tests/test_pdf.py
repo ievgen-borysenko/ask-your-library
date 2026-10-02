@@ -447,12 +447,13 @@ def test_a_compression_bomb_under_the_stream_cap_stops_at_the_page_text_cap(tmp_
 def test_a_compression_bomb_over_the_stream_cap_is_cut_off_by_the_library(tmp_path):
     """24 MB of drawing instructions in a 24 KB stream: the library stops
     inflating at MAX_STREAM_BYTES, and nothing past it is allocated (the peak
-    is the capped output and one copy of it)."""
+    is the capped output and one copy of it). The library's refusal is said
+    as what it is, too much content for a page."""
     path = make_pdf(tmp_path / "b.pdf", [room("amber"), b"q Q " * 6_000_000], compress=True)
     assert path.stat().st_size < 100_000
     started = time.monotonic()
     peak = peak_bytes(lambda: refused(path))
-    assert refused(path) == "could not be read (LimitReachedError)"
+    assert refused(path) == "a page in it has more than 4 MiB of drawing instructions"
     assert peak < 2 * pdf.MAX_STREAM_BYTES + 4 * 1024 * 1024, peak
     assert time.monotonic() - started < 5
 

@@ -196,11 +196,14 @@ class _Budget:
         self.page_content += n
         self.content += n
         if self.page_content > MAX_PAGE_CONTENT_BYTES:
-            self.refuse(f"a page in it has more than {mib(MAX_PAGE_CONTENT_BYTES)} of "
-                        "drawing instructions")
+            self.refuse_page_content()
         if self.content > MAX_CONTENT_BYTES:
             self.refuse(f"it has more than {mib(MAX_CONTENT_BYTES)} of drawing "
                         "instructions in all")
+
+    def refuse_page_content(self) -> None:
+        self.refuse(f"a page in it has more than {mib(MAX_PAGE_CONTENT_BYTES)} of drawing "
+                    "instructions")
 
     def shown(self, n: int) -> None:
         self.page_shown += n
@@ -248,7 +251,13 @@ def _bounded(budget: _Budget):
     class CountedContentStream(content_stream):
         def __init__(self, stream, pdf, forced_encoding=None):
             budget.check()
-            super().__init__(stream, pdf, forced_encoding)
+            try:
+                super().__init__(stream, pdf, forced_encoding)
+            except LimitReachedError:
+                # The library's own cap on what it joins or inflates for one
+                # page or form (a stream past MAX_STREAM_BYTES, a split page
+                # past MAX_PAGE_CONTENT_BYTES): too much content, said so.
+                budget.refuse_page_content()
             # Counted after the bytes are joined and before they are parsed:
             # parsing is lazy, and `operations` is what costs the time.
             budget.parsed(len(self.get_data()))
