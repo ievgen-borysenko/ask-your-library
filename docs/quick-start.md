@@ -63,8 +63,15 @@ The demo library is built by [`scripts/ingest_demo_corpus.py`](../scripts/ingest
 `ayl init --demo` needs a clone. It downloads the checksum-pinned texts from gutenberg.org — the
 two LibriVox books are not fetched, their transcripts being committed — and stages and caches
 them in the clone's `data/`, so the build is safe to interrupt: `ayl init --demo` again resumes
-it. `ingest_demo_corpus.py` itself takes
-`--stage prepare-text|prepare-audio|prepare-canaries|ingest|cards` for one stage,
+it. Run by hand, `ingest_demo_corpus.py` writes whatever `LIBRARY_DB_PATH` names, so name the
+demo library (and add `--starter` for the six-book one); run bare, it would aim at your own index,
+and it refuses one that holds books `ayl add` indexed:
+
+```bash
+LIBRARY_DB_PATH=~/AskYourLibrary/demo/index uv run scripts/ingest_demo_corpus.py --starter --stage ingest
+```
+
+It takes `--stage prepare-text|prepare-audio|prepare-canaries|ingest|cards` for one stage,
 `--book <substring>` to re-ingest a single book in place, and `--no-verify` to skip the checksum
 pins; running the transcription itself (`--retranscribe`) needs macOS with MLX Whisper.
 

@@ -1649,8 +1649,12 @@ def test_an_existing_index_closes_on_the_first_question_itself(sandbox):
     root, _, _ = sandbox
     (root / "data" / "lancedb" / "transcripts_ollama.lance").mkdir(parents=True)
     out = dry_run(sandbox)
-    assert 'uv run ayl ask "What does Marcus Aurelius say about anger?"' in out
-    assert "ayl init" not in out
+    assert 'uv run ayl ask "..."' in out
+    assert "What does Marcus Aurelius" not in out, "that index may be the reader's own books"
+    # The hint for the demo library leads to its own index, never to a bare
+    # run of the demo script, which writes this one.
+    assert "uv run ayl init --demo" in out
+    assert "ingest_demo_corpus.py" not in out
 
 
 # --- where the demo index goes (ADR-026) --------------------------------------
@@ -1685,6 +1689,7 @@ def test_an_old_index_in_the_checkout_is_found_where_it_is(sandbox):
     out = dry_run(sandbox)
     assert f"Library: your index at {root}/data/lancedb" in out
     assert "an index is already there; nothing is rebuilt" in out
+    assert "update it later with: uv run scripts/ingest_demo_corpus.py" not in out
 
 
 @mac_only

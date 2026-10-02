@@ -1347,13 +1347,15 @@ else
     note "OPENROUTER_API_KEY stays empty: nothing goes to OpenRouter in this mode."
 fi
 
-# --- 11. demo corpus --------------------------------------------------------
+# --- 11. library ------------------------------------------------------------
 # Where the index is, by the rule config.resolve_db_path applies (ADR-026):
 # LIBRARY_DB_PATH when it is set, exported or in the .env this run reads; else
 # the old default, data/lancedb here, when it holds this backend's transcripts
 # table (read where it is until 0.6.0); else $AYL_HOME/index, which is
-# ~/AskYourLibrary/index unless AYL_HOME says otherwise. The demo build below
-# writes to the same place, because it asks config.py the same question.
+# ~/AskYourLibrary/index unless AYL_HOME says otherwise: the reader's own index,
+# the one `ayl init` below names because it asks config.py the same question.
+# A demo library is never built into it: `ayl init` keeps that in
+# $AYL_HOME/demo/index (ADR-028).
 # `effective_value`, not `setting`: an EXPORTED blank value is what the app
 # sees (python-dotenv does not override a variable that exists, blank or not),
 # and config.py treats a blank or whitespace-only value of either name as unset.
@@ -1398,7 +1400,10 @@ done
 step "Library: your index at $db_path"
 if [ "$demo_ready" -eq 1 ]; then
     note "an index is already there; nothing is rebuilt"
-    note "update it later with: uv run scripts/ingest_demo_corpus.py"
+    # Not `scripts/ingest_demo_corpus.py`: run bare it writes THIS index, and a
+    # full rebuild would replace the books `ayl add` put in it with the
+    # classics (the script now refuses that; the hint should not lead there).
+    note "the demo library is an index of its own, apart from this one: uv run ayl init --demo"
 elif [ "$want_demo" -eq 0 ]; then
     note "no books yet, and no demo library (--no-demo). Index your own .txt / .md books:"
     note "  uv run ayl add ~/books"
@@ -1652,7 +1657,9 @@ if [ "$demo_ready" -eq 0 ]; then
     fi
     printf '  uv run ayl ask "..."\n'
 else
-    printf '  uv run ayl ask "What does Marcus Aurelius say about anger?"\n'
+    # The index there may be the reader's own books, so no question about a
+    # book the demo corpus holds: that one is printed by `ayl init --demo`.
+    printf '  uv run ayl ask "..."\n'
 fi
 # The one sentence this whole mode exists for, printed where the reader is about
 # to type the command: no account, no key, nothing to pay. The answering model is
