@@ -268,12 +268,13 @@ _T = {
               "address is really Ollama (`curl {url}/api/tags`).",
     },
     "pf_no_db": {
-        "ua": "Бази нема: {path}. Проіндексуй свої книжки (`uv run ayl add <тека>`), "
-              "побудуй демо-бібліотеку (`uv run ayl init --demo`, кілька хвилин; вона "
-              "окремо, у $AYL_HOME/demo/index) або вкажи LIBRARY_DB_PATH на свою LanceDB.",
-        "en": "Database not found: {path}. Index your own books (`uv run ayl add <folder>`), "
-              "build the demo library (`uv run ayl init --demo`, a few minutes; it is kept "
-              "apart, in $AYL_HOME/demo/index) or point LIBRARY_DB_PATH at your LanceDB.",
+        "ua": "Бази нема: {path}. Проіндексуй у неї свої книжки (`uv run ayl add <тека>`) "
+              "або вкажи LIBRARY_DB_PATH на іншу LanceDB. Демо-бібліотека — окремий індекс, "
+              "і питають її так само: LIBRARY_DB_PATH=$AYL_HOME/demo/index.",
+        "en": "Database not found: {path}. Index your own books into it "
+              "(`uv run ayl add <folder>`), or point LIBRARY_DB_PATH at another LanceDB. The "
+              "demo library is an index of its own and is asked the same way: "
+              "LIBRARY_DB_PATH=$AYL_HOME/demo/index.",
     },
     "pf_no_tables": {
         "ua": "У базі {path} нема таблиць: {tables}. Заверши інжест "

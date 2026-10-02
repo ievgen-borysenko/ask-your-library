@@ -420,6 +420,14 @@ def test_full_needs_demo(machine, capsys):
     assert "--full" in capsys.readouterr().err
 
 
+def test_a_dry_run_ends_on_the_status_the_real_run_would(machine, capsys):
+    """A demo asked for that the real run would not build (here: outside a
+    checkout) is exit 1 in the plan too, not a 0 the real run then breaks."""
+    machine.mp.setattr(init_cmd, "REPO_ROOT", "")
+    assert init("--dry-run", "--demo") == preflight.EXIT_NOT_READY
+    assert machine.builds == [] and not machine.home.exists()
+
+
 @pytest.mark.parametrize("reply, built", [("", False), ("n", False), ("y", True), ("yes", True)])
 def test_on_a_terminal_one_question_decides_the_demo_and_no_is_the_default(machine, reply,
                                                                           built, capsys):
@@ -561,3 +569,30 @@ def test_the_env_resolution_never_prints_a_credential_written_into_a_url(machine
     out = capsys.readouterr().out
     assert "s3cret" not in out
     assert "LANGCHAIN_ENDPOINT=https://<credentials>@smith.example.com" in out
+
+
+# --- the two child processes, as they are started -------------------------------------
+
+def test_the_demo_build_and_the_doctor_are_started_with_these_arguments(monkeypatch, tmp_path):
+    """The recorders above stand where these two calls are; this pins the calls
+    themselves: the script by path with `--starter` (none for --full) and the
+    backend, the doctor as a module, each with LIBRARY_DB_PATH naming the demo
+    library only when one is meant."""
+    calls = []
+    monkeypatch.setattr(init_cmd.subprocess, "call",
+                        lambda argv, env=None: calls.append((argv, env)) or 0)
+    monkeypatch.setattr(init_cmd, "REPO_ROOT", str(tmp_path / "clone"))
+    monkeypatch.setenv("LIBRARY_DB_PATH", "/the/reader/s/own")
+    demo = tmp_path / "home" / "demo" / "index"
+    assert init_cmd.build_demo(demo, "ollama", full=False) == 0
+    assert init_cmd.build_demo(demo, "ollama", full=True) == 0
+    assert init_cmd.closing_check(demo) == 0
+    assert init_cmd.closing_check(None) == 0
+    script = str(tmp_path / "clone" / "scripts" / "ingest_demo_corpus.py")
+    (starter, env1), (full, env2), (doctor, env3), (doctor_own, env4) = calls
+    assert starter == [sys.executable, script, "--backend", "ollama", "--starter"]
+    assert full == [sys.executable, script, "--backend", "ollama"]
+    assert env1["LIBRARY_DB_PATH"] == env2["LIBRARY_DB_PATH"] == env3["LIBRARY_DB_PATH"] \
+        == str(demo)
+    assert doctor == doctor_own == [sys.executable, "-m", "ask_your_library.ayl", "doctor"]
+    assert env4["LIBRARY_DB_PATH"] == "/the/reader/s/own", "the reader's own, untouched"

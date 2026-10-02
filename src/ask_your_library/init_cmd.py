@@ -639,7 +639,9 @@ def _run(args) -> int:
     say("")
     if dry:
         say("Dry run finished. Nothing was pulled, written or built.")
-        return 0
+        # The status the real run would end on, where the plan already knows
+        # it: a demo library asked for that would not be built.
+        return preflight.EXIT_NOT_READY if demo_missed else 0
 
     if not changed:
         say("Nothing to do: every step was already done, and nothing was changed.")
