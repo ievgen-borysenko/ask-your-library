@@ -19,6 +19,8 @@ Stages (all cached in data/, safe to re-run):
   uv run scripts/ingest_demo_corpus.py --stage cards --cards-dir corpus-tech/cards \
       --cards-dir ~/AskYourLibrary/cards/tech   # + cards built only here ($AYL_HOME)
   uv run scripts/ingest_demo_corpus.py --book alice        # filter by substring
+  uv run scripts/ingest_demo_corpus.py --starter           # the starter subset only (what
+                                                           # `ayl init --demo` builds)
   uv run scripts/ingest_demo_corpus.py --stage stamp-meta  # fingerprint pre-existing tables
   uv run scripts/ingest_demo_corpus.py --stage checksums   # pin source sha256 into the manifest
 
@@ -157,6 +159,14 @@ def write_checksums() -> None:
 
 def all_entries(manifest: dict) -> list[dict]:
     return manifest["books"] + manifest["canaries"]
+
+
+def starter_entries(manifest: dict) -> list[dict]:
+    """The manifest entries marked `starter: true`: the small demo library
+    `ayl init --demo` builds in minutes instead of the whole corpus's half
+    hour. The choice of books, and why each is in it, is written beside the
+    flag in corpus/manifest.yaml; this only reads it."""
+    return [entry for entry in all_entries(manifest) if entry.get("starter") is True]
 
 
 # --- fetching ---------------------------------------------------------------
@@ -471,13 +481,18 @@ def chunk_prepared(doc: dict) -> list[Chunk]:
     return chunks
 
 
-def prepared_docs(entry_ids: list[str]) -> list[dict]:
+def prepared_docs(entry_ids: list[str], known: list[str] | None = None) -> list[dict]:
     """Prepared documents for exactly the manifest entries — a prepared file
     that no longer has a manifest entry would silently contaminate a corpus
-    whose sources are supposed to be pinned."""
+    whose sources are supposed to be pinned.
+
+    `known` is every id the manifest holds, when `entry_ids` is only part of
+    it (`--starter`): a prepared file of a book outside the subset is then a
+    book prepared by an earlier full run, not a stale one, and is left out of
+    this ingest rather than refused."""
     expected = {f"{i}.json" for i in entry_ids}
     present = {p.name for p in PREPARED_DIR.glob("*.json")}
-    stale = sorted(present - expected)
+    stale = sorted(present - expected - {f"{i}.json" for i in (known or [])})
     if stale:
         sys.exit(f"prepared files without a manifest entry: {stale} — delete them "
                  f"(or restore the entries) before ingesting")
@@ -551,8 +566,9 @@ def refuse_unsafe_partial_reingest(db, name: str, embedder) -> None:
                                  f"refusing partial re-ingest of {name}", 1))
 
 
-def ingest_transcripts_table(backend: str, book_filter: str | None, entry_ids: list[str]) -> None:
-    docs = prepared_docs(entry_ids)
+def ingest_transcripts_table(backend: str, book_filter: str | None, entry_ids: list[str],
+                             known: list[str] | None = None) -> None:
+    docs = prepared_docs(entry_ids) if known is None else prepared_docs(entry_ids, known)
     if book_filter:
         docs = [d for d in docs if book_filter.lower() in d["book"].lower()]
     if not docs:
@@ -655,17 +671,25 @@ def card_files(cards_dirs: list[Path]) -> list[Path]:
     return cards
 
 
-def ingest_cards_table(backend: str, cards_dirs: list[Path] | None = None) -> None:
+def ingest_cards_table(backend: str, cards_dirs: list[Path] | None = None,
+                       only: set[str] | None = None) -> None:
     """Rebuild this index's cards table from folders of `*.md` cards.
 
     The folders are a parameter because the engineer's shelf (#58) is a second
     index with cards of its own: `--cards-dir corpus-tech/cards` together with
     LIBRARY_DB_PATH pointing at that index writes the shelf's `cards_<backend>`
     table through this same code, so both shelves' cards are cut, embedded and
-    stamped by one implementation rather than two."""
+    stamped by one implementation rather than two.
+
+    `only` keeps the cards whose file name is one of those manifest ids — the
+    starter subset's — so its cards table holds no card of a book its
+    transcripts table does not: a card hit there would name a book no chapter
+    read could open."""
     cards_dirs = cards_dirs or [CARDS_DIR]
     where = ", ".join(str(folder) for folder in cards_dirs)
     cards = card_files(cards_dirs)
+    if only is not None:
+        cards = [path for path in cards if path.stem in only]
     if not cards:
         sys.exit(f"no cards in {where} — generate them first")
     embedder = get_embedder(backend)
@@ -893,6 +917,10 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--backend", default=EMBED_BACKEND, choices=("ollama", "openrouter"))
     ap.add_argument("--book", help="substring filter: of the title for the prepare stages, "
                                    "of the book key for --stage ingest")
+    ap.add_argument("--starter", action="store_true",
+                    help="only the starter subset: the manifest entries marked `starter: true`, "
+                         "and their cards (what `ayl init --demo` builds; a few minutes "
+                         "instead of about thirty)")
     ap.add_argument("--no-verify", action="store_true",
                     help="skip manifest checksum verification of sources")
     ap.add_argument("--chunker", metavar="VERSION",
@@ -944,11 +972,19 @@ def main(argv: list[str] | None = None) -> None:
         # every other stage would ignore the flag without saying so.
         ap.error("--cards-dir belongs to --stage cards; no other stage reads a folder "
                  "of cards")
+    if args.starter and (args.book or args.cards_dir or args.stage in ("stamp-meta",
+                                                                        "checksums")):
+        # The subset is a whole library of its own: a substring filter inside
+        # it, another folder of cards, or a stage that works on every table or
+        # on the manifest itself would each make it something else.
+        ap.error("--starter builds the starter subset as a whole: it does not combine with "
+                 "--book, --cards-dir, --stage stamp-meta or --stage checksums")
     global VERIFY_CHECKSUMS
     VERIFY_CHECKSUMS = not args.no_verify
 
     manifest = load_manifest()
-    entries = all_entries(manifest)
+    entries = starter_entries(manifest) if args.starter else all_entries(manifest)
+    known = [e["id"] for e in all_entries(manifest)] if args.starter else None
     if args.book and args.stage.startswith("prepare"):
         entries = [e for e in entries if args.book.lower() in e["title"].lower()]
 
@@ -970,11 +1006,15 @@ def main(argv: list[str] | None = None) -> None:
         if args.stage in ("all", "ingest"):
             print("== ingest transcripts ==")
             with ingest_lock(DB_PATH, command=f"ingest_demo_corpus.py --stage {args.stage}"):
-                ingest_transcripts_table(args.backend, args.book, [e["id"] for e in entries])
+                ingest_transcripts_table(args.backend, args.book, [e["id"] for e in entries],
+                                         known)
         if args.stage in ("all", "cards"):
             print("== ingest cards ==")
             with ingest_lock(DB_PATH, command=f"ingest_demo_corpus.py --stage {args.stage}"):
-                ingest_cards_table(args.backend, args.cards_dir)
+                if args.starter:
+                    ingest_cards_table(args.backend, None, {e["id"] for e in entries})
+                else:
+                    ingest_cards_table(args.backend, args.cards_dir)
         if args.stage == "checksums":
             print("== pin source checksums into the manifest ==")
             write_checksums()

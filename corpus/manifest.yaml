@@ -26,6 +26,13 @@
 #                    item of what follows it ("NOTE TO CHAPTER I." over the notes to ten
 #                    chapters). Defaults to the matched heading; needs end_regex.
 #
+# The starter subset — `starter: true` on six books below — is what `ayl init --demo` builds
+# (and `scripts/ingest_demo_corpus.py --starter`): a demo library in minutes instead of the
+# whole corpus's half hour. Chosen to reach every path a first question takes: both tables
+# (each has a card in corpus/cards/), the README's own question, two multi-part works, the
+# committed audio transcript, and two books by one author for the ask-back. The comment above
+# each flag says why that book is in it. `ayl init --demo --full` builds everything.
+#
 # Naming convention: `id` is the primary key (file names, chunk ids). When a
 # second edition/translation of the same work is added, BOTH its id and title
 # get a qualifier (e.g. id: kobzar-hunter-tr, title: "The Kobzar ... (Hunter
@@ -46,6 +53,9 @@ books:
     author: "Mary Shelley"
     source: gutenberg
     pg_id: 84
+    # starter: a novel in letters and chapters, read in two golden questions of the
+    #   extended set
+    starter: true
 
   - id: treasure-island
     sha256: 5bc08275eacea8640b1aa185c645283bb8c564d7b23df6b03437d229b4fc6ebd
@@ -90,6 +100,9 @@ books:
     # the appendix (Fronto correspondence), the notes and the glossary after it
     end_regex: "^APPENDIX$"
     end_title: "APPENDIX AND GLOSSARY"
+    # starter: the question the README and the quick start open with (Marcus Aurelius on
+    #   anger); its end_regex keeps the appendix a section of its own
+    starter: true
 
   - id: senecas-morals
     sha256: acd016ee6b7cb232b8050ff88582a229770f14c70fd1fe35468b765e9949065d
@@ -101,6 +114,9 @@ books:
     pg_id: 56075
     # numbering restarts per part: sections become "PART — CHAPTER"
     part_regex: "^SENECA (OF [A-Z ,]+)\\.$"
+    # starter: a multi-part work (part_regex: sections are "PART — CHAPTER"), and the
+    #   other half of a Stoic comparison with Meditations
+    starter: true
 
   - id: pride-and-prejudice
     sha256: 3f6bb9d6f78e0293b56acd4714dd68cb7d6d1d293402031ce9d5a216bcaf9d75
@@ -136,6 +152,9 @@ books:
     author: "Lewis Carroll"
     source: librivox
     ia_item: alice_in_wonderland_librivox
+    # starter: one of the two LibriVox audio books: its transcript is committed, so it
+    #   costs no download, and the audio path of the corpus is in the subset
+    starter: true
 
   - id: call-of-the-wild
     sha256: 30f569c5671bba7bbc4a92ab6d8ee01a0d3be00f994819c77da62c28041eb8a2
@@ -161,6 +180,9 @@ books:
     author: "Arthur Conan Doyle"
     source: gutenberg
     pg_id: 2852
+    # starter: one of two books by one author in the subset, so a question that names
+    #   only the author or the detective reaches the ask-back
+    starter: true
 
   - id: study-in-scarlet
     sha256: 8bbec71f9fa9c2acc9afe9be70560ca5f65c1bc95ef5af8252e9097f8d012497
@@ -172,6 +194,9 @@ books:
     pg_id: 244
     # numbering restarts per part: sections become "PART — CHAPTER"
     part_regex: "^(PART I{1,2})\\.$"
+    # starter: the other Conan Doyle, and a second multi-part work (PART I / PART II
+    #   restart the chapter numbers)
+    starter: true
 
   - id: arsene-lupin
     sha256: 1b8fcfb078007a2fd0d33371563741aa821694149efed2f4dd368a9f67bd2ff8
