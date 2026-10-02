@@ -1107,9 +1107,12 @@ if [ -n "$conflict_names" ]; then
     printf '%s' "$conflict_lines" | while IFS= read -r line; do fail "$line"; done
     exported_conflicts=""
     dotenv_conflicts=""
+    home_conflicts=""
     for name in $conflict_names; do
         if [ -n "${!name+set}" ]; then
             exported_conflicts="$exported_conflicts $name"
+        elif ! dotenv_defines "$name" && home_defines "$name"; then
+            home_conflicts="$home_conflicts $name"
         else
             dotenv_conflicts="$dotenv_conflicts $name"
         fi
@@ -1130,6 +1133,11 @@ if [ -n "$conflict_names" ]; then
     if [ -n "$dotenv_conflicts" ]; then
         fail "nothing in this shell exports these — each line above names where its"
         fail "value came from. Edit .env (or move it aside and re-run) for:$dotenv_conflicts"
+    fi
+    # The same for the third layer: the file the value came from, by name.
+    if [ -n "$home_conflicts" ]; then
+        fail "these come from $home_dir/config.env, under the .env: edit that file"
+        fail "(or move it aside and re-run) for:$home_conflicts"
     fi
     case " $conflict_names " in
         *" LANGCHAIN_API_KEY "*)

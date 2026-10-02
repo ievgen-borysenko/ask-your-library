@@ -2107,3 +2107,18 @@ def test_an_ayl_home_named_in_the_dotenv_decides_which_config_env_is_read(sandbo
     assert "command not found" not in result.stderr
     assert f"LANGSMITH_TRACING=true ({chosen}/config.env)" in result.stderr
     assert invoked(records) == []
+
+
+@mac_only
+def test_the_remedy_names_config_env_when_the_value_came_from_it(sandbox):
+    """F8-remedy-source: "Edit .env" was the remedy for a value config.env set."""
+    root, _, env = sandbox
+    home = Path(env["HOME"]) / "AskYourLibrary"
+    home.mkdir()
+    (home / "config.env").write_text("LANGSMITH_TRACING=true\n")
+    result = real_run(sandbox, "--no-demo")
+    assert result.returncode == 2
+    lines = error_lines(result.stderr)
+    assert f"these come from {home}/config.env, under the .env: edit that file" in lines
+    assert "(or move it aside and re-run) for: LANGSMITH_TRACING" in lines
+    assert not any(line.startswith("value came from. Edit .env") for line in lines)
