@@ -38,6 +38,9 @@ import pytest
 from conftest import REPO, SCRUBBED, fresh_output
 
 SCRIPT = REPO / "scripts" / "install-mac.sh"
+# What the script and the package print in place of a URL-valued setting they
+# cannot print (dataflow.NOT_SHOWN; the script spells it out the same).
+NOT_SHOWN = "<not shown: the value carries a credential or is not a plain URL>"
 BASH = shutil.which("bash")
 # Everything the script could invoke that installs, downloads or starts something.
 RECORDED = ("brew", "ollama", "uv", "curl")
@@ -398,12 +401,12 @@ def test_a_non_loopback_ollama_host_is_refused(sandbox, bind):
     rest: ':11434' is a host/port pair whose empty host is every interface, and
     '0' is 0.0.0.0 — the two spellings that read most like loopback and are not."""
     _, records, _ = sandbox
-    from ask_your_library.dataflow import without_credentials
+    from ask_your_library.dataflow import shown_url
     result = real_run(sandbox, "--no-demo", OLLAMA_HOST=bind)
     assert result.returncode == 1, result.stdout
     # Named as every URL-valued setting is printed: what is in front of an @ is
     # replaced (it may be a credential), the host the request would reach is kept.
-    assert f"OLLAMA_HOST={without_credentials(bind)}" in result.stderr
+    assert f"OLLAMA_HOST={shown_url(bind)}" in result.stderr
     assert "unset OLLAMA_HOST" in result.stderr           # the fix is named
     # The gate is judged with the rest of the resolution, ahead of step 3, so
     # nothing at all runs in front of it — `uv python find` included.
@@ -592,7 +595,7 @@ def test_a_userinfo_host_is_not_this_machine(sandbox):
     assert result.returncode == 2, result.stdout
     # Printed with the userinfo replaced, like any credential in a URL: what is
     # left is the host the request goes to, which is the point of the refusal.
-    assert ("OLLAMA_URL=http://<credentials>@ollama.example.com (exported in this shell)"
+    assert (f"OLLAMA_URL={NOT_SHOWN} (exported in this shell)"
             " — that endpoint is not on this machine") in error_lines(result.stderr)
     assert not (root / ".env").exists()
     assert invoked(records) == []
@@ -617,7 +620,8 @@ def test_an_ollama_url_without_a_scheme_is_refused_by_name(sandbox):
     root, records, _ = sandbox
     result = real_run(sandbox, "--no-demo", OLLAMA_URL="localhost:11434")
     assert result.returncode == 2, result.stdout
-    assert ("OLLAMA_URL=localhost:11434 has no scheme, and config.py uses the value as it"
+    # Not printable under the allowlist (no scheme): named, its value not shown.
+    assert (f"OLLAMA_URL={NOT_SHOWN} has no scheme, and config.py uses the value as it"
             in error_lines(result.stderr))
     assert not (root / ".env").exists()
     assert invoked(records) == []
@@ -717,7 +721,8 @@ def test_a_non_loopback_ollama_host_is_refused_even_when_a_server_answers(sandbo
     _, records, _ = sandbox
     result = real_run(sandbox, "--no-demo", OLLAMA_HOST="ollama.example.com:11434")
     assert result.returncode == 1, result.stdout
-    assert ("OLLAMA_HOST=ollama.example.com:11434 is not one of the loopback forms this "
+    # host[:port] without a scheme is not printable under the allowlist
+    assert (f"OLLAMA_HOST={NOT_SHOWN} is not one of the loopback forms this "
             "script will") in error_lines(result.stderr)
     assert invoked(records) == [], "a tool ran past the gate"
 
@@ -801,7 +806,7 @@ def test_the_preflight_snippet_reports_the_configuration_the_loader_resolves(tmp
     # The endpoint line whole, not a search for the host inside the output: a
     # substring test against a URL is the shape of an allow-list check and is
     # not one, and here the pair of endpoints is the whole point of the line.
-    assert ("LLM_BASE_URL=https://openrouter.ai/api/v1, OLLAMA_URL=http://localhost:11434"
+    assert ("LLM_BASE_URL=https://openrouter.ai (path not shown), OLLAMA_URL=http://localhost:11434"
             in printed_lines(result.stdout))
     assert "tracing: LANGSMITH_TRACING_V2" in result.stdout
     assert "not the fully local one" in result.stdout
@@ -817,7 +822,7 @@ def test_the_preflight_snippet_prints_the_configuration_it_agrees_with(tmp_path)
     result = run_preflight("no-index", tmp_path, mode="hosted")
     assert result.returncode == 3, result.stdout + result.stderr
     assert "LLM_BACKEND=openrouter, EMBED_BACKEND=openrouter" in result.stdout
-    assert ("LLM_BASE_URL=https://openrouter.ai/api/v1, OLLAMA_URL=http://localhost:11434"
+    assert ("LLM_BASE_URL=https://openrouter.ai (path not shown), OLLAMA_URL=http://localhost:11434"
             in printed_lines(result.stdout))
     assert "tracing: off" in printed_lines(result.stdout)
 
@@ -1094,8 +1099,12 @@ def test_the_redacted_resolution_still_agrees_with_python_dotenv(sandbox):
     resolved, order = env_resolution(sandbox)
     real = dotenv_values(root / ".env")
     assert order == list(real)
+    from ask_your_library.dataflow import ENDPOINT_VARS, shown_url
     for name, value in real.items():
-        if not is_secret_name(name):
+        if name in ENDPOINT_VARS:
+            # a URL-valued setting is printed as the allowlist prints it
+            assert resolved[name] == shown_url(value), name
+        elif not is_secret_name(name):
             assert resolved[name] == value, name
         elif value:
             assert resolved[name] == f"<set, {len(value)} chars>", name
@@ -1449,12 +1458,12 @@ def test_a_host_that_only_looks_like_loopback_is_refused(sandbox, bind):
     compared exactly; a bind address has no userinfo at all, so an @ in one is
     refused outright."""
     _, records, _ = sandbox
-    from ask_your_library.dataflow import without_credentials
+    from ask_your_library.dataflow import shown_url
     result = real_run(sandbox, "--no-demo", OLLAMA_HOST=bind)
     assert result.returncode == 1, result.stdout
     # Named as every URL-valued setting is printed: what is in front of an @ is
     # replaced (it may be a credential), the host the request would reach is kept.
-    assert f"OLLAMA_HOST={without_credentials(bind)}" in result.stderr
+    assert f"OLLAMA_HOST={shown_url(bind)}" in result.stderr
     assert invoked(records) == [], "the gate let a tool run past it"
 
 
@@ -1499,7 +1508,7 @@ def test_hosted_mode_warns_when_the_embedder_is_openrouter(sandbox):
     assert ("warning: EMBED_BACKEND=openrouter (exported in this shell), which is"
             in printed)
     assert "not on this machine — every passage of your library would be sent to" in printed
-    assert printed.count("https://openrouter.ai/api/v1") == 1
+    assert printed.count("https://openrouter.ai (path not shown)") == 1
 
 
 @mac_only
@@ -1822,7 +1831,7 @@ def test_a_credential_in_ollama_url_is_never_printed(sandbox):
     env["OLLAMA_URL"] = f"http://reader:{SECRET}@localhost:11434"
     out = dry_run(sandbox)
     assert SECRET not in out
-    assert "answering on http://<credentials>@localhost:11434/api/tags" in out
+    assert f"answering its /api/tags at {NOT_SHOWN}" in out
     result = real_run(sandbox, "--no-demo", OLLAMA_URL=f"http://reader:{SECRET}@localhost:11434")
     assert SECRET not in result.stdout + result.stderr
 
@@ -1835,8 +1844,8 @@ def test_the_preflight_snippet_prints_no_credential_written_into_a_url(tmp_path)
                            LANGSMITH_TRACING_V2="true",
                            LANGSMITH_ENDPOINT=f"https://u:{SECRET}@smith.example.com")
     assert SECRET not in result.stdout + result.stderr
-    assert "OLLAMA_URL=http://<credentials>@127.0.0.1:9" in result.stdout
-    assert "-> https://<credentials>@smith.example.com" in result.stdout
+    assert f"OLLAMA_URL={NOT_SHOWN}" in result.stdout
+    assert f"-> {NOT_SHOWN}" in result.stdout
 
 
 # --- a credential planted in EVERY URL-valued setting at once (F2-installer-url) --------
@@ -1844,21 +1853,50 @@ def test_the_preflight_snippet_prints_no_credential_written_into_a_url(tmp_path)
 # reads carries the same secret, exported in one run and written into the .env in
 # another, and no output of the installer's dry run (both modes), `ayl init
 # --dry-run`, `ayl init --print-env-resolution` or `ayl doctor` may contain it.
-PLANTED = "planted-s3cret-in-every-url"
-# And passwords that hold, unencoded, the characters that used to end the
-# authority before its @ was found (F7-authority-last-at): / ? # @ and :.
-SECRETS = [PLANTED, "pl/anted-s3cret", "pl?anted-s3cret", "pl#anted-s3cret",
-           "pl@anted-s3cret", "pl:anted:s3cret", "p/l?a#n@t:ed-s3cret"]
+USER = "uQ7zK9"
+PLANTED = "Gx7Rk2TqVw9"
+# Passwords that hold, unencoded, the characters that ended the authority
+# before its @ was found (F7-authority-last-at), and whole values the
+# redaction it replaced misread (F8-url-allowlist): a "://" inside a
+# scheme-less value, a token in the query or the path, an encoded @ in the
+# userinfo, IPv6 with userinfo, an empty value. None of them is a word, so a
+# four-character slice of one cannot turn up in ordinary output by chance.
+PASSWORDS = [PLANTED, "Gx7/Rk2TqVw9", "Gx7?Rk2TqVw9", "Gx7#Rk2TqVw9", "Gx7@Rk2TqVw9",
+             "Gx7:Rk2:TqVw9", "G/x7?R#k2@T:qVw9"]
+# Port 9: nothing answers there, so no run reaches an Ollama this machine may
+# be running.
+WHOLE_VALUES = [
+    (f"{USER}:Zq8Lr2Vx@127.0.0.1:9/via/http://gw", ["Zq8Lr2Vx", USER]),
+    (f"{USER}:Kp4v://Yz6w@127.0.0.1:9", ["Kp4v://Yz6w", USER]),
+    ("http://127.0.0.1:9/?key=Tq9Wz3Lm", ["Tq9Wz3Lm"]),
+    ("http://127.0.0.1:9/Pz8Xk2Nj/api", ["Pz8Xk2Nj"]),
+    ("http://uQ7%40zK9:Mv5%40Rq3@127.0.0.1:9", ["Mv5%40Rq3", "uQ7%40zK9"]),
+    (f"http://{USER}:Hn3Bv7Qs@[::1]:9", ["Hn3Bv7Qs", USER]),
+    ("", []),
+]
+SECRETS = PASSWORDS      # kept for the name the tests below use
 
 
 def url_settings(secret=PLANTED):
     return {
-        "OLLAMA_URL": f"http://reader:{secret}@127.0.0.1:9",
-        "OLLAMA_HOST": f"reader:{secret}@127.0.0.1:11434",
-        "OPENROUTER_BASE_URL": f"https://reader:{secret}@openrouter.example/api/v1",
-        "LANGCHAIN_ENDPOINT": f"https://reader:{secret}@smith.example",
-        "LANGSMITH_ENDPOINT": f"https://reader:{secret}@smith.example",
+        "OLLAMA_URL": f"http://{USER}:{secret}@127.0.0.1:9",
+        "OLLAMA_HOST": f"{USER}:{secret}@127.0.0.1:11434",
+        "OPENROUTER_BASE_URL": f"https://{USER}:{secret}@openrouter.example/api/v1",
+        "LANGCHAIN_ENDPOINT": f"https://{USER}:{secret}@smith.example",
+        "LANGSMITH_ENDPOINT": f"https://{USER}:{secret}@smith.example",
     }
+
+
+def planted_cases():
+    """(id, settings, secrets): every password in every URL-valued setting,
+    and every whole value in all of them at once."""
+    cases = [(f"password-{i}", url_settings(p), [p, USER]) for i, p in enumerate(PASSWORDS)]
+    cases += [(f"value-{i}", {name: value for name in url_settings()}, secrets)
+              for i, (value, secrets) in enumerate(WHOLE_VALUES)]
+    return cases
+
+
+PLANTED_CASES = planted_cases()
 
 
 URL_SETTINGS = url_settings()
@@ -1871,23 +1909,23 @@ def test_every_url_valued_setting_is_named_in_the_planted_set():
     assert set(URL_SETTINGS) == set(dataflow.ENDPOINT_VARS)
 
 
-def assert_no_planted(result, secret=PLANTED):
+def assert_no_planted(result, secrets=(PLANTED, USER)):
+    """No run of four or more characters of any planted secret: every such
+    run contains a four-character slice, so the slices are what is checked."""
     printed = result.stdout + result.stderr
-    # The whole secret, and each run of six or more characters of it between
-    # its special characters: a value printed whole would carry those.
-    pieces = {secret} | {part for part in re.split(r"[/?#@:]", secret) if len(part) >= 6}
+    pieces = {secret[at:at + 4] for secret in secrets for at in range(len(secret) - 3)}
     leaked = sorted(piece for piece in pieces if piece in printed)
     assert not leaked, (leaked, printed[printed.find(leaked[0]) - 200:][:400] if leaked else "")
     return printed
 
 
 @mac_only
-@pytest.mark.parametrize("secret", SECRETS)
+@pytest.mark.parametrize("case", PLANTED_CASES, ids=[c[0] for c in PLANTED_CASES])
 @pytest.mark.parametrize("where", ["exported", "dotenv"])
 @pytest.mark.parametrize("mode", [(), ("--hosted",)])
-def test_the_installer_dry_run_prints_no_planted_credential(sandbox, where, mode, secret):
+def test_the_installer_dry_run_prints_no_planted_credential(sandbox, where, mode, case):
     root, _, env = sandbox
-    settings = url_settings(secret)
+    _, settings, secrets = case
     if where == "exported":
         env.update(settings)
     else:
@@ -1895,36 +1933,39 @@ def test_the_installer_dry_run_prints_no_planted_credential(sandbox, where, mode
                                            for name, value in settings.items()))
     result = subprocess.run([BASH, "scripts/install-mac.sh", "--dry-run", *mode], cwd=root,
                             env=env, capture_output=True, text=True)
-    printed = assert_no_planted(result, secret)
-    assert "<credentials>@" in printed, "the run never reached a line that names a URL"
+    printed = assert_no_planted(result, secrets)
+    if secrets:
+        assert "not shown" in printed, "the run never reached a line that names a URL"
     resolution = subprocess.run([BASH, "scripts/install-mac.sh", "--print-env-resolution"],
                                 cwd=root, env=env, capture_output=True, text=True)
-    assert_no_planted(resolution, secret)
+    assert_no_planted(resolution, secrets)
 
 
 @pytest.mark.skipif(not have_package, reason="the package is not importable here")
-@pytest.mark.parametrize("secret", SECRETS)
+@pytest.mark.parametrize("case", PLANTED_CASES, ids=[c[0] for c in PLANTED_CASES])
 @pytest.mark.parametrize("where", ["exported", "dotenv"])
 @pytest.mark.parametrize("argv", [["init", "--dry-run", "--no-demo"],
                                   ["init", "--print-env-resolution"],
                                   ["init", "--no-demo", "--yes"],
                                   ["doctor"]])
-def test_the_package_prints_no_planted_credential(tmp_path, where, argv, secret):
+def test_the_package_prints_no_planted_credential(tmp_path, where, argv, case):
     """`ayl init` and `ayl doctor` in a fresh interpreter, Ollama on a port
     nothing answers (the remedy text names the URL), a temp AYL_HOME."""
     from conftest import run_fresh
     work = tmp_path / "work"
     work.mkdir()
-    planted = url_settings(secret)
+    _, planted, secrets = case
+    planted = dict(planted)
     if where == "dotenv":
         (work / ".env").write_text("".join(f"{n}={v}\n" for n, v in planted.items()))
         planted = {}
     result = run_fresh("import sys\nfrom ask_your_library import ayl\n"
                        f"sys.exit(ayl.main({argv!r}))\n",
                        cwd=work, check=False, **planted)
-    printed = assert_no_planted(result, secret)
+    printed = assert_no_planted(result, secrets)
     assert "Traceback" not in printed, printed
-    assert "<credentials>@" in printed, "no line named a URL: the check checked nothing"
+    if secrets:
+        assert "not shown" in printed, "no line named a URL: the check checked nothing"
 
 
 # --- what `ayl init` refuses from configuration alone, the installer refuses first ------
@@ -2035,3 +2076,19 @@ def test_a_whitespace_only_llm_backend_is_the_default_for_both(sandbox, tmp_path
                      "sys.exit(ayl.main(['init', '--dry-run', '--no-demo']))\n",
                      cwd=root, check=False, AYL_HOME=str(tmp_path / "ayl-home"), **exported)
     assert init.returncode == 0, init.stdout + init.stderr
+
+
+@mac_only
+def test_an_ayl_home_named_in_the_dotenv_decides_which_config_env_is_read(sandbox, tmp_path):
+    """AYL_HOME may come from the .env, as config.py reads it; the guard used to
+    look for config.env before it could read the .env's line."""
+    root, records, _ = sandbox
+    chosen = tmp_path / "chosen-home"
+    chosen.mkdir()
+    (chosen / "config.env").write_text("LANGSMITH_TRACING=true\n")
+    (root / ".env").write_text(f"AYL_HOME={chosen}\nLLM_BACKEND=ollama\nEMBED_BACKEND=ollama\n")
+    result = real_run(sandbox, "--no-demo")
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "command not found" not in result.stderr
+    assert f"LANGSMITH_TRACING=true ({chosen}/config.env)" in result.stderr
+    assert invoked(records) == []

@@ -24,7 +24,10 @@ A name none of the three sets takes the default in the table below. `.env.exampl
 default configuration — copy it to `.env` and edit from there; the hosted lines ship commented out
 with what they cost written beside them. `ayl init --print-env-resolution` prints, for every
 setting that decides where your data goes, its value and which of the three places it came from. `scripts/install-mac.sh` reads the same three layers, in the same order, when it judges a
-configuration before installing anything.
+configuration before installing anything. Neither prints a URL-valued setting as written: only
+its `scheme://host[:port]`, with "(path not shown)" when a path or query followed, and for a value
+with an `@` anywhere, or one that is not a plain URL, the words
+`<not shown: the value carries a credential or is not a plain URL>`.
 
 | Variable | Default | Purpose |
 |---|---|---|

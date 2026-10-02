@@ -266,8 +266,11 @@ def local_mode_problems(writing: bool) -> list[str]:
     unset, which the file this run writes (`writing`) is not."""
     found = []
     if not dataflow.is_loopback(config.OLLAMA_URL):
-        found.append(f"OLLAMA_URL={dataflow.without_credentials(config.OLLAMA_URL)} "
-                     f"[{config.setting_source('OLLAMA_URL')}] is not this machine")
+        # The real value decides; only what is printed is the allowlisted form.
+        shown = dataflow.shown_url(config.OLLAMA_URL)
+        found.append(f"OLLAMA_URL [{config.setting_source('OLLAMA_URL')}] is not this machine"
+                     + (" (its value is not shown: it carries a credential or is not a plain "
+                        "URL)" if shown == dataflow.NOT_SHOWN else f": {shown}"))
     on = dataflow.tracing_on()
     found += [f"{name}={os.environ.get(name, '')} [{config.setting_source(name)}] uploads traces"
               for name in on]
@@ -466,8 +469,12 @@ def print_env_resolution() -> int:
             shown = "(unset)"
         elif any(part in name for part in SECRET_PARTS):
             shown = f"<set, {len(value)} chars>" if value else "(blank)"
+        elif name in dataflow.ENDPOINT_VARS:
+            shown = dataflow.shown_url(value) if value else "(blank)"
         else:
-            shown = dataflow.without_credentials(value)
+            # Not a URL (a model name, a path, a flag): as it is, unless it
+            # holds an @, which no value of these needs.
+            shown = dataflow.NOT_SHOWN if "@" in value else value
         say(f"  {name}={shown}  [{config.setting_source(name)}]")
     say(f"  -> answering: {config.LLM_BACKEND}, embeddings: {config.EMBED_BACKEND}, "
         f"index: {config.DB_PATH} ({config.DB_CHOICE.reason})")
@@ -581,18 +588,17 @@ def _run(args) -> int:
             return 2
 
     # --- 1 ---
-    # `url` goes to the requests and nowhere else; `shown` is what is printed.
-    # A credential written into OLLAMA_URL (user:password@host) is never
-    # printed, in a step line, a plan, an error or a remedy.
+    # `url` goes to the requests and nowhere else; `shown` is what is printed
+    # (`dataflow.shown_url`: scheme, host and port, or fixed words).
     url = config.OLLAMA_URL
-    shown = dataflow.without_credentials(url)
+    shown = dataflow.shown_url(url)
     needs_ollama = "ollama" in (llm, embed)
     step(1, f"Model server: Ollama at {shown}")
     pulled: frozenset = frozenset()
     if not needs_ollama:
         note("not needed: this configuration answers and embeds on OpenRouter")
     elif dry:
-        plan(f"ask {shown}/api/tags whether Ollama answers, and what it has pulled")
+        plan(f"ask Ollama's /api/tags at {shown} whether it answers, and what it has pulled")
     else:
         reply = preflight.ollama_tags(url)
         if reply.kind == "no_ollama":

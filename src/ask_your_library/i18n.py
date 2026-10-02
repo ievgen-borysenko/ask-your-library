@@ -262,10 +262,10 @@ _T = {
     "pf_ollama_bad_reply": {
         "ua": "Щось на {url} відповіло (HTTP {status}), але це не придатна відповідь /api/tags "
               "(помилковий статус, не JSON або несподівана структура). Перевір, що на цій адресі "
-              "саме Ollama (`curl {url}/api/tags`).",
+              "саме Ollama (`curl` її /api/tags за адресою з OLLAMA_URL).",
         "en": "Something at {url} answered with HTTP {status}, but the reply is not a usable "
               "/api/tags (an error status, not JSON, or an unexpected shape): check that this "
-              "address is really Ollama (`curl {url}/api/tags`).",
+              "address is really Ollama (`curl` the /api/tags of the address OLLAMA_URL names).",
     },
     "pf_no_db": {
         "ua": "Бази нема: {path}. Проіндексуй у неї свої книжки (`uv run ayl add <тека>`) "

@@ -17,7 +17,7 @@ import requests
 from requests import RequestException
 
 from .config import OLLAMA_URL
-from .dataflow import WITHHELD, server_text, without_credentials
+from .dataflow import WITHHELD, server_text, shown_url
 
 # A pull of a 9 GB model streams for minutes; what is bounded is the wait for
 # the NEXT line, not the whole download. Ollama sends a progress line every
@@ -41,8 +41,8 @@ def pull(model: str, on_progress: Progress | None = None, url: str | None = None
     Returns when Ollama says `success`; raises PullError otherwise, including
     a stream that ends without saying either."""
     base = (OLLAMA_URL if url is None else url).rstrip("/")
-    # `base` is requested; `shown` is printed — never a credential in the URL.
-    shown = without_credentials(base)
+    # `base` is requested; `shown` is printed (scheme, host and port only).
+    shown = shown_url(base)
     # `model` is the current field name and `name` the older spelling of it;
     # a server ignores the one it does not know.
     body = {"model": model, "name": model, "stream": True}

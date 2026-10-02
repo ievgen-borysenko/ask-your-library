@@ -45,6 +45,46 @@ fail() { printf 'error: %s\n' "$1" >&2; }
 # but `set -o pipefail` turns the SIGPIPE it can send the writer into a failure.
 first_line() { printf '%s\n' "${1%%$'\n'*}"; }
 
+# A URL-valued setting as this script prints it: `scheme://host[:port]`,
+# rebuilt from the parts a strict pattern extracted from the WHOLE value, plus
+# "(path not shown)" when a path, query or fragment followed — or, for a value
+# with an @ anywhere or one the pattern does not match whole, fixed words and
+# nothing of the value. An allowlist, not a redaction: taking a credential out
+# of a value failed three ways (the first delimiter, a / ? or # in a password,
+# a "://" in a scheme-less value). The same rule, pattern and words as
+# ask_your_library.dataflow.shown_url. Printing only: requests and the
+# loopback checks use the real value. Every line that prints OLLAMA_URL,
+# OLLAMA_HOST, OPENROUTER_BASE_URL or a trace endpoint goes through it (or
+# through shown_value); tests/test_install_script.py plants secrets in all.
+NOT_SHOWN="<not shown: the value carries a credential or is not a plain URL>"
+PLAIN_URL_RE='^([A-Za-z][A-Za-z0-9+.-]*)://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?([/?#].*)?$'
+shown_url() {
+    local value="$1" LC_ALL=C note=""
+    case "$value" in
+        *@*) printf '%s\n' "$NOT_SHOWN"; return 0 ;;
+    esac
+    if [[ "$value" =~ $PLAIN_URL_RE ]]; then
+        [ -z "${BASH_REMATCH[4]}" ] || note=" (path not shown)"
+        printf '%s://%s%s%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "$note"
+    else
+        printf '%s\n' "$NOT_SHOWN"
+    fi
+}
+
+# Any setting as this script prints it: a URL-valued one (ENDPOINT_VARS, the
+# names dataflow.ENDPOINT_VARS holds) through shown_url; any other as it is,
+# unless it holds an @, which none of them needs.
+shown_setting() {
+    case " OLLAMA_URL OLLAMA_HOST OPENROUTER_BASE_URL LANGCHAIN_ENDPOINT LANGSMITH_ENDPOINT " in
+        *" $1 "*) shown_url "$2"; return 0 ;;
+    esac
+    case "$2" in
+        *@*) printf '%s\n' "$NOT_SHOWN" ;;
+        *) printf '%s\n' "$2" ;;
+    esac
+}
+
+
 usage() {
     cat <<'USAGE'
 Usage: bash scripts/install-mac.sh [--dry-run] [--yes] [--no-demo] [--hosted]
@@ -567,11 +607,13 @@ print_env_resolution() {
             fi
             continue
         fi
-        # A URL's credential is not in the record either. Only a value with an
-        # @ is passed through shown_url: a command substitution drops trailing
-        # newlines, and every other value has to come back exactly as read.
-        case "$value" in
-            *@*) value="$(shown_url "$value")" ;;
+        # A URL's credential or token is not in the record either. Only a
+        # URL-valued name, or a value with an @, goes through shown_setting: a
+        # command substitution drops trailing newlines, and every other value
+        # has to come back exactly as read.
+        case " $ENDPOINT_VARS " in
+            *" $name "*) value="$(shown_setting "$name" "$value")" ;;
+            *) case "$value" in *@*) value="$(shown_setting "$name" "$value")" ;; esac ;;
         esac
         out=""
         index=0
@@ -597,6 +639,23 @@ if [ "$print_resolution" -eq 1 ]; then
     print_env_resolution
     exit 0
 fi
+
+# The value that .env gives a name, as python-dotenv would give it.
+planned_value() {
+    local variable="dotenv_v_$1"
+    printf '%s\n' "${!variable-}"
+}
+
+# Whether that .env names the variable at all. python-dotenv fills every name it
+# holds a line for, a blank line included, so "set to nothing" and "not
+# mentioned" are two different states of the environment — and graph.py reads
+# exactly that difference.
+dotenv_defines() {
+    case " $dotenv_names " in
+        *" $1 "*) return 0 ;;
+    esac
+    return 1
+}
 
 # --- the third layer: $AYL_HOME/config.env, the file `ayl init` writes ---------
 # config.py reads it beneath exported variables and the project's .env (ADR-027),
@@ -641,23 +700,6 @@ home_defines() {
 }
 home_value() { local variable="home_v_$1"; printf '%s\n' "${!variable-}"; }
 
-# The value that .env gives a name, as python-dotenv would give it.
-planned_value() {
-    local variable="dotenv_v_$1"
-    printf '%s\n' "${!variable-}"
-}
-
-# Whether that .env names the variable at all. python-dotenv fills every name it
-# holds a line for, a blank line included, so "set to nothing" and "not
-# mentioned" are two different states of the environment — and graph.py reads
-# exactly that difference.
-dotenv_defines() {
-    case " $dotenv_names " in
-        *" $1 "*) return 0 ;;
-    esac
-    return 1
-}
-
 setting() {
     local name="$1" value
     value="${!name-}"
@@ -672,29 +714,6 @@ ollama_url="$(setting OLLAMA_URL)"
 # value; without the same here a URL written with one asks for //api/tags.
 while [ "${ollama_url%/}" != "$ollama_url" ]; do ollama_url="${ollama_url%/}"; done
 
-# A URL-valued setting as this script prints it: a `user:password@` in front
-# of the host becomes `<credentials>@`, so a credential never reaches the
-# terminal or a log; the value itself is what is requested. The same rule with
-# or without a scheme (a credential written as user:secret@host:11434 is still
-# one), and the same as ask_your_library.dataflow.without_credentials. Every
-# line that prints OLLAMA_URL, OLLAMA_HOST, OPENROUTER_BASE_URL, the two trace
-# endpoints, or a .env value goes through it (or through shown_value, which
-# calls it); tests/test_install_script.py plants a credential in all of them.
-# Up to the LAST @, not the authority up to the first / ? or #: a password may
-# hold any of those unencoded (reader:Pa/ss@host), and cutting there left no @
-# to find and printed the value whole. An @ only in a path or query is
-# over-redacted (the host is hidden too): the safe direction.
-shown_url() {
-    local url="$1" scheme="" rest
-    case "$url" in
-        *://*) scheme="${url%%://*}://"; rest="${url#*://}" ;;
-        *) rest="$url" ;;
-    esac
-    case "$rest" in
-        *@*) printf '%s<credentials>@%s\n' "$scheme" "${rest##*@}" ;;
-        *) printf '%s\n' "$url" ;;
-    esac
-}
 ollama_shown="$(shown_url "$ollama_url")"
 embed_model="$(setting OLLAMA_EMBED_MODEL)"
 llm_model="$(setting OLLAMA_LLM_MODEL)"
@@ -718,7 +737,7 @@ case "$ollama_url" in
     *://*) ;;
     *)
         fail "OLLAMA_URL=$ollama_shown has no scheme, and config.py uses the value as it"
-        fail "stands: the answering model would be asked for at $ollama_shown/v1, which is"
+        fail "stands: the answering model would be asked for at that value with /v1 after it, which is"
         fail "not an address. Write it in full (http://localhost:11434), or unset"
         fail "OLLAMA_URL to use that default, and re-run."
         exit 2
@@ -812,7 +831,7 @@ shown_value() {
     if is_secret_name "$1"; then
         if [ -n "$2" ]; then printf '<set>\n'; else printf '\n'; fi
     else
-        shown_url "$2"
+        shown_setting "$1" "$2"
     fi
 }
 
@@ -947,8 +966,11 @@ trace_endpoint() {
     local endpoint
     endpoint="$(effective_value LANGSMITH_ENDPOINT)"
     [ -n "$endpoint" ] || endpoint="$(effective_value LANGCHAIN_ENDPOINT)"
-    [ -n "$endpoint" ] || endpoint="https://api.smith.langchain.com (the LangSmith default)"
-    shown_url "$endpoint"
+    if [ -n "$endpoint" ]; then
+        shown_url "$endpoint"
+    else
+        printf '%s\n' "https://api.smith.langchain.com (the LangSmith default)"
+    fi
 }
 
 # What contradicts "fully local". OLLAMA_HOST is reported but not judged here:
@@ -1013,17 +1035,19 @@ done
 # build while a URL-valued setting carries a credential (its error output can
 # print it: issue #107) — refused here, before anything is installed, with the
 # same words, rather than there, after everything was.
+# The settings a request goes to (dataflow.REQUEST_URL_VARS), and "carries a
+# credential" exactly as dataflow.carries_credential reads it: not printable
+# under shown_url.
 if [ "$want_demo" -eq 1 ] && [ "$assume_yes" -eq 1 ]; then
-    for name in $ENDPOINT_VARS; do
-        case "$(effective_value "$name")" in
-            *@*)
-                fail "--yes asks for the demo library, which is not built while a URL-valued"
-                fail "setting carries a credential ($name, $(value_source "$name")): the demo"
-                fail "build's error output is not yet safe for one (issue #107). Move the"
-                fail "credential out of the URL, or run without --yes (or with --no-demo)."
-                exit 2
-                ;;
-        esac
+    for name in OLLAMA_URL OPENROUTER_BASE_URL LANGCHAIN_ENDPOINT LANGSMITH_ENDPOINT; do
+        value="$(effective_value "$name")"
+        if [ -n "$value" ] && [ "$(shown_url "$value")" = "$NOT_SHOWN" ]; then
+            fail "--yes asks for the demo library, which is not built while a URL-valued"
+            fail "setting carries a credential ($name, $(value_source "$name")): the demo"
+            fail "build's error output is not yet safe for one (issue #107). Move the"
+            fail "credential out of the URL, or run without --yes (or with --no-demo)."
+            exit 2
+        fi
     done
 fi
 
@@ -1291,7 +1315,7 @@ fi
 # --- 7. Ollama --------------------------------------------------------------
 ollama_ready() { curl -fsS --max-time 3 "$ollama_url/api/tags" >/dev/null 2>&1; }
 
-step "Ollama: the binary, and a server answering on $ollama_shown/api/tags"
+step "Ollama: the binary, and a server answering its /api/tags at $ollama_shown"
 # OLLAMA_HOST — what a server started below binds, and where step 8's `ollama
 # pull` goes — was judged with the rest of the resolution, before step 3. The
 # gate used to sit here, and it sat inside the branch that starts a server, so a
@@ -1308,7 +1332,7 @@ ollama_service=0        # ... and it was brew services, which the last block nam
 ollama_pid=""           # ... or a bare `ollama serve`, whose pid is how to stop it
 if [ "$dry_run" -eq 1 ]; then
     plan "start it for this session (brew services run ollama, else 'ollama serve')"
-    plan "wait up to ${OLLAMA_WAIT_S}s for $ollama_shown/api/tags to answer"
+    plan "wait up to ${OLLAMA_WAIT_S}s for its /api/tags at $ollama_shown to answer"
 elif ollama_ready; then
     note "already answering"
 else
@@ -1342,7 +1366,7 @@ else
         waited=$((waited + 1))
     done
     if ! ollama_ready; then
-        fail "Ollama did not answer on $ollama_shown/api/tags within ${OLLAMA_WAIT_S}s."
+        fail "Ollama did not answer its /api/tags at $ollama_shown within ${OLLAMA_WAIT_S}s."
         fail "start it in another terminal ('ollama serve'), then re-run."
         exit 1
     fi
@@ -1450,9 +1474,9 @@ SUMMARY_KEYS="$SUMMARY_KEYS|ORCHESTRATOR_MODEL|PRICE_IN_PER_MTOK|PRICE_OUT_PER_M
 env_summary() {
     # `|| true`: no match is an empty summary, not a failed script under `set -e`.
     # A .env value may be a URL with a credential in it (OLLAMA_URL is one of
-    # these keys): the value is shown through shown_url, the name as it is.
+    # these keys): the value is shown through shown_setting, the name as it is.
     { grep -E "^($SUMMARY_KEYS)=" || true; } | while IFS= read -r line; do
-        note "${line%%=*}=$(shown_url "${line#*=}")"
+        note "${line%%=*}=$(shown_setting "${line%%=*}" "${line#*=}")"
     done
 }
 
@@ -1622,7 +1646,7 @@ try:
     # The data-flow names and the "fully local" rule, from the one Python
     # definition `ayl init` judges its local mode with.
     from ask_your_library.dataflow import (is_loopback, tracing_on, v1_tracing_set,
-                                           without_credentials)
+                                           shown_url)
     from ask_your_library.graph import enable_tracing_if_key_present
     from ask_your_library.i18n import t
     from ask_your_library.preflight import check_environment
@@ -1648,16 +1672,17 @@ mode = sys.argv[2] if len(sys.argv) > 2 else ""
 tracing_on = tracing_on()
 v1_tracing_set = v1_tracing_set()
 print(f"       LLM_BACKEND={LLM_BACKEND}, EMBED_BACKEND={EMBED_BACKEND}")
-print(f"       LLM_BASE_URL={without_credentials(LLM_BASE_URL)}, "
-      f"OLLAMA_URL={without_credentials(OLLAMA_URL)}")
+print(f"       LLM_BASE_URL={shown_url(LLM_BASE_URL)}, "
+      f"OLLAMA_URL={shown_url(OLLAMA_URL)}")
 if tracing_on:
     # A flag says that traces leave; the endpoint says where to. Neither name is
     # required, so the destination of a run that sets neither is the default the
     # LangSmith client falls back to.
     endpoint = (os.environ.get("LANGSMITH_ENDPOINT", "").strip()
-                or os.environ.get("LANGCHAIN_ENDPOINT", "").strip()
-                or "https://api.smith.langchain.com (the LangSmith default)")
-    print("       tracing: " + ", ".join(tracing_on) + " -> " + without_credentials(endpoint))
+                or os.environ.get("LANGCHAIN_ENDPOINT", "").strip())
+    endpoint = shown_url(endpoint) if endpoint else (
+        "https://api.smith.langchain.com (the LangSmith default)")
+    print("       tracing: " + ", ".join(tracing_on) + " -> " + endpoint)
 else:
     print("       tracing: off")
 if v1_tracing_set:
@@ -1686,7 +1711,7 @@ if mode == "local":
              (("LLM_BACKEND", LLM_BACKEND), ("EMBED_BACKEND", EMBED_BACKEND))
              if value != "ollama"]
     if not is_loopback(OLLAMA_URL):
-        wrong.append(f"OLLAMA_URL={without_credentials(OLLAMA_URL)}")
+        wrong.append(f"OLLAMA_URL={shown_url(OLLAMA_URL)}")
     wrong += tracing_on
     wrong += [name for name in v1_tracing_set if name not in tracing_on]
     if wrong:

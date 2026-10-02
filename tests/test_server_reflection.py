@@ -58,22 +58,25 @@ def test_with_a_credential_configured_server_text_is_withheld(monkeypatch):
     assert dataflow.server_text("disk full") is None
 
 
-@pytest.mark.parametrize("password", ["Pa/ss-S3cret", "Pa?ss-S3cret", "Pa#ss-S3cret",
-                                      "Pa@ss-S3cret", "Pa:ss-S3cret"])
-def test_a_password_with_a_url_delimiter_still_counts_as_a_credential(monkeypatch, password):
-    """The authority was cut at the first / ? or #, which left no @ to find
-    in `reader:Pa/ss...@host` (F7-authority-last-at)."""
-    url = f"http://reader:{password}@127.0.0.1:11434"
-    assert dataflow.carries_credential(url)
-    assert dataflow.without_credentials(url) == "http://<credentials>@127.0.0.1:11434"
-    assert dataflow.server_text("disk full", url) is None
-    monkeypatch.setattr(config, "OLLAMA_URL", url)
-    assert dataflow.credential_configured() and dataflow.server_text("disk full") is None
+@pytest.mark.parametrize("value", [
+    "http://reader:Pa/ss-S3cret@127.0.0.1:11434", "http://reader:Pa?ss@127.0.0.1:11434",
+    "http://reader:Pa#ss@127.0.0.1:11434", "http://reader:Pa@ss@127.0.0.1:11434",
+    "reader:S3cretPW@127.0.0.1:11434/via/http://gw", "reader:S3cr://x@127.0.0.1:11434",
+    "127.0.0.1:11434", ""])
+def test_a_value_shown_url_cannot_print_counts_as_a_credential(monkeypatch, value):
+    """carries_credential is exactly "not printable under shown_url"
+    (F8-url-allowlist), and server text is withheld then."""
+    assert dataflow.carries_credential(value) or value == ""
+    assert dataflow.shown_url(value) == dataflow.NOT_SHOWN
+    if value:
+        assert dataflow.server_text("disk full", value) is None
+        monkeypatch.setattr(config, "OLLAMA_URL", value)
+        assert dataflow.credential_configured() and dataflow.server_text("disk full") is None
 
 
-def test_an_at_only_in_a_path_is_over_redacted_the_safe_way():
-    assert dataflow.without_credentials("http://host/path@x") == "http://<credentials>@x"
-    assert dataflow.carries_credential("http://host/path@x")
+def test_a_plain_url_is_printable_and_its_path_is_not_printed():
+    assert dataflow.shown_url("http://127.0.0.1:11434/?key=Tok") == \
+        "http://127.0.0.1:11434 (path not shown)"
     assert not dataflow.carries_credential("http://localhost:11434/path")
 
 

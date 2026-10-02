@@ -54,25 +54,32 @@ def v1_tracing_set() -> list[str]:
     return [name for name in TRACING_V1_VARS if env_var_is_set(name)]
 
 
-def without_credentials(value: str) -> str:
-    """A value with the credential in front of its host replaced by
-    `<credentials>@`, so a printed endpoint never carries the credential
-    written into it.
+# What a URL-valued setting may be printed as: rebuilt from a scheme, a host
+# and a port that this pattern extracted from the WHOLE value — an allowlist,
+# not a redaction. Parsing a credential out of a value failed three ways (the
+# first delimiter, a / ? or # inside a password, a "://" inside a scheme-less
+# value); nothing is taken out here, only the three parts that cannot hold one
+# are put back together. The path, query and fragment are never printed: they
+# can hold a token. scripts/install-mac.sh's `shown_url` is the same rule.
+PLAIN_URL = re.compile(r"([A-Za-z][A-Za-z0-9+.-]*)://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])"
+                       r"(:[0-9]{1,5})?([/?#].*)?", re.DOTALL)
+NOT_SHOWN = "<not shown: the value carries a credential or is not a plain URL>"
+PATH_NOT_SHOWN = " (path not shown)"
 
-    When the value holds an `@` anywhere, everything after `scheme://` (or
-    from the start, without a scheme) up to its LAST `@` is taken for the
-    credential. Not the authority up to the first `/`, `?` or `#`: a password
-    may hold any of those unencoded (`reader:Pa/ss@host`), and cutting there
-    left no `@` in what was read and printed the value whole. A value whose
-    only `@` sits in a path or a query is over-redacted — its host is hidden
-    too — which is the safe direction: printing a credential is the failure
-    this exists to prevent, hiding a host is not. A value with no `@` at all
-    (a model name, a path, a URL with no userinfo) comes back unchanged. The
-    installer's bash `shown_url` applies the same rule."""
-    scheme, rest = value.split("://", 1) if "://" in value else ("", value)
-    if "@" not in rest:
-        return value
-    return f"{scheme + '://' if scheme else ''}<credentials>@{rest.rsplit('@', 1)[1]}"
+
+def shown_url(value: str) -> str:
+    """`value` as it may be printed: `scheme://host[:port]`, plus
+    "(path not shown)" when a path, query or fragment followed — or, for a
+    value with an `@` anywhere or one the pattern does not match whole (no
+    scheme, an odd character, an empty host), the fixed words NOT_SHOWN and
+    nothing of the value. Printing only: requests and the loopback check use
+    the real value."""
+    value = str(value)
+    match = None if "@" in value else PLAIN_URL.fullmatch(value)
+    if match is None:
+        return NOT_SHOWN
+    scheme, host, port, rest = match.groups()
+    return f"{scheme}://{host}{port or ''}{PATH_NOT_SHOWN if rest else ''}"
 
 
 # --- text a server sent back -----------------------------------------------------
@@ -87,20 +94,28 @@ SERVER_TEXT_LIMIT = 160
 WITHHELD = "its text is withheld because the configured URL carries a credential"
 
 
-def carries_credential(url: str) -> bool:
-    """Whether `url` is taken to carry a credential: an `@` anywhere after
-    its scheme — the rule `without_credentials` applies, and over-counting in
-    the same safe direction (an `@` in a path counts)."""
-    rest = url.split("://", 1)[1] if "://" in url else url
-    return "@" in rest
+def carries_credential(value: str) -> bool:
+    """True exactly when `value` is not printable under `shown_url`: an `@`
+    anywhere, or no strict match. Counted the safe way round — a value this
+    cannot read is taken to carry one."""
+    return shown_url(value) == NOT_SHOWN
+
+
+# The settings a request is sent to. OLLAMA_HOST is not one of them: it is
+# the Ollama server's own bind address, `host[:port]` without a scheme, which
+# this project never requests — counting it would call every machine that sets
+# it to 127.0.0.1:11434 credential-bearing. It is still printed through
+# `shown_url`.
+REQUEST_URL_VARS = ("OLLAMA_URL", "OPENROUTER_BASE_URL", "LANGCHAIN_ENDPOINT",
+                    "LANGSMITH_ENDPOINT")
 
 
 def credential_configured(*urls: str) -> bool:
-    """Whether `urls`, or any URL-valued setting this process is configured
-    with (OLLAMA_URL, OPENROUTER_BASE_URL, the ENDPOINT_VARS), carries one."""
+    """Whether `urls`, or any URL a request of this process may go to
+    (REQUEST_URL_VARS, as configured), carries one (`carries_credential`)."""
     from . import config      # here, not at the top: config is loaded lazily by its users
     every = (*urls, config.OLLAMA_URL, config.OPENROUTER_BASE_URL,
-             *(os.environ.get(name, "") for name in ENDPOINT_VARS))
+             *(os.environ.get(name, "") for name in REQUEST_URL_VARS[2:]))
     return any(carries_credential(url) for url in every if url)
 
 

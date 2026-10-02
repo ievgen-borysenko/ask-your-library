@@ -19,7 +19,7 @@ import lancedb
 import pytest
 import requests
 
-from ask_your_library import ayl, config, home, init_cmd, ollama, preflight
+from ask_your_library import ayl, config, dataflow, home, init_cmd, ollama, preflight
 from ask_your_library.embeddings import OllamaEmbedder
 from ask_your_library.index_meta import expected_chunker, write_index_meta
 from ask_your_library.i18n import t
@@ -253,7 +253,7 @@ def test_dry_run_prints_every_step_in_order_and_changes_nothing(machine, capsys)
     out = capsys.readouterr().out
     order = [out.index(f"[{n}/5]") for n in range(1, 6)]
     assert order == sorted(order)
-    assert f"would ask http://localhost:11434/api/tags" in out
+    assert "would ask Ollama's /api/tags at http://localhost:11434" in out
     assert f"would pull {ANSWERS}" in out and f"would pull {EMBEDS}" in out
     assert f"would write {machine.home / 'config.env'}" in out and "LLM_BACKEND=ollama" in out
     assert ("scripts/ingest_demo_corpus.py --starter --backend ollama --cache-dir "
@@ -395,9 +395,10 @@ def test_an_exported_switch_is_named_as_the_source_over_an_existing_file(machine
 # --- the local mode is held to "nothing leaves this machine" -------------------------
 
 @pytest.mark.parametrize("url, shown", [
-    ("http://gpu-box.example.com:11434", "OLLAMA_URL=http://gpu-box.example.com:11434"),
+    ("http://gpu-box.example.com:11434", "is not this machine: http://gpu-box.example.com:11434"),
     ("http://reader:hunter2@ollama.example.com:11434",
-     "OLLAMA_URL=http://<credentials>@ollama.example.com:11434"),
+     "is not this machine (its value is not shown: it carries a credential or is not a plain "
+     "URL)"),
 ])
 def test_a_local_mode_with_a_remote_ollama_is_refused(machine, capsys, url, shown):
     machine.mp.setattr(config, "OLLAMA_URL", url)
@@ -659,7 +660,7 @@ def test_the_env_resolution_never_prints_a_credential_written_into_a_url(machine
     init("--print-env-resolution")
     out = capsys.readouterr().out
     assert "s3cret" not in out
-    assert "LANGCHAIN_ENDPOINT=https://<credentials>@smith.example.com" in out
+    assert f"LANGCHAIN_ENDPOINT={dataflow.NOT_SHOWN}" in out
 
 
 # --- the two child processes, as they are started -------------------------------------
@@ -705,21 +706,21 @@ def test_the_dry_run_prints_the_url_without_its_credential(machine, capsys):
     machine.mp.setattr(config, "OLLAMA_URL", CREDENTIAL_URL)
     assert init("--dry-run", "--no-demo") == 0
     printed = no_secret(capsys)
-    assert "Ollama at http://<credentials>@localhost:11434" in printed
-    assert "would ask http://<credentials>@localhost:11434/api/tags" in printed
+    assert f"Ollama at {dataflow.NOT_SHOWN}" in printed
+    assert f"would ask Ollama's /api/tags at {dataflow.NOT_SHOWN}" in printed
 
 
 def test_a_real_step_prints_the_url_without_its_credential(machine, capsys):
     machine.mp.setattr(config, "OLLAMA_URL", CREDENTIAL_URL)
     assert init("--no-demo") == 0
-    assert "Ollama at http://<credentials>@localhost:11434" in no_secret(capsys)
+    assert f"Ollama at {dataflow.NOT_SHOWN}" in no_secret(capsys)
 
 
 def test_a_failed_tags_call_names_the_url_without_its_credential(machine, capsys):
     machine.mp.setattr(config, "OLLAMA_URL", CREDENTIAL_URL)
     machine.tags.down = True
     assert init("--no-demo") == preflight.EXIT_NO_LOCAL_RUNTIME
-    assert "Could not reach Ollama at http://<credentials>@localhost:11434" in no_secret(capsys)
+    assert f"Could not reach Ollama at {dataflow.NOT_SHOWN}" in no_secret(capsys)
 
 
 @pytest.mark.parametrize("answer", ["http_error", "error_line", "connection"])
@@ -748,7 +749,7 @@ def test_the_preflight_s_ollama_texts_carry_no_credential(monkeypatch):
         monkeypatch.setattr(preflight, "requests", fake)
         problems = preflight.check_environment(db_path=Path("/nonexistent/index"))
         text = " ".join(problems)
-        assert SECRET not in text and "http://<credentials>@localhost:11434" in text
+        assert SECRET not in text and dataflow.NOT_SHOWN in text
 
 
 class BadTags:
