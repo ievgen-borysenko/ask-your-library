@@ -8,9 +8,9 @@
   2.1 no longer pulls `greenlet` in, which stays through the `ui` extra. No constraint in
   `pyproject.toml` changes and the suite passes on the new versions. The security bumps went
   first, on their own: `pyjwt` 2.13.0 -> 2.15.1 and `urllib3` 2.7.0 -> 2.8.0, both transitive,
-  closing the Dependabot alerts the lockfile had carried; `urllib3` 2.8 refuses a host that is
-  not RFC 3986 syntax (an underscore name in `OLLAMA_URL`), which `ayl doctor` reports as the
-  backend being unavailable.
+  closing the Dependabot alerts the lockfile had carried; `urllib3` 2.8 refuses a host with
+  whitespace, a control character or a stray `%` in it (an underscore name such as
+  `ollama_host` is still accepted), which `ayl doctor` reports as the backend being unavailable.
 - **The chat database is opened by path, not by URL string.** SQLAlchemy 2.1 percent-decodes the
   database part of a URL it parses, so a chat dir with `%XX` in its name (`.../100%25/`) made the
   web chat's data layer open a database next to the one the schema had been written into — and

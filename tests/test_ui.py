@@ -305,13 +305,15 @@ def test_ui_import_writes_only_into_its_configured_dir(ui, tmp_path):
 
 
 def test_the_data_layer_opens_the_chat_db_the_schema_was_written_into(ui, monkeypatch, tmp_path):
-    """A chat dir with a percent sign in its name. SQLAlchemy 2.1 decodes `%25`
-    in the database part of a URL string, so a conninfo built as an f-string
-    pointed the layer at `.../100%/chat.db` while the schema had gone into
-    `.../100%25/chat.db`; the layer swallows the SQL error, and the history was
-    silently not saved. The row has to come back from the file app.py created."""
+    """A chat dir with a percent sign and a question mark in its name. SQLAlchemy
+    2.1 decodes `%25` in the database part of a URL string, so a conninfo built
+    as an f-string pointed the layer at `.../100%/chat.db` while the schema had
+    gone into `.../100%25/chat.db`; the layer swallows the SQL error, and the
+    history was silently not saved. A `?` cut the f-string's path short on any
+    version (the rest became query parameters). The engine has to hold the path
+    as it is, and the row has to come back from the file app.py created."""
     import sqlite3
-    chainlit_dir = tmp_path / "100%25" / "chainlit"
+    chainlit_dir = tmp_path / "100%25?" / "chainlit"
     monkeypatch.setenv("AYL_CHAINLIT_DIR", str(chainlit_dir))
     sys.modules.pop(UI_MODULE, None)
     module = importlib.import_module(UI_MODULE)
@@ -321,9 +323,8 @@ def test_the_data_layer_opens_the_chat_db_the_schema_was_written_into(ui, monkey
     assert _insert_and_read(layer, "t1", None) is not None
     with sqlite3.connect(module.CHAT_DB_PATH) as connection:
         assert connection.execute('SELECT count(*) FROM threads WHERE "id" = ?', ("t1",)).fetchone()[0] == 1
-    # nothing at the decoded path: a `100%/` next to `100%25/` is the bug
-    assert not (tmp_path / "100%").exists()
-    assert list((tmp_path / "100%25").rglob("chat.db")) == [module.CHAT_DB_PATH]
+    # the fixture's own chat.db and this one; nothing at a cut or decoded path
+    assert sorted(tmp_path.rglob("chat.db")) == sorted([tmp_path / "chainlit" / "chat.db", module.CHAT_DB_PATH])
 
 
 def test_markdown_images_are_neutralized_but_links_survive(ui):

@@ -366,8 +366,9 @@ def data_layer():
     # part of a URL it parses, so a chat dir with `%XX` in its name (`100%25`)
     # would open a database at the DECODED path, next to the one the schema was
     # just written into — and the layer swallows SQL errors, so the history
-    # would silently not be saved. `URL.create` takes the path as it is, and the
-    # layer hands the object to `create_async_engine` unchanged.
+    # would silently not be saved (a `?` in the name cut the path short on any
+    # version). `URL.create` takes the path as it is, and the layer hands the
+    # object to `create_async_engine` unchanged.
     return SQLAlchemyDataLayer(conninfo=URL.create("sqlite+aiosqlite", database=str(CHAT_DB_PATH)))
 
 
