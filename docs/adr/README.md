@@ -1468,29 +1468,44 @@ as well, with better layout analysis, but brings `charset-normalizer` and `crypt
 has no such limits; `pypdfium2` (Apache-2.0/BSD) wraps PDFium, a C++ renderer, which is the attack
 surface this decision avoids. It is a main dependency, not an extra: the criterion is a clean
 install that imports a PDF, and `pyproject.toml` bounds it below at the version verified, as the
-others are. It is a dependency installed beside this project under its own licence, not
+others are, and above at the next major version, unlike them: the reader counts at names inside
+the library (below), which a major version may move. It is a dependency installed beside this project under its own licence, not
 redistributed in it, so `NOTICE`, which records third-party material this tree carries, does not
 change — as for every other dependency.
 
 **A PDF is untrusted input, and every bound applies before the work it bounds.** The reader is
 `src/ask_your_library/ingest/pdf.py`, and its docstring lists what the library bounds, what the module bounds and
-what is never done. The library is configured to cap every inflated stream at 16 MiB, to stop its
-page-tree walk at twice the page cap and its outline walk at 10,000 entries (neither is
-materialised past the cap), and never to call `jbig2dec`; it already detects reference cycles,
-forbids entity declarations in XMP and rebuilds a damaged cross-reference table by one scan. Two
-bounds have no setting there, and they are the ones that matter: memory and time. The library
+what is never done. Every limit in the library's configuration is set explicitly: every inflated
+stream capped at 16 MiB, the page-tree walk stopped at twice the page cap or 64 levels and the
+outline walk at 10,000 entries or 32 levels (neither is materialised past the cap), at most 200
+form draws a page, `jbig2dec` never called; it already detects reference cycles, forbids entity
+declarations in XMP and rebuilds a damaged cross-reference table by one scan. Three bounds have no
+setting there, and they are the ones that matter: memory and time. The library
 keeps every stream it inflates for as long as the file is open, so the module counts the bytes at
 the library's one inflating function, `decode_stream_data`, and refuses past 256 MiB for the file;
 and parsing and interpreting drawing instructions is what costs time (a 14 MB page of text
 operators took 36 s), so the module counts the bytes handed to the library's content parser — a
 page's own stream and each form it draws, every time it draws it — and refuses past 4 MiB a page
-and 128 MiB a file, before they are parsed. Those two counts are made by putting a counting wrapper
-in place of `pypdf.filters.decode_stream_data` and `pypdf._page.ContentStream` for the length of one
-read; a test pins that the library still looks both names up, and that they are put back. The text
-a page shows is counted per instruction through the library's public extraction callback and
-refused past 100,000 characters, which stops a compressed bomb of text operators long before its
-end. The library has no timeout and none is added — no thread, no signal: measured on an Apple
-M-series machine, the slowest instructions go at about 2 MB a second, so the worst page the caps
+and 128 MiB a file, before they are parsed. And the library builds a font's character map and
+width table again for every page and every form draw that uses it, which no byte count sees: the
+first review measured an empty form drawn 40 times at 6.6 s (122 s and 722 MiB under allocation
+tracing), and a 23 KB file of 60 fonts whose one-line `/ToUnicode` range each stands for 65,536
+entries at 602 MiB. So each font dictionary is built once per file and kept, and the entries of
+every font built are counted and refused past 1,000,000 (about 160 MiB). The three counts are
+made by putting a counting wrapper in place of `pypdf.filters.decode_stream_data`,
+`pypdf._page.ContentStream` and `Font.from_font_resource` for the length of one read; a test pins
+that the library still looks all three up and that they are put back, and a page whose text came
+out with nothing counted refuses the file ("the reader's limits did not engage"). This is
+process-global for the length of a read, with the `pypdf` logger and the warning filters: the
+reader assumes one read at a time, which `ayl add` is, and is not thread-safe. The text a page
+shows is counted per instruction through the library's public extraction callback, each shown
+byte charged as the longest string one code of the page's fonts maps to (a map may turn one byte
+into 256 characters), and refused past 100,000 characters, which stops a compressed bomb of text
+operators long before its end. The library has no timeout, and none is added by a thread or a
+signal; a deadline of 60 s per file is checked at each counting point and at every drawing
+instruction, and is what bounds whatever no cap names — the next table a hostile font could make
+large. The caps are set so that it is not what stops a real file: measured on an Apple M-series
+machine, the slowest instructions go at about 2 MB a second, so the worst page the content caps
 admit takes under 2 s, the worst file about a minute, and a 400-page book under 3 s. The refusals
 are the EPUB's convention: one line, the file's path inside the folder and a fixed reason, never
 a quote; anything the library raises is named by its class only, and its own log lines and
@@ -1514,8 +1529,10 @@ than 200 characters on its first 10 pages — is refused rather than indexed emp
 **Consequences.** Running headers and page numbers are indexed as text, a word broken at a line end
 stays broken, two-column pages come out in drawing order, a chapter that starts mid-page starts on
 the next page, and an owner-password-only PDF that any viewer opens is refused. Each is in
-[Known limits](../known-limits.md). The two counting wrappers depend on names inside the library;
-a version that moves them fails the pinning test rather than silently dropping the bounds.
+[Known limits](../known-limits.md). The three counting wrappers depend on names inside the
+library; a version that moves them fails the pinning test, and at run time refuses the file rather
+than reading it without its bounds. A scan behind a text-layer cover passes the ten-page rule and
+is indexed with what it has, named in one line when fewer than half its pages have text.
 
 [reports]: ../eval-results/
 [backlog]: ../backlog.md

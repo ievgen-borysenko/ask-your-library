@@ -305,7 +305,10 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   [Add your own books](add-your-own-books.md#an-epub).
 - **A PDF is read through its text layer, and only that.** **No OCR**: a scanned PDF has no text
   layer and is refused (fewer than 200 characters on its first 10 pages); run OCR over it yourself
-  first. **No encrypted PDF**, not even one that opens without a password and only restricts
+  first. The rule has two edges. A scan behind a text-layer cover and front matter passes it, and
+  only those pages are indexed: the run names a book in which fewer than half the pages have text,
+  and indexes it anyway. And a real document with under 200 characters in its first ten pages —
+  a one-page note, a short form — is refused as if it were a scan. **No encrypted PDF**, not even one that opens without a password and only restricts
   printing or copying: no password is tried. **Headers, footers and page numbers are text**: they
   are not told apart from the body, so a running head sits in every page's text and can be
   retrieved like a sentence of the book. **Hyphenation is kept**: a word broken at a line end

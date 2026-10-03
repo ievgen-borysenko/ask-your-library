@@ -321,7 +321,8 @@ page starts, here, on the next one — and when two entries point at the same pa
 names it. Deeper entries (sections inside a chapter) do not split it. An entry that points at no
 page of this document (past the last page, at something that is not a page, at another file) is
 ignored, and so is one with no title. When no entry is left, or the outline cannot be read, or it
-has more than 10,000 entries, the run says so in one line and indexes the pages instead.
+is too deep or too large (more than 10,000 entries or 32 levels), the run says so in one line and
+indexes the pages instead.
 
 **Without an outline, a page is a section**: every page with text, named `Page N`, where N counts
 from the first page of the file — the number a viewer's page box shows, not the number printed on
@@ -344,16 +345,38 @@ the folder is indexed as usual:
   what may be done with it. No password is tried, the empty one included, and nothing is
   decrypted; save an unrestricted copy if you have the right to.
 - **Could not be read**: anything the library raises while it reads the file — not a PDF, cut
-  short, a damaged object, a stream that inflates past 16 MiB, a reference cycle. The line names
-  the kind of error (`could not be read (PdfStreamError)`) and nothing of what it said. A damaged
-  cross-reference table alone is not a refusal: the library rebuilds it.
-- **Too large**: a file over 256 MiB; more than 5,000 pages; more than 4 MiB of drawing
-  instructions on one page, or 128 MiB in the whole file, every drawing of a reused form counted;
-  compressed streams that inflate past 256 MiB together; more than 100,000 characters of text on
-  one page, or 20 million in the book. Each is counted before the work it bounds is done, so a
-  hostile file costs a bounded time — about a minute at worst, a few seconds for a real book —
-  and bounded memory.
+  short, a damaged object, a reference cycle, a stream other than a page's drawing instructions
+  (a font, an object stream) that inflates past **16 MiB**, a font map past the library's own
+  limits. The line names the kind of error (`could not be read (PdfStreamError)`) and nothing of
+  what it said. A damaged cross-reference table alone is not a refusal: the library rebuilds it.
+- **Too large**, each with its own line:
+  - the file is larger than **256 MiB**;
+  - it has more than **5,000 pages**, or its page tree is too deep or too large to read (more than
+    10,000 entries or 64 levels);
+  - a page in it has more than **4 MiB of drawing instructions** — its own, and every drawing of a
+    form it reuses, counted each time — including a page whose single stream inflates past that;
+    or the file has more than **128 MiB** of them in all;
+  - its compressed streams inflate past **256 MiB** in all;
+  - its fonts' character maps and widths hold more than **1,000,000 entries** (each font is built
+    once per file; one line of a font's character map can stand for 65,536 entries);
+  - a page in it holds more than **100,000 characters** of text — counted while the page is read,
+    each shown character code as the longest string the page's fonts map one code to — or the
+    book more than **20 million**;
+  - it took longer than **60 s** to read: a deadline per file, checked at every one of the counts
+    above and at every drawing instruction, for whatever no cap names.
+
+  Each is counted before the work it bounds is done, so a hostile file costs a bounded time —
+  about a minute at worst, a few seconds for a real book — and bounded memory. A page draws at
+  most 200 forms; the library skips the rest of them.
 - **No text** at all after extraction, or **no pages**.
+- **The reader's limits did not engage**: text came out of a page while the counts above saw
+  nothing — a `pypdf` version that reads differently from the one the limits were written for.
+  `pyproject.toml` keeps `pypdf` below 7 for the same reason.
+
+A PDF that is read but **mostly without text** — fewer than half its pages yield any, the shape of
+a scan with a text-layer cover and front matter, which the ten-page rule lets through — is
+indexed with what it has, and the run says so in one line: `only 12 of its 300 pages have text
+(the others may be scanned images, which are not read)`.
 
 What is never done with a PDF: no JavaScript is run, no action or link is followed, no attached
 or embedded file is read, no page is rendered, no image is decoded, and no external program is
