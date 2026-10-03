@@ -48,7 +48,7 @@ from . import config, dataflow, home, ollama, preflight
 from .bookkey import book_key
 from .cli import package_version, say
 from .embeddings import OllamaEmbedder, OpenRouterEmbedder
-from .hints import CONFIG_DOCS, command, from_clone, ui_extra
+from .hints import command, config_docs, from_clone, ui_extra
 from .i18n import t
 from .index_meta import expected_chunker, read_index_meta, rows_by_book
 from .ingest.doctor import check_ledger
@@ -247,7 +247,7 @@ def contradictions(mode: str) -> list[str]:
     loaded = {"LLM_BACKEND": config.LLM_BACKEND, "EMBED_BACKEND": config.EMBED_BACKEND}
     return [f"{name}={loaded[name]} is exported in this shell and would decide every command "
             f"instead of the {mode} mode this run writes; unset it, or run "
-            f"`ayl init --mode hosted`, in which an exported switch decides and is named"
+            f"`{command('ayl init --mode hosted')}`, in which an exported switch decides and is named"
             for name in SWITCHES
             if name in config.EXPORTED and loaded[name] != wanted[name]]
 
@@ -283,7 +283,7 @@ def config_text(mode: str) -> str:
     lines = [f"# Written by `ayl init` ({mode} mode). Read beneath exported variables and a",
              "# .env in the working directory; edit it freely, a second `ayl init` never",
              "# rewrites it. Every variable, with its default:",
-             f"# {CONFIG_DOCS}",
+             f"# {config_docs()}",
              *(f"{name}={value}" for name, value in MODES[mode].items())]
     if mode == "hosted":
         lines += ["# The key is yours to set; `ayl init` never takes one. ORCHESTRATOR_MODEL,",
@@ -525,7 +525,7 @@ def run(rest: list[str]) -> int:
     try:
         return _run(args)
     except KeyboardInterrupt:
-        problem("interrupted. Run `ayl init` again: what was pulled is kept, and every stage "
+        problem(f"interrupted. Run `{command('ayl init')}` again: what was pulled is kept, and every stage "
                 "of a demo build is cached, so it resumes rather than starts over.")
         return 130
 
@@ -543,7 +543,7 @@ def _run(args) -> int:
             problem(f"{sentence}.")
         problem("Every command would refuse this configuration (`ayl add` and `ayl ask` with "
                 "\"unknown embedding backend\"). Fix the value where it came from and run "
-                "`ayl init` again. Nothing was changed.")
+                f"`{command('ayl init')}` again. Nothing was changed.")
         return 2
 
     # Step 2 is decided first, silently: step 1 needs to know whether this
@@ -653,7 +653,8 @@ def _run(args) -> int:
         note(f"The demo library: six public-domain classics, built in {ESTIMATE[which]} after "
              f"the models, into its own index under AYL_HOME — never into yours. It downloads "
              f"five checksum-pinned texts from gutenberg.org; every stage is cached, so it is "
-             f"safe to interrupt and resume. Your own books need no demo: `ayl add <folder>`.")
+             f"safe to interrupt and resume. Your own books need no demo: "
+             f"`{command('ayl add <folder>')}`.")
         want_demo = ask("Build the demo library too?")
     say("")
 
@@ -680,7 +681,7 @@ def _run(args) -> int:
                 ollama.pull(model, Progress(model), url=url)
             except ollama.PullError as error:
                 say("")
-                problem(f"{error}. Nothing else was changed; run `ayl init` again once that is "
+                problem(f"{error}. Nothing else was changed; run `{command('ayl init')}` again once that is "
                         f"fixed.")
                 return preflight.EXIT_NO_LOCAL_RUNTIME
             say("")
@@ -764,13 +765,14 @@ def _run(args) -> int:
         problem("the demo library is not built while a URL-valued setting (OLLAMA_URL, "
                 "OPENROUTER_BASE_URL or a trace endpoint) carries a credential: the demo build's "
                 "error output is not yet safe for one (issue #107) and could print it. Move the "
-                "credential out of the URL, then run `ayl init --demo` again.")
+                f"credential out of the URL, then run `{command('ayl init --demo')}` again.")
         demo_blocked = True
     elif legacy and any(path.name == "lancedb" for path, _ in legacy):
         note("demo library: NOT built — an index from an earlier version is there (above). Move "
              "it with the commands printed rather than build a second one beside it.")
         demo_missed = True
     elif not REPO_ROOT or not (Path(REPO_ROOT) / "scripts" / "ingest_demo_corpus.py").is_file():
+        # Bare on purpose: this is printed where there is no clone to `uv run` in.
         problem("the demo library is built by scripts/ingest_demo_corpus.py from corpus/, and "
                 "both ship with the clone, not with the installed package. Run `ayl init "
                 "--demo` from a clone (git clone https://github.com/ievgen-borysenko/"

@@ -464,3 +464,35 @@ def test_a_first_run_prints_every_problem_and_leads_with_one(monkeypatch, capsys
     assert exit_info.value.code == 5
     err = capsys.readouterr().err
     assert "no ollama" in err and "no index" in err
+
+
+def test_ask_says_a_missing_cards_table_once(a_working_environment, monkeypatch, capsys, caplog):
+    """The preflight notice tells the reader; the search's own warning about
+    the same table, which reached stderr through Python's last-resort handler,
+    is not printed a second time in the same run."""
+    from ask_your_library import library
+    from ask_your_library.config import TABLES
+    from ask_your_library.i18n import t
+    from ask_your_library.preflight import PreflightResult
+    from ask_your_library.runner import RunResult
+
+    notice = t("pf_no_cards", table=TABLES["cards"])
+    monkeypatch.setattr(cli, "check_environment", lambda: PreflightResult([], [notice], []))
+    monkeypatch.setattr(library, "_reported_missing", set())
+
+    class NoCards:
+        def table_names(self):
+            return [TABLES["transcripts"]]
+
+    def run(*a, **k):
+        library.has_table(NoCards(), TABLES["cards"])          # what a search does
+        return RunResult(question="q", answer="a")
+    monkeypatch.setattr(cli, "_run", run)
+
+    with caplog.at_level("WARNING"):
+        try:
+            cli.main(["q"])
+        except SystemExit:
+            pass
+    assert capsys.readouterr().err.count(notice) == 1
+    assert not [r for r in caplog.records if "no table" in r.getMessage()]

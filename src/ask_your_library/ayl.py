@@ -27,7 +27,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import cli, hints
+from . import cli, config, hints
 from .catalog import render_catalog, run_catalog
 from .config import DB_CHOICE, DB_PATH, EMBED_BACKEND, tables_for
 from .i18n import t
@@ -64,7 +64,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="ayl",
         description="Agentic RAG over your own book library.",
         epilog="`ayl <command> --help` prints what that command accepts. Everything "
-               f"else is configured through environment variables: {hints.CONFIG_DOCS}")
+               f"else is configured through environment variables: {hints.config_docs()}")
     parser.add_argument("--version", action="version",
                         version=f"ayl {cli.package_version()}")
     sub = parser.add_subparsers(dest="command", metavar="<command>", required=True)
@@ -107,13 +107,17 @@ def report_environment(index_only: bool = False, db_path: Path | None = None,
     `doctor` is `ayl doctor`'s reading of the same result. The configured
     index not existing yet is the state a first run leaves (`ayl init`, then
     `ayl add`), said as that state and not as a fault; the status is still 3.
+    Only for an index the configuration persists (`config.db_path_persists`):
+    a LIBRARY_DB_PATH set in the shell may be a typo, or the demo library's
+    folder, and "add your own books into it" would be the wrong advice.
     And the cards notice is about searching, which the doctor does not do."""
     problems = check_environment(index_only=index_only, db_path=db_path, backend=backend)
     kinds = list(getattr(problems, "kinds", ()))
     shown = list(problems)
-    if doctor and db_path is None and "no_db" in kinds:
+    if doctor and db_path is None and "no_db" in kinds and config.db_path_persists():
         shown = [p for p, kind in zip(problems, kinds) if kind != "no_db"]
-        cli.say(t("doctor_empty_index", path=DB_CHOICE.path, add=hints.command("ayl add")))
+        cli.say(t("doctor_empty_index", path=config.DB_CHOICE.path,
+                  add=hints.command("ayl add")))
     if shown:
         cli.say(t("pf_header"), error=True)
         for problem in shown:
@@ -314,7 +318,8 @@ def run_doctor(rest: list[str]) -> int:
         cli.say(f"index: {db} — named with --db")
     problems = report_environment(db_path=db, backend=args.backend, doctor=True)
     kinds = getattr(problems, "kinds", ())
-    if "index_in_checkout" in kinds or (db is None and "no_db" in kinds):
+    if "index_in_checkout" in kinds or (db is None and "no_db" in kinds
+                                        and config.db_path_persists()):
         # The index half would ask for the same refused folder and print the
         # same refusal a second time — or say "no index at" about an index
         # nobody has added a book to yet; there is no index for it to reconcile.

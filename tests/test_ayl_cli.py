@@ -352,6 +352,9 @@ def test_doctor_before_the_first_add_says_the_index_is_empty_not_broken(monkeypa
     the state the next step (`ayl add`) changes, said as that state on stdout
     — not under "The environment is not ready", and without the index half's
     "no index at" — while the status stays 3, which `ayl init` reads."""
+    from ask_your_library import config
+    monkeypatch.setattr(config, "DB_CHOICE",
+                        config.DbPathChoice(config.AYL_HOME / "index", 3, "the default"))
     monkeypatch.setattr(ayl, "check_environment",
                         lambda index_only=False, db_path=None, backend=None:
                         PreflightResult(["Database not found: x"], (), ["no_db"]))
@@ -363,6 +366,27 @@ def test_doctor_before_the_first_add_says_the_index_is_empty_not_broken(monkeypa
     assert "index: empty — no books added yet" in out.out and "ayl add <folder>" in out.out
     assert t("pf_header") not in out.err and "Database not found" not in out.err
     assert seen == [], "the index half has nothing to reconcile"
+
+
+def test_doctor_names_a_missing_index_set_in_the_shell_as_a_problem(monkeypatch, capsys):
+    """`LIBRARY_DB_PATH=~/AskYourLibrary/demo/index ayl doctor` before the demo
+    is built, or a typo: "add your own books into it" would be wrong advice, so
+    the problem block and the index half's line are what the reader gets."""
+    from ask_your_library import config
+    monkeypatch.setattr(config, "DB_CHOICE",
+                        config.DbPathChoice(config.AYL_HOME / "demo" / "index", 1, "set"))
+    monkeypatch.setattr(config, "EXPORTED", frozenset({"LIBRARY_DB_PATH"}))
+    monkeypatch.setattr(ayl, "check_environment",
+                        lambda index_only=False, db_path=None, backend=None:
+                        PreflightResult(["Database not found: x"], (), ["no_db"]))
+    seen = []
+    monkeypatch.setattr(add_folder, "main",
+                        lambda argv=None, prog=None: seen.append(argv) or 1)
+    assert ayl.main(["doctor"]) == 3
+    out = capsys.readouterr()
+    assert "index: empty" not in out.out
+    assert t("pf_header") in out.err and "Database not found: x" in out.err
+    assert seen == [["--doctor"]], "the index half still runs and says where it looked"
 
 
 def test_doctor_names_a_missing_db_it_was_pointed_at_as_a_problem(monkeypatch, capsys):

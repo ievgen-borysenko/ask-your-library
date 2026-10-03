@@ -198,7 +198,7 @@ def test_a_missing_cards_table_is_skipped_and_the_full_text_is_listed(index, cap
     the books are the full text's."""
     index(cards=[], transcripts=[row(IVANHOE, "pg:82")])
     library._reported_missing.clear()
-    with caplog.at_level("INFO"):
+    with caplog.at_level("WARNING"):
         assert [b.key for b in list_books()] == [IVANHOE]
     assert "no table" in caplog.text
 

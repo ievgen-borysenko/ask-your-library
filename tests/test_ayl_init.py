@@ -363,7 +363,7 @@ def test_an_exported_hosted_embedder_is_refused_in_the_local_mode(machine, capsy
     assert init() == 2
     err = capsys.readouterr().err
     assert "EMBED_BACKEND=openrouter is exported in this shell" in err
-    assert "`ayl init --mode hosted`, in which an exported switch decides" in err
+    assert f"`{command('ayl init --mode hosted')}`, in which an exported switch decides" in err
 
 
 def test_in_the_hosted_mode_an_exported_switch_decides_and_is_named(machine, monkeypatch,
@@ -465,7 +465,7 @@ def test_an_interrupted_run_says_it_resumes(machine, capsys):
         raise KeyboardInterrupt
     machine.mp.setattr(ollama, "pull", interrupted)
     assert init() == 130
-    assert "Run `ayl init` again" in capsys.readouterr().err
+    assert f"Run `{command('ayl init')}` again" in capsys.readouterr().err
 
 
 def test_a_home_inside_a_git_work_tree_is_refused_for_the_configuration(machine, capsys):
