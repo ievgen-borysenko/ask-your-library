@@ -37,7 +37,7 @@ open ones often refer to them.
   high or higher and on other alerts at error level; Dependabot alerts, secret scanning with push
   protection, and private vulnerability reporting are on.
 
-- 0.5.0 (2026-10-03) closes two milestones in one release: 0.4.0, "reliable and tested", which
+- 0.5.0 (2026-10-04) closes two milestones in one release: 0.4.0, "reliable and tested", which
   was closed without a tag, and 0.5.0, "installable in one command". Its acceptance criterion: a
   clean `uv tool install` on macOS Apple silicon with Ollama, then `ayl init`, then `ayl add` of
   the reader's own EPUB or PDF, then a first answer with verified citations. What that run found

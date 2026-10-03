@@ -187,9 +187,10 @@ Designed for **localhost, single user**. Not designed for internet exposure:
   files the reader did not write. An EPUB (ADR-029) is read in memory with the standard library,
   with its archive limits checked before it is opened, unsafe member paths, XML entity
   declarations in its package files and DRM refused. A PDF (ADR-030) is read by `pypdf` in a child
-  process the parent stops past 60 s or 1 GiB of resident memory — sampled on macOS, which lets no
-  process set itself a hard memory limit, and exact on Linux — with a 256 MiB file cap, a
-  5,000-page cap and encryption refused. A refused file costs one line naming it; the folder's
+  process the parent stops past 60 s or 1 GiB of resident memory — a sampled bound, so a file that
+  allocates as fast as the machine can is stopped a few hundred MiB past it on macOS, which lets no
+  process set itself a hard memory limit; on Linux the child also caps its own address space —
+  with a 256 MiB file cap, a 5,000-page cap and encryption refused. A refused file costs one line naming it; the folder's
   other books are indexed. The limits are in [Add your own books](add-your-own-books.md); the
   extracted text is corpus text from then on, covered by the injection layers below and nothing
   more.
