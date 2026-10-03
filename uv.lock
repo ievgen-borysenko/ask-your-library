@@ -241,7 +241,7 @@ requires-dist = [
     { name = "langgraph", specifier = ">=0.4" },
     { name = "openai", specifier = ">=3.1" },
     { name = "pyarrow", specifier = ">=25.0" },
-    { name = "pypdf", specifier = ">=6.19.0" },
+    { name = "pypdf", specifier = ">=6.19.0,<7" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "requests", specifier = ">=2.31" },
