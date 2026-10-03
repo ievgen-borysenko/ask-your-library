@@ -1479,13 +1479,23 @@ file. It starts a child Python process (`python -I -m ask_your_library.ingest.pd
 `-I` so that nothing in the working directory or the environment can stand in for a module of this
 package), which reads it and prints one JSON document — title, author, sections, notes, or a
 refusal's reason, or the class of an unexpected error — and exits with a known status; its stderr
-is discarded unread, and its stdout is checked for shape before it is believed. The parent kills
-the child at 60 s (`MAX_SECONDS_PER_FILE`) and when its resident memory, sampled four times a
-second (`/proc` on Linux, `ps` elsewhere), passes 1 GiB (`MAX_CHILD_RSS_BYTES`); on Linux the child
-also limits its own address space to twice that (`RLIMIT_AS`, set by the child at start-up), which
-macOS ignores, so the sampling is the rule everywhere. The parent never imports `pypdf`. Starting
-the child costs about 50 ms a file on an Apple M-series machine; a 400-page book reads in 0.6 s
-through it.
+is discarded unread, and its stdout is checked for shape before it is believed. The child runs in
+a session of its own, and at 60 s (`MAX_SECONDS_PER_FILE`), or on any abnormal end, the parent
+kills its whole process group: the child never forks, and if a `fork` happened anyway the
+descendant goes with it. Memory is the child's own job, because only the child can see all of
+it: a watcher thread reads the process's high-water mark of resident memory
+(`getrusage(RUSAGE_SELF).ru_maxrss`, bytes on macOS and KiB on Linux) every 20 ms and once more
+before the result is printed, and ends the process with a status of its own past 1 GiB
+(`MAX_CHILD_RSS_BYTES`). The mark only rises, so an allocation made and freed between two looks
+is still seen — the parent's earlier sampling of the current resident size, four times a second
+through `ps`, accepted a child that touched 256 MiB under a 16 MiB cap and freed it in time, and
+failed outright where `ps` could not be run. On Linux the child also limits its address space to
+twice the cap (`RLIMIT_AS`). A watcher that cannot start or cannot read the mark ends the child
+with another status, a refusal, and so does a child the parent cannot start: a file is never read
+unwatched. The parent never imports `pypdf`, runs no thread, handles no signal and starts no
+program but the child. Each check costs about half a microsecond; a 400-page book reads in 0.55 s
+with the watcher and 0.54 s without, and starting the child costs about 50 ms a file on an Apple
+M-series machine.
 
 This replaced a first version that bounded the library from inside, by counting at three names
 inside it (the stream decoder, the content-stream parser, the font builder) for the length of a
@@ -1497,7 +1507,8 @@ boundary bounds all of them at once, and the counters, the replaced names and th
 still engaged were dropped with it.
 
 Inside the child, a first line gives a precise reason fast where the library lets a caller bound
-its work: every field of its configuration is set explicitly (each inflated stream at 16 MiB, the
+its work: every field of its configuration is set explicitly, and a test fails when a version adds
+one (each inflated stream at 16 MiB, the
 page-tree walk at twice the page cap or 64 levels, the outline at 10,000 entries or 32 levels, 200
 form draws a page, the XMP size and element count, the recovery of a damaged stream, `jbig2dec`
 never called), and the module caps the file at 256 MiB, the pages at 5,000, the text at 100,000

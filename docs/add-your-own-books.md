@@ -350,10 +350,15 @@ the folder is indexed as usual:
   (PdfStreamError)`) and nothing of what it said. A damaged cross-reference table alone is not a
   refusal: the library rebuilds it.
 - **Too long or too large to read** — the bound that holds whatever is inside the file. Each PDF
-  is read by a separate process that `ayl add` starts and watches:
-  - it took longer than **60 s** to read: the reading process is stopped;
-  - it needed more than **1 GiB** of memory to read: the reading process is stopped (its memory
-    is checked four times a second; on Linux it also cannot reserve more than twice that).
+  is read by a separate Python process that `ayl add` starts:
+  - it took longer than **60 s** to read: `ayl add` stops the reading process, and anything it
+    started;
+  - it needed more than **1 GiB** of memory to read: the reading process stops itself. It watches
+    the highest its memory has ever been, fifty times a second and once more before it answers,
+    so an allocation it made and freed in between still counts; on Linux it also cannot reserve
+    more than twice that;
+  - memory cannot be measured here, so the file is not read: the process could not be started, or
+    could not watch its own memory. A file is never read unwatched.
 
   A 400-page book reads in well under a second and a few dozen MiB; a file built to make the
   library loop or allocate — a font table of millions of entries in a few KiB, a form drawn
