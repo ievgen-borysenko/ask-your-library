@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **The grouped weekly lockfile update.** `lancedb` 0.38.0 -> 0.39.0, `langchain-openai` 1.6.2 ->
+  1.6.6, `langgraph` 1.2.11 -> 1.2.12, `openai` 3.13.0 -> 3.22.1, `sqlalchemy` 2.0.52 -> 2.1.1 and
+  `greenlet` 3.5.5 -> 3.5.6, with `langchain-core` following from 1.6.2 to 1.6.6; `sqlalchemy`
+  2.1 no longer pulls `greenlet` in, which stays through the `ui` extra. No constraint in
+  `pyproject.toml` changes and the suite passes on the new versions. The security bumps went
+  first, on their own: `pyjwt` 2.13.0 -> 2.15.1 and `urllib3` 2.7.0 -> 2.8.0, both transitive,
+  closing the Dependabot alerts the lockfile had carried; `urllib3` 2.8 refuses a host with
+  whitespace, a control character or a stray `%` in it (an underscore name such as
+  `ollama_host` is still accepted), which `ayl doctor` reports as the backend being unavailable.
+- **The chat database is opened by path, not by URL string.** SQLAlchemy 2.1 percent-decodes the
+  database part of a URL it parses, so a chat dir with `%XX` in its name (`.../100%25/`) made the
+  web chat's data layer open a database next to the one the schema had been written into — and
+  the layer swallows SQL errors, so the history was silently not saved; a `?` in the name cut the
+  path short on any version. The data layer now gets a `URL` object with the path as it is; a
+  test writes a thread through the layer into a dir named `100%25?` and reads it back from the
+  file app.py created.
 - **`ayl init`, the first run** (#30): checks that Ollama answers (exit 5 with the remedy when it
   does not), takes `--mode local|hosted` (local by default), pulls the models that mode needs and
   Ollama lacks over its HTTP API with the progress streamed, writes `~/AskYourLibrary/config.env`
