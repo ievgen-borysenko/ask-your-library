@@ -807,11 +807,16 @@ def test_an_allocation_freed_between_two_samples_is_still_seen(tmp_path, monkeyp
     assert pdf.read_pdf(path).title == "T"
 
 
-def test_a_child_that_cannot_measure_its_memory_reads_nothing(tmp_path, monkeypatch):
-    broken = ("import resource\n"
-              "def fail(*args): raise OSError('no rusage')\n"
-              "resource.getrusage = fail\npdf.watch_memory(LIMIT)\n" + READ_DOC)
-    monkeypatch.setattr(pdf, "child_command", lambda path: child_code(broken))
+@pytest.mark.parametrize("breakage", [
+    # Whatever the platform's reading is, it raises.
+    "def fail(*args): raise OSError('no reading')\npdf.peak_resident_bytes = fail\n",
+    # The Linux reading, on any platform: `/proc/self/status` cannot be read.
+    "def fail(*args, **kwargs): raise OSError('no /proc')\n"
+    "pdf.sys.platform = 'linux'\npdf.Path.read_text = fail\n",
+])
+def test_a_child_that_cannot_measure_its_memory_reads_nothing(tmp_path, monkeypatch, breakage):
+    monkeypatch.setattr(pdf, "child_command",
+                        lambda path: child_code(breakage + "pdf.watch_memory(LIMIT)\n" + READ_DOC))
     assert child_refused(make_pdf(tmp_path / "b.pdf", five_pages())) == (
         "memory cannot be measured here, so the file is not read")
 
@@ -827,11 +832,17 @@ def test_a_child_that_cannot_be_started_is_a_refusal_not_an_error(tmp_path, monk
 
 
 def pid_alive(pid: int) -> bool:
+    """Alive, and not a zombie: on Linux a killed orphan can sit unreaped for
+    a moment (or longer, under a container's init), and is dead all the same."""
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
-    return True
+    stat = Path(f"/proc/{pid}/stat")
+    try:
+        return stat.read_text().rsplit(")", 1)[1].split()[0] != "Z"
+    except (OSError, IndexError):
+        return True                                  # no /proc (macOS): kill(0) decides
 
 
 def gone_soon(pid: int) -> bool:
