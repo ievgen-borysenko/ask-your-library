@@ -7,6 +7,7 @@ no real book is read, and the tests do not depend on the library's own writer.
 The text is invented, low-entropy and plainly synthetic. No network: the
 embedder is faked as in test_add_folder.py, the index is a tmp_path LanceDB.
 """
+import dataclasses
 import io
 import logging
 import os
@@ -855,6 +856,12 @@ def test_a_process_the_child_forked_goes_with_it(tmp_path, monkeypatch, child_en
     monkeypatch.setattr(pdf, "child_command", lambda path: child_code(body))
     assert child_refused(make_pdf(tmp_path / "b.pdf", five_pages())) == reason
     assert gone_soon(int(pid_file.read_text()))
+
+
+def test_every_field_of_the_library_configuration_is_set():
+    """A field a later version adds fails here, rather than being left at a
+    default nobody chose."""
+    assert set(pdf.CONFIGURATION) == {f.name for f in dataclasses.fields(pypdf.Configuration)}
 
 
 def test_the_child_cannot_be_shadowed_from_the_working_directory():

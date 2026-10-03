@@ -183,6 +183,11 @@ CONFIGURATION = dict(
     xmp_maximum_element_count=MAX_XMP_ELEMENTS,
     # The one external program the library can start (JBIG2 images): never.
     jbig2dec_binary=None,
+    # Page merging, which is never done here; the library's own value.
+    page_merge_box="cropbox",
+    # The library's older module-level constants are not consulted: what
+    # bounds a read is this dictionary and nothing a module elsewhere set.
+    disable_legacy_handling=True,
 )
 
 # The scanned-PDF rule: fewer than SCAN_MIN_CHARS characters (whitespace not
