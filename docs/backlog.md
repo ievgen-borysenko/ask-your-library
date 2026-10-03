@@ -37,6 +37,12 @@ open ones often refer to them.
   high or higher and on other alerts at error level; Dependabot alerts, secret scanning with push
   protection, and private vulnerability reporting are on.
 
+- 0.5.0 (2026-10-03) closes two milestones in one release: 0.4.0, "reliable and tested", which
+  was closed without a tag, and 0.5.0, "installable in one command". Its acceptance criterion: a
+  clean `uv tool install` on macOS Apple silicon with Ollama, then `ayl init`, then `ayl add` of
+  the reader's own EPUB or PDF, then a first answer with verified citations. What that run found
+  and this release does not fix is in #116, #117 and #118.
+
 ## Agent behaviour
 
 - **The scope gate is measured at 7/9; the two misses both name a book on the shelf** (#70,
@@ -211,8 +217,9 @@ open ones often refer to them.
 - Typed evidence/hit models instead of dicts.
 - Sentence splitter consumes closing quotes/brackets into the separator; very long
   punctuation-free sentences exceed the chunk target.
-- `ayl-add`: EPUB/PDF input, a generic card generator (paid), measuring retrieval on a non-demo
-  folder.
+- `ayl add`: a generic card generator (paid), and measuring retrieval on a non-demo folder.
+  EPUB and PDF input are done (0.5.0, ADR-029 and ADR-030); re-embedding an unchanged book on
+  every run is #116.
 - Enable SQLite foreign keys in the Chainlit schema; a retention/cleanup command for the
   scratchpad and chat history once the tool outgrows single-user local use.
 - `pyproject`: declare `langchain-core` as a direct dependency (`llm.py` imports
@@ -282,16 +289,16 @@ open ones often refer to them.
   itself.
 - Rate limits and budgets only matter if the UI ever leaves localhost; before any hosted or
   multi-user deployment: isolation, budgets, retention, deployment security, a separate SCA.
-- A shorter README and a first-answer path that does not start with a 30-minute ingest (a small
-  demo subset with ready questions).
-- One-command install: `scripts/install-mac.sh` is the first step of it, not the item. macOS
-  only — no Linux, no Windows — and no packaging: no formula, no installer, no published wheel,
-  so a reader still clones the repository and runs a script from it. Homebrew stays a
-  prerequisite they install themselves (the script prints the official command and exits 1), and
-  Ollama stays a prerequisite of the product, one the script installs and starts for the session
-  but does not replace — keeping it up across reboots is a login item the reader registers
-  themselves. The demo corpus is still a ~30-minute build behind a prompt, so the first answer is
-  not one command away either (same item as above).
+- A shorter README. The first-answer half of this item is done in 0.5.0: the demo library is
+  opt-in, and its starter subset of six books builds in a few minutes (`ayl init --demo`,
+  ADR-028), with the README's first question answered from it.
+- One-command install: **done in 0.5.0** as `uv tool install git+https://github.com/ievgen-borysenko/ask-your-library@v0.5.0`
+  and `ayl init`, accepted end to end on macOS Apple silicon (the same commands elsewhere uv and
+  Ollama run, not run end to end there). What is still not there: a published wheel
+  (the install is from the git tag, not from PyPI), a formula, and the demo library and the evals
+  outside a clone (they ship with the repository). Ollama stays a prerequisite of the product;
+  `scripts/install-mac.sh` remains the macOS path for a clone, and installs and starts it for the
+  session but does not keep it up across reboots.
 
 ## Resolved (kept because the open items refer to them)
 

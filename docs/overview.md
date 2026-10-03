@@ -10,7 +10,7 @@ in code against the exact passage it was copied from (the answer's own sentences
 question, and the demo corpus (33 public-domain books plus 2 synthetic canaries), the golden
 sets and every eval run are fingerprinted. A reference implementation with an honest eval
 harness, not a "chat with your PDFs" demo. Your own books go in with one command
-(`uv run ayl add <folder>` over a folder of `.txt`, `.md`, `.epub` and `.pdf` files, embedded
+(`ayl add <folder>` over a folder of `.txt`, `.md`, `.epub` and `.pdf` files, embedded
 locally by default); the distilled book cards the demo corpus also carries still need an LLM per book and
 are not generated for you.
 
@@ -37,7 +37,8 @@ with the mechanism explained, in
   several candidates.
 - **Reports what it cost.** Per-node LLM calls, tokens and USD after every question, with
   retrieval selectivity (hits seen vs evidence kept) and injection-redaction counts.
-- **Is measurable.** Two eval harnesses, an injection canary and a checksum-pinned corpus; every
+- **Is measurable.** Eval harnesses (retrieval, the agent loop, a free replay of the planner),
+  injection and scope canaries and a checksum-pinned corpus; every
   run records the code SHA, golden and index fingerprints and the model, so a number is always
-  attributable. Runs are single and hosted-model output varies, so a changed number is a signal
-  to look at, not proof of a changed system.
+  attributable. Most published runs are single (`--repeat N` gives a spread) and model output
+  varies, so a changed number is a signal to look at, not proof of a changed system.

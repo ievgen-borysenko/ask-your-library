@@ -165,7 +165,10 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   2026-10-02 were that: steps spent on a search the run had already made.
 - **Comparative and aggregation questions may miss a work.** The planner issues queries centred
   on one side of the comparison and the other book is never retrieved. Decomposition per implied
-  work is v0.2.
+  work is open ([backlog](backlog.md#agent-behaviour)).
+- **The citation format varies between answers** (#118). The model writes the citations in
+  `synthesize`, and nothing fixes their form; the quote check runs over the evidence, not over
+  how the answer cites it.
 - **Exhaustive content questions are best-effort.** "Which of my books mention London?" reads
   like a catalogue question but needs the books' content: it goes through the research loop, and
   top-k retrieval cannot prove that no other book matches. The catalogue path (ADR-016) covers
@@ -250,23 +253,25 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   — nothing was re-run to change a published number. Raising `SEARCH_HIT_CHARS`
   now buys nothing (there is no chunk tail behind it) and lowering it cuts a chunk the retriever
   ranked whole.
-- **Corpus changes are per book, and a re-chunk is still a full rebuild.** `ayl-add` updates one
+- **Corpus changes are per book, and a re-chunk is still a full rebuild.** `ayl add` updates one
   book at a time — resolve to a `book_id` in the `books` ledger, delete that book's rows, append
   the new ones, write the ledger row before and after — so the books a run does not name are
-  neither read nor rewritten. The demo corpus keeps its staged whole-table rebuild (and its
+  neither read nor rewritten — but every book a run does name is embedded again, changed or not,
+  so `ayl add` over the same unchanged folder costs as much as the first run (#116). The demo
+  corpus keeps its staged whole-table rebuild (and its
   `--book` upsert): it builds a pinned corpus from scratch and has no run that adds one book. What
   still costs a full rebuild: a change of embedding model, and a change of chunker — both
   invalidate every vector or every chunk id in the table. #28 is the first chunker change this
   project has shipped, so every index built before 2026-09-17 needs that rebuild
   ([upgrading](upgrading.md)). Neither happens silently: the index is
   stamped with both, a reader warns and a write refuses (see the entry below and
-  [upgrading](upgrading.md)), and `ayl-add --backup` is what survives the rebuild. The BM25 index
+  [upgrading](upgrading.md)), and `ayl backup` is what survives the rebuild. The BM25 index
   is rebuilt whole after every run, measured at 0.8 s for the demo corpus's 7,285 rows at
   `sentence-pack-1`; at `sentence-pack-2` the same text is about 11,282 rows and the 0.8 s
   has not been retaken.
 - **The delete and the append are not one transaction.** A crash between them leaves one book out
   of the index; its ledger row still says `requested`, and the recovery pass at the start of the
-  next `ayl-add` finds it, re-indexes it when the run covers it and reports it by name when it
+  next `ayl add` finds it, re-indexes it when the run covers it and reports it by name when it
   does not. The same pass also catches the subtler shape: a crash while a book was being embedded
   leaves the index holding the PREVIOUS version of it, with nothing about the rows to say so.
   Every row therefore carries the revision of the book it was built from, and recovery compares
@@ -319,7 +324,9 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   points to belongs wholly to that chapter, so a chapter that starts halfway down a page takes the
   end of the chapter before it along, and only the outline's top level (or
   the level under a single root entry) opens sections. Without an outline, `Page N` counts the
-  file's pages, not the numbers printed on them. **On macOS the memory cap is sampled, not hard**:
+  file's pages, not the numbers printed on them. **A citation names the section**, so in a PDF
+  whose top-level outline entries are long — a part of fifty pages — one citation spans all of it
+  (#117). **On macOS the memory cap is sampled, not hard**:
   each PDF is read by a separate process that is stopped past 1 GiB, but macOS lets no process set
   itself a hard memory limit, so the cap is enforced by reading that process's memory fifty times a
   second; a file that allocates as fast as the machine can is stopped a few hundred MiB past the
@@ -387,7 +394,7 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   (`Chapter 59` vs `59`) heuristically; the 12k it returns is a window inside up to 120k of the
   chapter, not its first 12k, when the request names what it is looking for.
 - **A book's identity is minted; its NAME is still a derived string.** Every book has a `book_id`
-  in the `books` ledger, assigned once and never recomputed, and `ayl-add` updates by that id. A
+  in the `books` ledger, assigned once and never recomputed, and `ayl add` updates by that id. A
   book is recognised by its key, or — when the key is what changed — by being the same file in the
   same folder: so correcting `author:` in the front matter or on the title line renames the book
   rather than indexing a second one, and a file that moved inside the folder keeps its key and so
@@ -401,15 +408,15 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   heading differs from its transcript's key by one character still lists as two books, because the
   two tables are joined by that string and no card row carries a `book_id` — which is also why
   `--prune` removes a book's full-text rows and keeps its card, saying so, rather than deleting
-  from a table `ayl-add` never writes. And a book backfilled
+  from a table `ayl add` never writes. And a book backfilled
   from an index built before the ledger records neither a digest nor a file, so the *first*
   correction after that upgrade still creates a second book (the next one does not).
 - **The catalogue is what the index holds, not what your folder holds.** It counts the distinct
   book keys of the index tables and never reads the ledger (ADR-016, ADR-024), so "N of N books"
   stays exactly as exhaustive as it was — but a book whose file you deleted is still listed until
-  you re-run `ayl-add --prune`, and a file that failed to index is not listed at all. The two
+  you re-run `ayl add --prune`, and a file that failed to index is not listed at all. The two
   questions the catalogue cannot answer — what was requested, and what failed — are what
-  `ayl-add --doctor` answers, by reconciling the ledger against the index tables and reporting
+  `ayl doctor` answers, by reconciling the ledger against the index tables and reporting
   the drift. A stale ledger is itself a failure mode now; that check is how it becomes visible.
 - **The chunker and the schema version are enforced unevenly, on purpose.** `_index_meta` carries
   `chunker` and `schema_version` beside the embedding fingerprint, written by both ingest paths.
@@ -417,7 +424,7 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   not yet migrated, and the cards table — which never gains the ledger columns — are stamped for
   what they actually are. A disagreeing chunker (or a row schema NEWER than this code's) **warns
   on read and refuses on write**: the index goes on answering from the chunks it holds, and the
-  next `ayl-add` into it stops before embedding or deleting anything. That is not the embedder's
+  next `ayl add` into it stops before embedding or deleting anything. That is not the embedder's
   rule, which is fatal on read, and the difference is deliberate — a rebuild costs about half an
   hour and a read of differently-cut text is a degradation, not a broken index, while one
   mixed-chunker write cannot be undone at all. See [upgrading](upgrading.md).
@@ -431,7 +438,7 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   table cut by another chunker whose rows happen to fit under the ceiling and above the floor; a
   cards table, whose chunker has no ceiling; row counts of books that have no prepared text
   beside them; and a stamp naming an OLDER version (`--chunker <name>`), which stays an
-  assertion trusted exactly as far as the person who made it. The way out is `ayl-add <folder> --rebuild`, which drops the
+  assertion trusted exactly as far as the person who made it. The way out is `ayl add <folder> --rebuild`, which drops the
   table and re-indexes — it keeps the ledger's minted ids, but the books the ledger holds that
   this folder does not lose their rows with the table and are reported as `requested`, to be
   re-indexed from their own folders.
@@ -445,7 +452,7 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   history and has to be the reader's decision. Until it is taken, the UI works for everything that
   does not touch the missing column.
 - **A backup is a file copy with a statement attached, and the statement has limits.**
-  `ayl-add --backup <dir>` copies the LanceDB directory and the web UI's `chat.db` with a manifest
+  `ayl backup <dir>` copies the LanceDB directory and the web UI's `chat.db` with a manifest
   (the stamps, the row counts, a sha256 per file), after taking the ingest lock and finishing any
   interrupted staged rebuild — those two are what make the copy a copy of a whole index rather
   than of one caught mid-write. The lock is an **`flock`** on a file beside the index directory, so
