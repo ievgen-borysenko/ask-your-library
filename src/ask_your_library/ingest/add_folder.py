@@ -321,9 +321,9 @@ def read_epub_book(path: Path, folder: Path) -> Book | None:
 
 def read_pdf_book(path: Path, folder: Path) -> Book | None:
     """One .pdf -> a Book, or None when it is refused: the EPUB path's rules
-    (`read_epub_book`), with `pdf` writing the reasons. An outline the file has
-    but that could not be used is one more warning: the book is indexed, with
-    its pages as the sections instead of its chapters."""
+    (`read_epub_book`), with `pdf` writing the reasons. What `pdf` notes about
+    a book it reads anyway (an outline it could not use, so the sections are
+    pages; most pages without text) is one more warning each."""
     try:
         pdf = read_pdf(path)
     except PdfRefused as reason:
@@ -335,9 +335,8 @@ def read_pdf_book(path: Path, folder: Path) -> Book | None:
         log.warning("%s: could not be read (%s), skipped", path.relative_to(folder),
                     type(error).__name__)
         return None
-    if pdf.outline_note:
-        log.warning("%s: %s; its pages are the sections instead", path.relative_to(folder),
-                    pdf.outline_note)
+    for note in pdf.notes:
+        log.warning("%s: %s", path.relative_to(folder), note)
     key = book_key(pdf.title, pdf.author) if pdf.title else key_from_filename(path)
     text = "\n\n".join(body for _, body in pdf.sections)
     return Book(note=slug(key), book=key, source=f"local:{path.name}", path=path,

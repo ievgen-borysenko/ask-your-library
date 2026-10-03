@@ -58,11 +58,13 @@ class Outline:
 
 
 def make_pdf(path, pages, *, info=None, outline=None, encrypt=False, compress=False,
-             form=None, xmp=None, outline_first=None):
+             form=None, xmp=None, outline_first=None, cmaps=None, fonts_per_page=False):
     """A minimal PDF 1.4 at `path`. `pages` holds, per page, a list of lines or
     the raw bytes of its content stream; `form` (bytes) is a form XObject every
     page can draw as `/X1 Do`; `outline_first` replaces the outline root's
-    `/First` with raw bytes."""
+    `/First` with raw bytes. `cmaps` maps more font names to `/ToUnicode`
+    CMaps (Helvetica with that map, one CMap stream each); with
+    `fonts_per_page`, every page gets font dictionaries of its own."""
     path.parent.mkdir(parents=True, exist_ok=True)
     objects: list[bytes | None] = [None, None]        # 1: catalog, 2: page tree
 
@@ -79,20 +81,31 @@ def make_pdf(path, pages, *, info=None, outline=None, encrypt=False, compress=Fa
 
     font = add(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica "
                b"/Encoding /WinAnsiEncoding >>")
+    maps = {name: stream(data) for name, data in (cmaps or {}).items()}
+
+    def font_resources() -> bytes:
+        extra = b"".join(
+            b" /%s %d 0 R" % (name.encode(), add(
+                b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode %d 0 R >>" % m))
+            for name, m in maps.items())
+        return b"<< /F1 %d 0 R%s >>" % (font, extra)
+
+    shared_fonts = font_resources()
     xobject = b""
     if form is not None:
         data = zlib.compress(form, 9) if compress else form
         flt = b" /Filter /FlateDecode" if compress else b""
         x = add(b"<< /Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources "
-                b"<< /Font << /F1 %d 0 R >> >> /Length %d%s >>\nstream\n"
-                % (font, len(data), flt) + data + b"\nendstream")
+                b"<< /Font %s >> /Length %d%s >>\nstream\n"
+                % (shared_fonts, len(data), flt) + data + b"\nendstream")
         xobject = b" /XObject << /X1 %d 0 R >>" % x
     page_ids = []
     for content in pages:
         c = stream(content if isinstance(content, bytes) else show(content))
+        fonts = font_resources() if fonts_per_page else shared_fonts
         page_ids.append(add(b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
-                            b"/Resources << /Font << /F1 %d 0 R >>%s >> /Contents %d 0 R >>"
-                            % (font, xobject, c)))
+                            b"/Resources << /Font %s%s >> /Contents %d 0 R >>"
+                            % (fonts, xobject, c)))
     objects[1] = b"<< /Type /Pages /Kids [%s] /Count %d >>" % (
         b" ".join(b"%d 0 R" % p for p in page_ids), len(page_ids))
     catalog = b"<< /Type /Catalog /Pages 2 0 R"
@@ -158,6 +171,18 @@ def make_pdf(path, pages, *, info=None, outline=None, encrypt=False, compress=Fa
 KETTLE = {"Title": "The Copper Kettle", "Author": "Ada Quill"}
 
 
+def cmap(*sections: bytes) -> bytes:
+    """A `/ToUnicode` CMap with these `beginbfchar`/`beginbfrange` sections."""
+    return (b"/CIDInit /ProcSet findresource begin 12 dict begin begincmap\n"
+            b"/CMapName /Synthetic def\n1 begincodespacerange <00> <FF> endcodespacerange\n"
+            + b"\n".join(sections)
+            + b"\nendcmap CMapName currentdict /CMap defineresource pop end end")
+
+
+# One range, 31 bytes, that the library expands to 65,536 mapping entries.
+WIDE_RANGE = b"1 beginbfrange\n<0000> <FFFF> <0041>\nendbfrange"
+
+
 def five_pages():
     return [room("amber", 1), room("birch"), room("cedar"), room("delta"), room("ember")]
 
@@ -178,7 +203,7 @@ def test_one_page_is_one_section_and_the_metadata_is_the_key(tmp_path):
     book = pdf.read_pdf(make_pdf(tmp_path / "b.pdf", [room("amber")], info=KETTLE))
     assert (book.title, book.author) == ("The Copper Kettle", "Ada Quill")
     assert book.sections == [("Page 1", "\n".join(room("amber")))]
-    assert book.outline_note == ""
+    assert book.notes == []
 
 
 def test_without_an_outline_every_page_with_text_is_a_section(tmp_path):
@@ -243,7 +268,8 @@ def test_an_outline_that_points_nowhere_falls_back_to_pages_and_says_so(tmp_path
     outline = [Outline("Lost", b"40 0 R"), Outline("Also lost", b"41 0 R")]
     book = pdf.read_pdf(make_pdf(tmp_path / "b.pdf", five_pages()[:2], outline=outline))
     assert titles(book) == ["Page 1", "Page 2"]
-    assert book.outline_note == "no entry of its outline points at a page of the document"
+    assert book.notes == ["no entry of its outline points at a page of the document; its pages "
+                          "are the sections instead"]
 
 
 def test_an_outline_that_is_not_a_tree_falls_back_to_pages(tmp_path):
@@ -252,12 +278,26 @@ def test_an_outline_that_is_not_a_tree_falls_back_to_pages(tmp_path):
     assert titles(book) == ["Page 1", "Page 2"]
 
 
+OUTLINE_TOO_BIG = ("its outline is too deep or too large to read; its pages are the sections "
+                   "instead")
+
+
 def test_an_outline_over_its_cap_falls_back_to_pages(tmp_path, monkeypatch):
     monkeypatch.setattr(pdf, "MAX_OUTLINE_ENTRIES", 2)
     outline = [Outline("One", 0), Outline("Two", 1), Outline("Three", 2)]
     book = pdf.read_pdf(make_pdf(tmp_path / "b.pdf", five_pages(), outline=outline))
     assert titles(book)[:2] == ["Page 1", "Page 2"]
-    assert book.outline_note == "its outline has more than 2 entries"
+    assert book.notes == [OUTLINE_TOO_BIG]
+
+
+def test_an_outline_too_deep_falls_back_to_pages(tmp_path):
+    entry = Outline("Leaf", 1)
+    for depth in range(40):                          # past MAX_OUTLINE_DEPTH
+        entry = Outline(f"Level {depth}", 0, [entry])
+    book = pdf.read_pdf(make_pdf(tmp_path / "b.pdf", five_pages(),
+                                 outline=[entry, Outline("Two", 2)]))
+    assert titles(book)[:2] == ["Page 1", "Page 2"]
+    assert book.notes == [OUTLINE_TOO_BIG]
 
 
 def test_whitespace_is_normalised_controls_stripped_and_hyphens_kept(tmp_path):
@@ -402,7 +442,35 @@ def test_a_page_tree_past_the_cap_is_not_walked_to_its_end(tmp_path, monkeypatch
     of a million entries is not materialised before the count is refused."""
     monkeypatch.setattr(pdf, "MAX_PAGES", 2)
     assert refused(make_pdf(tmp_path / "b.pdf", five_pages())) == (
-        "its page tree is larger than the limit of 2 pages")
+        "its page tree is too deep or too large to read")
+
+
+def test_a_page_tree_too_deep_is_refused(tmp_path):
+    """A chain of page-tree nodes, each holding the next: the library walks
+    it recursively, and stops at MAX_PAGE_TREE_DEPTH."""
+    path = make_pdf(tmp_path / "b.pdf", [room("amber")])
+    data = path.read_bytes()
+    # Object 2 is the page tree; wrap it in 80 more levels, appended as an
+    # incremental update with its own cross-reference section.
+    size = int(data.rsplit(b"/Size ", 1)[1].split()[0])
+    out = bytearray(data)
+    offsets = {}
+    kid = 2
+    for n in range(size, size + 80):
+        offsets[n] = len(out)
+        out += b"%d 0 obj\n<< /Type /Pages /Kids [%d 0 R] /Count 1 >>\nendobj\n" % (n, kid)
+        kid = n
+    offsets[1] = len(out)
+    out += b"1 0 obj\n<< /Type /Catalog /Pages %d 0 R >>\nendobj\n" % kid
+    xref = len(out)
+    out += b"xref\n0 1\n0000000000 65535 f \n1 1\n%010d 00000 n \n" % offsets[1]
+    out += b"%d 80\n" % size + b"".join(b"%010d 00000 n \n" % offsets[n]
+                                         for n in range(size, size + 80))
+    prev = int(data.rsplit(b"startxref", 1)[1].split()[0])
+    out += b"trailer\n<< /Size %d /Root 1 0 R /Prev %d >>\nstartxref\n%d\n%%%%EOF\n" % (
+        size + 80, prev, xref)
+    path.write_bytes(bytes(out))
+    assert refused(path) == "its page tree is too deep or too large to read"
 
 
 def test_a_page_over_the_text_cap_is_refused(tmp_path, monkeypatch):
@@ -490,21 +558,152 @@ def test_everything_inflated_in_one_file_is_capped(tmp_path, monkeypatch):
 
 
 def test_the_library_is_left_as_it_was_found(tmp_path, monkeypatch, caplog):
-    """The two counting points are put back after every read, refused or not,
-    and are still the names the library looks up when it inflates a stream and
-    when it parses a page: if a later version moved them, the counting would
-    stop silently, and this is where that shows."""
+    """The three counting points are put back after every read, refused or not,
+    and are still the names the library looks up when it inflates a stream,
+    when it parses a page and when it builds a font: if a later version moved
+    them, the counting would stop, and this is where that shows."""
     decode, content_stream = pypdf.filters.decode_stream_data, pypdf._page.ContentStream
+    from_font_resource = pypdf._font.Font.__dict__["from_font_resource"]
     propagate = logging.getLogger("pypdf").propagate
     seen = []
-    monkeypatch.setattr(pdf._Budget, "inflated", lambda self, n: seen.append(("inflated", n)))
-    monkeypatch.setattr(pdf._Budget, "parsed", lambda self, n: seen.append(("parsed", n)))
+    for name in ("inflated", "parsed", "font"):
+        original = getattr(pdf._Budget, name)
+        monkeypatch.setattr(pdf._Budget, name,
+                            lambda self, *args, _name=name, _original=original:
+                            seen.append(_name) or _original(self, *args))
     pdf.read_pdf(make_pdf(tmp_path / "b.pdf", five_pages(), compress=True))
-    assert {kind for kind, _ in seen} == {"inflated", "parsed"}
+    assert set(seen) == {"inflated", "parsed", "font"}
     refused(make_pdf(tmp_path / "e.pdf", five_pages(), encrypt=True))
     assert pypdf.filters.decode_stream_data is decode
     assert pypdf._page.ContentStream is content_stream
+    assert pypdf._font.Font.__dict__["from_font_resource"] is from_font_resource
     assert logging.getLogger("pypdf").propagate is propagate
+
+
+@pytest.mark.parametrize("counter", ["parsed", "font"])
+def test_a_reader_whose_counting_does_not_engage_refuses_the_file(tmp_path, monkeypatch,
+                                                                 counter):
+    """Were a later library to parse a page or build a font somewhere the
+    counting points do not reach, text would come out uncounted: the file is
+    refused instead of read without its bounds."""
+    monkeypatch.setattr(pdf._Budget, counter, lambda self, *args: None)
+    assert refused(make_pdf(tmp_path / "b.pdf", five_pages())) == (
+        "the reader's limits did not engage (library version?)")
+
+
+# --- fonts, forms and the deadline ---------------------------------------------------
+# The first review's reproducers. Before the fix, on the machine the bounds were
+# measured on: the CMap re-parse took 8.7 s, the empty-form draws 122 s and
+# 722 MiB, the many-fonts page 45 s and 602 MiB.
+
+FOUR_WIDE_FONTS = {f"F{n}": cmap(WIDE_RANGE) for n in range(2, 6)}
+
+
+def bounded(call):
+    """(seconds, peak bytes) of `call`: timed on its own, since tracing every
+    allocation slows the library's font building tenfold, then traced."""
+    started = time.monotonic()
+    call()
+    seconds = time.monotonic() - started
+    return seconds, peak_bytes(call)
+
+
+def test_a_font_used_on_every_page_is_built_once(tmp_path):
+    path = make_pdf(tmp_path / "b.pdf", [room("amber")] * 3, cmaps=FOUR_WIDE_FONTS,
+                    compress=True)
+    assert path.stat().st_size < 4_000
+    seconds, peak = bounded(lambda: pdf.read_pdf(path))
+    assert seconds < 10 and peak < 256 * 1024 * 1024, (seconds, peak)
+
+
+def test_an_empty_form_drawn_many_times_does_not_rebuild_its_fonts(tmp_path):
+    page = show(room("amber")) + b" /X1 Do" * 40
+    path = make_pdf(tmp_path / "b.pdf", [page], form=b"", cmaps=FOUR_WIDE_FONTS, compress=True)
+    seconds, peak = bounded(lambda: pdf.read_pdf(path))
+    assert seconds < 10 and peak < 256 * 1024 * 1024, (seconds, peak)
+
+
+def test_a_page_of_many_wide_fonts_is_refused_at_the_font_cap(tmp_path):
+    many = {f"G{n}": cmap(WIDE_RANGE) for n in range(60)}
+    path = make_pdf(tmp_path / "b.pdf", [room("amber")], cmaps=many, compress=True)
+    assert path.stat().st_size < 30_000
+    reason = []
+    seconds, peak = bounded(lambda: reason.append(refused(path)))
+    assert reason == ["its fonts' character maps and widths hold more than 1,000,000 "
+                      "entries"] * 2
+    assert seconds < 10 and peak < 256 * 1024 * 1024, (seconds, peak)
+
+
+def test_fonts_of_their_own_on_every_page_count_against_the_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(pdf, "MAX_FONT_ENTRIES", 300_000)
+    path = make_pdf(tmp_path / "b.pdf", [room("amber")] * 6, cmaps={"F2": cmap(WIDE_RANGE)},
+                    fonts_per_page=True, compress=True)
+    assert refused(path) == ("its fonts' character maps and widths hold more than 300,000 "
+                             "entries")
+
+
+def test_the_form_draws_on_a_page_are_capped(tmp_path, monkeypatch):
+    """Past MAX_FORM_DRAWS the library skips the rest of a page's forms."""
+    monkeypatch.setattr(pdf, "MAX_FORM_DRAWS", 3)
+    form = show(["The fern room has one lamp."])
+    book = pdf.read_pdf(make_pdf(tmp_path / "b.pdf", [show(room("amber")) + b" /X1 Do" * 10],
+                                 form=form))
+    assert book.sections[0][1].count("fern room") == 3
+
+
+def test_a_file_that_takes_too_long_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setattr(pdf, "MAX_SECONDS_PER_FILE", 0)
+    assert refused(make_pdf(tmp_path / "b.pdf", five_pages())) == (
+        "it took longer than 0 s to read")
+
+
+def test_the_deadline_is_checked_while_a_page_is_interpreted(tmp_path, monkeypatch):
+    """Not only between pages: a page of 400,000 instructions stops at the
+    deadline, not at its end."""
+    monkeypatch.setattr(pdf, "MAX_SECONDS_PER_FILE", 0.2)
+    path = make_pdf(tmp_path / "b.pdf", [room("amber"), b"q Q " * 400_000], compress=True)
+    started = time.monotonic()
+    assert refused(path) == "it took longer than 0.2 s to read"
+    assert time.monotonic() - started < 1.5
+
+
+# --- what the page text cap counts --------------------------------------------------
+# One code can map to a long string: the library caps a `/ToUnicode`
+# destination at 512 bytes, 256 characters. 250 here.
+
+LONG_CODE = cmap(b"1 beginbfchar\n<01> <" + b"0061" * 250 + b">\nendbfchar")
+
+
+def long_codes(times: int) -> bytes:
+    return b"BT /F2 11 Tf 72 400 Td " + b"(\\001) Tj " * times + b"ET"
+
+
+def test_the_page_text_cap_counts_the_characters_a_code_expands_to(tmp_path):
+    """300 shown bytes are 75,000 characters: read. 500 are 125,000: refused,
+    and refused while the page is interpreted, not after the library has
+    built the text — the cap is charged 250 characters a shown byte."""
+    fine = pdf.read_pdf(make_pdf(tmp_path / "f.pdf", [long_codes(300)],
+                                 cmaps={"F2": LONG_CODE}))
+    assert len(fine.sections[0][1]) == 300 * 250
+    path = make_pdf(tmp_path / "b.pdf", [long_codes(100_000)], cmaps={"F2": LONG_CODE},
+                    compress=True)
+    started = time.monotonic()
+    assert refused(path) == "a page in it holds more than 100,000 characters of text"
+    assert time.monotonic() - started < 2
+
+
+# --- the scan rule's other edge --------------------------------------------------------
+
+def test_mostly_textless_pages_are_indexed_and_named(tmp_path):
+    """Text-layer front matter over a scanned body passes the first-ten-pages
+    rule; what it has is indexed, and the caller is told how little that is."""
+    pages = [room("amber")] * 10 + [b""] * 15
+    book = pdf.read_pdf(make_pdf(tmp_path / "b.pdf", pages))
+    assert len(book.sections) == 10
+    assert book.notes == ["only 10 of its 25 pages have text (the others may be scanned "
+                          "images, which are not read)"]
+    half = pdf.read_pdf(make_pdf(tmp_path / "h.pdf", [room("amber")] * 10 + [b""] * 10))
+    assert half.notes == []
 
 
 def test_the_library_logs_nothing_while_it_reads(tmp_path, caplog):

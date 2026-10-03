@@ -56,10 +56,15 @@ and what is never done:
   forms drawn inside forms and inherited attributes are detected and stop;
   every decoded stream is capped (`MAX_STREAM_BYTES`, set through `pypdf`'s
   configuration for every filter it inflates: Flate, LZW, run-length, JBIG2);
-  the page-tree walk stops past `2 * MAX_PAGES` entries and the outline walk
-  past `MAX_OUTLINE_ENTRIES`, so neither is materialised past the cap; XMP
+  the page-tree walk stops past `2 * MAX_PAGES` entries or `MAX_PAGE_TREE_DEPTH`
+  levels and the outline walk past `MAX_OUTLINE_ENTRIES` entries or
+  `MAX_OUTLINE_DEPTH` levels, so neither is materialised past the cap; a page
+  draws at most `MAX_FORM_DRAWS` forms (the library skips the rest); XMP
   metadata is parsed with entity declarations forbidden and an element cap; a
-  damaged cross-reference table is rebuilt by scanning the file once;
+  damaged cross-reference table is rebuilt by scanning the file once. Every
+  one of these is set explicitly in `_bounded`, not left at the library's
+  default. Its fixed limits (a `/ToUnicode` map of at most 100,000 entries,
+  a width table of at most 65,536 CIDs) apply as well;
 - **this module bounds**, before the work is done rather than after: the file
   size (`MAX_FILE_BYTES`, checked on the open file before the library reads
   it); every byte `pypdf` inflates in this file, all streams together
@@ -71,31 +76,49 @@ and what is never done:
   (`MAX_CONTENT_BYTES`), counted when the content is handed to the parser and
   before it is parsed, which is what bounds time: parsing and interpreting the
   instructions is the slow part; the bytes a page shows as text, counted per
-  instruction while the page is interpreted, and the characters it yields
+  instruction while the page is interpreted and multiplied by the longest
+  string one code of the page's fonts maps to, and the characters it yields
   (`MAX_PAGE_CHARS`); the characters of the whole book (`MAX_TOTAL_CHARS`); the
-  number of pages (`MAX_PAGES`);
-- **time**: `pypdf` has no timeout, and none is added (no thread, no signal).
-  The bound is the content caps above. Measured on an Apple M-series
-  machine, the slowest instructions to parse and interpret (runs of numbers,
-  of path operators) go at about 2 MB a second: the worst page the caps admit
-  takes under 2 s, the worst file about a minute (52 s for 128 MiB of `q Q`),
-  and a 400-page book of plain text under 3 s.
+  number of pages (`MAX_PAGES`); the fonts: the library builds a font's
+  character map and widths again for every page and every form draw that uses
+  it, so each font dictionary is built once per file and kept, and the entries
+  of every one built are counted (`MAX_FONT_ENTRIES`), which bounds the memory
+  the kept fonts hold and the time spent building them;
+- **time**: `pypdf` has no timeout. None is added by a thread or a signal; a
+  deadline per file (`MAX_SECONDS_PER_FILE`) is checked at every counting point
+  above and at every drawing instruction, so whatever no cap names (the next
+  table a hostile font could make large) still ends in a refusal. The caps are
+  set so that it should not be what stops a file: measured on an Apple
+  M-series machine, the slowest instructions to parse and interpret (runs of
+  numbers, of path operators) go at about 2 MB a second, the worst page the
+  content caps admit takes under 2 s, the worst file about a minute (52 s for
+  128 MiB of `q Q`), and a 400-page book of plain text under 3 s.
 
 Every refusal is a `PdfRefused` carrying a reason written here: it names no
 part of the document and quotes no text of it, so the caller's one line about
 the file says which file and why, and nothing of what is in it. `pypdf`'s own
 log lines and warnings are silenced while it reads, for the same reason: they
 can quote bytes of the document (a font name, an object's content).
+
+**One read at a time.** The counting points replace three names inside
+`pypdf` (`filters.decode_stream_data`, `_page.ContentStream`,
+`Font.from_font_resource`), the `pypdf` logger is detached and warnings are
+filtered, all of it process-wide, for the length of one `read_pdf` and put back
+afterwards. The reader assumes it is the only code using `pypdf` while it runs,
+which is true of `ayl add`, a single-threaded command; it is not thread-safe,
+and two reads in parallel threads would count each other's work.
 """
 import logging
 import os
 import re
+import time
 import warnings
 from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pypdf
+import pypdf._font
 import pypdf._page
 import pypdf.filters
 from pypdf import PdfReader, apply_configuration
@@ -117,6 +140,26 @@ MAX_CONTENT_BYTES = 128 * 1024 * 1024        # ... and for the whole file
 MAX_PAGE_CHARS = 100_000
 MAX_TOTAL_CHARS = 20_000_000
 MAX_OUTLINE_ENTRIES = 10_000
+# A real outline is a few levels deep and a real page tree four or five; the
+# library walks both recursively.
+MAX_OUTLINE_DEPTH = 32
+MAX_PAGE_TREE_DEPTH = 64
+# Forms one page may draw: a running head, a watermark, a figure built of
+# parts is a handful to a few dozen; past this the library skips the rest.
+MAX_FORM_DRAWS = 200
+# Entries in the character maps and width tables of every font built for one
+# file. A book's fonts hold a few hundred entries each, a CJK font tens of
+# thousands; a one-line `/ToUnicode` range can make 65,536, and each costs
+# memory (about 160 bytes) and time to build.
+MAX_FONT_ENTRIES = 1_000_000
+MAX_SECONDS_PER_FILE = 60
+# Recovering a damaged compressed stream is a byte-at-a-time loop in the
+# library; a real damaged stream is a page's worth.
+MAX_RECOVERY_BYTES = 1024 * 1024
+MAX_XMP_BYTES = 1024 * 1024
+MAX_XMP_ELEMENTS = 10_000
+# Objects the library may visit to find a document catalogue that is missing.
+MAX_ROOT_RECOVERY = 10_000
 
 # The scanned-PDF rule: fewer than SCAN_MIN_CHARS characters (whitespace not
 # counted) on the first SCAN_PAGES pages, or on all of them when there are fewer,
@@ -125,6 +168,10 @@ MAX_OUTLINE_ENTRIES = 10_000
 # whose only text is a page number or a scanner's stamp stays under 200.
 SCAN_PAGES = 10
 SCAN_MIN_CHARS = 200
+# Past the first ten pages a book is read whatever it holds; when fewer than
+# this share of all its pages have text, the caller is told the rest may be
+# scanned, since text-layer front matter over a scanned body passes the rule.
+SPARSE_TEXT_SHARE = 0.5
 
 PAGE_SECTION = "Page {n}"
 
@@ -142,9 +189,9 @@ class PdfBook:
     title: str                          # "" when the metadata names none
     author: str                         # "" when the metadata names none
     sections: list[tuple[str, str]]
-    # Why the outline was not used, when the file has one that was not; the
-    # caller reports it, since the sections are then pages, not chapters.
-    outline_note: str = ""
+    # What the caller should say about a book it indexes anyway: an outline
+    # that was not used (the sections are then pages), pages without text.
+    notes: list[str] = field(default_factory=list)
 
 
 def mib(n: int) -> str:
@@ -153,6 +200,7 @@ def mib(n: int) -> str:
 
 ENCRYPTED = ("encrypted (password-protected or restricted; no password was tried and "
              "nothing was decrypted)")
+NOT_ENGAGED = "the reader's limits did not engage (library version?)"
 
 
 # --- the budget -----------------------------------------------------------------
@@ -171,6 +219,11 @@ class _Budget:
         self.content = 0
         self.page_content = 0
         self.page_shown = 0
+        self.font_entries = 0
+        self.font_calls = 0
+        # The longest string one code maps to, over the fonts this page uses.
+        self.page_expansion = 1
+        self.deadline = time.monotonic() + MAX_SECONDS_PER_FILE
         self.over: str | None = None
 
     def refuse(self, reason: str) -> None:
@@ -179,12 +232,25 @@ class _Budget:
         raise PdfRefused(self.over)
 
     def check(self) -> None:
+        if self.over is None and time.monotonic() > self.deadline:
+            self.over = f"it took longer than {MAX_SECONDS_PER_FILE} s to read"
         if self.over is not None:
             raise PdfRefused(self.over)
 
     def new_page(self) -> None:
         self.page_content = 0
         self.page_shown = 0
+        self.page_expansion = 1
+
+    def font(self, entries: int, expansion: int) -> None:
+        """A font the page (or a form it draws) uses; `entries` is 0 when it
+        was built earlier in this file and is handed back, not rebuilt."""
+        self.font_calls += 1
+        self.page_expansion = max(self.page_expansion, expansion)
+        self.font_entries += entries
+        if self.font_entries > MAX_FONT_ENTRIES:
+            self.refuse(f"its fonts' character maps and widths hold more than "
+                        f"{MAX_FONT_ENTRIES:,} entries")
 
     def inflated(self, n: int) -> None:
         self.decoded += n
@@ -211,10 +277,14 @@ class _Budget:
             self.refuse(page_chars_reason())
 
     def visit(self, operator, operands, *_matrices) -> None:
-        """`pypdf`'s per-instruction callback (a public extraction hook)."""
+        """`pypdf`'s per-instruction callback (a public extraction hook). A
+        shown byte is charged as the longest string a code of the page's fonts
+        maps to: a `/ToUnicode` map can turn one byte into 256 characters, and
+        what the cap bounds is the text the library builds, not the bytes."""
         self.check()
         if operator in SHOW_TEXT:
-            self.shown(sum(shown_length(operand) for operand in operands))
+            self.shown(self.page_expansion
+                       * sum(shown_length(operand) for operand in operands))
 
 
 def shown_length(operand) -> int:
@@ -229,18 +299,59 @@ def page_chars_reason() -> str:
     return f"a page in it holds more than {MAX_PAGE_CHARS:,} characters of text"
 
 
+def font_size(font) -> tuple[int, int]:
+    """(entries, expansion) of a font the library built: the entries of its
+    character map, encoding and width table, and the longest string one code
+    maps to."""
+    character_map = font.character_map or {}
+    encoding = font.encoding if isinstance(font.encoding, dict) else {}
+    entries = len(character_map) + len(encoding) + len(font.character_widths or {})
+    expansion = max((len(value) for value in character_map.values()
+                     if isinstance(value, str)), default=1)
+    return entries, max(expansion, 1)
+
+
 @contextmanager
 def _bounded(budget: _Budget):
     """`pypdf` with this module's caps, for the length of one read.
 
-    Two of the caps have no setting in the library, so they are counted at the
-    two places every stream passes through: `pypdf.filters.decode_stream_data`,
-    the one function that inflates a stream, and the `ContentStream` that
-    `pypdf._page` builds for every page and every form before it parses one.
-    Both are put back when the read ends, however it ends, and a test pins
-    that each is still where the library looks for it."""
+    Three of the caps have no setting in the library, so they are counted at
+    the three places the work passes through: `pypdf.filters.decode_stream_data`,
+    the one function that inflates a stream; the `ContentStream` that
+    `pypdf._page` builds for every page and every form before it parses one;
+    and `Font.from_font_resource`, which builds a font's maps for every page
+    and every form draw that uses it. All three are put back when the read
+    ends, however it ends, and a test pins that each is still where the
+    library looks for it; `page_text` refuses a page whose text came out with
+    nothing counted, should a later version look elsewhere."""
     decode = pypdf.filters.decode_stream_data
     content_stream = pypdf._page.ContentStream
+    font_class = pypdf._font.Font
+    from_font_resource = font_class.__dict__["from_font_resource"]   # the classmethod
+    built: dict[int, tuple] = {}
+
+    def counted_font(cls, font_dict):
+        """Each font dictionary is built once per file: the library would build
+        it again for every page and every form draw, and an empty form drawn
+        200 times would rebuild every font it names 200 times. The entry keeps
+        the dictionary alive, so its `id` cannot be reused for another."""
+        budget.check()
+        known = built.get(id(font_dict))
+        if known is None or known[0] is not font_dict:
+            try:
+                font = from_font_resource.__func__(cls, font_dict)
+            except Exception as error:
+                built[id(font_dict)] = (font_dict, error, 1)
+                raise
+            entries, expansion = font_size(font)
+            built[id(font_dict)] = (font_dict, font, expansion)
+            budget.font(entries, expansion)
+            return font
+        _, font, expansion = known
+        if isinstance(font, Exception):
+            raise font                               # failed once: not retried
+        budget.font(0, expansion)
+        return font
 
     def counted_decode(stream):
         budget.check()                               # refuse before inflating more
@@ -262,16 +373,33 @@ def _bounded(budget: _Budget):
             # parsing is lazy, and `operations` is what costs the time.
             budget.parsed(len(self.get_data()))
 
+    # Every limit the library's configuration has, set here rather than left
+    # at its default, so that what bounds a read is written in this file.
     configuration = dict(
+        # No stream is longer than the file that holds it.
         maximum_declared_stream_length=MAX_FILE_BYTES,
+        # One inflated stream, whatever filter inflates it.
         zlib_maximum_output_length=MAX_STREAM_BYTES,
         lzw_maximum_output_length=MAX_STREAM_BYTES,
         run_length_maximum_output_length=MAX_STREAM_BYTES,
         jbig2_maximum_output_length=MAX_STREAM_BYTES,
+        # Images are never decoded here; capped all the same.
         image_maximum_buffer_size=MAX_STREAM_BYTES,
+        # The predictor geometry of a Flate stream (images, cross-reference
+        # streams): the library's own values, written out.
+        flate_maximum_columns=250_000,
+        flate_maximum_row_length=4_000_000,
+        zlib_maximum_recovery_input_length=MAX_RECOVERY_BYTES,
+        # A page whose content is split over several streams, joined.
         array_based_stream_maximum_output_length=MAX_PAGE_CONTENT_BYTES,
         page_tree_maximum_entries=2 * MAX_PAGES,
+        page_tree_maximum_depth=MAX_PAGE_TREE_DEPTH,
         outline_maximum_entries=MAX_OUTLINE_ENTRIES,
+        outline_maximum_depth=MAX_OUTLINE_DEPTH,
+        xform_maximum_invocations_per_extraction=MAX_FORM_DRAWS,
+        xmp_maximum_input_length=MAX_XMP_BYTES,
+        xmp_maximum_element_count=MAX_XMP_ELEMENTS,
+        # The one external program the library can start (JBIG2 images): never.
         jbig2dec_binary=None,
     )
     quiet = logging.getLogger("pypdf")
@@ -288,11 +416,13 @@ def _bounded(budget: _Budget):
         quiet.propagate = False
         pypdf.filters.decode_stream_data = counted_decode
         pypdf._page.ContentStream = CountedContentStream
+        font_class.from_font_resource = classmethod(counted_font)
         try:
             yield
         finally:
             pypdf.filters.decode_stream_data = decode
             pypdf._page.ContentStream = content_stream
+            font_class.from_font_resource = from_font_resource
             quiet.propagate = propagate
             quiet.removeHandler(silent)
 
@@ -338,6 +468,11 @@ def page_text(page, budget: _Budget) -> str:
     budget.new_page()
     raw = page.extract_text(visitor_operand_before=budget.visit)
     budget.check()                                   # a refusal pypdf swallowed
+    if raw.strip() and not (budget.content and budget.font_calls):
+        # Text came out of a page, so the library parsed content and built a
+        # font, and the counting points saw neither: it looks for them
+        # somewhere else now, and nothing it does is bounded.
+        budget.refuse(NOT_ENGAGED)
     if len(raw) > MAX_PAGE_CHARS:
         budget.refuse(page_chars_reason())
     return clean_text(raw)
@@ -348,8 +483,8 @@ def read_pages(reader: PdfReader, budget: _Budget) -> list[str]:
         count = len(reader.pages)
     except LimitReachedError as error:
         budget.check()
-        raise PdfRefused(f"its page tree is larger than the limit of {MAX_PAGES:,} "
-                         "pages") from error
+        # Too many entries or too many levels: the library does not say which.
+        raise PdfRefused("its page tree is too deep or too large to read") from error
     if count > MAX_PAGES:
         raise PdfRefused(f"it has {count:,} pages, and the limit is {MAX_PAGES:,}")
     if count == 0:
@@ -426,7 +561,7 @@ def outline_starts(reader: PdfReader, budget: _Budget, count: int
         raise
     except LimitReachedError:
         budget.check()
-        return [], f"its outline has more than {MAX_OUTLINE_ENTRIES:,} entries"
+        return [], "its outline is too deep or too large to read"
     except Exception as error:
         budget.check()
         return [], f"its outline could not be read ({type(error).__name__})"
@@ -482,12 +617,14 @@ def read_pdf(path: Path) -> PdfBook:
             if size > MAX_FILE_BYTES:
                 raise PdfRefused(f"the file is larger than {mib(MAX_FILE_BYTES)}")
             with _bounded(budget):
-                reader = _Reader(fp, strict=False)
+                reader = _Reader(fp, strict=False,
+                                 root_object_recovery_limit=MAX_ROOT_RECOVERY)
                 if reader.is_encrypted:
                     raise PdfRefused(ENCRYPTED)
                 texts = read_pages(reader, budget)
                 title, author = metadata(reader, budget)
                 starts, note = outline_starts(reader, budget, len(texts))
+                budget.check()
     except PdfRefused:
         raise
     except OSError as error:
@@ -499,4 +636,9 @@ def read_pdf(path: Path) -> PdfBook:
     sections = build_sections(texts, starts)
     if not sections:                                 # the scan rule makes this rare
         raise PdfRefused("no text in it")
-    return PdfBook(title=title, author=author, sections=sections, outline_note=note)
+    notes = [f"{note}; its pages are the sections instead"] if note else []
+    with_text = sum(1 for text in texts if text)
+    if with_text < SPARSE_TEXT_SHARE * len(texts):
+        notes.append(f"only {with_text} of its {len(texts)} pages have text (the others "
+                     "may be scanned images, which are not read)")
+    return PdfBook(title=title, author=author, sections=sections, notes=notes)
