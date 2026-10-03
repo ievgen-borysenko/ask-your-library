@@ -765,11 +765,96 @@ def test_a_child_that_dies_says_nothing_of_its_traceback(tmp_path, monkeypatch, 
     (3, b'{"refused": "it has no pages"}', "it has no pages"),
     (4, b'{"error": "KeyError"}', "could not be read (KeyError)"),
     (-9, b"", "could not be read (the reader stopped with status -9)"),
+    (5, b"", "it needed more than 1 GiB of memory to read"),
+    (6, b"", "memory cannot be measured here, so the file is not read"),
 ])
 def test_the_child_s_output_is_checked_before_it_is_believed(status, stdout, reason):
     with pytest.raises(pdf.PdfRefused) as refusal:
         pdf.parse_child_output(status, stdout)
     assert str(refusal.value) == reason
+
+
+def child_code(body: str) -> list[str]:
+    """A stand-in child: this package's watcher and `emit`, around `body`."""
+    return [sys.executable, "-I", "-c",
+            "import sys\nfrom ask_your_library.ingest import pdf\n"
+            f"LIMIT = {pdf.MAX_CHILD_RSS_BYTES}\n" + body]
+
+
+READ_DOC = ("raise SystemExit(pdf.emit(0, {'title': 'T', 'author': '', 'notes': [], "
+            "'sections': [['Page 1', 'x']]}, LIMIT))")
+
+
+def test_an_allocation_freed_between_two_samples_is_still_seen(tmp_path, monkeypatch):
+    """The gate's case: 256 MiB allocated, touched and freed at once, under a
+    cap of 64 MiB (the child's interpreter and this package alone are about
+    21 MiB). Sampling resident memory missed it and accepted the result; the
+    high-water mark keeps it, and the child is ended."""
+    monkeypatch.setattr(pdf, "MAX_CHILD_RSS_BYTES", 64 * 1024 * 1024)
+    allocate = ("pdf.watch_memory(LIMIT)\nb = bytearray(256 * 1024 * 1024)\n"
+                "b[::4096] = b'x' * len(b[::4096])\ndel b\n")
+    monkeypatch.setattr(pdf, "child_command", lambda path: child_code(allocate + READ_DOC))
+    path = make_pdf(tmp_path / "b.pdf", five_pages())
+    assert child_refused(path) == "it needed more than 64 MiB of memory to read"
+    # The same child without the allocation stays under the cap and is read.
+    monkeypatch.setattr(pdf, "child_command",
+                        lambda path: child_code("pdf.watch_memory(LIMIT)\n" + READ_DOC))
+    assert pdf.read_pdf(path).title == "T"
+
+
+def test_a_child_that_cannot_measure_its_memory_reads_nothing(tmp_path, monkeypatch):
+    broken = ("import resource\n"
+              "def fail(*args): raise OSError('no rusage')\n"
+              "resource.getrusage = fail\npdf.watch_memory(LIMIT)\n" + READ_DOC)
+    monkeypatch.setattr(pdf, "child_command", lambda path: child_code(broken))
+    assert child_refused(make_pdf(tmp_path / "b.pdf", five_pages())) == (
+        "memory cannot be measured here, so the file is not read")
+
+
+def test_a_child_that_cannot_be_started_is_a_refusal_not_an_error(tmp_path, monkeypatch):
+    """A sandbox that denies starting a process: one fixed line, not a
+    traceback that stops the folder."""
+    def denied(*args, **kwargs):
+        raise PermissionError(13, "Operation not permitted")
+    monkeypatch.setattr(pdf.subprocess, "Popen", denied)
+    assert child_refused(make_pdf(tmp_path / "b.pdf", five_pages())) == (
+        "memory cannot be measured here, so the file is not read")
+
+
+def pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def gone_soon(pid: int) -> bool:
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        if not pid_alive(pid):
+            return True
+        time.sleep(0.05)
+    return False
+
+
+@pytest.mark.parametrize("child_end, reason", [
+    ("time.sleep(30)", "it took longer than 1 s to read"),
+    ("raise SystemExit(1)", "could not be read (the reader stopped with status 1)"),
+])
+def test_a_process_the_child_forked_goes_with_it(tmp_path, monkeypatch, child_end, reason):
+    """The child never forks; one that did anyway, and left a grandchild
+    sleeping, has its whole process group killed — on the deadline, and on an
+    abnormal end. (In the second case the grandchild lets go of the output
+    pipe, so the child's exit is seen at once rather than at the deadline.)"""
+    monkeypatch.setattr(pdf, "MAX_SECONDS_PER_FILE", 1)
+    pid_file = tmp_path / "grandchild.pid"
+    body = ("import os, time\npid = os.fork()\nif pid == 0:\n    os.close(1)\n"
+            "    time.sleep(30)\n    os._exit(0)\n"
+            f"open({str(pid_file)!r}, 'w').write(str(pid))\n{child_end}\n")
+    monkeypatch.setattr(pdf, "child_command", lambda path: child_code(body))
+    assert child_refused(make_pdf(tmp_path / "b.pdf", five_pages())) == reason
+    assert gone_soon(int(pid_file.read_text()))
 
 
 def test_the_child_cannot_be_shadowed_from_the_working_directory():

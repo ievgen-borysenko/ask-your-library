@@ -43,15 +43,22 @@ the file-name rule of a text book.
 
 A PDF is untrusted input, and **the bound is a process boundary**. `read_pdf`
 does not read the file: it starts a child Python process
-(`python -I -m ask_your_library.ingest.pdf --child <path>`) that does, and
-bounds that process from outside. The child's wall-clock time is capped
-(`MAX_SECONDS_PER_FILE`): past it the child is killed. Its resident memory is
-sampled every `RSS_SAMPLE_SECONDS` (`/proc` on Linux, `ps` elsewhere) and the
-child is killed past `MAX_CHILD_RSS_BYTES`; on Linux the child also caps its
-own address space at twice that (`RLIMIT_AS`, set by the child at start-up),
-which macOS ignores, so the parent's sampling is the rule everywhere. Whatever
-the library does inside, however a hostile file makes it allocate or loop, it
-ends in one of those two refusals. The parent never imports `pypdf`.
+(`python -I -m ask_your_library.ingest.pdf --child <path>`) that does, in a
+session (and process group) of its own, and bounds it. The parent caps the
+child's wall-clock time (`MAX_SECONDS_PER_FILE`): past it the whole process
+group is killed, and so it is on any abnormal end. The child never forks; if a
+`fork` happened anyway, the group kill takes the descendant too. The child caps
+its own memory: at start-up it starts one watcher thread that reads the
+process's high-water mark of resident memory (`getrusage(RUSAGE_SELF).ru_maxrss`)
+every `MEMORY_SAMPLE_SECONDS` and ends the process with `EXIT_MEMORY` past
+`MAX_CHILD_RSS_BYTES`; the mark only rises, so an allocation freed between two
+samples is still seen, and the same check runs once more before the child
+prints its result. On Linux the child also caps its address space at twice
+that (`RLIMIT_AS`). A watcher that cannot start or cannot measure ends the
+child with `EXIT_UNMEASURED`, a refusal: a file is never read unmeasured.
+Whatever the library does inside, however a hostile file makes it allocate or
+loop, it ends in one of those refusals. No external program is started; the
+parent never imports `pypdf`, runs no thread and handles no signal.
 
 Inside the child, the first line is a set of caps that give a precise reason
 fast, on what the library lets a caller bound:
@@ -88,7 +95,8 @@ see, and the process boundary is the bound that does not depend on finding
 them all.
 
 The child prints one JSON document on stdout and exits with a known status
-(`EXIT_READ`, `EXIT_REFUSED`, `EXIT_ERROR`); its stderr is discarded unread.
+(`EXIT_READ`, `EXIT_REFUSED`, `EXIT_ERROR`; `EXIT_MEMORY` and
+`EXIT_UNMEASURED` print nothing); its stderr is discarded unread.
 Every refusal is a `PdfRefused` carrying a reason written here: it names no
 part of the document and quotes no text of it, so the caller's one line about
 the file says which file and why, and nothing of what is in it. Inside the
@@ -103,6 +111,7 @@ import json
 import logging
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -141,7 +150,10 @@ MAX_ROOT_RECOVERY = 10_000
 # The process boundary. A 400-page book reads in about 0.6 s and 40 MiB.
 MAX_SECONDS_PER_FILE = 60
 MAX_CHILD_RSS_BYTES = 1024 * 1024 * 1024
-RSS_SAMPLE_SECONDS = 0.25
+# How often the child's watcher reads its high-water mark; the mark itself
+# catches what happens between two reads, so this sets only how far past the
+# cap a fast allocation can run before the child is ended.
+MEMORY_SAMPLE_SECONDS = 0.02
 
 # Every field of the library's `Configuration`, set here rather than left at its
 # default, so that what bounds a read is written in this file.
@@ -193,7 +205,7 @@ SHOW_TEXT = frozenset({b"Tj", b"TJ", b"'", b'"'})
 
 # The child's exit statuses. Anything else (a crash, a signal) is a refusal
 # that names the status and nothing else.
-EXIT_READ, EXIT_REFUSED, EXIT_ERROR = 0, 3, 4
+EXIT_READ, EXIT_REFUSED, EXIT_ERROR, EXIT_MEMORY, EXIT_UNMEASURED = 0, 3, 4, 5, 6
 
 
 class PdfRefused(Exception):
@@ -228,6 +240,9 @@ def too_big_reason() -> str:
     return f"it needed more than {mib(MAX_CHILD_RSS_BYTES)} of memory to read"
 
 
+UNMEASURED = "memory cannot be measured here, so the file is not read"
+
+
 def page_chars_reason() -> str:
     return f"a page in it holds more than {MAX_PAGE_CHARS:,} characters of text"
 
@@ -242,26 +257,6 @@ def child_command(path: Path) -> list[str]:
             "--max-bytes", str(MAX_CHILD_RSS_BYTES)]
 
 
-def child_rss(pid: int) -> int | None:
-    """The child's resident memory in bytes, or None once it has exited."""
-    statm = Path(f"/proc/{pid}/statm")
-    if statm.exists():
-        try:
-            return int(statm.read_text().split()[1]) * os.sysconf("SC_PAGE_SIZE")
-        except (OSError, ValueError, IndexError):
-            return None
-    try:
-        out = subprocess.run(["ps", "-o", "rss=", "-p", str(pid)], capture_output=True,
-                             text=True, timeout=5, check=False).stdout.strip()
-    except FileNotFoundError as error:
-        # Without a way to measure the child, its memory would be unbounded:
-        # refused, not read on trust.
-        raise PdfRefused("its memory cannot be measured here (no `ps`)") from error
-    except subprocess.TimeoutExpired:
-        return None
-    return int(out) * 1024 if out.isdigit() else None
-
-
 def read_pdf(path: Path) -> PdfBook:
     """The whole read, in a child process bounded from here. Raises
     `PdfRefused` for anything that is not indexed."""
@@ -270,33 +265,49 @@ def read_pdf(path: Path) -> PdfBook:
             raise PdfRefused(f"the file is larger than {mib(MAX_FILE_BYTES)}")
     except OSError as error:
         raise PdfRefused("the file cannot be read") from error
-    proc = subprocess.Popen(child_command(path), stdin=subprocess.DEVNULL,
-                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    deadline = time.monotonic() + MAX_SECONDS_PER_FILE
     try:
-        while True:
-            try:
-                # Reads the child's stdout while it runs, so a large book
-                # cannot fill the pipe and stall it; retried without losing
-                # output when it times out.
-                out, _ = proc.communicate(timeout=RSS_SAMPLE_SECONDS)
-                break
-            except subprocess.TimeoutExpired:
-                pass
-            if time.monotonic() > deadline:
-                raise PdfRefused(too_slow_reason())
-            rss = child_rss(proc.pid)
-            if rss is not None and rss > MAX_CHILD_RSS_BYTES:
-                raise PdfRefused(too_big_reason())
+        # A session of its own: the child leads a new process group, and the
+        # group is what is killed, descendants included.
+        proc = subprocess.Popen(child_command(path), stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                start_new_session=True)
+    except OSError as error:
+        raise PdfRefused(UNMEASURED) from error
+    normal = False
+    try:
+        try:
+            # Reads the child's stdout while it runs, so a large book cannot
+            # fill the pipe and stall it.
+            out, _ = proc.communicate(timeout=MAX_SECONDS_PER_FILE)
+        except subprocess.TimeoutExpired as error:
+            raise PdfRefused(too_slow_reason()) from error
+        normal = proc.returncode in (EXIT_READ, EXIT_REFUSED, EXIT_ERROR)
     finally:
-        if proc.poll() is None:
-            proc.kill()
-            proc.communicate()
+        if not normal:
+            kill_group(proc)
     return parse_child_output(proc.returncode, out)
+
+
+def kill_group(proc: subprocess.Popen) -> None:
+    """Kill the child's process group — the child and anything it started —
+    and reap the child. A group with no member left is not an error."""
+    for kill in (lambda: os.killpg(proc.pid, signal.SIGKILL), proc.kill):
+        try:
+            kill()
+        except OSError:                              # already gone
+            pass
+    try:
+        proc.communicate(timeout=5)                  # reap it, close the pipe
+    except (ValueError, OSError, subprocess.TimeoutExpired):
+        pass                                         # already reaped
 
 
 def parse_child_output(status: int, out: bytes) -> PdfBook:
     """The child's exit status and stdout -> the book, or the refusal."""
+    if status == EXIT_MEMORY:
+        raise PdfRefused(too_big_reason())
+    if status == EXIT_UNMEASURED:
+        raise PdfRefused(UNMEASURED)
     if status not in (EXIT_READ, EXIT_REFUSED, EXIT_ERROR):
         raise PdfRefused(f"could not be read (the reader stopped with status {status})")
     unreadable = PdfRefused("could not be read (the reader's output was not readable)")
@@ -323,9 +334,55 @@ def parse_child_output(status: int, out: bytes) -> PdfBook:
 
 # === the child: the read itself =====================================================
 
+def memory_over(limit: int) -> bool:
+    """Whether this process's resident memory has ever passed `limit`: the
+    high-water mark, in bytes on macOS and KiB on Linux."""
+    import resource
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return peak * (1 if sys.platform == "darwin" else 1024) > limit
+
+
+def watch_memory(limit: int) -> None:
+    """The child's memory cap: one daemon thread that ends the process when
+    its high-water mark passes `limit`, or when it cannot be read. Only ever
+    called in the child, which is the process it may end."""
+    import threading
+
+    def watch():
+        try:
+            while True:
+                if memory_over(limit):
+                    os._exit(EXIT_MEMORY)
+                time.sleep(MEMORY_SAMPLE_SECONDS)
+        except BaseException:
+            os._exit(EXIT_UNMEASURED)
+
+    try:
+        memory_over(limit)                       # measurable at all, before reading
+        threading.Thread(target=watch, name="memory-watch", daemon=True).start()
+    except BaseException:
+        os._exit(EXIT_UNMEASURED)
+
+
+def emit(status: int, doc: dict, limit: int) -> int:
+    """The child's last act: the memory check once more (an allocation since
+    the watcher's last look is in the high-water mark), then the one JSON
+    document on stdout."""
+    try:
+        over = memory_over(limit)
+    except BaseException:
+        os._exit(EXIT_UNMEASURED)
+    if over:
+        os._exit(EXIT_MEMORY)
+    sys.stdout.buffer.write(json.dumps(doc, ensure_ascii=False).encode("utf-8"))
+    sys.stdout.buffer.flush()
+    return status
+
+
 def child_main(argv: list[str]) -> int:
     """`python -I -m ask_your_library.ingest.pdf --child <path> --max-bytes N`:
-    read one file, print one JSON document on stdout, exit with a known status."""
+    read one file, print one JSON document on stdout, exit with a known status.
+    Never forks."""
     if len(argv) != 4 or argv[0] != "--child" or argv[2] != "--max-bytes":
         return 2
     global MAX_CHILD_RSS_BYTES
@@ -333,11 +390,12 @@ def child_main(argv: list[str]) -> int:
     # The parent's cap, so that a MemoryError here is reported in its terms.
     MAX_CHILD_RSS_BYTES = max_bytes
     if sys.platform.startswith("linux"):
-        # A second wall on Linux, set by the child itself before it reads
-        # anything. Address space runs ahead of resident memory, hence twice;
-        # macOS does not enforce RLIMIT_AS, so the parent's sampling is the rule.
+        # A second wall on Linux, set before anything is read. Address space
+        # runs ahead of resident memory, hence twice; macOS does not enforce
+        # RLIMIT_AS.
         import resource
         resource.setrlimit(resource.RLIMIT_AS, (2 * max_bytes, 2 * max_bytes))
+    watch_memory(max_bytes)
     try:
         book = read_in_process(path)
         status, doc = EXIT_READ, {"title": book.title, "author": book.author,
@@ -345,13 +403,11 @@ def child_main(argv: list[str]) -> int:
     except PdfRefused as reason:
         status, doc = EXIT_REFUSED, {"refused": str(reason)}
     except MemoryError:
-        status, doc = EXIT_REFUSED, {"refused": too_big_reason()}
+        os._exit(EXIT_MEMORY)
     except Exception as error:
         # The class only: the message can quote the document.
         status, doc = EXIT_ERROR, {"error": type(error).__name__}
-    sys.stdout.buffer.write(json.dumps(doc, ensure_ascii=False).encode("utf-8"))
-    sys.stdout.buffer.flush()
-    return status
+    return emit(status, doc, max_bytes)
 
 
 @contextmanager
