@@ -347,6 +347,71 @@ def test_a_healthy_environment_leaves_the_doctors_own_status(monkeypatch):
     assert ayl.main(["doctor"]) == 1
 
 
+def test_doctor_before_the_first_add_says_the_index_is_empty_not_broken(monkeypatch, capsys):
+    """Right after `ayl init` the configured index does not exist yet. That is
+    the state the next step (`ayl add`) changes, said as that state on stdout
+    — not under "The environment is not ready", and without the index half's
+    "no index at" — while the status stays 3, which `ayl init` reads."""
+    from ask_your_library import config
+    monkeypatch.setattr(config, "DB_CHOICE",
+                        config.DbPathChoice(config.AYL_HOME / "index", 3, "the default"))
+    monkeypatch.setattr(ayl, "check_environment",
+                        lambda index_only=False, db_path=None, backend=None:
+                        PreflightResult(["Database not found: x"], (), ["no_db"]))
+    seen = []
+    monkeypatch.setattr(add_folder, "main",
+                        lambda argv=None, prog=None: seen.append(argv) or 1)
+    assert ayl.main(["doctor"]) == 3
+    out = capsys.readouterr()
+    assert "index: empty — no books added yet" in out.out and "ayl add <folder>" in out.out
+    assert t("pf_header") not in out.err and "Database not found" not in out.err
+    assert seen == [], "the index half has nothing to reconcile"
+
+
+def test_doctor_names_a_missing_index_set_in_the_shell_as_a_problem(monkeypatch, capsys):
+    """`LIBRARY_DB_PATH=~/AskYourLibrary/demo/index ayl doctor` before the demo
+    is built, or a typo: "add your own books into it" would be wrong advice, so
+    the problem block and the index half's line are what the reader gets."""
+    from ask_your_library import config
+    monkeypatch.setattr(config, "DB_CHOICE",
+                        config.DbPathChoice(config.AYL_HOME / "demo" / "index", 1, "set"))
+    monkeypatch.setattr(config, "EXPORTED", frozenset({"LIBRARY_DB_PATH"}))
+    monkeypatch.setattr(ayl, "check_environment",
+                        lambda index_only=False, db_path=None, backend=None:
+                        PreflightResult(["Database not found: x"], (), ["no_db"]))
+    seen = []
+    monkeypatch.setattr(add_folder, "main",
+                        lambda argv=None, prog=None: seen.append(argv) or 1)
+    assert ayl.main(["doctor"]) == 3
+    out = capsys.readouterr()
+    assert "index: empty" not in out.out
+    assert t("pf_header") in out.err and "Database not found: x" in out.err
+    assert seen == [["--doctor"]], "the index half still runs and says where it looked"
+
+
+def test_doctor_names_a_missing_db_it_was_pointed_at_as_a_problem(monkeypatch, capsys):
+    """`--db` to a path that is not there is likely a typo, not a first run."""
+    monkeypatch.setattr(ayl, "check_environment",
+                        lambda index_only=False, db_path=None, backend=None:
+                        PreflightResult(["Database not found: x"], (), ["no_db"]))
+    monkeypatch.setattr(add_folder, "main", lambda argv=None, prog=None: 1)
+    assert ayl.main(["doctor", "--db", "/nowhere"]) == 3
+    assert "Database not found: x" in capsys.readouterr().err
+
+
+def test_doctor_does_not_repeat_the_cards_notice(monkeypatch, capsys):
+    """The cards notice is about searching; `ayl ask` says it, the doctor
+    does not search. Other notices still reach the reader."""
+    cards = t("pf_no_cards", table="cards_ollama")
+    monkeypatch.setattr(ayl, "check_environment",
+                        lambda index_only=False, db_path=None, backend=None:
+                        PreflightResult([], [cards, "another notice"], []))
+    monkeypatch.setattr(add_folder, "main", lambda argv=None, prog=None: 0)
+    assert ayl.main(["doctor"]) == 0
+    err = capsys.readouterr().err
+    assert cards not in err and "another notice" in err
+
+
 def test_doctor_help_answers_before_the_preflight(capsys):
     """The autouse fixture's `check_environment` explodes: this passes only
     because `ayl doctor --help` parses and exits first."""
@@ -561,6 +626,26 @@ def test_ui_without_chainlit_names_the_extra(monkeypatch, tmp_path, capsys):
 
     assert ayl.main(["ui"]) == 1
     assert "--extra ui" in capsys.readouterr().err
+
+
+def test_ui_without_chainlit_in_a_tool_install_names_the_reinstall(monkeypatch, tmp_path,
+                                                                   capsys):
+    """A tool install has no project to `uv sync`: the extra comes with a
+    re-install, in the form uv takes for an extra on a git source."""
+    from ask_your_library import paths
+    monkeypatch.setattr(paths, "REPO_ROOT", "")
+    monkeypatch.setattr(cli, "package_version", lambda: "0.5.0")
+    monkeypatch.setenv("AYL_CHAINLIT_DIR", str(tmp_path / "root" / ".chainlit"))
+
+    def missing(command, env=None):
+        raise FileNotFoundError(command[0])
+    monkeypatch.setattr(launcher.subprocess, "call", missing)
+
+    assert ayl.main(["ui"]) == 1
+    err = capsys.readouterr().err
+    assert ("uv tool install --force 'ask-your-library[ui] @ "
+            "git+https://github.com/ievgen-borysenko/ask-your-library@v0.5.0'") in err
+    assert "uv run" not in err and "uv sync" not in err
 
 
 def test_ui_help_does_not_start_a_server(monkeypatch, capsys):

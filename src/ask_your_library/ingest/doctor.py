@@ -19,7 +19,7 @@ The catalogue is deliberately not consulted: it answers from the index tables
 import logging
 from dataclasses import dataclass, field
 
-from ..index_meta import (CARDS_PREFIX, CARDS_REBUILD_HINT, chunk_lengths, length_distribution,
+from ..index_meta import (CARDS_PREFIX, cards_rebuild_hint, chunk_lengths, length_distribution,
                           length_mismatch, read_index_meta, rebuild_hint, version_mismatch)
 from .ledger import INDEXED, TABLE, open_ledger
 
@@ -85,7 +85,7 @@ class LedgerReport:
         for line in self.length_drift:
             out.append(f"  CHUNK LENGTH        {line}")
         for line in self.version_mismatches:
-            if line.endswith(CARDS_REBUILD_HINT):
+            if line.endswith(cards_rebuild_hint()):
                 # a cards table: reads with a warning, and its rebuild is the
                 # cards stage, named in the line itself
                 out.append(f"  VERSION MISMATCH    {line}")
@@ -151,7 +151,7 @@ def _read_stamps(db, report: LedgerReport) -> dict[str, str]:
         detail = version_mismatch(db, name)
         if detail:
             if name.startswith(CARDS_PREFIX):
-                detail = f"{detail} — reads with a warning. {CARDS_REBUILD_HINT}"
+                detail = f"{detail} — reads with a warning. {cards_rebuild_hint()}"
             report.version_mismatches.append(detail)
     return stamped
 

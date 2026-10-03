@@ -11,6 +11,9 @@ it needs and leaves the index answering until you decide to spend the rebuild.
 uv run ayl backup ~/ayl-backups --db ~/ayl-index
 ```
 
+The commands on this page are written as a clone types them, after `uv run`; installed as a tool
+(`uv tool install`), type the same commands without it.
+
 `ayl backup`, `ayl restore`, `ayl doctor` and `ayl add` are one program under four verbs, so
 every flag on this page is one of its flags; `ayl <verb> --help` lists the ones that verb takes.
 `--db <dir>` aims the whole command at that index — the checks it runs and the report it prints
@@ -18,6 +21,43 @@ alike. Upgrading from a version before `ayl`: the two names
 it replaced, `ask-library` and `ayl-add`, are still installed and still run the same code — each
 prints one deprecation line and is removed at `0.6.0`, so a script of your own has one minor
 release to change the name it types.
+
+## From 0.3.1 to 0.5.0
+
+0.5.0 is the next release after 0.3.1: the 0.4.0 milestone was closed without a tag, and its work
+ships here. What a reader of 0.3.1 meets, in the order it matters:
+
+1. **One command, `ayl`.** `ayl ask`, `ayl add`, `ayl doctor`, `ayl backup`, `ayl restore`,
+   `ayl books`, `ayl ui` and `ayl init`. The old names, `ask-library` and `ayl-add`, still run the
+   same code and print one deprecation line each; they are removed at 0.6.0. A flag of
+   `ayl-add` that chose another command (`--doctor`, `--backup`, `--restore`) is its own verb now.
+2. **An install that is not a clone.** `uv tool install
+   git+https://github.com/ievgen-borysenko/ask-your-library@v0.5.0` puts `ayl` on your `PATH`
+   ([quick start](quick-start.md#install)); a clone keeps working as before, with `git pull &&
+   uv sync`. The demo library and the evals still need a clone.
+3. **`AYL_HOME`.** Everything built on this machine — your index, the demo library, the
+   scratchpads, the web chat's database, the configuration `ayl init` writes — now defaults to
+   `~/AskYourLibrary` instead of the directory a command is typed in. An index at the old default,
+   `data/lancedb`, is not moved: it is read where it is, with one notice per process, until
+   0.6.0, when it becomes an error ([below](#the-index-moved-to-ayl_homeindex); ADR-026). A `.env`
+   copied from 0.3.1's `.env.example` sets `LIBRARY_DB_PATH=data/lancedb` and keeps the index
+   there silently; delete the line after the move.
+4. **`ayl init`** checks Ollama, pulls the models, writes `$AYL_HOME/config.env`, and says where
+   your books go; it never rewrites a `.env` or a `config.env` that already chooses the mode, and
+   it reports an index or chat database at the old place with the commands that move it, rather
+   than building a second one ([quick start](quick-start.md#the-first-run-ayl-init); ADR-027 for
+   the order the three configuration files are read in).
+5. **The index stamp says more.** Besides the embedding model it now records the chunker and the
+   row schema each table was built with (ADR-020, amended): a different embedding model is still
+   fatal on read, and a *stamped* chunker that is not this code's reads with a warning and refuses
+   the next write. **An index 0.3.1 built has no chunker stamp** — the stamp gained the chunker
+   after that release — and an absent stamp is not a mismatch, so nothing warns about it, although
+   its rows were cut by the old chunker. `ayl doctor` prints its stamps and how long its chunks
+   are; the rebuild that brings it to the new chunker is below
+   ([the chunker changed](#from-031-the-chunker-changed-28-and-every-earlier-index-is-one-behind-it)).
+6. **`ayl add` reads EPUB and PDF** as well as text and Markdown, and keeps a ledger of the books
+   it indexed; an index from 0.3.1 gets its ledger filled from its rows on the first run
+   ([Add your own books](add-your-own-books.md)).
 
 ## What an upgrade may change, and what each costs you
 
@@ -46,8 +86,10 @@ folder, `AYL_HOME` (`~/AskYourLibrary` unless set) — [ADR-026](adr/README.md#a
 | the scratchpads of `ayl ask` | `.scratch`, relative to the working directory | `$AYL_HOME/scratch` | `ASK_SCRATCH_DIR` |
 | the web chat's database and auth secret | the checkout's `.chainlit/` | `$AYL_HOME/ui/.chainlit/` | `AYL_CHAINLIT_DIR` |
 
-The demo corpus's downloads and prepared texts stay in the checkout's `data/raw/` and
-`data/prepared/`; only the index it builds goes to the new place.
+The demo corpus's downloads and prepared texts go to `$AYL_HOME/demo/cache` when `ayl init
+--demo` builds it, and that build writes nothing into the checkout; `scripts/ingest_demo_corpus.py`
+run by hand still stages them in the checkout's `data/raw/` and `data/prepared/` unless given
+`--cache-dir`.
 
 **Nothing is moved, copied or deleted for you**, and nothing you already built stops answering.
 The index a command opens, when no `--db` names one, is decided by three rules in this order, and
@@ -104,7 +146,7 @@ run since you upgraded — and `--force` moves that one aside rather than deleti
 move mints a new one, and you log in again. To keep everything where it is instead, set
 `LIBRARY_DB_PATH` and `AYL_CHAINLIT_DIR` to the two old directories as absolute paths.
 
-## This release: the chunker changed (#28), and every earlier index is one behind it
+## From 0.3.1: the chunker changed (#28), and every earlier index is one behind it
 
 This is the first chunker bump this project has shipped, so it is also the first time the policy
 above does anything. **If you built an index before 2026-09-17, it was cut by `sentence-pack-1`
@@ -117,16 +159,28 @@ longer than that, so the retriever ranked text the model never saw
 rule and are **not** affected: a cards table built by an earlier release stays valid and is not
 re-chunked.
 
-**What your index does until you rebuild it.** It answers. Every read logs one warning line and
-the CLI and the web UI show a startup notice; retrieval and the quote check work exactly as
-before, on the chunks the index already holds. The next `ayl add` write refuses, because one
-append would leave two chunkers' rows in one table.
+**What your index does until you rebuild it.** It answers, and retrieval and the quote check work
+exactly as before, on the chunks the index already holds. What it says about them depends on its
+stamp:
+
+- **No chunker stamp — every index 0.3.1 built.** An absent stamp is not a mismatch
+  (`index_meta.version_mismatch`): nothing warns, and the next `ayl add` is not refused. That write
+  stamps the table `sentence-pack-2`, and the books it did not re-index keep their old, longer
+  rows, which `ayl doctor` then reports as `CHUNK LENGTH` drift, exiting 1. Before any write,
+  `ayl doctor`'s `chunks:` line shows which chunker you hold: a longest row above 2,640 characters
+  is one this code cannot cut.
+- **Stamped `sentence-pack-1`** (a build from `main` between #27 and #28, or an
+  `ingest_demo_corpus.py --stage stamp-meta --chunker` claim): every read logs one warning line and the CLI and the web UI show a startup
+  notice, and the next `ayl add` write refuses, because one append would leave two chunkers' rows
+  in one table.
+
+Either way, the rebuild below is what brings the index to the new chunks.
 
 **Your own library, in order:**
 
 ```bash
 uv run ayl backup ~/ayl-backups --db ~/ayl-index    # 1. the copy that survives step 3
-uv run ayl doctor --db ~/ayl-index                  # 2. read the stamps; exits non-zero on the mismatch
+uv run ayl doctor --db ~/ayl-index                  # 2. the stamps and chunk lengths; non-zero on a stamped mismatch
 uv run ayl add ~/books --rebuild --backup ~/ayl-backups --db ~/ayl-index   # 3. re-chunk and re-embed
 uv run ayl add ~/more-books --db ~/ayl-index        # 4. every OTHER folder, plain
 ```
@@ -147,8 +201,11 @@ says exactly this, naming them; `--rebuild --force` goes ahead and reports every
 folder).
 
 **The demo corpus** has its own rebuild and does not go through `ayl add`. It lives in an index of
-its own, `~/AskYourLibrary/demo/index`, and `ayl init` rebuilds it there: it sees the old chunker's
-stamp, calls the library unfinished, and runs the demo build the way it first did:
+its own, `~/AskYourLibrary/demo/index`, and `ayl init` rebuilds it there: it sees a stamp that does
+not name this chunker (or names none), calls the library unfinished, and runs the demo build the
+way it first did. A demo corpus 0.3.1 built is in a clone's `data/lancedb`, the old default, and
+while it is there `ayl init --demo` builds nothing beside it and prints the commands that move it
+([above](#the-index-moved-to-ayl_homeindex)).
 
 ```bash
 uv run ayl init --demo          # --demo --full for the whole corpus
@@ -257,7 +314,7 @@ card chunk is as long as its section and there is no ceiling to check it against
 is still printed.
 
 A table stamped with **no chunker** is not a mismatch and never warns. That is every index built
-before 0.4.0, and it means "nobody recorded which chunker made these rows" — not "they disagree".
+before the stamp gained the chunker (by 0.3.1 or earlier), and it means "nobody recorded which chunker made these rows" — not "they disagree".
 The ledger writes `legacy` for the same absence. If you know which chunker built such an index,
 you can say so once and get the checks from then on:
 
@@ -402,8 +459,9 @@ uv run ayl doctor --db ~/ayl-index
 uv run ayl doctor --db ~/ayl-index
 uv run ayl backup ~/ayl-backups --db ~/ayl-index
 
-# 2. upgrade
+# 2. upgrade: from a clone, or as a tool (the tag of the release you want)
 git pull && uv sync
+uv tool install --force git+https://github.com/ievgen-borysenko/ask-your-library@v0.5.0
 
 # 3. what does the new code think of the old index?
 uv run ayl doctor --db ~/ayl-index

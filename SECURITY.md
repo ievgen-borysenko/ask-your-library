@@ -24,6 +24,21 @@ a LangSmith key is the third path, and `LANGSMITH_TRACING_V2=false` plus
 `LANGCHAIN_TRACING_V2=false` close it whatever was inherited. See "Privacy and data flow" and
 "Threat model" in `docs/privacy-and-threat-model.md` for what is protected and what is not.
 
+**The books are untrusted input.** `ayl add` parses files nobody here wrote, and two of its formats
+are containers: an EPUB is a zip archive of XML and XHTML, a PDF a compressed object graph. An
+EPUB is read with the standard library, in memory, never extracted to disk, and refused before it
+is opened when its archive is over the limits (10,000 members, a 16 MiB directory, 64 MiB per
+member, 512 MiB in all, any ZIP64); an absolute or `..` member path, an XML entity declaration in
+a package file and DRM are refused too (ADR-029). A PDF is read by `pypdf` in a separate child
+process that the parent bounds from outside: stopped past 60 s or 1 GiB of resident memory, after
+a 256 MiB file cap and a 5,000-page cap; an encrypted PDF is refused and no password is tried
+(ADR-030). On macOS the memory bound is sampled, not a kernel limit, so a file that allocates as
+fast as the machine can is stopped a few hundred MiB past it; on Linux the child also caps its own
+address space. A refused file is named in one line, never quoted, and the rest of the folder is
+indexed. What comes out is text, and from then on it is corpus text like any other book's: the
+injection layers in `docs/privacy-and-threat-model.md` apply to it the same way. Every limit and
+refusal: `docs/add-your-own-books.md`.
+
 One environment knob loads and runs code by design, and it is a test seam, not a feature:
 `AYL_UI_FAKE_BACKEND` names a Python file that `src/ask_your_library/ui/app.py` executes at
 startup, which is how `tests/ui/test_ui_smoke.py` drives a real server with no model and no index
@@ -76,9 +91,9 @@ git cannot resolve, and neither of them is a scan.
 OSV-Scanner runs over `uv.lock`, the resolved dependency set CI installs from. A secret, or an
 advisory without a recorded exception, fails the job — and so does a scanner that cannot run, which
 is why neither job is marked `continue-on-error`. A failed job blocks the merge: this repository is
-public, and the ruleset on `main` — "Protection rule for main" — lists all seven checks as required
+public, and the ruleset on `main` — "Protection rule for main" — lists eight checks as required
 (`test (openrouter)`, `test (ollama)`, `test-ui (openrouter)`, `test-ui (ollama)`, `install-script`,
-`secrets`, `dependencies`), requires code scanning results from `CodeQL` — no security alert of high
+`workflows`, `secrets`, `dependencies`), requires code scanning results from `CodeQL` — no security alert of high
 severity or above, and no other alert at error level — requires the branch to be up to date with
 `main` before it merges, and refuses force-pushes and deletion of the branch, with no bypass for
 anyone. CodeQL itself runs from GitHub's default setup rather than from a workflow in this

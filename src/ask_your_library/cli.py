@@ -1,8 +1,10 @@
 """Ask Your Library — command-line interface.
 
-  uv run ayl ask                        # chat: question after question, with memory
-  uv run ayl ask "What did X say about Y?"   # single question (scripts, evals)
-  uv run ayl ask --help / --version     # no API key, no index needed
+  ayl ask                        # chat: question after question, with memory
+  ayl ask "What did X say about Y?"   # single question (scripts, evals)
+  ayl ask --help / --version     # no API key, no index needed
+
+(From a clone, each after `uv run`; installed as a tool, as written.)
 
 `ask-library` is the same run under the name this had before `ayl` (#30); it
 prints one deprecation line and is removed at 0.6.0.
@@ -28,10 +30,12 @@ import sys
 from importlib.metadata import PackageNotFoundError, version
 
 from .bookkey import split_read_query, unescape_marker
-from .config import QUESTION_DEADLINE_S, SUPPORTED_LANGS
+from .config import QUESTION_DEADLINE_S, SUPPORTED_LANGS, TABLES
 from .graph import build_graph
+from .hints import config_docs
 from .home import scratch_dir
 from .i18n import set_lang, source_word, status_word, t
+from .library import mark_reported
 from .preflight import check_environment, exit_code
 from .runner import RunResult, failed_result, history_entry, run_question
 from .sanitize import LINE_BREAK_RE, strip_control_chars
@@ -242,7 +246,7 @@ def build_parser(prog: str = "ask-library") -> argparse.ArgumentParser:
         description="Agentic RAG over your own book library.",
         epilog="Without a question the CLI opens an interactive chat with memory "
                "(`exit`, `quit` or Ctrl-D leaves it). Everything else is configured "
-               "through environment variables; see .env.example.")
+               f"through environment variables: {config_docs()}")
     parser.add_argument("--version", action="version",
                         version=f"{prog} {package_version()}")
     # ASK_LANG is otherwise the only way to switch language, and it is a process
@@ -287,6 +291,10 @@ def main(argv: list[str] | None = None, prog: str = "ask-library") -> None:
         say(t("pf_notice_header"), error=True)
         for notice in notices:
             say(f"  - {notice}", error=True)
+        # Told once: the search's own log line about the same table would
+        # repeat the sentence on stderr in the middle of the run.
+        if t("pf_no_cards", table=TABLES["cards"]) in notices:
+            mark_reported(TABLES["cards"])
 
     graph = build_graph()
 

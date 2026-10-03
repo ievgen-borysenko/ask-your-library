@@ -440,3 +440,19 @@ def test_fts_failure_on_one_corpus_degrades_that_corpus_only(counted_index, capl
     # a hit that reached the result through FTS alone carries no distance; a vector hit does
     assert "distance" in transcripts[0] and "distance" not in transcripts[1]
     assert set(tables[library.TABLES["transcripts"]].limits) == {library.CANDIDATES_PER_LIST}
+
+
+def test_has_table_warns_unless_an_interface_already_said_it(monkeypatch, caplog):
+    """The eval harnesses run no preflight: the warning is their only signal.
+    `mark_reported` is what an interface that showed the notice calls."""
+    class Empty:
+        def table_names(self):
+            return []
+    monkeypatch.setattr(library, "_reported_missing", set())
+    with caplog.at_level("WARNING"):
+        assert library.has_table(Empty(), "cards_x") is False
+        library.mark_reported("cards_y")
+        assert library.has_table(Empty(), "cards_y") is False
+    messages = [r.getMessage() for r in caplog.records]
+    assert sum("cards_x" in m for m in messages) == 1
+    assert not any("cards_y" in m for m in messages)

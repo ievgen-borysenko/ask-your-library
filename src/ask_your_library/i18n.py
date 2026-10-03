@@ -1,8 +1,8 @@
 """Language of the agent's user-facing text (answers, reports, CLI/UI labels).
 
 ASK_LANG=en (default) | ua sets the process-wide default:
-  uv run ask-library                     # English
-  ASK_LANG=ua uv run ask-library         # Ukrainian
+  ayl ask                     # English
+  ASK_LANG=ua ayl ask         # Ukrainian (from a clone: `uv run ayl ask`)
 New keys must be added to every language.
 
 Per-session override (web chat, several tabs in different languages at once):
@@ -13,6 +13,7 @@ concurrent sessions never clobber each other. The CLI relies on the default.
 import contextvars
 
 from .config import DEFAULT_LANG, SUPPORTED_LANGS
+from .hints import command, from_clone
 
 LANG = DEFAULT_LANG
 
@@ -27,6 +28,25 @@ def set_lang(lang: str) -> None:
 
 def get_lang() -> str:
     return _current.get()
+
+
+# The command that sets a machine up, as this install has it: the clone's
+# installer does everything (Ollama included); a tool install has `ayl init`,
+# which pulls the models and writes the configuration once Ollama runs. Built
+# per call (`hints` reads the install at call time) and filled in by `t()`
+# itself, as `{setup_all}` and `{setup_pulls}`, so every caller of `t()` stays
+# as it is.
+def _setup(lang: str) -> dict[str, str]:
+    clone = from_clone()
+    installer = "bash scripts/install-mac.sh" if clone else command("ayl init")
+    if lang == "ua":
+        return {"setup_all": "Одна команда робить усе це: `bash scripts/install-mac.sh`. " if clone
+                else "Потім `ayl init` завантажить моделі й запише конфігурацію. ",
+                "setup_pulls": f"`{installer}` завантажує моделі саме цієї конфігурації."}
+    return {"setup_all": "One command does all of that: `bash scripts/install-mac.sh`. " if clone
+            else "Then `ayl init` pulls the models and writes the configuration. ",
+            "setup_pulls": f"`{installer}` pulls the models this configuration opens."}
+
 
 _T = {
     # ---- nodes: what the user sees in answers and reports
@@ -249,13 +269,13 @@ _T = {
         "ua": "Не вдалося звернутися до Ollama на {url} (помилка з'єднання або запиту). "
               "Типова конфігурація відповідає локально, і саме Ollama її запускає: "
               "встанови (`brew install ollama`), запусти (`ollama serve`), потім {pulls}. "
-              "Одна команда робить усе це: `bash scripts/install-mac.sh`. "
+              "{setup_all}"
               "Якщо сервер в іншому місці — задай OLLAMA_URL; щоб відповідати на хмарній "
               "моделі — LLM_BACKEND=openrouter (потрібен ключ, і це коштує грошей).",
         "en": "Could not reach Ollama at {url} (a connection or request error). "
               "The default configuration answers locally, and Ollama is what runs it: "
               "install it (`brew install ollama`), start it (`ollama serve`), then {pulls}. "
-              "One command does all of that: `bash scripts/install-mac.sh`. "
+              "{setup_all}"
               "Set OLLAMA_URL if your server is elsewhere, or LLM_BACKEND=openrouter to "
               "answer on a hosted model instead (that needs a key, and costs money).",
     },
@@ -268,19 +288,19 @@ _T = {
               "address is really Ollama (`curl` the /api/tags of the address OLLAMA_URL names).",
     },
     "pf_no_db": {
-        "ua": "Бази нема: {path}. Проіндексуй у неї свої книжки (`uv run ayl add <тека>`) "
+        "ua": "Бази нема: {path}. Проіндексуй у неї свої книжки (`{add} <тека>`) "
               "або вкажи LIBRARY_DB_PATH на іншу LanceDB. Демо-бібліотека — окремий індекс, "
               "і питають її так само: LIBRARY_DB_PATH=$AYL_HOME/demo/index.",
         "en": "Database not found: {path}. Index your own books into it "
-              "(`uv run ayl add <folder>`), or point LIBRARY_DB_PATH at another LanceDB. The "
+              "(`{add} <folder>`), or point LIBRARY_DB_PATH at another LanceDB. The "
               "demo library is an index of its own and is asked the same way: "
               "LIBRARY_DB_PATH=$AYL_HOME/demo/index.",
     },
     "pf_no_tables": {
-        "ua": "У базі {path} нема таблиць: {tables}. Заверши інжест "
-              "(`uv run scripts/ingest_demo_corpus.py --stage ingest` і --stage cards).",
-        "en": "Database {path} is missing tables: {tables}. Finish the ingest "
-              "(`uv run scripts/ingest_demo_corpus.py --stage ingest` and --stage cards).",
+        "ua": "У базі {path} нема таблиць: {tables}. Заверши інжест: `{add} <тека>` для "
+              "своїх книжок, {script} і --stage cards для демо-корпусу.",
+        "en": "Database {path} is missing tables: {tables}. Finish the ingest: `{add} <folder>` "
+              "for your own books, {script} and --stage cards for the demo corpus.",
     },
     "pf_index_mismatch": {
         "ua": "Індекс не відповідає налаштованій embedding-моделі: {detail}",
@@ -297,6 +317,15 @@ _T = {
         "en": "This index was built by another version of the code (it still answers, from "
               "the chunks it holds): {detail}",
     },
+    # `ayl doctor` over the configured index before the first `ayl add`: a
+    # state, printed on stdout, not a problem under pf_header (the status is
+    # still EXIT_NO_INDEX, which is what `ayl init`'s closing check reads).
+    "doctor_empty_index": {
+        "ua": "індекс: порожній — книжок ще не додано. `{add} <тека>` проіндексує твої "
+              ".txt / .md / .epub / .pdf у {path}.",
+        "en": "index: empty — no books added yet. `{add} <folder>` indexes your own "
+              ".txt / .md / .epub / .pdf books into {path}.",
+    },
     "pf_header": {
         "ua": "Середовище не готове:",
         "en": "The environment is not ready:",
@@ -311,20 +340,18 @@ _T = {
     "pf_no_local_model": {
         "ua": "LLM_BACKEND=ollama, але модель {model} не завантажена: `ollama pull {model}` "
               "(кілька гігабайтів — завантаження має завершитися), або OLLAMA_LLM_MODEL=<менша>. "
-              "`bash scripts/install-mac.sh` завантажує моделі саме цієї конфігурації.",
+              "{setup_pulls}",
         "en": "LLM_BACKEND=ollama, but the model {model} is not pulled: `ollama pull {model}` "
               "(several GB — the download has to finish), or set OLLAMA_LLM_MODEL to a smaller "
-              "one. `bash scripts/install-mac.sh` pulls the models this configuration opens.",
+              "one. {setup_pulls}",
     },
     "pf_no_embed_model": {
         "ua": "EMBED_BACKEND=ollama, але embedding-модель {model} не завантажена: "
               "`ollama pull {model}` (кілька гігабайтів — завантаження має завершитися), "
-              "або OLLAMA_EMBED_MODEL=<інша>. "
-              "`bash scripts/install-mac.sh` завантажує моделі саме цієї конфігурації.",
+              "або OLLAMA_EMBED_MODEL=<інша>. {setup_pulls}",
         "en": "EMBED_BACKEND=ollama, but the embedding model {model} is not pulled: "
               "`ollama pull {model}` (several GB — the download has to finish), or set "
-              "OLLAMA_EMBED_MODEL. `bash scripts/install-mac.sh` pulls the models this "
-              "configuration opens.",
+              "OLLAMA_EMBED_MODEL. {setup_pulls}",
     },
     "pf_no_cards": {
         "ua": "Таблиці карток {table} нема: відповіді спираються лише на повний текст "
@@ -586,5 +613,8 @@ def status_word(status: str) -> str:
 
 def t(key: str, **kw) -> str:
     """Look up `key` in the current session's language and format it with `kw`."""
-    s = _T[key][_current.get()]
+    lang = _current.get()
+    s = _T[key][lang]
+    if "{setup_" in s:
+        kw = {**_setup(lang), **kw}
     return s.format(**kw) if kw else s

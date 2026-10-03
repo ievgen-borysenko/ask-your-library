@@ -76,35 +76,35 @@ the catalogue path and the deterministic gate behind the ask-back, is in
 ## Quick start
 
 You need [uv](https://docs.astral.sh/uv/) and [Ollama](https://ollama.com), installed and
-running. Then, from a clone:
+running: Ollama embeds your books in both modes and, in the default local mode, also answers, with
+no account and no key. The hosted mode answers on [OpenRouter](https://openrouter.ai) instead and
+needs its key. Then one command installs `ayl`:
 
 ```bash
-git clone https://github.com/ievgen-borysenko/ask-your-library.git && cd ask-your-library
-uv sync
-uv run ayl init --dry-run                # the plan, printed; nothing is changed
-uv run ayl init                          # the models (mostly download time) and the configuration
-uv run ayl add ~/books                   # your own .txt / .md / .epub / .pdf books
-uv run ayl ask "..."
+uv tool install git+https://github.com/ievgen-borysenko/ask-your-library@v0.5.0
+uv tool update-shell                     # once, only if `ayl` is not found; then open a new terminal
+ayl init --dry-run                       # the plan, printed; nothing is changed
+ayl init                                 # the models (mostly download time) and the configuration
+ayl add ~/books                          # your own .txt / .md / .epub / .pdf books
+ayl ask "..."
 ```
 
 `ayl init` checks that Ollama answers, pulls the two models the configuration names, writes
 `~/AskYourLibrary/config.env` (unless that file, or a `.env` that sets `LLM_BACKEND` or
 `EMBED_BACKEND`, already chooses the mode), and says where your books go; run it again and it
-changes nothing.
-On a Mac, `bash scripts/install-mac.sh` (with `--dry-run` to read it first) also installs uv and
-Ollama through Homebrew, then runs `ayl init`.
+changes nothing. For the hosted mode, `ayl init --mode hosted`, then set `OPENROUTER_API_KEY` in
+the `config.env` it wrote; that mode is billed per question ([`docs/cost.md`](docs/cost.md)).
 
-**The demo library is opt-in, and kept apart from yours.** `uv run ayl init --demo` builds six
-public-domain classics in a few minutes (`--demo --full`: the whole corpus of 33 books, about 30
-minutes) into `~/AskYourLibrary/demo/index`, never into your own index. Ask it by naming it:
+The web chat is an extra, so a tool install adds it by installing again with it:
 
 ```bash
-LIBRARY_DB_PATH=~/AskYourLibrary/demo/index uv run ayl ask "What does Marcus Aurelius say about anger?"
+uv tool install --force 'ask-your-library[ui] @ git+https://github.com/ievgen-borysenko/ask-your-library@v0.5.0'
+AYL_ALLOW_DEFAULT_LOGIN=1 ayl ui         # on 127.0.0.1; login admin / change-me, a throwaway demo
 ```
 
-No account, no API key, nothing to pay: the answering model and the embeddings both run on your
-own machine through Ollama, and the cost line under the answer reads $0.0000. A hosted answering
-model is available (`uv run ayl init --mode hosted`) and is the only thing here that needs a key.
+No account, no API key, nothing to pay in the default mode: the answering model and the
+embeddings both run on your own machine through Ollama, and the cost line under the answer reads
+$0.0000. A hosted answering model is the only thing here that needs a key.
 
 `ayl` is the one command: `ayl init` the first run, `ayl ask` a question, `ayl add` a folder of your own books, `ayl books`
 for what the index holds, `ayl doctor` for whether this machine is ready, `ayl backup` /
@@ -115,11 +115,41 @@ at `0.6.0`.
 
 What this machine builds for you — your index, the demo library if you asked for it, the
 configuration `ayl init` writes, the scratchpads, the web chat's history — lives in
-`~/AskYourLibrary` (`AYL_HOME`) by default, outside the clone, rather than in the directory a
-command is typed in (a relative `LIBRARY_DB_PATH` you set is still read against that directory).
-An index an earlier version built in `data/lancedb` is still read there, with a notice, when a
-command runs in the directory that holds it, until `0.6.0`; [upgrading](docs/upgrading.md#the-index-moved-to-ayl_homeindex) has the two
+`~/AskYourLibrary` (`AYL_HOME`) by default, rather than in the directory a command is typed in (a
+relative `LIBRARY_DB_PATH` you set is still read against that directory). An index an earlier
+version built in a clone's `data/lancedb` is still read there, with a notice, when a command runs
+in the directory that holds it, until `0.6.0`; [upgrading](docs/upgrading.md#the-index-moved-to-ayl_homeindex) has the two
 commands that move it.
+
+### From a clone
+
+For contributors, for the demo library, and for the evals, which ship with the repository and not
+with the package. Every `ayl` command above is the same here, typed after `uv run`:
+
+```bash
+git clone https://github.com/ievgen-borysenko/ask-your-library.git && cd ask-your-library
+uv sync
+uv run ayl init --dry-run                # the plan, printed; nothing is changed
+uv run ayl init
+uv run ayl add ~/books
+uv run ayl ask "..."
+uv run --extra ui ayl ui                 # the web chat, with the extra
+```
+
+On a Mac, `bash scripts/install-mac.sh` (with `--dry-run` to read it first) does the installs too:
+it installs uv and Ollama through Homebrew, starts Ollama for the session, pulls the models, syncs
+the locked environment with the web chat's extra, writes a `.env` in the clone (fully local
+unless `--hosted`), then runs `ayl init`.
+
+**The demo library is opt-in, kept apart from yours, and built from a clone.** `uv run ayl init
+--demo` builds six public-domain classics in a few minutes (`--demo --full`: the whole corpus of
+33 books, about 30 minutes) into `~/AskYourLibrary/demo/index`, never into your own index; the
+corpus and the script that builds it are in the repository, so a tool install refuses `--demo`
+and says so. Ask it by naming it:
+
+```bash
+LIBRARY_DB_PATH=~/AskYourLibrary/demo/index uv run ayl ask "What does Marcus Aurelius say about anger?"
+```
 
 **Local is slower, and it quotes less reliably: both halves are the trade.** The quoting half is
 under [Privacy and cost](#privacy-and-cost) below and in
@@ -130,7 +160,7 @@ research questions of the core eval set — for about $0.002 and $0.05 respectiv
 Every figure here is a measured single run, over the rows of that one kind of question, and
 [`docs/cost.md`](docs/cost.md) names which run and which rows each one comes from.
 
-**On every other system the commands above are the whole install** once uv and Ollama are there;
+**On every system the commands above are the whole install** once uv and Ollama are there;
 [`docs/quick-start.md`](docs/quick-start.md) has each step by hand as well, with your own books,
 the web UI and the eval commands.
 
@@ -240,7 +270,7 @@ themselves are in [`docs/eval-results/`](docs/eval-results/).
 | [`docs/configuration.md`](docs/configuration.md) | Every environment variable, and the fully local, no-account setup |
 | [`docs/add-your-own-books.md`](docs/add-your-own-books.md) | `ayl add`: book keys, chapters, what is skipped, per-book re-indexing and the ledger |
 | [`docs/upgrading.md`](docs/upgrading.md) | What an upgrade may change, the mismatch policy, `ayl backup` / `ayl restore` and when a copy is safe |
-| [`docs/evaluation.md`](docs/evaluation.md) | The two harnesses, three golden sets, the measured runs and the ablation |
+| [`docs/evaluation.md`](docs/evaluation.md) | The harnesses, the golden sets, the measured runs and the ablation |
 | [`docs/privacy-and-threat-model.md`](docs/privacy-and-threat-model.md) | Data flow, threat model, the four injection layers and their limits |
 
 Everything else is under [`docs/`](docs/): the architecture and its decision records, what a
@@ -255,10 +285,11 @@ localhost demo with a published list of what it does not do
 ([`docs/known-limits.md`](docs/known-limits.md)) — read it the way you would read a worked
 example, not the way you would adopt a product.
 
-`v0.3.1`, a documentation and CI patch over `v0.3.0`, the minor release where the shipped default
-changed: a clone now answers on a local model through Ollama, with no account and nothing to pay,
-where it used to need an OpenRouter key. The hosted path is unchanged and opt-in
-(`LLM_BACKEND=openrouter`). The release history is in [`docs/CHANGELOG.md`](docs/CHANGELOG.md)
+`v0.5.0`: installable in one command (`uv tool install`, then `ayl init`), with the reader's own
+EPUB and PDF books imported by `ayl add`, everything built on the machine kept in `AYL_HOME`, and
+an index stamped with what built it and checked against it. Since `v0.3.0` the shipped default
+answers on a local model through Ollama, with no account and nothing to pay; the hosted path is
+opt-in (`LLM_BACKEND=openrouter`). The release history is in [`docs/CHANGELOG.md`](docs/CHANGELOG.md)
 and the open gaps in [`docs/backlog.md`](docs/backlog.md).
 
 The code and the project's own files are under Apache-2.0 (`LICENSE`, attribution in

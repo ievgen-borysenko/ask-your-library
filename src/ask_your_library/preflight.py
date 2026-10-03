@@ -30,6 +30,7 @@ from .config import (DB_PATH, EMBED_BACKEND, LLM_BACKEND, OLLAMA_EMBED_MODEL, OL
                      OPENROUTER_NEEDS_KEY, ORCHESTRATOR_MODEL, TABLES, confirm_db_path, tables_for)
 from .dataflow import shown_url
 from .embeddings import get_embedder, openrouter_api_key
+from .hints import command, script
 from .i18n import t
 from .index_meta import check_index, warn_version_mismatch
 
@@ -65,6 +66,19 @@ class PreflightResult(list):
         super().__init__(problems)
         self.notices: list[str] = list(notices)
         self.kinds: list[str] = list(kinds)
+
+
+def no_db_problem(db) -> str:
+    """The no-index sentence, with the command in this install's form. One
+    function, because `scripts/install-mac.sh` rebuilds the same sentence to
+    tell an expected missing index from an unexpected problem."""
+    return t("pf_no_db", path=db, add=command("ayl add"))
+
+
+def no_tables_problem(db, tables: str) -> str:
+    """The missing-tables sentence, the same way (`no_db_problem`)."""
+    return t("pf_no_tables", path=db, tables=tables, add=command("ayl add"),
+             script=script("scripts/ingest_demo_corpus.py --stage ingest"))
 
 
 def exit_code(result: PreflightResult) -> int:
@@ -276,7 +290,7 @@ def check_environment(index_only: bool = False, db_path: Path | None = None,
             problem("index_in_checkout", str(error))
             return PreflightResult(problems, notices, kinds)
     if not db.exists():
-        problem("no_db", t("pf_no_db", path=db))
+        problem("no_db", no_db_problem(db))
     else:
         # Full text is the corpus the agent cannot work without; book cards are
         # optional, because `ayl-add` builds an index without them (they need an
@@ -288,8 +302,7 @@ def check_environment(index_only: bool = False, db_path: Path | None = None,
             present = set()
         missing = required - present
         if missing:
-            problem("no_tables", t("pf_no_tables", path=db,
-                                   tables=", ".join(sorted(missing))))
+            problem("no_tables", no_tables_problem(db, ", ".join(sorted(missing))))
         else:
             # Degraded, not broken: search runs over full text alone. Said here
             # because library.has_table only logs it, which in the web UI is a

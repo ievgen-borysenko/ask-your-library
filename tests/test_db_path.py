@@ -14,6 +14,7 @@ Nothing is copied, moved or deleted by the code, in any clause.
 import pytest
 
 from ask_your_library import ayl, config, home, preflight
+from ask_your_library.hints import command
 from ask_your_library.ingest import add_folder
 from ask_your_library.preflight import PreflightResult
 from conftest import run_fresh
@@ -96,8 +97,8 @@ def test_the_notice_names_the_new_default_the_path_and_the_move(tmp_path):
     new = (tmp_path / "home").resolve() / "index"
     assert str(old) in notice
     assert f"{new} ($AYL_HOME/index)" in notice
-    assert "`ayl backup <dir>`" in notice
-    assert f"`ayl restore <dir>/<timestamp> --db {new} --chat-db " in notice
+    assert f"`{command('ayl backup <dir>')}`" in notice
+    assert f"`{command('ayl restore <dir>/<timestamp>')} --db {new} --chat-db " in notice
     assert f"until {config.LEGACY_DB_SUNSET}, when it becomes an error" in notice
     assert "Nothing is moved for you" in notice
     assert f"LIBRARY_DB_PATH={old}" in notice          # the way to keep it where it is

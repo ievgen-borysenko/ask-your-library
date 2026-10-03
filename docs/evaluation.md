@@ -266,7 +266,8 @@ dollars and the cost line says so; locally it costs $0, and seconds are the only
 A run that spent no model call writes no such line, which is why the byte-compat fixture above is
 unchanged by this.
 
-Three golden sets, reported separately. **Core** (`eval/golden/en-demo.yaml`, 11 questions, the
+Three golden sets for the demo corpus, reported separately (the engineer's shelf has a fourth,
+`eval/golden/en-tech.yaml`, described in [`corpus-tech/README.md`](../corpus-tech/README.md)). **Core** (`eval/golden/en-demo.yaml`, 11 questions, the
 default `GOLDEN_PATH`): eight questions on books the golden author has read and a two-book
 comparison of two of them (Ivanhoe and Don Quixote), all nine reader-verified; h06, one of the two
 questions the example traces are built on, verified against the source text by an AI session only;
@@ -735,9 +736,8 @@ path written in a code span or a fenced block is a file this tree holds; that th
 `pyproject.toml` is the newest released heading of [`CHANGELOG.md`](CHANGELOG.md), with an empty
 `Unreleased` section required on a tagged commit; that the ADR index counts its own entries,
 numbers them contiguously and gives each one a `Status:` line; and that the settings in
-[`configuration.md`](configuration.md) and the `ayl-add` flags in
-[`add-your-own-books.md`](add-your-own-books.md), [`upgrading.md`](upgrading.md) and the README
-are read by the code and accepted by the parser. External links are never fetched, and whether a
+[`configuration.md`](configuration.md) are read by the code, and that the `ayl add` and `ayl init`
+flags the documentation writes are accepted by their parsers. External links are never fetched, and whether a
 sentence is still true is not a thing a test can know: the read-through stays a human step of
 every release PR.
 

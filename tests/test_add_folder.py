@@ -814,6 +814,68 @@ def test_main_reports_books_sections_chunks_table_and_model(tmp_path, fake_embed
     assert "no cards_ollama table" in out
 
 
+def test_the_no_cards_line_is_said_on_the_first_run_only(tmp_path, fake_embedder, capsys):
+    """Every later `ayl add` into the same index said it again; once is the
+    news, and the question-asking commands keep saying it where it matters."""
+    folder = make_folder(tmp_path)
+    assert add_folder.main([str(folder), "--db", str(tmp_path / "db")]) == 0
+    assert "no cards_ollama table" in capsys.readouterr().out
+    assert add_folder.main([str(folder), "--db", str(tmp_path / "db")]) == 0
+    assert "no cards_ollama table" not in capsys.readouterr().out
+
+
+def _db_choice(monkeypatch, path, clause, exported):
+    """Stand in for the import-time resolution: `path` chosen by `clause`, with
+    LIBRARY_DB_PATH in the process environment or not."""
+    from ask_your_library import config
+    monkeypatch.setattr(config, "DB_CHOICE", config.DbPathChoice(path, clause, "test"))
+    monkeypatch.setattr(config, "EXPORTED",
+                        frozenset({"LIBRARY_DB_PATH"}) if exported else frozenset())
+    monkeypatch.setattr(add_folder, "DB_PATH", path)
+
+
+def test_the_ask_line_drops_the_prefix_for_the_default_index(tmp_path, monkeypatch):
+    """`LIBRARY_DB_PATH=` in front of every `ayl ask` read as a step the reader
+    must not skip. The default under AYL_HOME is what the next shell opens."""
+    from ask_your_library.hints import command
+    index = tmp_path / "home" / "index"
+    _db_choice(monkeypatch, index, clause=3, exported=False)
+    assert add_folder.ask_line(index, named=False) == f'{command("ayl ask")} "..."'
+
+
+def test_the_ask_line_keeps_the_prefix_for_a_path_set_in_the_shell(tmp_path, monkeypatch):
+    """`LIBRARY_DB_PATH=~/x ayl add ~/books`, the form add-your-own-books.md
+    shows: the next shell has no LIBRARY_DB_PATH, and a bare `ayl ask` would
+    open $AYL_HOME/index instead."""
+    from ask_your_library.hints import command
+    index = tmp_path / "my index"
+    _db_choice(monkeypatch, index, clause=1, exported=True)
+    assert add_folder.ask_line(index, named=False) == \
+        f"LIBRARY_DB_PATH='{index}' {command('ayl ask')} \"...\""
+
+
+def test_the_ask_line_keeps_the_prefix_after_a_db(tmp_path, monkeypatch):
+    from ask_your_library.hints import command
+    _db_choice(monkeypatch, tmp_path / "home" / "index", clause=3, exported=False)
+    elsewhere = tmp_path / "elsewhere"
+    assert add_folder.ask_line(elsewhere, named=True) == \
+        f"LIBRARY_DB_PATH={elsewhere} {command('ayl ask')} \"...\""
+
+
+def test_the_ask_line_drops_the_prefix_for_a_path_from_config_env(tmp_path, monkeypatch):
+    """LIBRARY_DB_PATH written in $AYL_HOME/config.env is read by every later
+    command too, so it needs no repeating."""
+    from ask_your_library import config
+    from ask_your_library.hints import command
+    index = tmp_path / "kept"
+    home_config = tmp_path / "config.env"
+    home_config.write_text(f"LIBRARY_DB_PATH={index}\n")
+    _db_choice(monkeypatch, index, clause=1, exported=False)
+    monkeypatch.setattr(config, "PROJECT_ENV", None)
+    monkeypatch.setattr(config, "HOME_CONFIG", home_config)
+    assert add_folder.ask_line(index, named=False) == f'{command("ayl ask")} "..."'
+
+
 def test_a_heading_with_nothing_under_it_keeps_a_section(tmp_path):
     """The last heading of a file (or an empty chapter) is part of the file:
     it keeps a section whose text is the heading line (review of #52)."""

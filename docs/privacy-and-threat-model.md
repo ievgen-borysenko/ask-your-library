@@ -183,6 +183,17 @@ Designed for **localhost, single user**. Not designed for internet exposure:
   Chainlit configuration is a CORS list, i.e. what a cross-origin page may *read*, and never a
   substitute for either; `ayl ui` writes it with the port the server was actually given, because
   an entry naming a port this server is not on is a page there allowed to read its threads.
+- **Book files are untrusted input, and parsing them is bounded.** `ayl add` reads EPUB and PDF
+  files the reader did not write. An EPUB (ADR-029) is read in memory with the standard library,
+  with its archive limits checked before it is opened, unsafe member paths, XML entity
+  declarations in its package files and DRM refused. A PDF (ADR-030) is read by `pypdf` in a child
+  process the parent stops past 60 s or 1 GiB of resident memory — a sampled bound, so a file that
+  allocates as fast as the machine can is stopped a few hundred MiB past it on macOS, which lets no
+  process set itself a hard memory limit; on Linux the child also caps its own address space —
+  with a 256 MiB file cap, a 5,000-page cap and encryption refused. A refused file costs one line naming it; the folder's
+  other books are indexed. The limits are in [Add your own books](add-your-own-books.md); the
+  extracted text is corpus text from then on, covered by the injection layers below and nothing
+  more.
 - The injection layers cover instructions embedded in the *corpus*. They do not protect against
   a hostile *user*, do not cover paraphrased or non-EN/UA injections, and do not make the
   XML-like data blocks a boundary.

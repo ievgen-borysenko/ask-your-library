@@ -867,7 +867,8 @@ See [`docs/upgrading.md`](../upgrading.md).
 
 ## ADR-021: The action channel is a reserved string marker in `current_query`
 
-Status: accepted; recorded 2026-09-16, after the fact. The typed channel is deferred (#25).
+Status: accepted; recorded 2026-09-16, after the fact. The typed channel is deferred: it was
+#25's, and is now issue #111, with ADR-022's records for `history`.
 
 One state field carries both "search this" and "do this". `reflect` may write three reserved markers
 into `current_query` — `__chapter__|book|section` (`nodes.py:547`), `__book__|key|query`, the
@@ -916,7 +917,8 @@ instead of a discovery.
 ## ADR-022: Conversation memory and the scratchpad are free text
 
 Status: accepted; recorded 2026-09-16, after the fact. Deliberate for the scratchpad, accidental for
-`history` and kept.
+`history` and kept. The open half — `history` as records — is issue #111, with ADR-021's typed
+channel.
 
 `history` is a `list[str]`, one string per turn, `"Q: … A: …"` with the answer cut at 500 characters
 (`runner.py:88-99`); it enters the state as text (`state.py:16`, `runner.py:72-86`) and the planner
@@ -1200,7 +1202,7 @@ builds for the reader points, and nothing of it defaults into the working direct
 | the scratchpads (CLI and web chat) | `$AYL_HOME/scratch` | `ASK_SCRATCH_DIR` | no |
 | the web chat's app root, chat database, auth secret | `$AYL_HOME/ui`, `$AYL_HOME/ui/.chainlit` | `AYL_CHAINLIT_DIR` | no |
 | local cards of the engineer's shelf | `$AYL_HOME/cards/tech` | — | yes |
-| the private shelf (the reader's own books, cards, index) | under `$AYL_HOME` | — | yes (not built yet) |
+| the private shelf: the reader's own books, as an index | `$AYL_HOME/index`, filled by `ayl add` from .txt, .md, .epub ([ADR-029](#adr-029-epub-is-read-with-the-standard-library-as-untrusted-input-and-drm-is-refused)) and .pdf ([ADR-030](#adr-030-pdf-is-read-through-its-text-layer-with-pypdf-in-a-child-process-bounded-from-outside-and-encryption-is-refused)); the files stay where they are, and no card is generated for them | `LIBRARY_DB_PATH` | yes, as the index |
 
 What is **not** moved by default: the demo corpus's downloads and prepared texts (`data/raw/`,
 `data/prepared/`), which `scripts/ingest_demo_corpus.py` stages in the checkout when it is run
@@ -1268,7 +1270,10 @@ chat's app root. The counter-argument is real and is recorded with it: a scratch
 retrieved passages verbatim, and a chat database holds answers that quote them, so a home folder
 inside a checkout can put book text one `git add` away from a commit. Both stay outside the
 checkout by default; what is not enforced is the case where the reader moved `AYL_HOME` into one.
-Revisit if the private shelf makes those passages the reader's own books by default.
+Revisit if the private shelf makes those passages the reader's own books by default. *Note,
+0.5.0:* that condition is now met — the demo library is opt-in (ADR-028) and `ayl add` reads the
+reader's EPUB and PDF (ADR-029, ADR-030), so the index a first run builds is the reader's own
+books — and the decision is unchanged in this release; the revisit is open.
 
 When only a folder under `AYL_HOME` is a symlink into a checkout — `$AYL_HOME/index` linked into
 one, `AYL_HOME` itself outside — the refusal names that folder and what it resolves to rather than

@@ -1709,7 +1709,7 @@ try:
                                            shown_url)
     from ask_your_library.graph import enable_tracing_if_key_present
     from ask_your_library.i18n import t
-    from ask_your_library.preflight import check_environment
+    from ask_your_library.preflight import check_environment, no_db_problem, no_tables_problem
     # Tracing is not decided by the flags alone. build_graph calls this before
     # the first node, and it turns a LANGCHAIN_API_KEY with no
     # LANGCHAIN_TRACING_V2 set into LANGCHAIN_TRACING_V2=true. Reading the
@@ -1754,8 +1754,7 @@ if v1_tracing_set:
 # preflight would build has exactly that name in it.
 no_index = set()
 if "no-index" in expected:
-    no_index = {t("pf_no_db", path=DB_PATH),
-                t("pf_no_tables", path=DB_PATH, tables=TABLES["transcripts"])}
+    no_index = {no_db_problem(DB_PATH), no_tables_problem(DB_PATH, TABLES["transcripts"])}
 no_key = {t("pf_no_key")} if "no-key" in expected else set()
 
 for problem in result:

@@ -33,6 +33,7 @@ import pyarrow.compute as pc
 from .ingest.chunking import (CARD_CHUNKER_VERSION, CHUNKER_VERSION, TRANSCRIPT_CEILING_CHARS,
                               TRANSCRIPT_MAX_CHARS, TRANSCRIPT_OVERLAP_CHARS,
                               TRANSCRIPT_TARGET_CHARS)
+from .hints import command, from_clone
 from .ingest.ledger import LEGACY_CHUNKER
 from .ingest.publish import (LEDGER_COLUMNS, STAGING_SUFFIX, rebuild_table,
                              recover_staging)
@@ -217,12 +218,14 @@ def check_index(db, table_name: str, model: str, dims: int) -> str | None:
 # deleting the index directory by hand — a remedy no message mentioned and
 # nobody should have to guess. `--rebuild` drops the table and re-indexes,
 # which is the one write that is not a mix; `--backup` is in the same command
-# because a rebuild discards every row it replaces.
-REBUILD_HINT = ("The way out is a rebuild, which replaces every row: "
-                "`uv run ayl add <folder> --rebuild --backup <dir>` takes a copy first, drops the "
-                "table and re-indexes (`--rebuild --force` skips the copy). For the demo library, "
-                "`uv run ayl init --demo` (`--demo --full` for the whole corpus) rebuilds it in "
-                "its own index (ADR-028).")
+# because a rebuild discards every row it replaces. A function and not a
+# constant: the command's form is this install's (`hints`), read per call.
+def text_rebuild_hint() -> str:
+    return ("The way out is a rebuild, which replaces every row: "
+            f"`{command('ayl add <folder> --rebuild --backup <dir>')}` takes a copy first, "
+            "drops the table and re-indexes (`--rebuild --force` skips the copy). For the "
+            f"demo library, `{command('ayl init --demo')}` (`--demo --full` for the whole "
+            "corpus) rebuilds it in its own index (ADR-028).")
 
 # One table kind, one chunking rule. Cards are cut on their "## section"
 # headings and transcripts by the sentence packer, so the packer's version says
@@ -235,19 +238,21 @@ CARDS_PREFIX = "cards"
 # A cards table is rebuilt on its own, from the card files, without touching the
 # full text: `ayl-add` does not write cards, so its `--rebuild` is not the way
 # out for one, and naming it would send a reader to re-embed every book.
-CARDS_REBUILD_HINT = ("The way out for a cards table is rebuilding it from the card files, a "
-                      "quick stage that leaves the full text alone: "
-                      "`LIBRARY_DB_PATH=~/AskYourLibrary/demo/index uv run "
-                      "scripts/ingest_demo_corpus.py --stage cards --starter` for the demo "
-                      "library (without `--starter` for the whole corpus); for "
-                      "the engineer's shelf the same, with "
-                      "its `LIBRARY_DB_PATH` and `--cards-dir corpus-tech/cards --cards-dir "
-                      "\"${AYL_HOME:-$HOME/AskYourLibrary}/cards/tech\"`.")
+def cards_rebuild_hint() -> str:
+    return ("The way out for a cards table is rebuilding it from the card files, a "
+            "quick stage that leaves the full text alone: "
+            "`LIBRARY_DB_PATH=~/AskYourLibrary/demo/index uv run "
+            "scripts/ingest_demo_corpus.py --stage cards --starter`"
+            f"{'' if from_clone() else ' from a clone of the repository'} for the "
+            "demo library (without `--starter` for the whole corpus); for "
+            "the engineer's shelf the same, with "
+            "its `LIBRARY_DB_PATH` and `--cards-dir corpus-tech/cards --cards-dir "
+            "\"${AYL_HOME:-$HOME/AskYourLibrary}/cards/tech\"`.")
 
 
 def rebuild_hint(table: str) -> str:
     """The command that gets past a mismatch on THIS table."""
-    return CARDS_REBUILD_HINT if table.startswith(CARDS_PREFIX) else REBUILD_HINT
+    return cards_rebuild_hint() if table.startswith(CARDS_PREFIX) else text_rebuild_hint()
 
 
 def expected_chunker(table: str) -> str:

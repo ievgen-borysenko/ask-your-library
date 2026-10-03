@@ -16,6 +16,8 @@ from typing import NamedTuple
 
 from dotenv import dotenv_values, load_dotenv
 
+from .hints import command
+
 # --- where a setting comes from (ADR-027) --------------------------------------
 # Highest first, and the same for every command — `ayl ask`, `ayl ui`, a script:
 #   1. a variable exported in the environment;
@@ -233,7 +235,8 @@ def legacy_db_notice(choice: DbPathChoice, home: Path | None = None) -> str:
     return (f"note: reading the index at {choice.path}, the old default. The default is now "
             f"{base / 'index'} ($AYL_HOME/index); the old place is read until "
             f"{LEGACY_DB_SUNSET}, when it becomes an error. Nothing is moved for you. To move "
-            f"it: `ayl backup <dir>`, then `ayl restore <dir>/<timestamp> --db {index} "
+            f"it: `{command('ayl backup <dir>')}`, then "
+            f"`{command('ayl restore <dir>/<timestamp>')} --db {index} "
             f"--chat-db {chat}`, then move "
             f"{LEGACY_DB_PATH} out of this directory, and the checkout's .chainlit/chat.db "
             f"(with its -wal/-shm) if there is one; or set "
@@ -244,6 +247,26 @@ DB_CHOICE = resolve_db_path()
 # The name every module imports. Decided once, at import, like every other knob
 # here; what is NOT done at import is saying anything about it (`confirm_db_path`).
 DB_PATH = DB_CHOICE.path
+
+
+
+def db_path_persists(choice: DbPathChoice | None = None) -> bool:
+    """Whether the index chosen without a `--db` is one the NEXT command, typed
+    in a new shell, opens too — so a printed hint may name it by leaving the
+    variable out.
+
+    Yes for clause 3 (the default under AYL_HOME), and for clause 1 when
+    LIBRARY_DB_PATH comes from a file: the project's `.env` or
+    `$AYL_HOME/config.env` (`setting_source`). No for clause 1 from the
+    process environment — exported, or written in front of the command
+    (`LIBRARY_DB_PATH=~/x ayl add ~/books`), which the next shell does not
+    have — and no for clause 2, an old index found in the working directory,
+    which only a command typed in that same directory reads."""
+    choice = DB_CHOICE if choice is None else choice
+    if choice.clause == 3:
+        return True
+    return choice.clause == 1 and setting_source("LIBRARY_DB_PATH") != "exported"
+
 
 _db_confirmed = False
 

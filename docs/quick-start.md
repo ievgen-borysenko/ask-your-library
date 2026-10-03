@@ -3,20 +3,45 @@
 The short version is on the [README](../README.md); this page is the same thing step by step,
 what each step does, and every command the project ships.
 
-## The first run: `ayl init`
+## Install
 
-Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/) and
-[Ollama](https://ollama.com), installed and running — Ollama runs both the embeddings and, in the
-default configuration, the answering model. No account and no API key: see
+Requirements: [uv](https://docs.astral.sh/uv/) (it provides Python 3.11+ itself) and
+[Ollama](https://ollama.com), installed and running — Ollama runs the embeddings in both modes
+and, in the default configuration, the answering model too. No account and no API key: see
 [Fully local, no account](configuration.md#fully-local-no-account).
+
+```bash
+uv tool install git+https://github.com/ievgen-borysenko/ask-your-library@v0.5.0
+uv tool update-shell                     # once, only if `ayl` is not found; then open a new terminal
+ayl --version                            # ayl 0.5.0
+```
+
+`uv tool install` puts `ayl` (and the two older names, `ask-library` and `ayl-add`) in uv's tool
+directory, in an environment of its own; `uv tool update-shell` adds that directory to your
+shell's `PATH` when it is not there yet. To move to a later release, run the same install with
+its tag and `--force`. The web chat is the `ui` extra, added by installing again with it:
+
+```bash
+uv tool install --force 'ask-your-library[ui] @ git+https://github.com/ievgen-borysenko/ask-your-library@v0.5.0'
+```
+
+`ayl ui` without the extra says exactly this line. **From a clone** — for the demo library, the
+evals, the tests or a change of your own — every `ayl` command on this page is typed after
+`uv run`, and the web chat's extra is `uv run --extra ui`:
 
 ```bash
 git clone https://github.com/ievgen-borysenko/ask-your-library.git && cd ask-your-library
 uv sync                                  # the locked environment
-uv run ayl init --dry-run                # every step, printed; nothing is pulled, written or built
-uv run ayl init                          # check Ollama, pull the models, write the configuration
-uv run ayl add ~/books                   # your own .txt / .md / .epub / .pdf books, into your index
-uv run ayl ask "..."
+uv run ayl init --dry-run
+```
+
+## The first run: `ayl init`
+
+```bash
+ayl init --dry-run                       # every step, printed; nothing is pulled, written or built
+ayl init                                 # check Ollama, pull the models, write the configuration
+ayl add ~/books                          # your own .txt / .md / .epub / .pdf books, into your index
+ayl ask "..."
 ```
 
 `ayl init` runs five steps, and each one is skipped when it is already done, so a second run
@@ -49,14 +74,17 @@ changes nothing and says so:
    move it ([upgrading](upgrading.md#the-index-moved-to-ayl_homeindex)); nothing is moved for you,
    and no second index is built beside it.
 
-Then it runs `ayl doctor` and prints the next commands. `--dry-run` ends on the status the real
+Then it runs `ayl doctor` and prints the next commands, in the form this install types them
+(bare `ayl` from a tool install, `uv run ayl` from a clone). Before the first `ayl add` that
+doctor says the index is empty and names `ayl add`; that is the state a first run leaves, not a
+fault, and the status it exits with is still 3. `--dry-run` ends on the status the real
 run would, wherever that can be told without a request (a refused folder, a demo that would not be
 built, an index or ledger the doctor would fail), and names what it did not check. `--yes` asks
 nothing;
 `ayl init --print-env-resolution` prints where each setting that decides where your data goes
 comes from.
 
-**The demo library.** `ayl init` asks once whether to build it — on a terminal, and no is the
+**The demo library — from a clone.** `ayl init` asks once whether to build it — on a terminal, and no is the
 default — or `--demo` builds it and `--no-demo` skips the question. It is six public-domain
 classics (`starter: true` in `corpus/manifest.yaml`, chosen to reach every path a first question
 takes) built in a few minutes into `~/AskYourLibrary/demo/index`, **apart from your own index**, so
@@ -77,7 +105,8 @@ LIBRARY_DB_PATH=~/AskYourLibrary/demo/index uv run ayl books
 
 The demo library is built by [`scripts/ingest_demo_corpus.py`](../scripts/ingest_demo_corpus.py)
 (`--starter` for the subset), which ships with the clone and not with the package, so
-`ayl init --demo` needs a clone. It downloads the checksum-pinned texts from gutenberg.org — the
+`ayl init --demo` needs a clone; from a tool install it refuses that step, says why, and steps 1–4
+still run. It downloads the checksum-pinned texts from gutenberg.org — the
 two LibriVox books are not fetched, their transcripts being committed — and stages and caches
 them in `~/AskYourLibrary/demo/cache` (it runs `ingest_demo_corpus.py --cache-dir` with that
 folder, and such a run writes nothing into the clone), so the build is safe to interrupt: running
@@ -96,7 +125,7 @@ It takes `--stage prepare-text|prepare-audio|prepare-canaries|ingest|cards` for 
 pins; running the transcription itself (`--retranscribe`) needs macOS with MLX Whisper.
 
 To answer on a hosted model instead, run `ayl init --mode hosted` and set `OPENROUTER_API_KEY` in
-the `config.env` it writes. That path costs money per question ([Cost](cost.md)); the local one
+the `config.env` it writes; the embeddings stay on Ollama. That path costs money per question ([Cost](cost.md)); the local one
 does not, and quotes less reliably — the default `qwen2.5:14b` left 1 unattributed and 2 broken
 quotes among the 61 checked by code on the run of 2026-09-10
 ([`eval-results/2026-09-10-local-models.md`](eval-results/2026-09-10-local-models.md)). Single run,
@@ -110,7 +139,9 @@ version built in the clone's `data/lancedb` is read where it is until 0.6.0
 [Add your own books](add-your-own-books.md); `ayl doctor` reports whether the index and its book
 ledger agree.
 
-## On a Mac, one script does the installs too
+## From a clone on a Mac, one script does the installs too
+
+Run from the root of a clone:
 
 ```bash
 bash scripts/install-mac.sh --dry-run    # the plan, printed; nothing is changed
@@ -132,22 +163,27 @@ like credentials shown as `<set, N chars>`. It never runs `sudo`. What reaches t
 ## Ask a question, run the UI, run the evals
 
 Every command below reads your index; put `LIBRARY_DB_PATH=~/AskYourLibrary/demo/index` in front
-of one to aim it at the demo library instead.
+of one to aim it at the demo library instead. Installed as a tool, type them as shown; from a
+clone, after `uv run` (`uv run --extra ui ayl ui` for the web chat).
 
 ```bash
-uv run ayl ask "Which book in my library is about a shipwreck?"
-uv run ayl ask                           # interactive chat with conversation memory
-uv run ayl ask --verbose "..."           # plus every evidence item with the passage it was checked against
-uv run ayl books                         # what the index holds, listed by code: no model call, $0
-uv run ayl doctor                        # the environment and the index, both halves, nothing written
+ayl ask "Which book in my library is about a shipwreck?"
+ayl ask                                  # interactive chat with conversation memory
+ayl ask --verbose "..."                  # plus every evidence item with the passage it was checked against
+ayl books                                # what the index holds, listed by code: no model call, $0
+ayl doctor                               # the environment and the index, both halves, nothing written
 
-# web UI (Chainlit, same core as the CLI), bound to loopback; throwaway local demo, admin / change-me:
-# the login form's first field is labelled "Email address"; type the username there
-AYL_ALLOW_DEFAULT_LOGIN=1 uv run --extra ui ayl ui -w
+# web UI (Chainlit, same core as the CLI; the `ui` extra), bound to loopback; throwaway local
+# demo, admin / change-me: the login form's first field is labelled "Email address"; type the
+# username there
+AYL_ALLOW_DEFAULT_LOGIN=1 ayl ui
 # with a real password (the UI refuses to start on the placeholder one):
-CHAINLIT_USERNAME=... CHAINLIT_PASSWORD=... uv run --extra ui ayl ui -w
+CHAINLIT_USERNAME=... CHAINLIT_PASSWORD=... ayl ui
+```
 
-# evals
+The evals and the tests need a clone:
+
+```bash
 uv run eval/run_retrieval_eval.py        # no LLM calls, free
 uv run eval/run_agent_eval.py            # full agentic loop over the golden set
 uv run eval/injection_canary.py          # one LLM call (the last stage; free on the local backend)

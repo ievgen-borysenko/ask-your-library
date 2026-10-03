@@ -825,7 +825,7 @@ COMMAND_DOCS = ("docs/add-your-own-books.md", "docs/upgrading.md", "README.md")
 # of `LLM_BACKEND=ollama` far more often than as a command, and neither may take
 # a flag away from the command named above it.
 COMMANDS = AYL_ADD_FORMS + ("ayl init", "ayl ask", "ayl books", "ayl ui", "ask-library",
-                            "ingest_demo_corpus.py", "install-mac.sh")
+                            "ingest_demo_corpus.py", "install-mac.sh", "uv tool install")
 # `ayl init` has a parser of its own (#30), and the first-run pages are where a
 # reader copies its flags from.
 INIT_DOCS = ("README.md", "docs/quick-start.md", "docs/configuration.md",

@@ -2,6 +2,48 @@
 
 ## Unreleased
 
+## 0.5.0 (2026-10-04)
+
+This release closes two milestones at once. **0.4.0, "reliable and tested"** — a measured baseline,
+the provenance gate before the answer, a book ledger with stable ids, an index stamped with what
+built it, the re-chunk — was closed on 2026-10-03 without a tag of its own, so there is no 0.4.0
+release and no `v0.4.0` tag. **0.5.0, "installable in one command"** — the `ayl` dispatcher,
+`AYL_HOME`, `ayl init`, and EPUB and PDF import — is the rest. Everything below is new since
+0.3.1; a reader coming from it starts at [upgrading](upgrading.md#from-031-to-050). The acceptance
+run on 2026-10-03 — a clean `uv tool install` on macOS Apple silicon with Ollama, `ayl init`, the
+reader's own PDF through `ayl add`, a first answer with verified citations — passed; what it found
+and this release leaves for later is #116, #117 and #118.
+
+- **Every command a printed line asks you to type is in this install's form.** One module
+  (`hints.py`) decides: `uv run ayl ...` from a clone, bare `ayl ...` from a tool install or a
+  wheel. The preflight's no-index and missing-table sentences in both languages, the rebuild
+  hints, the chat-database repair line, the move of an index from the old default, `ayl add`'s
+  closing lines and `ayl init`'s next steps all go through it; a hint that names a repository
+  script says it needs a clone instead of printing `uv run` to a tool install, and the
+  installer's one-command remedy becomes `ayl init` there; a command only named inside a
+  sentence ("re-run `ayl add` over its folder") stays bare. `ayl add` ends on `ayl ask "..."`
+  alone when the index it wrote is the one the next shell opens too — the default under
+  `AYL_HOME`, or `LIBRARY_DB_PATH` from a `.env` or `config.env` — and keeps `LIBRARY_DB_PATH=`
+  after a `--db` and after a `LIBRARY_DB_PATH` set only in the shell. The `--help` texts and the `config.env` `ayl init` writes point at the
+  configuration page on GitHub, at the installed release's tag, rather than at `.env.example`
+  and `docs/`, which a tool install does not have, and `ayl ui` without the web chat's extra names, on a tool install,
+  `uv tool install --force 'ask-your-library[ui] @ git+...@v<version>'`.
+- **`ayl doctor` before the first `ayl add` says the index is empty, not that something is
+  broken.** Right after `ayl init` the configured index does not exist yet; the doctor now prints
+  "index: empty — no books added yet" with the `ayl add` line, instead of the not-ready block and
+  the index half's "no index at". The status is still 3, which `ayl init` reads. A missing index
+  named with `--db`, or by a `LIBRARY_DB_PATH` set only in the shell (a typo, or the demo
+  library's folder), is still reported as a problem.
+- **The cards-table notice is said where it matters, once.** Not by `ayl doctor`, which does not
+  search; by `ayl add` only on the run that creates the index; and under `ayl ask` the search's own
+  warning about the same table is not repeated once the preflight notice has said it
+  (`library.mark_reported`). The eval harnesses, which run no preflight, still get the warning.
+- **The release pass over the documentation.** The quick start leads with the tool install; the
+  upgrading page has what a 0.3.1 reader meets, and no longer claims a warning for an index 0.3.1
+  built (it has no chunker stamp, so nothing warns, and the first `ayl add` stamps it); the
+  architecture diagrams carry the out-of-scope edge of `plan` (#70); SECURITY.md and the threat
+  model treat book files as untrusted input with the EPUB and PDF bounds, and list the eight
+  required checks; `.env.example` lists every variable the code reads.
 - **The grouped weekly lockfile update.** `lancedb` 0.38.0 -> 0.39.0, `langchain-openai` 1.6.2 ->
   1.6.6, `langgraph` 1.2.11 -> 1.2.12, `openai` 3.13.0 -> 3.22.1, `sqlalchemy` 2.0.52 -> 2.1.1 and
   `greenlet` 3.5.5 -> 3.5.6, with `langchain-core` following from 1.6.2 to 1.6.6; `sqlalchemy`

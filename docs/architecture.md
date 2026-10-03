@@ -25,6 +25,7 @@ flowchart TB
         PLAN -->|"catalogue<br/>question"| CAT["catalog: list_books over the index tables,<br/>count = length of that list, no search"]:::code
         PLAN -->|"steps left"| ACT["act: search_both, hybrid + RRF,<br/>or read_chapter; sanitized, stable hit ids"]:::code
         PLAN -->|"no query left"| SYN
+        PLAN -->|"out of scope (#70): first reading,<br/>nothing searched — the refusal<br/>is written by code, no model call"| SYN
         ACT --> OBS["observe: evidence distillate (book, chapter, candidate quote, hit id),<br/>then the quote gate in plain code: kept, re-pinned or dropped"]:::ai
         OBS --> REF{"reflect:<br/>enough<br/>evidence?"}:::ai
         REF -->|"next query, or a<br/>chapter not read yet"| ACT
@@ -62,6 +63,7 @@ flowchart TD
     Q(["question"]):::human --> P["plan: decides mode,<br/>asks for 2-4 English queries"]:::ai
     P -->|"steps left"| A["act: hybrid search, or read a chapter<br/>hit ids like s2h4, sanitized text to the scratchpad"]:::code
     P -->|"step budget or question deadline<br/>used up after a clarify /<br/>the planner's own call timed out"| S
+    P -->|"out of scope (#70), first plan of the run, no evidence yet:<br/>mode refusal, no search; synthesize writes the refusal in code"| S
     P -->|"catalogue question: count, titles, a title or an author"| K["catalog: the book list read from the index tables,<br/>count = length of that list; no search, no second model call"]:::code
     K --> V
     A --> O["observe: distill candidate quotes, each pinned to a hit id,<br/>then the quote gate: kept, re-pinned or dropped"]:::ai
@@ -119,6 +121,14 @@ in [`adr/README.md`](adr/README.md), each with the measurement that settled it.
   and score-scale free: only a chunk's rank in each list matters, so cosine distance and BM25
   never have to be calibrated against each other. A broken FTS index degrades to vector-only
   with a warning rather than silently.
+- **An out-of-scope request is refused at `plan`, before any search (#70).** The planner's one
+  call may set an `out_of_scope` field — a request for something the library cannot supply (code,
+  a translation, arithmetic, a persona) rather than a question about the books. On the first
+  `plan` of a run, with no evidence collected, code turns that into mode `refusal`: no query is
+  queued, so the run goes straight to `synthesize`, which writes the refusal itself and makes no
+  model call. After a clarify the field is ignored, because the evidence in the state was paid for
+  and the reader's follow-up is not out of scope. `eval/scope_canary.py` measures it; the live run
+  and the two misses are in the [backlog](backlog.md#agent-behaviour).
 - **Catalogue questions bypass retrieval (ADR-016).** `plan` recognises them in its one call and
   names the operation (`count`, `list`, `has` a title, `by_author`); `library.list_books()` reads
   the distinct book keys of both tables (the demo's canary fixtures excluded by their `source`
@@ -164,15 +174,15 @@ in [`adr/README.md`](adr/README.md), each with the measurement that settled it.
   otherwise degrades retrieval silently when the dims happen to match. The stamp also carries the
   chunker and a row-schema version (17.09), and those two are enforced the other way round:
   **warn on read, refuse on write** (#27). Differently-cut text still retrieves, so an index keeps
-  answering and says so once per table; the next `ayl-add` into it stops before writing, because
-  one append mixes two chunkers in a table with nothing to tell them apart. `ayl-add --backup` is
+  answering and says so once per table; the next `ayl add` into it stops before writing, because
+  one append mixes two chunkers in a table with nothing to tell them apart. `ayl backup` is
   what survives the rebuild that resolves it — see [upgrading](upgrading.md).
 - **A book has a minted identity, kept in a ledger beside the index (17.09, ADR-024).** The
   `books` table records what was requested, what is indexed and what failed, under a `book_id`
   assigned once and never derived from title, author or path — so a corrected author renames a
-  book instead of indexing a second one, and `ayl-add` updates one book at a time by that id. The
+  book instead of indexing a second one, and `ayl add` updates one book at a time by that id. The
   catalogue does not read it: what the library holds is answered from the rows that can be
-  searched (ADR-016), and `ayl-add --doctor` is what reconciles the two.
+  searched (ADR-016), and `ayl doctor` is what reconciles the two.
 
 ## Quote provenance (not faithfulness, and not correctness)
 
@@ -219,7 +229,7 @@ or "card"), which is the corpus of the passage it is pinned to. The UI badge is 
 both unattributed and broken are zero, it names the card matches under the count, and a run whose
 every quote matched only a card is amber and says so instead of showing "0/0". Under the badge every
 evidence item opens to the passage it was checked against (verdict, book, section, hit id, **what
-kind of source that passage is**, the quote, the retrieved text); `ask-library --verbose` prints the
+kind of source that passage is**, the quote, the retrieved text); `ayl ask --verbose` prints the
 same list. Reports written before 16.09 counted card matches inside the triple
 ([`evaluation.md`](evaluation.md)).
 
@@ -241,19 +251,27 @@ The numbers under [Evaluation](evaluation.md) come from this validator (runs on 
 src/ask_your_library/  agent package: graph, nodes, model client (llm.py), prompts, clarify
                        resolver, coverage gate, provenance engine, hybrid search, embeddings,
                        index fingerprint, bookkey.py (one home for book identity),
-                       sanitizer, preflight, runner, CLI, i18n
+                       sanitizer, preflight, runner, the `ayl` dispatcher (ayl.py), CLI,
+                       `ayl init` (init_cmd.py), AYL_HOME and the configuration layers
+                       (home.py, config.py), hints.py (commands as this install types them), i18n
   ingest/              chapter splitting, chunking, LanceDB rows, FTS index, staged and
                        per-book publishing, ledger.py (the books ledger), doctor.py
-                       (ledger vs index), and add_folder.py - the `ayl-add` folder ingest
+                       (ledger vs index), epub.py and pdf.py (the two untrusted formats),
+                       backup.py and lock.py (`ayl backup` / `ayl restore`, the ingest lock),
+                       and add_folder.py - the `ayl add` folder ingest
   ui/                  Chainlit web chat (app.py), launcher.py (writes the app root
                        Chainlit reads, then starts it), and the packaged config,
                        translation and welcome page
-scripts/               ingest_demo_corpus.py - staged, cached corpus build
+scripts/               ingest_demo_corpus.py - staged, cached corpus build; fetch_tech_shelf.py -
+                       the engineer's shelf; install-mac.sh - the macOS installer for a clone
 corpus/                manifest.yaml (checksums), book cards, canaries, audio transcripts,
                        toc/ (committed chapter titles; the card-grounding test uses them)
+corpus-tech/           the engineer's shelf: manifest, chapter lists and cards, no book text
 eval/                  retrieval eval, agent eval, injection and scope canaries, golden sets, report summarizer
 tests/                 unit tests and the golden-set / manifest CI guard
-docs/                  backlog.md (known gaps, v0.2), CHANGELOG.md, adr/ (decision records),
+docs/                  backlog.md (known gaps), CHANGELOG.md, adr/ (decision records),
                        eval-results/, examples/
-.github/workflows/     CI: unit tests on every push, UI contracts with the chainlit extra
+.github/workflows/     ci.yml (tests on both backends, UI contracts with the chainlit extra, the
+                       browser smoke, the installer, the workflow lint), security.yml (gitleaks,
+                       OSV-Scanner), corpus.yml (the corpus pins)
 ```
