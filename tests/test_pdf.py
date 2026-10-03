@@ -7,16 +7,17 @@ no real book is read, and the tests do not depend on the library's own writer.
 The text is invented, low-entropy and plainly synthetic. No network: the
 embedder is faked as in test_add_folder.py, the index is a tmp_path LanceDB.
 """
+import io
 import logging
 import os
+import sys
 import time
 import tracemalloc
 import zlib
+from pathlib import Path
 
 import lancedb
 import pypdf
-import pypdf._page
-import pypdf.filters
 import pytest
 
 from ask_your_library import ayl, library
@@ -171,6 +172,43 @@ def make_pdf(path, pages, *, info=None, outline=None, encrypt=False, compress=Fa
 KETTLE = {"Title": "The Copper Kettle", "Author": "Ada Quill"}
 
 
+def make_differences_pdf(path, names: int):
+    """A PDF 1.5 whose one font has an `/Encoding` with a `/Differences` array
+    of `names` repeated glyph names, kept in a Flate-compressed object stream
+    behind a cross-reference stream: millions of entries in a few KiB."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    encoding = b"<< /Type /Encoding /Differences [0" + b" /A" * names + b"] >>"
+    packed = zlib.compress(b"5 0 " + encoding, 9)
+    content = show(room("amber"))
+    bodies = {
+        1: b"<< /Type /Catalog /Pages 2 0 R >>",
+        2: b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        3: b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+           b"/Resources << /Font << /F1 4 0 R >> >> /Contents 6 0 R >>",
+        4: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding 5 0 R >>",
+        6: b"<< /Length %d >>\nstream\n" % len(content) + content + b"\nendstream",
+        7: b"<< /Type /ObjStm /N 1 /First 4 /Filter /FlateDecode /Length %d >>\nstream\n"
+           % len(packed) + packed + b"\nendstream",
+    }
+    out = bytearray(b"%PDF-1.5\n%\xe2\xe3\xcf\xd3\n")
+    offsets = {}
+    for n, body in bodies.items():
+        offsets[n] = len(out)
+        out += b"%d 0 obj\n" % n + body + b"\nendobj\n"
+    offsets[8] = len(out)
+    rows = [b"\x00" + (0).to_bytes(4, "big") + b"\xff\xff"]
+    for n in range(1, 9):
+        if n == 5:
+            rows.append(b"\x02" + (7).to_bytes(4, "big") + (0).to_bytes(2, "big"))
+        else:
+            rows.append(b"\x01" + offsets[n].to_bytes(4, "big") + (0).to_bytes(2, "big"))
+    xref = b"".join(rows)
+    out += (b"8 0 obj\n<< /Type /XRef /Size 9 /W [1 4 2] /Root 1 0 R /Length %d >>\nstream\n"
+            % len(xref) + xref + b"\nendstream\nendobj\nstartxref\n%d\n%%%%EOF\n" % offsets[8])
+    path.write_bytes(bytes(out))
+    return path
+
+
 def cmap(*sections: bytes) -> bytes:
     """A `/ToUnicode` CMap with these `beginbfchar`/`beginbfrange` sections."""
     return (b"/CIDInit /ProcSet findresource begin 12 dict begin begincmap\n"
@@ -193,14 +231,14 @@ def titles(book):
 
 def refused(path):
     with pytest.raises(pdf.PdfRefused) as refusal:
-        pdf.read_pdf(path)
+        pdf.read_in_process(path)
     return str(refusal.value)
 
 
 # --- structure -----------------------------------------------------------------------
 
 def test_one_page_is_one_section_and_the_metadata_is_the_key(tmp_path):
-    book = pdf.read_pdf(make_pdf(tmp_path / "b.pdf", [room("amber")], info=KETTLE))
+    book = pdf.read_in_process(make_pdf(tmp_path / "b.pdf", [room("amber")], info=KETTLE))
     assert (book.title, book.author) == ("The Copper Kettle", "Ada Quill")
     assert book.sections == [("Page 1", "\n".join(room("amber")))]
     assert book.notes == []
@@ -208,7 +246,7 @@ def test_one_page_is_one_section_and_the_metadata_is_the_key(tmp_path):
 
 def test_without_an_outline_every_page_with_text_is_a_section(tmp_path):
     pages = [room("amber"), [], room("cedar"), room("delta")]
-    book = pdf.read_pdf(make_pdf(tmp_path / "b.pdf", pages))
+    book = pdf.read_in_process(make_pdf(tmp_path / "b.pdf", pages))
     # The empty page is no section, and the numbering keeps its gap.
     assert titles(book) == ["Page 1", "Page 3", "Page 4"]
     assert "cedar room" in book.sections[1][1] and "amber" not in book.sections[1][1]
@@ -216,7 +254,7 @@ def test_without_an_outline_every_page_with_text_is_a_section(tmp_path):
 
 def test_an_outline_of_three_entries_is_three_sections_and_front_matter(tmp_path):
     outline = [Outline("Chapter One", 1), Outline("Chapter Two", 2), Outline("Chapter Three", 4)]
-    book = pdf.read_pdf(make_pdf(tmp_path / "b.pdf", five_pages(), outline=outline))
+    book = pdf.read_in_process(make_pdf(tmp_path / "b.pdf", five_pages(), outline=outline))
     assert titles(book) == [FRONT_MATTER_SECTION, "Chapter One", "Chapter Two",
                             "Chapter Three"]
     text = dict(book.sections)
@@ -234,46 +272,46 @@ def test_outline_entries_that_point_at_no_page_are_ignored(tmp_path):
                Outline("A page number", b"40"),             # an integer, not a page
                Outline("", 2),                              # no title
                Outline("Chapter Two", 3)]
-    book = pdf.read_pdf(make_pdf(tmp_path / "b.pdf", five_pages(), outline=outline))
+    book = pdf.read_in_process(make_pdf(tmp_path / "b.pdf", five_pages(), outline=outline))
     assert titles(book) == ["Chapter One", "Chapter Two"]
     assert "cedar" in dict(book.sections)["Chapter One"]
 
 
 def test_outline_order_does_not_decide_reading_order_and_a_page_has_one_name(tmp_path):
     outline = [Outline("Later", 3), Outline("Earlier", 0), Outline("Also earlier", 0)]
-    book = pdf.read_pdf(make_pdf(tmp_path / "b.pdf", five_pages(), outline=outline))
+    book = pdf.read_in_process(make_pdf(tmp_path / "b.pdf", five_pages(), outline=outline))
     assert titles(book) == ["Earlier", "Later"]
 
 
 def test_a_single_root_entry_is_read_through_to_its_children(tmp_path):
     outline = [Outline("The Copper Kettle", 0, [Outline("One", 1), Outline("Two", 3)])]
-    book = pdf.read_pdf(make_pdf(tmp_path / "b.pdf", five_pages(), outline=outline))
+    book = pdf.read_in_process(make_pdf(tmp_path / "b.pdf", five_pages(), outline=outline))
     assert titles(book) == [FRONT_MATTER_SECTION, "One", "Two"]
 
 
 def test_nested_entries_below_the_top_level_do_not_split_a_section(tmp_path):
     outline = [Outline("One", 0, [Outline("One, part two", 1)]), Outline("Two", 2)]
-    book = pdf.read_pdf(make_pdf(tmp_path / "b.pdf", five_pages(), outline=outline))
+    book = pdf.read_in_process(make_pdf(tmp_path / "b.pdf", five_pages(), outline=outline))
     assert titles(book) == ["One", "Two"]
     assert "birch" in dict(book.sections)["One"]
 
 
 def test_repeated_outline_titles_are_made_unique(tmp_path):
     outline = [Outline("Notes", 0), Outline("Notes", 2)]
-    book = pdf.read_pdf(make_pdf(tmp_path / "b.pdf", five_pages(), outline=outline))
+    book = pdf.read_in_process(make_pdf(tmp_path / "b.pdf", five_pages(), outline=outline))
     assert titles(book) == ["Notes", "Notes (2)"]
 
 
 def test_an_outline_that_points_nowhere_falls_back_to_pages_and_says_so(tmp_path):
     outline = [Outline("Lost", b"40 0 R"), Outline("Also lost", b"41 0 R")]
-    book = pdf.read_pdf(make_pdf(tmp_path / "b.pdf", five_pages()[:2], outline=outline))
+    book = pdf.read_in_process(make_pdf(tmp_path / "b.pdf", five_pages()[:2], outline=outline))
     assert titles(book) == ["Page 1", "Page 2"]
     assert book.notes == ["no entry of its outline points at a page of the document; its pages "
                           "are the sections instead"]
 
 
 def test_an_outline_that_is_not_a_tree_falls_back_to_pages(tmp_path):
-    book = pdf.read_pdf(make_pdf(tmp_path / "b.pdf", five_pages()[:2],
+    book = pdf.read_in_process(make_pdf(tmp_path / "b.pdf", five_pages()[:2],
                                  outline_first=b"(not an entry)"))
     assert titles(book) == ["Page 1", "Page 2"]
 
@@ -283,9 +321,9 @@ OUTLINE_TOO_BIG = ("its outline is too deep or too large to read; its pages are 
 
 
 def test_an_outline_over_its_cap_falls_back_to_pages(tmp_path, monkeypatch):
-    monkeypatch.setattr(pdf, "MAX_OUTLINE_ENTRIES", 2)
+    monkeypatch.setitem(pdf.CONFIGURATION, "outline_maximum_entries", 2)
     outline = [Outline("One", 0), Outline("Two", 1), Outline("Three", 2)]
-    book = pdf.read_pdf(make_pdf(tmp_path / "b.pdf", five_pages(), outline=outline))
+    book = pdf.read_in_process(make_pdf(tmp_path / "b.pdf", five_pages(), outline=outline))
     assert titles(book)[:2] == ["Page 1", "Page 2"]
     assert book.notes == [OUTLINE_TOO_BIG]
 
@@ -294,7 +332,7 @@ def test_an_outline_too_deep_falls_back_to_pages(tmp_path):
     entry = Outline("Leaf", 1)
     for depth in range(40):                          # past MAX_OUTLINE_DEPTH
         entry = Outline(f"Level {depth}", 0, [entry])
-    book = pdf.read_pdf(make_pdf(tmp_path / "b.pdf", five_pages(),
+    book = pdf.read_in_process(make_pdf(tmp_path / "b.pdf", five_pages(),
                                  outline=[entry, Outline("Two", 2)]))
     assert titles(book)[:2] == ["Page 1", "Page 2"]
     assert book.notes == [OUTLINE_TOO_BIG]
@@ -302,19 +340,19 @@ def test_an_outline_too_deep_falls_back_to_pages(tmp_path):
 
 def test_whitespace_is_normalised_controls_stripped_and_hyphens_kept(tmp_path):
     lines = ["The   amber\troom is quiet-", "ly lit\x1b[2J at noon.", "   ", "A  lamp."]
-    book = pdf.read_pdf(make_pdf(tmp_path / "b.pdf", [lines + room("birch")]))
+    book = pdf.read_in_process(make_pdf(tmp_path / "b.pdf", [lines + room("birch")]))
     assert book.sections[0][1].startswith(
         "The amber room is quiet-\nly lit[2J at noon.\nA lamp.\n")
 
 
 def test_flate_compressed_pages_are_read(tmp_path):
-    book = pdf.read_pdf(make_pdf(tmp_path / "b.pdf", five_pages(), compress=True))
+    book = pdf.read_in_process(make_pdf(tmp_path / "b.pdf", five_pages(), compress=True))
     assert titles(book) == ["Page 1", "Page 2", "Page 3", "Page 4", "Page 5"]
 
 
 def test_text_drawn_through_a_form_is_read(tmp_path):
     form = show(room("fern"))
-    book = pdf.read_pdf(make_pdf(tmp_path / "b.pdf", [b"/X1 Do"], form=form))
+    book = pdf.read_in_process(make_pdf(tmp_path / "b.pdf", [b"/X1 Do"], form=form))
     assert "fern room" in book.sections[0][1]
 
 
@@ -331,9 +369,9 @@ XMP = (b'<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>'
 
 
 def test_xmp_fills_what_the_information_dictionary_lacks(tmp_path):
-    book = pdf.read_pdf(make_pdf(tmp_path / "x.pdf", five_pages(), xmp=XMP))
+    book = pdf.read_in_process(make_pdf(tmp_path / "x.pdf", five_pages(), xmp=XMP))
     assert (book.title, book.author) == ("The Tin Bell", "Bo Reed, Cy Ink")
-    both = pdf.read_pdf(make_pdf(tmp_path / "y.pdf", five_pages(), xmp=XMP,
+    both = pdf.read_in_process(make_pdf(tmp_path / "y.pdf", five_pages(), xmp=XMP,
                                  info={"Title": "The Copper Kettle"}))
     assert (both.title, both.author) == ("The Copper Kettle", "Bo Reed, Cy Ink")
 
@@ -341,7 +379,7 @@ def test_xmp_fills_what_the_information_dictionary_lacks(tmp_path):
 def test_xmp_with_an_entity_declaration_is_ignored_not_expanded(tmp_path):
     bomb = (b'<?xml version="1.0"?><!DOCTYPE x [<!ENTITY a "aaaaaaaaaa">]>'
             + XMP.replace(b"The Tin Bell", b"&a;"))
-    book = pdf.read_pdf(make_pdf(tmp_path / "x.pdf", five_pages(), xmp=bomb))
+    book = pdf.read_in_process(make_pdf(tmp_path / "x.pdf", five_pages(), xmp=bomb))
     assert (book.title, book.author) == ("", "")
 
 
@@ -374,7 +412,7 @@ def test_the_scan_rule_reads_the_first_ten_pages(tmp_path):
     assert refused(make_pdf(tmp_path / "late.pdf", late)) == NO_TEXT_LAYER.format(n=10, s="s")
     # A near-empty cover and title page are not a scan.
     early = [[], ["The Copper Kettle"], room("amber"), room("birch")]
-    assert titles(pdf.read_pdf(make_pdf(tmp_path / "early.pdf", early))) == [
+    assert titles(pdf.read_in_process(make_pdf(tmp_path / "early.pdf", early))) == [
         "Page 2", "Page 3", "Page 4"]
 
 
@@ -396,7 +434,7 @@ def test_an_encrypted_pdf_is_refused_and_no_password_is_tried(tmp_path, monkeypa
 def test_the_encryption_check_stands_without_the_reader_override(tmp_path, monkeypatch):
     """Belt and braces: were the library to stop calling the method the
     override replaces, `is_encrypted` still refuses the file."""
-    monkeypatch.delattr(pdf._Reader, "_handle_encryption")
+    monkeypatch.setattr(pdf, "reader_class", lambda: pypdf.PdfReader)
     monkeypatch.setattr(pypdf.PdfReader, "_handle_encryption", lambda self, password: None)
     assert refused(make_pdf(tmp_path / "b.pdf", five_pages(), encrypt=True)).startswith(
         "encrypted")
@@ -421,12 +459,12 @@ def test_a_damaged_cross_reference_table_is_rebuilt(tmp_path):
     data = path.read_bytes()
     at = data.rindex(b"startxref\n") + len(b"startxref\n")
     path.write_bytes(data[:at] + b"999999\n%%EOF\n")          # points at nothing
-    assert len(pdf.read_pdf(path).sections) == 5
+    assert len(pdf.read_in_process(path).sections) == 5
 
 
 def test_a_file_over_the_size_cap_is_refused_before_it_is_read(tmp_path, monkeypatch):
     monkeypatch.setattr(pdf, "MAX_FILE_BYTES", 1024)
-    monkeypatch.setattr(pdf, "_Reader", None)                  # never reached
+    monkeypatch.setattr(pdf, "reader_class", None)             # never reached
     assert refused(make_pdf(tmp_path / "b.pdf", five_pages())) == (
         "the file is larger than 0 MiB")
 
@@ -441,6 +479,7 @@ def test_a_page_tree_past_the_cap_is_not_walked_to_its_end(tmp_path, monkeypatch
     """The library's page-tree walk stops at 2 * MAX_PAGES entries, so a tree
     of a million entries is not materialised before the count is refused."""
     monkeypatch.setattr(pdf, "MAX_PAGES", 2)
+    monkeypatch.setitem(pdf.CONFIGURATION, "page_tree_maximum_entries", 4)
     assert refused(make_pdf(tmp_path / "b.pdf", five_pages())) == (
         "its page tree is too deep or too large to read")
 
@@ -515,156 +554,23 @@ def test_a_compression_bomb_under_the_stream_cap_stops_at_the_page_text_cap(tmp_
 def test_a_compression_bomb_over_the_stream_cap_is_cut_off_by_the_library(tmp_path):
     """24 MB of drawing instructions in a 24 KB stream: the library stops
     inflating at MAX_STREAM_BYTES, and nothing past it is allocated (the peak
-    is the capped output and one copy of it). The library's refusal is said
-    as what it is, too much content for a page."""
+    is the capped output and one copy of it)."""
     path = make_pdf(tmp_path / "b.pdf", [room("amber"), b"q Q " * 6_000_000], compress=True)
     assert path.stat().st_size < 100_000
     started = time.monotonic()
     peak = peak_bytes(lambda: refused(path))
-    assert refused(path) == "a page in it has more than 4 MiB of drawing instructions"
+    assert refused(path) == "could not be read (LimitReachedError)"
     assert peak < 2 * pdf.MAX_STREAM_BYTES + 4 * 1024 * 1024, peak
     assert time.monotonic() - started < 5
 
 
-def test_drawing_instructions_past_the_page_cap_are_refused_before_they_are_parsed(
-        tmp_path, monkeypatch):
-    monkeypatch.setattr(pdf, "MAX_PAGE_CONTENT_BYTES", 64 * 1024)
-    path = make_pdf(tmp_path / "b.pdf", [room("amber"), b"q Q " * 20_000], compress=True)
-    assert refused(path) == "a page in it has more than 0 MiB of drawing instructions"
-
-
-def test_a_form_drawn_many_times_counts_every_time(tmp_path, monkeypatch):
-    """A 10 KB form drawn 50 times is 500 KB to parse, though it is one
-    object: every draw is counted, before the library parses it."""
-    monkeypatch.setattr(pdf, "MAX_PAGE_CONTENT_BYTES", 256 * 1024)
-    form = b"q Q " * 2_500 + show(["x"])
-    path = make_pdf(tmp_path / "b.pdf", [room("amber"), b"/X1 Do " * 50], form=form)
-    assert refused(path) == "a page in it has more than 0 MiB of drawing instructions"
-    # Drawn a few times, the same form is read.
-    fine = make_pdf(tmp_path / "f.pdf", [room("amber"), b"/X1 Do " * 3], form=form)
-    assert len(pdf.read_pdf(fine).sections) == 2
-
-
-def test_drawing_instructions_past_the_file_cap_are_refused(tmp_path, monkeypatch):
-    monkeypatch.setattr(pdf, "MAX_CONTENT_BYTES", 600)
-    assert refused(make_pdf(tmp_path / "b.pdf", five_pages())) == (
-        "it has more than 0 MiB of drawing instructions in all")
-
-
-def test_everything_inflated_in_one_file_is_capped(tmp_path, monkeypatch):
-    monkeypatch.setattr(pdf, "MAX_DECODED_BYTES", 600)
-    path = make_pdf(tmp_path / "b.pdf", five_pages(), compress=True)
-    assert refused(path) == "its compressed streams inflate past 0 MiB in all"
-
-
-def test_the_library_is_left_as_it_was_found(tmp_path, monkeypatch, caplog):
-    """The three counting points are put back after every read, refused or not,
-    and are still the names the library looks up when it inflates a stream,
-    when it parses a page and when it builds a font: if a later version moved
-    them, the counting would stop, and this is where that shows."""
-    decode, content_stream = pypdf.filters.decode_stream_data, pypdf._page.ContentStream
-    from_font_resource = pypdf._font.Font.__dict__["from_font_resource"]
-    propagate = logging.getLogger("pypdf").propagate
-    seen = []
-    for name in ("inflated", "parsed", "font"):
-        original = getattr(pdf._Budget, name)
-        monkeypatch.setattr(pdf._Budget, name,
-                            lambda self, *args, _name=name, _original=original:
-                            seen.append(_name) or _original(self, *args))
-    pdf.read_pdf(make_pdf(tmp_path / "b.pdf", five_pages(), compress=True))
-    assert set(seen) == {"inflated", "parsed", "font"}
-    refused(make_pdf(tmp_path / "e.pdf", five_pages(), encrypt=True))
-    assert pypdf.filters.decode_stream_data is decode
-    assert pypdf._page.ContentStream is content_stream
-    assert pypdf._font.Font.__dict__["from_font_resource"] is from_font_resource
-    assert logging.getLogger("pypdf").propagate is propagate
-
-
-@pytest.mark.parametrize("counter", ["parsed", "font"])
-def test_a_reader_whose_counting_does_not_engage_refuses_the_file(tmp_path, monkeypatch,
-                                                                 counter):
-    """Were a later library to parse a page or build a font somewhere the
-    counting points do not reach, text would come out uncounted: the file is
-    refused instead of read without its bounds."""
-    monkeypatch.setattr(pdf._Budget, counter, lambda self, *args: None)
-    assert refused(make_pdf(tmp_path / "b.pdf", five_pages())) == (
-        "the reader's limits did not engage (library version?)")
-
-
-# --- fonts, forms and the deadline ---------------------------------------------------
-# The first review's reproducers. Before the fix, on the machine the bounds were
-# measured on: the CMap re-parse took 8.7 s, the empty-form draws 122 s and
-# 722 MiB, the many-fonts page 45 s and 602 MiB.
-
-FOUR_WIDE_FONTS = {f"F{n}": cmap(WIDE_RANGE) for n in range(2, 6)}
-
-
-def bounded(call):
-    """(seconds, peak bytes) of `call`: timed on its own, since tracing every
-    allocation slows the library's font building tenfold, then traced."""
-    started = time.monotonic()
-    call()
-    seconds = time.monotonic() - started
-    return seconds, peak_bytes(call)
-
-
-def test_a_font_used_on_every_page_is_built_once(tmp_path):
-    path = make_pdf(tmp_path / "b.pdf", [room("amber")] * 3, cmaps=FOUR_WIDE_FONTS,
-                    compress=True)
-    assert path.stat().st_size < 4_000
-    seconds, peak = bounded(lambda: pdf.read_pdf(path))
-    assert seconds < 10 and peak < 256 * 1024 * 1024, (seconds, peak)
-
-
-def test_an_empty_form_drawn_many_times_does_not_rebuild_its_fonts(tmp_path):
-    page = show(room("amber")) + b" /X1 Do" * 40
-    path = make_pdf(tmp_path / "b.pdf", [page], form=b"", cmaps=FOUR_WIDE_FONTS, compress=True)
-    seconds, peak = bounded(lambda: pdf.read_pdf(path))
-    assert seconds < 10 and peak < 256 * 1024 * 1024, (seconds, peak)
-
-
-def test_a_page_of_many_wide_fonts_is_refused_at_the_font_cap(tmp_path):
-    many = {f"G{n}": cmap(WIDE_RANGE) for n in range(60)}
-    path = make_pdf(tmp_path / "b.pdf", [room("amber")], cmaps=many, compress=True)
-    assert path.stat().st_size < 30_000
-    reason = []
-    seconds, peak = bounded(lambda: reason.append(refused(path)))
-    assert reason == ["its fonts' character maps and widths hold more than 1,000,000 "
-                      "entries"] * 2
-    assert seconds < 10 and peak < 256 * 1024 * 1024, (seconds, peak)
-
-
-def test_fonts_of_their_own_on_every_page_count_against_the_file(tmp_path, monkeypatch):
-    monkeypatch.setattr(pdf, "MAX_FONT_ENTRIES", 300_000)
-    path = make_pdf(tmp_path / "b.pdf", [room("amber")] * 6, cmaps={"F2": cmap(WIDE_RANGE)},
-                    fonts_per_page=True, compress=True)
-    assert refused(path) == ("its fonts' character maps and widths hold more than 300,000 "
-                             "entries")
-
-
 def test_the_form_draws_on_a_page_are_capped(tmp_path, monkeypatch):
     """Past MAX_FORM_DRAWS the library skips the rest of a page's forms."""
-    monkeypatch.setattr(pdf, "MAX_FORM_DRAWS", 3)
+    monkeypatch.setitem(pdf.CONFIGURATION, "xform_maximum_invocations_per_extraction", 3)
     form = show(["The fern room has one lamp."])
-    book = pdf.read_pdf(make_pdf(tmp_path / "b.pdf", [show(room("amber")) + b" /X1 Do" * 10],
-                                 form=form))
+    book = pdf.read_in_process(make_pdf(tmp_path / "b.pdf",
+                                        [show(room("amber")) + b" /X1 Do" * 10], form=form))
     assert book.sections[0][1].count("fern room") == 3
-
-
-def test_a_file_that_takes_too_long_is_refused(tmp_path, monkeypatch):
-    monkeypatch.setattr(pdf, "MAX_SECONDS_PER_FILE", 0)
-    assert refused(make_pdf(tmp_path / "b.pdf", five_pages())) == (
-        "it took longer than 0 s to read")
-
-
-def test_the_deadline_is_checked_while_a_page_is_interpreted(tmp_path, monkeypatch):
-    """Not only between pages: a page of 400,000 instructions stops at the
-    deadline, not at its end."""
-    monkeypatch.setattr(pdf, "MAX_SECONDS_PER_FILE", 0.2)
-    path = make_pdf(tmp_path / "b.pdf", [room("amber"), b"q Q " * 400_000], compress=True)
-    started = time.monotonic()
-    assert refused(path) == "it took longer than 0.2 s to read"
-    assert time.monotonic() - started < 1.5
 
 
 # --- what the page text cap counts --------------------------------------------------
@@ -678,18 +584,17 @@ def long_codes(times: int) -> bytes:
     return b"BT /F2 11 Tf 72 400 Td " + b"(\\001) Tj " * times + b"ET"
 
 
-def test_the_page_text_cap_counts_the_characters_a_code_expands_to(tmp_path):
-    """300 shown bytes are 75,000 characters: read. 500 are 125,000: refused,
-    and refused while the page is interpreted, not after the library has
-    built the text — the cap is charged 250 characters a shown byte."""
-    fine = pdf.read_pdf(make_pdf(tmp_path / "f.pdf", [long_codes(300)],
-                                 cmaps={"F2": LONG_CODE}))
+def test_the_page_text_cap_counts_shown_bytes_and_then_the_characters_they_made(tmp_path):
+    """While the page is interpreted the cap counts shown bytes; after it, the
+    characters the fonts made of them. 300 one-byte codes of 250 characters
+    each are 75,000 characters: read. 500 are 125,000: under the cap on shown
+    bytes, over it on characters, refused when the page is done. Between the
+    two, the work is bounded by the process boundary, not by this cap."""
+    fine = pdf.read_in_process(make_pdf(tmp_path / "f.pdf", [long_codes(300)],
+                                        cmaps={"F2": LONG_CODE}))
     assert len(fine.sections[0][1]) == 300 * 250
-    path = make_pdf(tmp_path / "b.pdf", [long_codes(100_000)], cmaps={"F2": LONG_CODE},
-                    compress=True)
-    started = time.monotonic()
-    assert refused(path) == "a page in it holds more than 100,000 characters of text"
-    assert time.monotonic() - started < 2
+    assert refused(make_pdf(tmp_path / "b.pdf", [long_codes(500)], cmaps={"F2": LONG_CODE})) == (
+        "a page in it holds more than 100,000 characters of text")
 
 
 # --- the scan rule's other edge --------------------------------------------------------
@@ -698,25 +603,178 @@ def test_mostly_textless_pages_are_indexed_and_named(tmp_path):
     """Text-layer front matter over a scanned body passes the first-ten-pages
     rule; what it has is indexed, and the caller is told how little that is."""
     pages = [room("amber")] * 10 + [b""] * 15
-    book = pdf.read_pdf(make_pdf(tmp_path / "b.pdf", pages))
+    book = pdf.read_in_process(make_pdf(tmp_path / "b.pdf", pages))
     assert len(book.sections) == 10
     assert book.notes == ["only 10 of its 25 pages have text (the others may be scanned "
                           "images, which are not read)"]
-    half = pdf.read_pdf(make_pdf(tmp_path / "h.pdf", [room("amber")] * 10 + [b""] * 10))
+    half = pdf.read_in_process(make_pdf(tmp_path / "h.pdf", [room("amber")] * 10 + [b""] * 10))
     assert half.notes == []
 
 
-def test_the_library_logs_nothing_while_it_reads(tmp_path, caplog):
-    """A damaged outline makes the library log the node it could not read,
-    quoting it; nothing of that reaches the log."""
-    path = make_pdf(tmp_path / "b.pdf", five_pages()[:2],
-                    outline_first=b"(the amber room logs this)")
+# --- the library's logging --------------------------------------------------------------
+
+def noisy_pdf(path, words=b"the amber room logs this"):
+    """A PDF whose damaged outline the library logs, quoting it."""
+    path = make_pdf(path, five_pages()[:2], outline_first=b"(" + words + b")")
     data = path.read_bytes()
     at = data.rindex(b"startxref\n") + len(b"startxref\n")
     path.write_bytes(data[:at] + b"999999\n%%EOF\n")
+    return path
+
+
+def test_the_library_logs_nothing_while_it_reads(tmp_path, caplog):
     with caplog.at_level(logging.DEBUG):
-        pdf.read_pdf(path)
+        pdf.read_in_process(noisy_pdf(tmp_path / "b.pdf"))
     assert caplog.records == []
+
+
+def test_a_handler_already_on_the_library_s_loggers_hears_nothing(tmp_path):
+    """Adding a handler that drops records is not enough: one attached
+    earlier, to `pypdf` or to one of its module loggers, would still receive
+    the quote. The lists are replaced for the read and put back exactly."""
+    heard = io.StringIO()
+    handler = logging.StreamHandler(heard)
+    parent, module = logging.getLogger("pypdf"), logging.getLogger("pypdf._doc_common")
+    before = [(lg.handlers[:], lg.level, lg.propagate) for lg in (parent, module)]
+    last_resort = logging.lastResort
+    parent.addHandler(handler)
+    module.addHandler(handler)
+    try:
+        pdf.read_in_process(noisy_pdf(tmp_path / "b.pdf"))
+        assert heard.getvalue() == ""
+        assert parent.handlers[-1] is handler and module.handlers[-1] is handler
+        assert logging.lastResort is last_resort
+    finally:
+        parent.removeHandler(handler)
+        module.removeHandler(handler)
+    assert [(lg.handlers, lg.level, lg.propagate) for lg in (parent, module)] == before
+
+
+# --- the process boundary ---------------------------------------------------------------
+# `read_pdf` reads in a child process and bounds it from outside. The first
+# review's reproducers and the merge gate's `/Differences` array, measured on
+# the machine the bounds were set on before the boundary existed, in process:
+# an empty form drawn 40 times, 6.6 s; 60 wide CMaps in a 23 KB file, 602 MiB
+# under allocation tracing; 5 million `/Differences` names in a 15 KB file,
+# 630 MiB of resident memory.
+
+FOUR_WIDE_FONTS = {f"F{n}": cmap(WIDE_RANGE) for n in range(2, 6)}
+
+
+def child_peak(call):
+    """(seconds, the parent's peak bytes) of `call`."""
+    started = time.monotonic()
+    peak = peak_bytes(call)
+    return time.monotonic() - started, peak
+
+
+def child_refused(path):
+    with pytest.raises(pdf.PdfRefused) as refusal:
+        pdf.read_pdf(path)
+    return str(refusal.value)
+
+
+@pytest.mark.parametrize("build", [
+    lambda p: make_pdf(p, five_pages(), info=KETTLE),
+    lambda p: make_pdf(p, five_pages(), compress=True,
+                       outline=[Outline("Chapter One", 1), Outline("Chapter Two", 3)]),
+    lambda p: make_pdf(p, [room("amber")] * 10 + [b""] * 15, xmp=XMP),
+    lambda p: make_pdf(p, [["café ½"] + room("amber")], info={"Title": "Café"}),
+])
+def test_the_child_reads_what_the_process_reads(tmp_path, build):
+    path = build(tmp_path / "b.pdf")
+    assert pdf.read_pdf(path) == pdf.read_in_process(path)
+
+
+@pytest.mark.parametrize("build", [
+    lambda p: make_pdf(p, five_pages(), encrypt=True),
+    lambda p: make_pdf(p, [b""] * 3),
+    lambda p: p.write_bytes(b"this is not a PDF at all") and p,
+])
+def test_the_child_refuses_what_the_process_refuses(tmp_path, build):
+    path = tmp_path / "b.pdf"
+    path = build(path) or path
+    assert child_refused(path) == refused(path)
+
+
+def test_the_differences_array_is_bounded_by_the_child_s_memory(tmp_path, monkeypatch):
+    """The merge gate's fixture: 5 million glyph names in a 15 KB file. In
+    process it costs about 630 MiB and is read; the child is killed at the
+    memory cap (lowered here to make the test quick), and the parent's own
+    memory does not move."""
+    monkeypatch.setattr(pdf, "MAX_CHILD_RSS_BYTES", 256 * 1024 * 1024)
+    path = make_differences_pdf(tmp_path / "b.pdf", 5_000_000)
+    assert path.stat().st_size < 20_000
+    reason = []
+    seconds, peak = child_peak(lambda: reason.append(child_refused(path)))
+    assert reason == ["it needed more than 256 MiB of memory to read"]
+    assert seconds < 10 and peak < 16 * 1024 * 1024, (seconds, peak)
+
+
+def test_many_wide_fonts_are_bounded_by_the_child_s_memory(tmp_path, monkeypatch):
+    monkeypatch.setattr(pdf, "MAX_CHILD_RSS_BYTES", 256 * 1024 * 1024)
+    many = {f"G{n}": cmap(WIDE_RANGE) for n in range(60)}
+    path = make_pdf(tmp_path / "b.pdf", [room("amber")], cmaps=many, compress=True)
+    reason = []
+    seconds, peak = child_peak(lambda: reason.append(child_refused(path)))
+    assert reason == ["it needed more than 256 MiB of memory to read"]
+    assert seconds < 10 and peak < 16 * 1024 * 1024, (seconds, peak)
+
+
+def test_an_empty_form_drawn_many_times_is_bounded_by_the_deadline(tmp_path, monkeypatch):
+    monkeypatch.setattr(pdf, "MAX_SECONDS_PER_FILE", 1)
+    page = show(room("amber")) + b" /X1 Do" * 40
+    path = make_pdf(tmp_path / "b.pdf", [page], form=b"", cmaps=FOUR_WIDE_FONTS, compress=True)
+    seconds, peak = child_peak(lambda: child_refused(path))
+    assert child_refused(path) == "it took longer than 1 s to read"
+    assert seconds < 3 and peak < 16 * 1024 * 1024, (seconds, peak)
+
+
+def test_a_font_on_every_page_is_read_in_time(tmp_path):
+    path = make_pdf(tmp_path / "b.pdf", [room("amber")] * 3, cmaps=FOUR_WIDE_FONTS,
+                    compress=True)
+    seconds, _ = child_peak(lambda: pdf.read_pdf(path))
+    assert seconds < 10
+
+
+def test_a_child_that_hangs_is_killed_at_the_deadline(tmp_path, monkeypatch):
+    monkeypatch.setattr(pdf, "MAX_SECONDS_PER_FILE", 0.5)
+    monkeypatch.setattr(pdf, "child_command",
+                        lambda path: [sys.executable, "-c", "import time; time.sleep(30)"])
+    started = time.monotonic()
+    assert child_refused(make_pdf(tmp_path / "b.pdf", five_pages())) == (
+        "it took longer than 0.5 s to read")
+    assert time.monotonic() - started < 3
+
+
+def test_a_child_that_dies_says_nothing_of_its_traceback(tmp_path, monkeypatch, capsys,
+                                                       caplog):
+    monkeypatch.setattr(pdf, "child_command", lambda path: [
+        sys.executable, "-c", f"print('the {CANARY} room'); raise RuntimeError('{CANARY}')"])
+    with caplog.at_level(logging.DEBUG):
+        reason = child_refused(make_pdf(tmp_path / "b.pdf", five_pages()))
+    assert reason == "could not be read (the reader stopped with status 1)"
+    out = capsys.readouterr()
+    assert CANARY not in out.out + out.err + reason + "\n".join(
+        r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.parametrize("status, stdout, reason", [
+    (0, b"not json", "could not be read (the reader's output was not readable)"),
+    (0, b'{"title": 1}', "could not be read (the reader's output was not readable)"),
+    (3, b'{"refused": "it has no pages"}', "it has no pages"),
+    (4, b'{"error": "KeyError"}', "could not be read (KeyError)"),
+    (-9, b"", "could not be read (the reader stopped with status -9)"),
+])
+def test_the_child_s_output_is_checked_before_it_is_believed(status, stdout, reason):
+    with pytest.raises(pdf.PdfRefused) as refusal:
+        pdf.parse_child_output(status, stdout)
+    assert str(refusal.value) == reason
+
+
+def test_the_child_cannot_be_shadowed_from_the_working_directory():
+    """`-I`: a `json.py` in the folder `ayl add` runs from is not imported."""
+    assert pdf.child_command(Path("b.pdf"))[1] == "-I"
 
 
 # --- in a folder -----------------------------------------------------------------------
@@ -869,11 +927,16 @@ def test_a_private_pdf_is_written_only_to_the_index_named_for_the_run(tmp_path, 
 
     def allowed(event, path):
         return (path in (index, lock) or path.startswith(index + os.sep)
-                or (event == "os.mkdir" and path == os.path.realpath(db.parent)))
+                or (event == "os.mkdir" and path == os.path.realpath(db.parent))
+                # Each PDF is read by a child process whose stdin and stderr
+                # are the null device: opened for writing, and nothing lands.
+                or (event == "open" and path == os.path.realpath(os.devnull)))
 
     stray = [(event, path) for event, path in targets if not allowed(event, path)]
     assert stray == [], stray
     assert not any(p.startswith(os.path.realpath(REPO) + os.sep) for _, p in targets)
+    # Four PDFs, four children, each with its stderr discarded.
+    assert sum(1 for event, p in targets if p == os.path.realpath(os.devnull)) == 4
     rows = lancedb.connect(db).open_table("transcripts_ollama").to_arrow().to_pylist()
     assert {r["book"] for r in rows} == {"A Private Book — R. Reader", "noisy — Unknown"}
     assert sorted(p.name for p in folder.iterdir()) == ["Locked.pdf", "damaged.pdf",

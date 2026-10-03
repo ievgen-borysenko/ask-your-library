@@ -31,11 +31,9 @@ dependencies = [
     # The PDF text layer for `ayl add` (ingest/pdf.py, ADR-030): BSD-3-Clause,
     # pure Python, no dependencies of its own on Python 3.11+. 6.19 is the
     # version verified to have `apply_configuration` with every field pdf.py
-    # sets and the `decode_stream_data` / `ContentStream` /
-    # `Font.from_font_resource` names it counts at; below 7, because those
-    # names are the library's internals and a major version may move them
-    # (pdf.py also refuses a file whose counting did not engage). The
-    # lockfile resolves 6.19.0.
+    # sets; below 7, because pdf.py sets every one of those fields by name and
+    # replaces `PdfReader._handle_encryption`, which a major version may
+    # rename. The lockfile resolves 6.19.0.
     "pypdf>=6.19.0,<7",
 ]
 
