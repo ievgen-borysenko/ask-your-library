@@ -301,7 +301,7 @@ chapters — are in [Known limits](known-limits.md).
 
 A `.pdf` is read through its **text layer**: the characters its pages draw, as the
 [`pypdf`](https://pypi.org/project/pypdf/) library extracts them (BSD-licensed, pure Python,
-installed with `ayl`; [ADR-030](adr/README.md#adr-030-pdf-is-read-through-its-text-layer-with-pypdf-bounded-before-the-work-and-encryption-is-refused)).
+installed with `ayl`; [ADR-030](adr/README.md#adr-030-pdf-is-read-through-its-text-layer-with-pypdf-in-a-child-process-bounded-from-outside-and-encryption-is-refused)).
 Nothing is rendered and nothing is recognised from images: a scanned book has no text layer, and
 is refused rather than indexed empty.
 
@@ -316,9 +316,9 @@ document has one. Each top-level entry opens a section at the page it points to,
 runs to the page before the next entry's; when the top level is a single entry with entries
 under it (a book whose one bookmark is its own title), the level under it is used instead. Pages
 before the first entry are `Front matter`. The outline's order does not matter, the pages' does:
-sections are in page order. A page is the smallest unit — a chapter that starts halfway down a
-page starts, here, on the next one — and when two entries point at the same page the first one
-names it. Deeper entries (sections inside a chapter) do not split it. An entry that points at no
+sections are in page order. A page is the smallest unit: the page an entry points to belongs
+wholly to that entry's section, so a chapter that starts halfway down a page takes the end of the
+chapter before it along, and when two entries point at the same page the first one names it. Deeper entries (sections inside a chapter) do not split it. An entry that points at no
 page of this document (past the last page, at something that is not a page, at another file) is
 ignored, and so is one with no title. When no entry is left, or the outline cannot be read, or it
 is too deep or too large (more than 10,000 entries or 32 levels), the run says so in one line and
@@ -345,33 +345,29 @@ the folder is indexed as usual:
   what may be done with it. No password is tried, the empty one included, and nothing is
   decrypted; save an unrestricted copy if you have the right to.
 - **Could not be read**: anything the library raises while it reads the file — not a PDF, cut
-  short, a damaged object, a reference cycle, a stream other than a page's drawing instructions
-  (a font, an object stream) that inflates past **16 MiB**, a font map past the library's own
-  limits. The line names the kind of error (`could not be read (PdfStreamError)`) and nothing of
-  what it said. A damaged cross-reference table alone is not a refusal: the library rebuilds it.
-- **Too large**, each with its own line:
+  short, a damaged object, a reference cycle, a stream that inflates past **16 MiB**, a font map
+  past the library's own limits. The line names the kind of error (`could not be read
+  (PdfStreamError)`) and nothing of what it said. A damaged cross-reference table alone is not a
+  refusal: the library rebuilds it.
+- **Too long or too large to read** — the bound that holds whatever is inside the file. Each PDF
+  is read by a separate process that `ayl add` starts and watches:
+  - it took longer than **60 s** to read: the reading process is stopped;
+  - it needed more than **1 GiB** of memory to read: the reading process is stopped (its memory
+    is checked four times a second; on Linux it also cannot reserve more than twice that).
+
+  A 400-page book reads in well under a second and a few dozen MiB; a file built to make the
+  library loop or allocate — a font table of millions of entries in a few KiB, a form drawn
+  hundreds of times — ends in one of these two lines instead of stalling the run.
+- **Too large**, before that, each with its own line:
   - the file is larger than **256 MiB**;
   - it has more than **5,000 pages**, or its page tree is too deep or too large to read (more than
     10,000 entries or 64 levels);
-  - a page in it has more than **4 MiB of drawing instructions** — its own, and every drawing of a
-    form it reuses, counted each time — including a page whose single stream inflates past that;
-    or the file has more than **128 MiB** of them in all;
-  - its compressed streams inflate past **256 MiB** in all;
-  - its fonts' character maps and widths hold more than **1,000,000 entries** (each font is built
-    once per file; one line of a font's character map can stand for 65,536 entries);
-  - a page in it holds more than **100,000 characters** of text — counted while the page is read,
-    each shown character code as the longest string the page's fonts map one code to — or the
-    book more than **20 million**;
-  - it took longer than **60 s** to read: a deadline per file, checked at every one of the counts
-    above and at every drawing instruction, for whatever no cap names.
+  - a page in it holds more than **100,000 characters** of text (the bytes it shows are counted
+    while the page is read, the characters they make after it), or the book more than
+    **20 million**.
 
-  Each is counted before the work it bounds is done, so a hostile file costs a bounded time —
-  about a minute at worst, a few seconds for a real book — and bounded memory. A page draws at
-  most 200 forms; the library skips the rest of them.
+  A page draws at most 200 forms; the library skips the rest of them.
 - **No text** at all after extraction, or **no pages**.
-- **The reader's limits did not engage**: text came out of a page while the counts above saw
-  nothing — a `pypdf` version that reads differently from the one the limits were written for.
-  `pyproject.toml` keeps `pypdf` below 7 for the same reason.
 
 A PDF that is read but **mostly without text** — fewer than half its pages yield any, the shape of
 a scan with a text-layer cover and front matter, which the ten-page rule lets through — is

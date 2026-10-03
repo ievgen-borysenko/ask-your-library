@@ -45,7 +45,7 @@
   [Known limits](known-limits.md) what is not read.
 
 - **`ayl add` reads `.pdf`** (#34,
-  [ADR-030](adr/README.md#adr-030-pdf-is-read-through-its-text-layer-with-pypdf-bounded-before-the-work-and-encryption-is-refused)):
+  [ADR-030](adr/README.md#adr-030-pdf-is-read-through-its-text-layer-with-pypdf-in-a-child-process-bounded-from-outside-and-encryption-is-refused)):
   a folder may now hold PDF books with a text layer. The text is extracted by `pypdf`
   (BSD-3-Clause, pure Python), the one new dependency, installed with `ayl`. The title and author
   come from the information dictionary, else the XMP metadata (the file-name rule when there is no
@@ -53,10 +53,10 @@
   next, or, without an outline, one per page with text (`Page N`). A scanned PDF (fewer than 200
   characters on its first 10 pages) is refused with one line, and so is an encrypted one (no
   password is tried), one the library cannot read (named by the kind of error only), and one over
-  the limits: 256 MiB a file, 5,000 pages, 4 MiB of drawing instructions a page and 128 MiB a file,
-  256 MiB inflated in all, 1,000,000 font-map entries, 100,000 characters a page (a code a font
-  maps to a long string charged at that length) and 20 million a book, each counted before the
-  work it bounds, and 60 s a file. An outline that points at no page is named in one line and the
+  the limits: 256 MiB a file, 5,000 pages, 100,000 characters a page and 20 million a book. Each
+  PDF is read in a child process that `ayl add` stops at 60 s or 1 GiB of memory, so no file can
+  make the library loop or allocate without bound; the child's output is one JSON document, its
+  error output is discarded. An outline that points at no page is named in one line and the
   pages are indexed instead, and so is a book in which fewer than half the pages have text; a
   folder named `*.pdf` is skipped and named. `pypdf` is kept below 7. No JavaScript, action, attachment,
   rendering or external program, ever. [Add your own books](add-your-own-books.md#a-pdf) has the

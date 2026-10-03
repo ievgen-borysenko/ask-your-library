@@ -315,8 +315,9 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   reads `infor- mation` in the index, which a keyword search for the whole word misses (the
   embedding search usually does not). **Two columns** come out in the order the producer drew
   them, which is usually column by column and sometimes line across line; tables, captions and
-  sidebars land where they were drawn. **A page is the smallest section**: a chapter that starts
-  halfway down a page starts, in the index, on the next one, and only the outline's top level (or
+  sidebars land where they were drawn. **A page is the smallest section**: the page an outline entry
+  points to belongs wholly to that chapter, so a chapter that starts halfway down a page takes the
+  end of the chapter before it along, and only the outline's top level (or
   the level under a single root entry) opens sections. Without an outline, `Page N` counts the
   file's pages, not the numbers printed on them. Every rule and refusal:
   [Add your own books](add-your-own-books.md#a-pdf).

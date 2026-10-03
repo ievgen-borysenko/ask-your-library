@@ -1443,7 +1443,7 @@ them; fixed-layout books are read as if they reflowed; MOBI and AZW are not read
 [Known limits](../known-limits.md), and splitting at contents anchors is the obvious next step if
 real books show the need.
 
-## ADR-030: PDF is read through its text layer with pypdf, bounded before the work, and encryption is refused
+## ADR-030: PDF is read through its text layer with pypdf, in a child process bounded from outside, and encryption is refused
 
 Status: accepted (2026-10-03, #34, with `ayl add` reading `.pdf`).
 
@@ -1468,50 +1468,48 @@ as well, with better layout analysis, but brings `charset-normalizer` and `crypt
 has no such limits; `pypdfium2` (Apache-2.0/BSD) wraps PDFium, a C++ renderer, which is the attack
 surface this decision avoids. It is a main dependency, not an extra: the criterion is a clean
 install that imports a PDF, and `pyproject.toml` bounds it below at the version verified, as the
-others are, and above at the next major version, unlike them: the reader counts at names inside
-the library (below), which a major version may move. It is a dependency installed beside this project under its own licence, not
+others are, and above at the next major version, unlike them: the reader sets every field of the
+library's configuration and replaces one method of its reader (below), which a major version may
+rename. It is a dependency installed beside this project under its own licence, not
 redistributed in it, so `NOTICE`, which records third-party material this tree carries, does not
 change — as for every other dependency.
 
-**A PDF is untrusted input, and every bound applies before the work it bounds.** The reader is
-`src/ask_your_library/ingest/pdf.py`, and its docstring lists what the library bounds, what the module bounds and
-what is never done. Every limit in the library's configuration is set explicitly: every inflated
-stream capped at 16 MiB, the page-tree walk stopped at twice the page cap or 64 levels and the
-outline walk at 10,000 entries or 32 levels (neither is materialised past the cap), at most 200
-form draws a page, `jbig2dec` never called; it already detects reference cycles, forbids entity
-declarations in XMP and rebuilds a damaged cross-reference table by one scan. Three bounds have no
-setting there, and they are the ones that matter: memory and time. The library
-keeps every stream it inflates for as long as the file is open, so the module counts the bytes at
-the library's one inflating function, `decode_stream_data`, and refuses past 256 MiB for the file;
-and parsing and interpreting drawing instructions is what costs time (a 14 MB page of text
-operators took 36 s), so the module counts the bytes handed to the library's content parser — a
-page's own stream and each form it draws, every time it draws it — and refuses past 4 MiB a page
-and 128 MiB a file, before they are parsed. And the library builds a font's character map and
-width table again for every page and every form draw that uses it, which no byte count sees: the
-first review measured an empty form drawn 40 times at 6.6 s (122 s and 722 MiB under allocation
-tracing), and a 23 KB file of 60 fonts whose one-line `/ToUnicode` range each stands for 65,536
-entries at 602 MiB. So each font dictionary is built once per file and kept, and the entries of
-every font built are counted and refused past 1,000,000 (about 160 MiB). The three counts are
-made by putting a counting wrapper in place of `pypdf.filters.decode_stream_data`,
-`pypdf._page.ContentStream` and `Font.from_font_resource` for the length of one read; a test pins
-that the library still looks all three up and that they are put back, and a page whose text came
-out with nothing counted refuses the file ("the reader's limits did not engage"). This is
-process-global for the length of a read, with the `pypdf` logger and the warning filters: the
-reader assumes one read at a time, which `ayl add` is, and is not thread-safe. The text a page
-shows is counted per instruction through the library's public extraction callback, each shown
-byte charged as the longest string one code of the page's fonts maps to (a map may turn one byte
-into 256 characters), and refused past 100,000 characters, which stops a compressed bomb of text
-operators long before its end. The library has no timeout, and none is added by a thread or a
-signal; a deadline of 60 s per file is checked at each counting point and at every drawing
-instruction, and is what bounds whatever no cap names — the next table a hostile font could make
-large. The caps are set so that it is not what stops a real file: measured on an Apple M-series
-machine, the slowest instructions go at about 2 MB a second, so the worst page the content caps
-admit takes under 2 s, the worst file about a minute, and a 400-page book under 3 s. The refusals
-are the EPUB's convention: one line, the file's path inside the folder and a fixed reason, never
-a quote; anything the library raises is named by its class only, and its own log lines and
-warnings are silenced while it reads, because they quote the file (an outline node it could not
-read is logged verbatim). No JavaScript is run, no action followed, no attachment read, no page
-rendered, no image decoded.
+**A PDF is untrusted input, and the bound is a process boundary.** `read_pdf` does not read the
+file. It starts a child Python process (`python -I -m ask_your_library.ingest.pdf --child <path>`;
+`-I` so that nothing in the working directory or the environment can stand in for a module of this
+package), which reads it and prints one JSON document — title, author, sections, notes, or a
+refusal's reason, or the class of an unexpected error — and exits with a known status; its stderr
+is discarded unread, and its stdout is checked for shape before it is believed. The parent kills
+the child at 60 s (`MAX_SECONDS_PER_FILE`) and when its resident memory, sampled four times a
+second (`/proc` on Linux, `ps` elsewhere), passes 1 GiB (`MAX_CHILD_RSS_BYTES`); on Linux the child
+also limits its own address space to twice that (`RLIMIT_AS`, set by the child at start-up), which
+macOS ignores, so the sampling is the rule everywhere. The parent never imports `pypdf`. Starting
+the child costs about 50 ms a file on an Apple M-series machine; a 400-page book reads in 0.6 s
+through it.
+
+This replaced a first version that bounded the library from inside, by counting at three names
+inside it (the stream decoder, the content-stream parser, the font builder) for the length of a
+read. Each review found one more allocation those counters did not see: forms drawn hundreds of
+times, a one-line CMap range that stands for 65,536 entries rebuilt for every page, and finally a
+font `/Differences` array of five million names in a 15 KB file, 630 MiB of resident memory before
+any counter ran. The library is free to allocate in ways no caller can enumerate; a process
+boundary bounds all of them at once, and the counters, the replaced names and the check that they
+still engaged were dropped with it.
+
+Inside the child, a first line gives a precise reason fast where the library lets a caller bound
+its work: every field of its configuration is set explicitly (each inflated stream at 16 MiB, the
+page-tree walk at twice the page cap or 64 levels, the outline at 10,000 entries or 32 levels, 200
+form draws a page, the XMP size and element count, the recovery of a damaged stream, `jbig2dec`
+never called), and the module caps the file at 256 MiB, the pages at 5,000, the text at 100,000
+characters a page — the bytes a page shows counted per instruction through the library's public
+extraction callback, the characters they made after the page — and 20 million a book. The
+refusals are the EPUB's convention: one line, the file's path inside the folder and a fixed
+reason, never a quote; anything the library raises is named by its class only. Its own log lines
+and warnings are silenced while it reads, because they quote the file (an outline node it could
+not read is logged verbatim): the handler lists of the `pypdf` loggers are replaced, not added
+to, `logging.lastResort` with them, and all of it is restored afterwards — process-global state,
+which the child, reading one file, is free to change. No JavaScript is run, no action followed,
+no attachment read, no page rendered, no image decoded.
 
 **Encryption is refused, and nothing is tried.** `PdfReader` tries the empty password on any
 encrypted file as it opens it, which opens a file that has only an owner password — restrictions
@@ -1527,12 +1525,12 @@ than 200 characters on its first 10 pages — is refused rather than indexed emp
 0.5.0.
 
 **Consequences.** Running headers and page numbers are indexed as text, a word broken at a line end
-stays broken, two-column pages come out in drawing order, a chapter that starts mid-page starts on
-the next page, and an owner-password-only PDF that any viewer opens is refused. Each is in
-[Known limits](../known-limits.md). The three counting wrappers depend on names inside the
-library; a version that moves them fails the pinning test, and at run time refuses the file rather
-than reading it without its bounds. A scan behind a text-layer cover passes the ten-page rule and
-is indexed with what it has, named in one line when fewer than half its pages have text.
+stays broken, two-column pages come out in drawing order, a chapter that starts mid-page takes the
+whole of that page (and the end of the chapter before it), and an owner-password-only PDF that any
+viewer opens is refused. A scan behind a text-layer cover passes the ten-page rule and is indexed
+with what it has, named in one line when fewer than half its pages have text. Each is in
+[Known limits](../known-limits.md). Every PDF costs one process start, and a hostile one costs at
+most a minute and a gigabyte before its line is written.
 
 [reports]: ../eval-results/
 [backlog]: ../backlog.md
