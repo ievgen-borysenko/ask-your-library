@@ -1,8 +1,10 @@
 """Ask Your Library — command-line interface.
 
-  uv run ayl ask                        # chat: question after question, with memory
-  uv run ayl ask "What did X say about Y?"   # single question (scripts, evals)
-  uv run ayl ask --help / --version     # no API key, no index needed
+  ayl ask                        # chat: question after question, with memory
+  ayl ask "What did X say about Y?"   # single question (scripts, evals)
+  ayl ask --help / --version     # no API key, no index needed
+
+(From a clone, each after `uv run`; installed as a tool, as written.)
 
 `ask-library` is the same run under the name this had before `ayl` (#30); it
 prints one deprecation line and is removed at 0.6.0.
@@ -30,6 +32,7 @@ from importlib.metadata import PackageNotFoundError, version
 from .bookkey import split_read_query, unescape_marker
 from .config import QUESTION_DEADLINE_S, SUPPORTED_LANGS
 from .graph import build_graph
+from .hints import CONFIG_DOCS
 from .home import scratch_dir
 from .i18n import set_lang, source_word, status_word, t
 from .preflight import check_environment, exit_code
@@ -242,7 +245,7 @@ def build_parser(prog: str = "ask-library") -> argparse.ArgumentParser:
         description="Agentic RAG over your own book library.",
         epilog="Without a question the CLI opens an interactive chat with memory "
                "(`exit`, `quit` or Ctrl-D leaves it). Everything else is configured "
-               "through environment variables; see .env.example.")
+               f"through environment variables: {CONFIG_DOCS}")
     parser.add_argument("--version", action="version",
                         version=f"{prog} {package_version()}")
     # ASK_LANG is otherwise the only way to switch language, and it is a process

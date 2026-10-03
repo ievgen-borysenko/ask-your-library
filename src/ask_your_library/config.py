@@ -16,6 +16,8 @@ from typing import NamedTuple
 
 from dotenv import dotenv_values, load_dotenv
 
+from .hints import command
+
 # --- where a setting comes from (ADR-027) --------------------------------------
 # Highest first, and the same for every command — `ayl ask`, `ayl ui`, a script:
 #   1. a variable exported in the environment;
@@ -233,7 +235,8 @@ def legacy_db_notice(choice: DbPathChoice, home: Path | None = None) -> str:
     return (f"note: reading the index at {choice.path}, the old default. The default is now "
             f"{base / 'index'} ($AYL_HOME/index); the old place is read until "
             f"{LEGACY_DB_SUNSET}, when it becomes an error. Nothing is moved for you. To move "
-            f"it: `ayl backup <dir>`, then `ayl restore <dir>/<timestamp> --db {index} "
+            f"it: `{command('ayl backup <dir>')}`, then "
+            f"`{command('ayl restore <dir>/<timestamp>')} --db {index} "
             f"--chat-db {chat}`, then move "
             f"{LEGACY_DB_PATH} out of this directory, and the checkout's .chainlit/chat.db "
             f"(with its -wal/-shm) if there is one; or set "

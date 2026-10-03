@@ -49,14 +49,16 @@ def has_table(db, table_name: str) -> bool:
     table only, because book cards are LLM-distilled and cost money. Search
     then runs over the corpora that exist — but logs it, once per process, so a
     corpus lost to a broken ingest never passes for "nothing relevant found".
-    That log is for the operator; the user is told by the preflight notice
-    (`preflight.check_environment().notices`), which the interfaces show."""
+    That log is for the operator, at INFO: the user is told by the preflight
+    notice (`preflight.check_environment().notices`), which the interfaces
+    show, and a WARNING here reached the CLI's stderr through Python's
+    last-resort handler as a second copy of the same sentence."""
     if table_name in db.table_names():
         return True
     if table_name not in _reported_missing:
         _reported_missing.add(table_name)
-        log.warning("%s: no table %s in this index — searching the other corpus only",
-                    DB_PATH, table_name)
+        log.info("%s: no table %s in this index — searching the other corpus only",
+                 DB_PATH, table_name)
     return False
 
 

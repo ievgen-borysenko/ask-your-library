@@ -19,8 +19,9 @@ import lancedb
 import pytest
 import requests
 
-from ask_your_library import ayl, config, dataflow, home, init_cmd, ollama, preflight
+from ask_your_library import ayl, config, dataflow, home, init_cmd, ollama, paths, preflight
 from ask_your_library.embeddings import OllamaEmbedder
+from ask_your_library.hints import command
 from ask_your_library.index_meta import expected_chunker, write_index_meta
 from ask_your_library.i18n import t
 from ask_your_library.ingest.ledger import open_ledger
@@ -487,6 +488,20 @@ def test_demo_builds_the_starter_subset_into_its_own_index(machine, capsys):
     assert f"LIBRARY_DB_PATH={demo} uv run ayl ask \"{init_cmd.FIRST_QUESTION}\"" in out
 
 
+def test_installed_as_a_tool_no_hint_says_uv_run(machine, capsys):
+    """Outside a clone `ayl` is on PATH, and `uv run ayl ...` would run in
+    whatever project the shell is in: every command `ayl init` prints is the
+    bare one, and the web chat's line names how to add its extra."""
+    machine.mp.setattr(init_cmd, "REPO_ROOT", "")
+    machine.mp.setattr(paths, "REPO_ROOT", "")
+    machine.mp.setattr(init_cmd.importlib.util, "find_spec", lambda name: None)
+    assert init() == 0
+    out = capsys.readouterr().out
+    assert "uv run" not in out
+    assert "  ayl add ~/books" in out and "AYL_ALLOW_DEFAULT_LOGIN=1 ayl ui" in out
+    assert "uv tool install --force 'ask-your-library[ui] @ git+" in out
+
+
 def test_a_built_demo_library_is_not_built_again(machine, capsys):
     machine.check_status = 0
     assert init("--demo") == 0
@@ -515,6 +530,7 @@ def test_a_dry_run_ends_on_the_status_the_real_run_would(machine, capsys):
     """A demo asked for that the real run would not build (here: outside a
     checkout) is exit 1 in the plan too, not a 0 the real run then breaks."""
     machine.mp.setattr(init_cmd, "REPO_ROOT", "")
+    machine.mp.setattr(paths, "REPO_ROOT", "")
     assert init("--dry-run", "--demo") == preflight.EXIT_NOT_READY
     assert machine.builds == [] and not machine.home.exists()
 
@@ -555,6 +571,7 @@ def test_the_default_answer_is_one_constant(machine, monkeypatch):
 
 def test_outside_a_checkout_the_demo_is_refused_with_the_way_on(machine, capsys):
     machine.mp.setattr(init_cmd, "REPO_ROOT", "")
+    machine.mp.setattr(paths, "REPO_ROOT", "")
     assert init("--demo") == preflight.EXIT_NOT_READY
     err = capsys.readouterr().err
     assert "ship with the clone, not with the installed package" in err
@@ -581,7 +598,8 @@ def test_an_old_index_in_the_working_directory_gets_the_move_not_a_second_index(
     machine.mp.setattr(config, "DB_PATH", old)
     assert init("--demo") == preflight.EXIT_NOT_READY
     out = capsys.readouterr().out
-    assert "`ayl backup <dir>`, then `ayl restore <dir>/<timestamp> --db" in out
+    assert (f"`{command('ayl backup <dir>')}`, then "
+            f"`{command('ayl restore <dir>/<timestamp>')} --db") in out
     assert "demo library: NOT built" in out
     assert f"--db {machine.home / 'demo' / 'index'}` in that restore" in out, \
         "a manifest-only old index is a demo library: offer the demo location"
@@ -966,6 +984,7 @@ def _in_a_work_tree(machine, with_config):
 
 def _outside_a_checkout(machine):
     machine.mp.setattr(init_cmd, "REPO_ROOT", "")
+    machine.mp.setattr(paths, "REPO_ROOT", "")
 
 
 def _old_index_here(machine):

@@ -1,11 +1,15 @@
 """Ask Your Library — `ayl`, the one command the rest hang off.
 
-  uv run ayl init                 # the first run: models, configuration, where books go
-  uv run ayl ask "What does Marcus Aurelius say about anger?"
-  uv run ayl add ~/books          # index a folder of .txt / .md / .epub / .pdf books
-  uv run ayl doctor               # the environment and the index, both halves
-  uv run ayl books                # what the index holds, without a model call
-  uv run ayl ui                   # the Chainlit web chat
+  ayl init                 # the first run: models, configuration, where books go
+  ayl ask "What does Marcus Aurelius say about anger?"
+  ayl add ~/books          # index a folder of .txt / .md / .epub / .pdf books
+  ayl doctor               # the environment and the index, both halves
+  ayl books                # what the index holds, without a model call
+  ayl ui                   # the Chainlit web chat
+
+Installed as a tool, `ayl` is on PATH; from a clone every line above is typed
+after `uv run`. What is printed to the reader says the form of its install
+(`hints.command`).
 
 This is a router, not a second implementation. `ayl ask` is `cli.main`; `ayl
 add`, `doctor`, `backup` and `restore` are `ingest.add_folder.main`, which is
@@ -23,9 +27,9 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import cli
+from . import cli, hints
 from .catalog import render_catalog, run_catalog
-from .config import DB_CHOICE, DB_PATH, EMBED_BACKEND
+from .config import DB_CHOICE, DB_PATH, EMBED_BACKEND, tables_for
 from .i18n import t
 from . import init_cmd
 from .ingest import add_folder
@@ -60,7 +64,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="ayl",
         description="Agentic RAG over your own book library.",
         epilog="`ayl <command> --help` prints what that command accepts. Everything "
-               "else is configured through environment variables; see .env.example.")
+               f"else is configured through environment variables: {hints.CONFIG_DOCS}")
     parser.add_argument("--version", action="version",
                         version=f"ayl {cli.package_version()}")
     sub = parser.add_subparsers(dest="command", metavar="<command>", required=True)
@@ -90,7 +94,7 @@ def split_argv(argv: list[str]) -> tuple[list[str], list[str]]:
 
 
 def report_environment(index_only: bool = False, db_path: Path | None = None,
-                       backend: str | None = None) -> PreflightResult:
+                       backend: str | None = None, doctor: bool = False) -> PreflightResult:
     """The preflight block, printed the way `ayl ask` prints it before it
     refuses to run: every problem, then the non-fatal notices. Returns the
     result so the caller can turn it into an exit status; printing is all this
@@ -98,13 +102,27 @@ def report_environment(index_only: bool = False, db_path: Path | None = None,
 
     `index_only`, `db_path` and `backend` are `preflight.check_environment`'s,
     and mean there what they mean to the command: the half a command that only
-    reads the index can fail on, and the index it was pointed at."""
+    reads the index can fail on, and the index it was pointed at.
+
+    `doctor` is `ayl doctor`'s reading of the same result. The configured
+    index not existing yet is the state a first run leaves (`ayl init`, then
+    `ayl add`), said as that state and not as a fault; the status is still 3.
+    And the cards notice is about searching, which the doctor does not do."""
     problems = check_environment(index_only=index_only, db_path=db_path, backend=backend)
-    if problems:
+    kinds = list(getattr(problems, "kinds", ()))
+    shown = list(problems)
+    if doctor and db_path is None and "no_db" in kinds:
+        shown = [p for p, kind in zip(problems, kinds) if kind != "no_db"]
+        cli.say(t("doctor_empty_index", path=DB_CHOICE.path, add=hints.command("ayl add")))
+    if shown:
         cli.say(t("pf_header"), error=True)
-        for problem in problems:
+        for problem in shown:
             cli.say(f"  - {problem}", error=True)
     notices = getattr(problems, "notices", [])
+    if doctor:
+        cards = {t("pf_no_cards", table=tables_for(name)["cards"])
+                 for name in ("ollama", "openrouter")}
+        notices = [notice for notice in notices if notice not in cards]
     if notices:
         cli.say(t("pf_notice_header"), error=True)
         for notice in notices:
@@ -294,10 +312,12 @@ def run_doctor(rest: list[str]) -> int:
         cli.say(f"index: {DB_CHOICE.path} — {DB_CHOICE.reason}")
     else:
         cli.say(f"index: {db} — named with --db")
-    problems = report_environment(db_path=db, backend=args.backend)
-    if "index_in_checkout" in getattr(problems, "kinds", ()):
+    problems = report_environment(db_path=db, backend=args.backend, doctor=True)
+    kinds = getattr(problems, "kinds", ())
+    if "index_in_checkout" in kinds or (db is None and "no_db" in kinds):
         # The index half would ask for the same refused folder and print the
-        # same refusal a second time; there is no index for it to reconcile.
+        # same refusal a second time — or say "no index at" about an index
+        # nobody has added a book to yet; there is no index for it to reconcile.
         return exit_code(problems)
     status = add_folder.main(["--doctor", *_forwarded(args), *extra], prog="ayl doctor")
     return exit_code(problems) if problems else status
@@ -349,7 +369,7 @@ def run_ui(rest: list[str]) -> int:
                     "Its Chainlit configuration is written into the app root "
                     "(AYL_CHAINLIT_DIR's parent, else $AYL_HOME/ui) on every start.",
         epilog="Every other argument goes to `chainlit run` verbatim (`-w` to reload "
-               "on edit). Needs the `ui` extra: `uv sync --extra ui` once.")
+               f"on edit). Needs the `ui` extra: {hints.ui_extra(cli.package_version())}.")
     parser.add_argument("--host", default=launcher.default_host(),
                         help=f"the address to bind — an IPv4 address or a DNS name (default: "
                              f"CHAINLIT_HOST, now {launcher.default_host()}; anything but "
@@ -370,7 +390,7 @@ def run_ui(rest: list[str]) -> int:
         return launcher.start(root, args.host, args.port, extra)
     except FileNotFoundError:
         cli.say("chainlit is not installed: it is the `ui` extra — "
-                "`uv run --extra ui ayl ui`, or `uv sync --extra ui` once.", error=True)
+                f"{hints.ui_extra(cli.package_version())}.", error=True)
         return 1
 
 

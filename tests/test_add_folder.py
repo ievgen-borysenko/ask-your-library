@@ -814,6 +814,28 @@ def test_main_reports_books_sections_chunks_table_and_model(tmp_path, fake_embed
     assert "no cards_ollama table" in out
 
 
+def test_the_no_cards_line_is_said_on_the_first_run_only(tmp_path, fake_embedder, capsys):
+    """Every later `ayl add` into the same index said it again; once is the
+    news, and the question-asking commands keep saying it where it matters."""
+    folder = make_folder(tmp_path)
+    assert add_folder.main([str(folder), "--db", str(tmp_path / "db")]) == 0
+    assert "no cards_ollama table" in capsys.readouterr().out
+    assert add_folder.main([str(folder), "--db", str(tmp_path / "db")]) == 0
+    assert "no cards_ollama table" not in capsys.readouterr().out
+
+
+def test_the_ask_line_names_the_index_only_when_it_is_not_the_configured_one(tmp_path,
+                                                                             monkeypatch):
+    """`LIBRARY_DB_PATH=` in front of every `ayl ask` read as a step the reader
+    must not skip; it is needed only after a `--db` somewhere else."""
+    from ask_your_library.hints import command
+    monkeypatch.setattr(add_folder, "DB_PATH", tmp_path / "home" / "index")
+    assert add_folder.ask_line(tmp_path / "home" / "index") == f'{command("ayl ask")} "..."'
+    elsewhere = tmp_path / "my index"
+    assert add_folder.ask_line(elsewhere) == \
+        f"LIBRARY_DB_PATH='{elsewhere}' {command('ayl ask')} \"...\""
+
+
 def test_a_heading_with_nothing_under_it_keeps_a_section(tmp_path):
     """The last heading of a file (or an empty chapter) is part of the file:
     it keeps a section whose text is the heading line (review of #52)."""

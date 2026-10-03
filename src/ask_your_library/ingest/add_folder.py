@@ -7,9 +7,11 @@ configured embedder (local Ollama bge-m3 by default), `publish` for the staged
 write and `index_meta` for the embedding fingerprint — so a folder of your own
 files is chunked and stamped exactly like the demo corpus.
 
-    uv run ayl-add ~/books
-    LIBRARY_DB_PATH=~/my-lancedb uv run ayl-add ~/books
-    uv run ayl-add ~/books --dry-run       # what would be indexed, no embedding
+    ayl add ~/books
+    ayl add ~/books --db ~/my-lancedb      # another index than the configured one
+    ayl add ~/books --dry-run              # what would be indexed, no embedding
+
+(From a clone, each after `uv run`.)
 
 One file = one book. The book key ("Title — Author", the form the agent cites
 and filters on) is taken from, in order:
@@ -36,6 +38,7 @@ searches full text alone when the cards table is absent.
 import argparse
 import hashlib
 import logging
+import shlex
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -47,6 +50,7 @@ from ..bookkey import (MAX_TITLE_LINE, UNKNOWN_AUTHOR, author_of, book_key, chun
                        split_title_author, title_of)
 from ..config import DB_PATH, EMBED_BACKEND, confirm_db_path
 from ..embeddings import get_embedder
+from ..hints import command, script
 from ..index_meta import (META_TABLE, check_index, read_index_meta, refuse_version_mismatch,
                           write_index_meta)
 from ..sanitize import LINE_BREAK_RE, strip_control_chars
@@ -423,7 +427,7 @@ def refuse_model_mismatch(db, table: str, embedder) -> None:
             f"another model of the same size, and mixing two models in one table degrades "
             f"retrieval silently.\n"
             f"Stamp the existing table if you know it was built with {embedder.model!r} "
-            f"(`uv run scripts/ingest_demo_corpus.py --stage stamp-meta`), or rebuild the "
+            f"({script('scripts/ingest_demo_corpus.py --stage stamp-meta')}), or rebuild the "
             f"index, or point LIBRARY_DB_PATH at a different database.")
     if int(meta["dims"]) != int(embedder.dims):
         raise IngestError(
@@ -667,7 +671,7 @@ def refuse_rebuild_over_other_folders(ledger: Ledger, folder: Path | None, keepi
         f"book(s) this run does not cover ({shown}{more}) — a rebuild drops the whole table, so "
         f"their rows would go with it and only {folder or 'this run'}'s books would be left in "
         f"the index. Rebuild ONCE, with any one of the folders, and add the rest with a plain "
-        f"`uv run ayl add <folder>`: an ordinary run appends, and after the rebuild there is no "
+        f"`{command('ayl add <folder>')}`: an ordinary run appends, and after the rebuild there is no "
         f"mismatch left for it to refuse. `--rebuild --force` goes ahead anyway and names every "
         f"book it orphans.")
 
@@ -758,7 +762,9 @@ def _write_books(books: list[Book], backend: str, db_path: Path, folder: Path | 
     db = lancedb.connect(db_path)
     table_name = f"transcripts_{backend}"
     counts = {"books": 0, "sections": 0, "chunks": 0, "merged_headings": 0,
-              "recovered": [], "vanished": [], "pruned": 0, "orphaned_by_rebuild": []}
+              "recovered": [], "vanished": [], "pruned": 0, "orphaned_by_rebuild": [],
+              # the first run into this index: where the no-cards line is said, once
+              "new_table": table_name not in table_names(db)}
 
     if not rebuild:
         # BEFORE any recovery, and that ordering is the whole of it. Both
@@ -1039,7 +1045,7 @@ def run_backup(db_path: Path, dest: Path, chat_db: Path | None) -> int:
         return 1
     for line in manifest_lines(target, read_manifest(target)):
         say(line)
-    say(f"restore it with:  uv run ayl restore {target} --db {db_path}")
+    say(f"restore it with:  {command('ayl restore')} {target} --db {db_path}")
     return 0
 
 
@@ -1056,7 +1062,7 @@ def run_restore(db_path: Path, source: Path, chat_db: Path | None, force: bool) 
     except (BackupError, IngestBusy) as error:
         say(str(error), error=True)
         return 1
-    say(f"check it with:  uv run ayl doctor --db {db_path}")
+    say(f"check it with:  {command('ayl doctor')} --db {db_path}")
     return 0
 
 
@@ -1139,7 +1145,7 @@ def main(argv: list[str] | None = None, prog: str = "ayl-add") -> int:
         say("--cards is not implemented: book cards are LLM-distilled summaries, which "
             "means paid model calls per book. The demo corpus ships its cards in "
             "corpus/cards/ and indexes them with "
-            "`uv run scripts/ingest_demo_corpus.py --stage cards`; there is no generic "
+            f"{script('scripts/ingest_demo_corpus.py --stage cards')}; there is no generic "
             "card generator yet. Run `ayl add` without --cards for a full-text-only index.",
             error=True)
         return 2
@@ -1222,11 +1228,22 @@ def main(argv: list[str] | None = None, prog: str = "ayl-add") -> int:
             f"delete its rows")
     if counts["pruned"]:
         say(f"pruned {counts['pruned']} book(s) whose file is gone")
-    if not counts["cards_table"]:
+    if not counts["cards_table"] and counts.get("new_table"):
         say(f"no cards_{args.backend} table here: the agent will search full text only "
             f"(book cards need an LLM and are not generated by `ayl add`)")
-    say(f"ask it something:  LIBRARY_DB_PATH={db_path} uv run ayl ask \"...\"")
+    say(f"ask it something:  {ask_line(db_path)}")
     return 0
+
+
+def ask_line(db_path: Path) -> str:
+    """The command that asks the index this run wrote. `LIBRARY_DB_PATH=` in
+    front only when that index is not the one the configuration already
+    opens (a `--db` elsewhere): a prefix the reader does not need reads as a
+    step they must not skip."""
+    ask = f'{command("ayl ask")} "..."'
+    if Path(db_path).expanduser().resolve() == Path(DB_PATH).expanduser().resolve():
+        return ask
+    return f"LIBRARY_DB_PATH={shlex.quote(str(db_path))} {ask}"
 
 
 def ayl_add_main(argv: list[str] | None = None) -> int:

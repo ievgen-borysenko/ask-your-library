@@ -33,6 +33,7 @@ the demo step refuses, and says so, while steps 1-4 work anywhere.
 file written, no index opened that does not already exist.
 """
 import argparse
+import importlib.util
 import os
 import shlex
 import subprocess
@@ -45,8 +46,9 @@ from dotenv import dotenv_values
 
 from . import config, dataflow, home, ollama, preflight
 from .bookkey import book_key
-from .cli import say
+from .cli import package_version, say
 from .embeddings import OllamaEmbedder, OpenRouterEmbedder
+from .hints import CONFIG_DOCS, command, from_clone, ui_extra
 from .i18n import t
 from .index_meta import expected_chunker, read_index_meta, rows_by_book
 from .ingest.doctor import check_ledger
@@ -135,12 +137,6 @@ def plan(text: str) -> None:
 
 def problem(text: str) -> None:
     say(f"error: {text}", error=True)
-
-
-def command(text: str) -> str:
-    """A command line as the reader types it here: through `uv run` in a
-    clone, where `ayl` lives in the project's environment, bare elsewhere."""
-    return f"uv run {text}" if REPO_ROOT else text
 
 
 def quoted(path: Path) -> str:
@@ -285,13 +281,14 @@ def local_mode_problems(writing: bool) -> list[str]:
 
 def config_text(mode: str) -> str:
     lines = [f"# Written by `ayl init` ({mode} mode). Read beneath exported variables and a",
-             "# .env in the working directory (docs/configuration.md); edit it freely, a",
-             "# second `ayl init` never rewrites it.",
+             "# .env in the working directory; edit it freely, a second `ayl init` never",
+             "# rewrites it. Every variable, with its default:",
+             f"# {CONFIG_DOCS}",
              *(f"{name}={value}" for name, value in MODES[mode].items())]
     if mode == "hosted":
         lines += ["# The key is yours to set; `ayl init` never takes one. ORCHESTRATOR_MODEL,",
                   "# PRICE_IN_PER_MTOK and PRICE_OUT_PER_MTOK keep the code's defaults unless",
-                  "# set here (.env.example has them with what they cost).",
+                  "# set here (the page above lists them with what they cost).",
                   "OPENROUTER_API_KEY="]
     else:
         lines += ["# Unset LIBRARY_DB_PATH: your index is $AYL_HOME/index (ADR-026)."]
@@ -915,9 +912,12 @@ def next_steps(demo_index: Path | None, llm: str, reader_index: Path) -> None:
         say("      question (docs/cost.md)")
     else:
         say("      no account, no key, nothing to pay: the answer is written on this machine")
-    say(f"  AYL_ALLOW_DEFAULT_LOGIN=1 {command('--extra ui ayl ui') if REPO_ROOT else 'ayl ui'}")
+    say(f"  AYL_ALLOW_DEFAULT_LOGIN=1 {command('--extra ui ayl ui') if from_clone() else 'ayl ui'}")
     say("      the web chat on 127.0.0.1, login admin / change-me; set CHAINLIT_USERNAME and")
     say("      CHAINLIT_PASSWORD for a real one and drop the variable")
+    if not from_clone() and importlib.util.find_spec("chainlit") is None:
+        # A tool install has no `ui` extra unless it was asked for.
+        say(f"      it needs the `ui` extra, once: {ui_extra(package_version())}")
 
 
 class Progress:

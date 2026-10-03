@@ -395,7 +395,7 @@ def test_a_missing_cards_table_is_searched_around_and_warned(counted_index, capl
     exists, says so once, and does not pay for the missing one."""
     counts, _ = counted_index(corpora=("transcripts",))
 
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("INFO"):
         hits = library.search_both("q", k=4)
 
     assert [hit["corpus"] for hit in hits] == ["transcripts", "transcripts"]   # vector row + FTS-only row
@@ -428,7 +428,7 @@ def test_fts_failure_on_one_corpus_degrades_that_corpus_only(counted_index, capl
     counts, tables = counted_index(fts_ok=True)
     tables[library.TABLES["cards"]].fts_ok = False
 
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("INFO"):
         hits = library.search_both("q", k=4)
 
     assert counts == {"connect": 1, "embed": 1}
