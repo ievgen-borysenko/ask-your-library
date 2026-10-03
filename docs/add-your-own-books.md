@@ -353,12 +353,17 @@ the folder is indexed as usual:
   is read by a separate Python process that `ayl add` starts:
   - it took longer than **60 s** to read: `ayl add` stops the reading process, and anything it
     started;
-  - it needed more than **1 GiB** of memory to read: the reading process stops itself. It watches
-    the highest its memory has ever been, fifty times a second and once more before it answers,
-    so an allocation it made and freed in between still counts; on Linux it also cannot reserve
-    more than twice that;
-  - memory cannot be measured here, so the file is not read: the process could not be started, or
-    could not watch its own memory. A file is never read unwatched.
+  - it needed more than **1 GiB** of memory to read: `ayl add` reads the reading process's memory
+    fifty times a second, from outside it, and stops it past the cap; the process also watches the
+    highest its own memory has been and stops itself, and on Linux the kernel will not let it
+    reserve more than twice the cap. On macOS, which lets no process set itself a hard memory
+    limit, the bound is a sampled one: a file that allocates as fast as the machine can is
+    stopped at the cap plus what the machine fills in between two looks — up to about 0.7 GiB
+    under a 256 MiB cap, measured — so the most a PDF can hold for the moment before it is stopped
+    is a few hundred MiB over 1 GiB;
+  - memory cannot be measured here, so the file is not read: the process could not be started, its
+    memory cannot be read on this system, or it could not watch its own. A file is never read
+    unwatched.
 
   A 400-page book reads in well under a second and a few dozen MiB; a file built to make the
   library loop or allocate — a font table of millions of entries in a few KiB, a form drawn

@@ -319,7 +319,12 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   points to belongs wholly to that chapter, so a chapter that starts halfway down a page takes the
   end of the chapter before it along, and only the outline's top level (or
   the level under a single root entry) opens sections. Without an outline, `Page N` counts the
-  file's pages, not the numbers printed on them. Every rule and refusal:
+  file's pages, not the numbers printed on them. **On macOS the memory cap is sampled, not hard**:
+  each PDF is read by a separate process that is stopped past 1 GiB, but macOS lets no process set
+  itself a hard memory limit, so the cap is enforced by reading that process's memory fifty times a
+  second; a file that allocates as fast as the machine can is stopped a few hundred MiB past the
+  cap (measured: at most about 0.7 GiB under a 256 MiB cap), and the 60 s deadline bounds how long.
+  On Linux the kernel's limit is exact. Every rule and refusal:
   [Add your own books](add-your-own-books.md#a-pdf).
 - **Prompt delimiters are a convention, not a boundary.** Retrieved text is wrapped in
   XML-like blocks with `<` neutralized; the sanitizer is a small EN/UA regex set. An injection

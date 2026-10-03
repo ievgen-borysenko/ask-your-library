@@ -44,21 +44,39 @@ the file-name rule of a text book.
 A PDF is untrusted input, and **the bound is a process boundary**. `read_pdf`
 does not read the file: it starts a child Python process
 (`python -I -m ask_your_library.ingest.pdf --child <path>`) that does, in a
-session (and process group) of its own, and bounds it. The parent caps the
-child's wall-clock time (`MAX_SECONDS_PER_FILE`): past it the whole process
-group is killed, and so it is on any abnormal end. The child never forks; if a
-`fork` happened anyway, the group kill takes the descendant too. The child caps
-its own memory: at start-up it starts one watcher thread that reads the
-process's high-water mark of resident memory (`getrusage(RUSAGE_SELF).ru_maxrss`)
-every `MEMORY_SAMPLE_SECONDS` and ends the process with `EXIT_MEMORY` past
-`MAX_CHILD_RSS_BYTES`; the mark only rises, so an allocation freed between two
-samples is still seen, and the same check runs once more before the child
-prints its result. On Linux the child also caps its address space at twice
-that (`RLIMIT_AS`). A watcher that cannot start or cannot measure ends the
-child with `EXIT_UNMEASURED`, a refusal: a file is never read unmeasured.
+session (and process group) of its own, and bounds it from outside. The child
+never forks; if a `fork` happened anyway, the group kill takes the descendant
+too. Three bounds, in the order they act:
+
+- **memory, from the parent**: every `MEMORY_SAMPLE_SECONDS` the parent reads
+  the child's resident memory — `proc_pidinfo(PROC_PIDTASKINFO)` from `libproc`
+  through `ctypes` on macOS, `/proc/<pid>/statm` on Linux, no external program —
+  and kills the process group past `MAX_CHILD_RSS_BYTES`. A different process,
+  so a C-level allocation holding the child's interpreter lock cannot keep it
+  from looking. On a platform with neither, or when the reading fails while the
+  child runs, the file is refused: never read unmeasured. A sampled bound can
+  be overshot by what the machine faults in between two samples: measured on an
+  Apple M-series machine, a child touching memory as fast as it can was killed
+  at about 0.7 GiB under a 256 MiB cap. That margin is the residual on macOS,
+  which lets no process set a hard memory limit on itself (`setrlimit` refuses
+  `RLIMIT_AS`, `RLIMIT_DATA` and `RLIMIT_RSS` there); on Linux the next line is
+  exact;
+- **memory, in the child**: on Linux it caps its address space at twice
+  `MAX_CHILD_RSS_BYTES` (`RLIMIT_AS`, the kernel's limit, set at start-up).
+  Everywhere, a watcher thread reads the process's high-water mark
+  (`getrusage(RUSAGE_SELF).ru_maxrss`) every `MEMORY_SAMPLE_SECONDS`, and once
+  more before the result is printed, and ends the process with `EXIT_MEMORY`
+  past the cap: a fast first line with an exact reason, which sees an
+  allocation freed between two samples, but which cannot run while a C call
+  holds the interpreter lock. A watcher that cannot start or measure ends the
+  child with `EXIT_UNMEASURED`, a refusal;
+- **time, from the parent**: past `MAX_SECONDS_PER_FILE` the process group is
+  killed, and so it is on any abnormal end.
+
 Whatever the library does inside, however a hostile file makes it allocate or
 loop, it ends in one of those refusals. No external program is started; the
-parent never imports `pypdf`, runs no thread and handles no signal.
+parent never imports `pypdf`, runs no thread and handles no signal: its
+sampling is the loop that reads the child's output.
 
 Inside the child, the first line is a set of caps that give a precise reason
 fast, on what the library lets a caller bound:
@@ -150,9 +168,9 @@ MAX_ROOT_RECOVERY = 10_000
 # The process boundary. A 400-page book reads in about 0.6 s and 40 MiB.
 MAX_SECONDS_PER_FILE = 60
 MAX_CHILD_RSS_BYTES = 1024 * 1024 * 1024
-# How often the child's watcher reads its high-water mark; the mark itself
-# catches what happens between two reads, so this sets only how far past the
-# cap a fast allocation can run before the child is ended.
+# How often the parent reads the child's resident memory, and the child its
+# own high-water mark: this sets how far past the cap a fast allocation can
+# run before the child is killed (the parent) or ends itself (the child).
 MEMORY_SAMPLE_SECONDS = 0.02
 
 # Every field of the library's `Configuration`, set here rather than left at its
@@ -262,6 +280,53 @@ def child_command(path: Path) -> list[str]:
             "--max-bytes", str(MAX_CHILD_RSS_BYTES)]
 
 
+PROC_PIDTASKINFO = 4                             # <sys/proc_info.h>
+
+
+def resident_memory_reader():
+    """A function pid -> the process's resident bytes (None when it cannot be
+    read), or None on a platform with no way to read it without starting a
+    program. macOS: `proc_pidinfo(pid, PROC_PIDTASKINFO)` from `libproc`;
+    Linux: `/proc/<pid>/statm`."""
+    if sys.platform == "darwin":
+        import ctypes
+        import ctypes.util
+
+        class TaskInfo(ctypes.Structure):            # struct proc_taskinfo
+            _fields_ = ([(name, ctypes.c_uint64) for name in (
+                "virtual_size", "resident_size", "total_user", "total_system",
+                "threads_user", "threads_system")]
+                + [(name, ctypes.c_int32) for name in (
+                    "policy", "faults", "pageins", "cow_faults", "messages_sent",
+                    "messages_received", "syscalls_mach", "syscalls_unix", "csw",
+                    "threadnum", "numrunning", "priority")])
+
+        try:
+            libproc = ctypes.CDLL(ctypes.util.find_library("proc") or "/usr/lib/libproc.dylib")
+            pidinfo = libproc.proc_pidinfo
+        except (OSError, AttributeError):
+            return None
+        pidinfo.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p,
+                            ctypes.c_int]
+        pidinfo.restype = ctypes.c_int
+
+        def read(pid: int) -> int | None:
+            info = TaskInfo()
+            size = pidinfo(pid, PROC_PIDTASKINFO, 0, ctypes.byref(info), ctypes.sizeof(info))
+            return info.resident_size if size == ctypes.sizeof(info) else None
+        return read
+    if sys.platform.startswith("linux"):
+        page = os.sysconf("SC_PAGE_SIZE")
+
+        def read(pid: int) -> int | None:
+            try:
+                return int(Path(f"/proc/{pid}/statm").read_text().split()[1]) * page
+            except (OSError, ValueError, IndexError):
+                return None
+        return read
+    return None
+
+
 def read_pdf(path: Path) -> PdfBook:
     """The whole read, in a child process bounded from here. Raises
     `PdfRefused` for anything that is not indexed."""
@@ -270,6 +335,9 @@ def read_pdf(path: Path) -> PdfBook:
             raise PdfRefused(f"the file is larger than {mib(MAX_FILE_BYTES)}")
     except OSError as error:
         raise PdfRefused("the file cannot be read") from error
+    resident = resident_memory_reader()
+    if resident is None or resident(os.getpid()) is None:
+        raise PdfRefused(UNMEASURED)                 # checked on this process first
     try:
         # A session of its own: the child leads a new process group, and the
         # group is what is killed, descendants included.
@@ -278,14 +346,25 @@ def read_pdf(path: Path) -> PdfBook:
                                 start_new_session=True)
     except OSError as error:
         raise PdfRefused(UNMEASURED) from error
+    deadline = time.monotonic() + MAX_SECONDS_PER_FILE
     normal = False
     try:
-        try:
-            # Reads the child's stdout while it runs, so a large book cannot
-            # fill the pipe and stall it.
-            out, _ = proc.communicate(timeout=MAX_SECONDS_PER_FILE)
-        except subprocess.TimeoutExpired as error:
-            raise PdfRefused(too_slow_reason()) from error
+        while True:
+            try:
+                # Reads the child's stdout while it runs, so a large book
+                # cannot fill the pipe and stall it; a timeout loses no output.
+                out, _ = proc.communicate(timeout=MEMORY_SAMPLE_SECONDS)
+                break
+            except subprocess.TimeoutExpired:
+                pass
+            if time.monotonic() > deadline:
+                raise PdfRefused(too_slow_reason())
+            rss = resident(proc.pid)
+            if rss is None:
+                if proc.poll() is None:              # running, and not measurable
+                    raise PdfRefused(UNMEASURED)
+            elif rss > MAX_CHILD_RSS_BYTES:
+                raise PdfRefused(too_big_reason())
         normal = proc.returncode in (EXIT_READ, EXIT_REFUSED, EXIT_ERROR)
     finally:
         if not normal:

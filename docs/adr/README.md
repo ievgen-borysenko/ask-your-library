@@ -1482,20 +1482,38 @@ refusal's reason, or the class of an unexpected error — and exits with a known
 is discarded unread, and its stdout is checked for shape before it is believed. The child runs in
 a session of its own, and at 60 s (`MAX_SECONDS_PER_FILE`), or on any abnormal end, the parent
 kills its whole process group: the child never forks, and if a `fork` happened anyway the
-descendant goes with it. Memory is the child's own job, because only the child can see all of
-it: a watcher thread reads the process's high-water mark of resident memory
-(`getrusage(RUSAGE_SELF).ru_maxrss`, bytes on macOS and KiB on Linux) every 20 ms and once more
-before the result is printed, and ends the process with a status of its own past 1 GiB
-(`MAX_CHILD_RSS_BYTES`). The mark only rises, so an allocation made and freed between two looks
-is still seen — the parent's earlier sampling of the current resident size, four times a second
-through `ps`, accepted a child that touched 256 MiB under a 16 MiB cap and freed it in time, and
-failed outright where `ps` could not be run. On Linux the child also limits its address space to
-twice the cap (`RLIMIT_AS`). A watcher that cannot start or cannot read the mark ends the child
-with another status, a refusal, and so does a child the parent cannot start: a file is never read
-unwatched. The parent never imports `pypdf`, runs no thread, handles no signal and starts no
-program but the child. Each check costs about half a microsecond; a 400-page book reads in 0.55 s
-with the watcher and 0.54 s without, and starting the child costs about 50 ms a file on an Apple
-M-series machine.
+descendant goes with it. Memory is bounded three ways, past 1 GiB (`MAX_CHILD_RSS_BYTES`):
+
+- *From outside*: every 20 ms the parent reads the child's resident memory —
+  `proc_pidinfo(PROC_PIDTASKINFO)` from `libproc` through `ctypes` on macOS, `/proc/<pid>/statm` on
+  Linux — and kills the process group past the cap. A different process, so a C call that holds
+  the child's interpreter lock cannot keep it from looking: a child's own watcher thread could
+  not run while `bytearray(2 GiB)` zero-filled its memory, and the child reached 2,068 MiB under a
+  256 MiB cap before it was ended. On a platform with neither reading, or when the reading fails
+  while the child runs, the file is refused. The sampling is the loop that already reads the
+  child's output; the parent runs no thread, handles no signal and starts no program but the child.
+- *The kernel, on Linux*: the child limits its own address space to twice the cap (`RLIMIT_AS`)
+  at start-up. That limit is exact. macOS has none a process can set on itself: `setrlimit`
+  refuses `RLIMIT_AS`, `RLIMIT_DATA` and `RLIMIT_RSS` there ("current limit exceeds maximum
+  limit", even keeping the hard value), and a 600 MiB allocation goes through.
+- *In the child*: a watcher thread reads the high-water mark (`getrusage(RUSAGE_SELF).ru_maxrss`)
+  every 20 ms and once more before the result is printed, and ends the process with an exact
+  reason. The mark only rises, so an allocation made and freed between two looks is still seen —
+  the earlier sampling through `ps` accepted a child that touched 256 MiB under a 16 MiB cap — but
+  the thread cannot run while a C call holds the lock. A watcher that cannot start or read the
+  mark ends the child with a refusal, and so does a child the parent cannot start: a file is
+  never read unwatched.
+
+**The residual, on macOS.** The merge gate asked for a hard limit that does not depend on the
+child's interpreter lock, and for PDFs to be refused where the platform has none. The first half
+holds on Linux; the second is not followed, deliberately: macOS is the project's primary
+platform, and refusing every PDF there would remove the format from the release whose criterion it
+is. What macOS gets is the parent's sampled bound, and its residual is stated: what the machine
+faults in between two samples. Measured on an Apple M-series machine, a child zero-filling 2 GiB
+as fast as it could, under a 256 MiB cap, peaked at 263 to 696 MiB over ten runs before it was
+killed; the cap plus a few hundred MiB is the ceiling, and the 60 s deadline bounds how long. A
+check costs about half a microsecond in the child and one system call in the parent; a 400-page
+book reads in 0.55 s, and starting the child costs about 50 ms a file.
 
 This replaced a first version that bounded the library from inside, by counting at three names
 inside it (the stream decoder, the content-stream parser, the font builder) for the length of a

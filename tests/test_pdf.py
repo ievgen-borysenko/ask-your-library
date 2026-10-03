@@ -11,7 +11,9 @@ import dataclasses
 import io
 import logging
 import os
+import subprocess
 import sys
+import threading
 import time
 import tracemalloc
 import zlib
@@ -856,6 +858,73 @@ def test_a_process_the_child_forked_goes_with_it(tmp_path, monkeypatch, child_en
     monkeypatch.setattr(pdf, "child_command", lambda path: child_code(body))
     assert child_refused(make_pdf(tmp_path / "b.pdf", five_pages())) == reason
     assert gone_soon(int(pid_file.read_text()))
+
+
+def recorded_samples(monkeypatch):
+    """Every resident-memory sample the parent takes, with the number of
+    threads the parent had when it took it."""
+    samples = []
+    reader = pdf.resident_memory_reader
+
+    def recording():
+        read = reader()
+
+        def sample(pid):
+            value = read(pid)
+            samples.append((pid, value, threading.active_count()))
+            return value
+        return sample
+    monkeypatch.setattr(pdf, "resident_memory_reader", recording)
+    return samples
+
+
+def test_a_child_growing_inside_one_c_call_is_killed_from_outside(tmp_path, monkeypatch):
+    """`bytearray(2 GiB)` zero-fills its memory in one C call that holds the
+    child's interpreter lock, so the child's own watcher cannot run until it
+    returns (at the previous design, the child reached 2,068 MiB under a
+    256 MiB cap). The parent, a different process, samples it every 20 ms and
+    kills it. The overshoot is what the machine faults in between two samples:
+    measured here at 263 to 696 MiB of peak over ten runs, so the bound below
+    is generous."""
+    monkeypatch.setattr(pdf, "MAX_CHILD_RSS_BYTES", 256 * 1024 * 1024)
+    monkeypatch.setattr(pdf, "child_command", lambda path: [
+        sys.executable, "-I", "-c", "b = bytearray(2 * 1024 ** 3)\nimport time\ntime.sleep(30)"])
+    samples = recorded_samples(monkeypatch)
+    started = time.monotonic()
+    assert child_refused(make_pdf(tmp_path / "b.pdf", five_pages())) == (
+        "it needed more than 256 MiB of memory to read")
+    assert time.monotonic() - started < 5
+    child = [value for pid, value, _ in samples if pid != os.getpid() and value]
+    assert child and child[-1] > 256 * 1024 * 1024
+    assert child[-1] < 1024 * 1024 * 1024, child[-1]
+
+
+def test_the_parent_reads_with_no_thread_and_no_process_but_the_child(tmp_path, monkeypatch):
+    samples = recorded_samples(monkeypatch)
+    started = []
+    popen = subprocess.Popen
+
+    def counted(*args, **kwargs):
+        started.append(args[0])
+        return popen(*args, **kwargs)
+    monkeypatch.setattr(pdf.subprocess, "Popen", counted)
+    threads = threading.active_count()
+    pdf.read_pdf(make_pdf(tmp_path / "b.pdf", five_pages()))
+    assert len(started) == 1 and started[0][:4] == [sys.executable, "-I", "-m",
+                                                    "ask_your_library.ingest.pdf"]
+    assert samples and {count for _, _, count in samples} == {threads}
+
+
+def test_a_platform_where_memory_cannot_be_read_reads_nothing(tmp_path, monkeypatch):
+    path = make_pdf(tmp_path / "b.pdf", five_pages())
+    monkeypatch.setattr(pdf, "resident_memory_reader", lambda: None)
+    assert child_refused(path) == "memory cannot be measured here, so the file is not read"
+    # Readable for this process, unreadable for the running child: the same.
+    monkeypatch.setattr(pdf, "resident_memory_reader",
+                        lambda: lambda pid: 1 if pid == os.getpid() else None)
+    monkeypatch.setattr(pdf, "child_command",
+                        lambda path: [sys.executable, "-I", "-c", "import time; time.sleep(5)"])
+    assert child_refused(path) == "memory cannot be measured here, so the file is not read"
 
 
 def test_every_field_of_the_library_configuration_is_set():

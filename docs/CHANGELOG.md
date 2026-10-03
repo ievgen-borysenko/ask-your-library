@@ -55,7 +55,9 @@
   password is tried), one the library cannot read (named by the kind of error only), and one over
   the limits: 256 MiB a file, 5,000 pages, 100,000 characters a page and 20 million a book. Each
   PDF is read in a child process: `ayl add` stops it, and anything it started, at 60 s, and the
-  child ends itself when the highest its memory has been passes 1 GiB, so no file can make the
+  child is stopped past 1 GiB of memory (read from outside fifty times a second; on Linux also the
+  kernel's limit; on macOS a sampled bound that a fast allocation can overshoot by a few hundred
+  MiB), so no file can make the
   library loop or allocate without bound. Its output is one JSON document, its error output is
   discarded, and a child that cannot be started or cannot watch its memory reads nothing. An outline that points at no page is named in one line and the
   pages are indexed instead, and so is a book in which fewer than half the pages have text; a
