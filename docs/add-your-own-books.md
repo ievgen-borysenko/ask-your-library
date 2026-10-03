@@ -23,13 +23,16 @@ accepts, and anything written after a bare `--` reaches it verbatim (`ayl backup
 this had before, is still installed and still runs the same code; it prints one deprecation line
 and is removed at `0.6.0`.
 
-Every `.txt`, `.md` and `.epub` file under the folder (recursively) is **one book**. Skipped, and
+Every `.txt`, `.md`, `.epub` and `.pdf` file under the folder (recursively) is **one book**. Skipped, and
 reported on stderr: hidden files and directories; **symlinks** — in or out of the folder, including
 files under a symlinked directory; files that are not UTF-8 text; files with nothing but a front
 matter block or a title line; a folder named `*.epub` (an unpacked EPUB, the way Apple Books keeps
-one: zip it, or export it as a file; nothing inside it is read as a book of its own); and an EPUB that is refused ([below](#an-epub)):
-DRM-protected, malformed, with an unsafe member path or an XML entity declaration in its package
-files, not readable in the encoding a document declares, over the archive limits, or without text.
+one: zip it, or export it as a file; nothing inside it is read as a book of its own) and a folder
+named `*.pdf` (a PDF is a single file; nothing inside the folder is read either); an EPUB that is
+refused ([below](#an-epub)): DRM-protected, malformed, with an unsafe member path or an XML entity
+declaration in its package files, not readable in the encoding a document declares, over the
+archive limits, or without text; and a PDF that is refused ([below](#a-pdf)): without a text layer
+(a scan), encrypted, unreadable, or over its limits.
 A link is not followed, so nothing outside the folder is ever read or embedded; copy the file in
 if you want it indexed. One bad file never aborts the run — the
 others are still indexed, and every skip is named on stderr (hidden ones as a single line with
@@ -293,6 +296,97 @@ the folder is indexed as usual:
 
 The limits of what is read — fixed layout, MOBI and AZW, footnotes, a file that holds several
 chapters — are in [Known limits](known-limits.md).
+
+## A PDF
+
+A `.pdf` is read through its **text layer**: the characters its pages draw, as the
+[`pypdf`](https://pypi.org/project/pypdf/) library extracts them (BSD-licensed, pure Python,
+installed with `ayl`; [ADR-030](adr/README.md#adr-030-pdf-is-read-through-its-text-layer-with-pypdf-in-a-child-process-bounded-from-outside-and-encryption-is-refused)).
+Nothing is rendered and nothing is recognised from images: a scanned book has no text layer, and
+is refused rather than indexed empty.
+
+**The book key** is the document's own metadata: `/Title` and `/Author` in its information
+dictionary, else `dc:title` and the `dc:creator` names in its XMP metadata. With no title the file
+name rule above applies (`Title - Author.pdf`); with a title and no author the author is
+`Unknown`. A title the producing program wrote for you (a word processor's file name, say) is
+taken as written; front matter and title lines do not apply.
+
+**A section comes from the outline**, the bookmarks a PDF viewer shows in its side panel, when the
+document has one. Each top-level entry opens a section at the page it points to, and the section
+runs to the page before the next entry's; when the top level is a single entry with entries
+under it (a book whose one bookmark is its own title), the level under it is used instead. Pages
+before the first entry are `Front matter`. The outline's order does not matter, the pages' does:
+sections are in page order. A page is the smallest unit: the page an entry points to belongs
+wholly to that entry's section, so a chapter that starts halfway down a page takes the end of the
+chapter before it along, and when two entries point at the same page the first one names it. Deeper entries (sections inside a chapter) do not split it. An entry that points at no
+page of this document (past the last page, at something that is not a page, at another file) is
+ignored, and so is one with no title. When no entry is left, or the outline cannot be read, or it
+is too deep or too large (more than 10,000 entries or 32 levels), the run says so in one line and
+indexes the pages instead.
+
+**Without an outline, a page is a section**: every page with text, named `Page N`, where N counts
+from the first page of the file — the number a viewer's page box shows, not the number printed on
+the page. A page without text is no section, so the numbering keeps its gaps.
+
+The text of a page is `pypdf`'s plain extraction, in page order: every run of whitespace becomes
+one space, lines are trimmed and empty ones dropped, and the control and invisible characters the
+text path strips are stripped here too. A word hyphenated at a line end stays hyphenated, running
+headers, footers and page numbers are read as text, and a two-column page comes out in the order
+it was drawn — see [Known limits](known-limits.md).
+
+**Refused, with one line naming the file and why** — never a line of its text — and the rest of
+the folder is indexed as usual:
+
+- **No text layer**: fewer than 200 characters of text (whitespace not counted) on its first 10
+  pages, or on all of them when it has fewer. A scan needs OCR, which `ayl` does not do; a PDF
+  you ran OCR over yourself has a text layer and is read. Ten pages, because a real book's cover,
+  half-title and title page can be nearly empty.
+- **Encrypted**: any `/Encrypt` dictionary, a password to open the file or only restrictions on
+  what may be done with it. No password is tried, the empty one included, and nothing is
+  decrypted; save an unrestricted copy if you have the right to.
+- **Could not be read**: anything the library raises while it reads the file — not a PDF, cut
+  short, a damaged object, a reference cycle, a stream that inflates past **16 MiB**, a font map
+  past the library's own limits. The line names the kind of error (`could not be read
+  (PdfStreamError)`) and nothing of what it said. A damaged cross-reference table alone is not a
+  refusal: the library rebuilds it.
+- **Too long or too large to read** — the bound that holds whatever is inside the file. Each PDF
+  is read by a separate Python process that `ayl add` starts:
+  - it took longer than **60 s** to read: `ayl add` stops the reading process, and anything it
+    started;
+  - it needed more than **1 GiB** of memory to read: `ayl add` reads the reading process's memory
+    fifty times a second, from outside it, and stops it past the cap; the process also watches the
+    highest its own memory has been and stops itself, and on Linux the kernel will not let it
+    reserve more than the cap plus 768 MiB of address space. On macOS, which lets no process set itself a hard memory
+    limit, the bound is a sampled one: a file that allocates as fast as the machine can is
+    stopped at the cap plus what the machine fills in between two looks — up to about 0.7 GiB
+    under a 256 MiB cap, measured — so the most a PDF can hold for the moment before it is stopped
+    is a few hundred MiB over 1 GiB;
+  - memory cannot be measured here, so the file is not read: the process could not be started, its
+    memory cannot be read on this system, or it could not watch its own. A file is never read
+    unwatched.
+
+  A 400-page book reads in well under a second and a few dozen MiB; a file built to make the
+  library loop or allocate — a font table of millions of entries in a few KiB, a form drawn
+  hundreds of times — ends in one of these two lines instead of stalling the run.
+- **Too large**, before that, each with its own line:
+  - the file is larger than **256 MiB**;
+  - it has more than **5,000 pages**, or its page tree is too deep or too large to read (more than
+    10,000 entries or 64 levels);
+  - a page in it holds more than **100,000 characters** of text (the bytes it shows are counted
+    while the page is read, the characters they make after it), or the book more than
+    **20 million**.
+
+  A page draws at most 200 forms; the library skips the rest of them.
+- **No text** at all after extraction, or **no pages**.
+
+A PDF that is read but **mostly without text** — fewer than half its pages yield any, the shape of
+a scan with a text-layer cover and front matter, which the ten-page rule lets through — is
+indexed with what it has, and the run says so in one line: `only 12 of its 300 pages have text
+(the others may be scanned images, which are not read)`.
+
+What is never done with a PDF: no JavaScript is run, no action or link is followed, no attached
+or embedded file is read, no page is rendered, no image is decoded, and no external program is
+started.
 
 ## More than one library
 

@@ -281,8 +281,8 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   moment of the swap instead. Re-ask the question, or index when nobody is asking.
 - **English corpus assumption.** The planner prompt hardcodes English search queries. Questions
   in other languages work (bge-m3 is multilingual), the queries do not.
-- **"Your own library" covers plain text and EPUB, and without cards.** `ayl add` takes `.txt`,
-  `.md` and `.epub`; PDF and audio are not handled yet (the demo corpus's audio path is Whisper in
+- **"Your own library" covers plain text, EPUB and PDF, and without cards.** `ayl add` takes
+  `.txt`, `.md`, `.epub` and `.pdf`; audio is not handled yet (the demo corpus's audio path is Whisper in
   `scripts/ingest_demo_corpus.py`, driven by the manifest). It builds the transcripts table
   only — book-card generation needs an LLM per book and is not implemented — and the chapter
   detection of a text file is the demo heuristic, so an unusual edition may fall back to one
@@ -303,6 +303,29 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   file do not split it. No heading inside the text is used, so a book whose table of contents is
   missing gets `Section 1`, `Section 2`, … rather than its chapter names. Every rule and refusal:
   [Add your own books](add-your-own-books.md#an-epub).
+- **A PDF is read through its text layer, and only that.** **No OCR**: a scanned PDF has no text
+  layer and is refused (fewer than 200 characters on its first 10 pages); run OCR over it yourself
+  first. The rule has two edges. A scan behind a text-layer cover and front matter passes it, and
+  only those pages are indexed: the run names a book in which fewer than half the pages have text,
+  and indexes it anyway. And a real document with under 200 characters in its first ten pages —
+  a one-page note, a short form — is refused as if it were a scan. **No encrypted PDF**, not even one that opens without a password and only restricts
+  printing or copying: no password is tried. **Headers, footers and page numbers are text**: they
+  are not told apart from the body, so a running head sits in every page's text and can be
+  retrieved like a sentence of the book. **Hyphenation is kept**: a word broken at a line end
+  reads `infor- mation` in the index, which a keyword search for the whole word misses (the
+  embedding search usually does not). **Two columns** come out in the order the producer drew
+  them, which is usually column by column and sometimes line across line; tables, captions and
+  sidebars land where they were drawn. **A page is the smallest section**: the page an outline entry
+  points to belongs wholly to that chapter, so a chapter that starts halfway down a page takes the
+  end of the chapter before it along, and only the outline's top level (or
+  the level under a single root entry) opens sections. Without an outline, `Page N` counts the
+  file's pages, not the numbers printed on them. **On macOS the memory cap is sampled, not hard**:
+  each PDF is read by a separate process that is stopped past 1 GiB, but macOS lets no process set
+  itself a hard memory limit, so the cap is enforced by reading that process's memory fifty times a
+  second; a file that allocates as fast as the machine can is stopped a few hundred MiB past the
+  cap (measured: at most about 0.7 GiB under a 256 MiB cap), and the 60 s deadline bounds how long.
+  On Linux the kernel's limit is exact. Every rule and refusal:
+  [Add your own books](add-your-own-books.md#a-pdf).
 - **Prompt delimiters are a convention, not a boundary.** Retrieved text is wrapped in
   XML-like blocks with `<` neutralized; the sanitizer is a small EN/UA regex set. An injection
   cannot forge a source (provenance is checked against the stored passage), but it can steer

@@ -5,13 +5,13 @@ what it was measured to buy. They were written from the code rather than ahead o
 describe the system as built; where a variant was tried and dropped, the rejected variant is part
 of the record, because it is usually the more useful half.
 
-Twenty-nine decisions, in the order they were taken. ADR-016 is written out as a file of its own
+Thirty decisions, in the order they were taken. ADR-016 is written out as a file of its own
 because it changed the planner's contract and added a node to the graph; the rest are summarised
 here. ADR-017 to ADR-023 were recorded on 2026-09-16, after the fact: a review of this tree found
 seven decisions the code had made and no record named. The four that constrain what may be built
 next are written out below; the other three are reserved as stubs — number, title, one sentence —
 to be written when the code they describe is next touched, so that the numbering is taken and the
-decision is not forgotten. ADR-024 and ADR-025 were taken on 2026-09-17, ADR-026 on 2026-09-25 and ADR-027 to ADR-029 on 2026-10-02,
+decision is not forgotten. ADR-024 and ADR-025 were taken on 2026-09-17, ADR-026 on 2026-09-25, ADR-027 to ADR-029 on 2026-10-02 and ADR-030 on 2026-10-03,
 each written out with the code it describes. The measurements are not repeated in full: the reports under
 [`docs/eval-results/`][reports] are the primary record, and each entry below names the one that
 carries its numbers. Reports of
@@ -1442,6 +1442,127 @@ contents' links into the middle of a file do not split it); footnotes stay where
 them; fixed-layout books are read as if they reflowed; MOBI and AZW are not read. Each is in
 [Known limits](../known-limits.md), and splitting at contents anchors is the obvious next step if
 real books show the need.
+
+## ADR-030: PDF is read through its text layer with pypdf, in a child process bounded from outside, and encryption is refused
+
+Status: accepted (2026-10-03, #34, with `ayl add` reading `.pdf`).
+
+The second half of the 0.5.0 criterion: a reader's own PDF, imported on a clean install. Three
+decisions again, and the first is the one the EPUB did not need.
+
+**A library, and which one.** A PDF's text is not stored as text. A page is a program of drawing
+instructions in a compressed stream; the characters it shows are codes in a font's encoding, mapped
+to Unicode through a `/ToUnicode` table, a standard encoding with differences, or the encoding
+inside an embedded font program; where a word ends is a matter of glyph positions, not spaces.
+Reading that with the standard library means writing a PDF object parser, the stream filters, a
+content-stream interpreter, the CMap and font-encoding machinery and the text-positioning
+arithmetic: a project of its own, larger than this one's ingest, and one more untrusted-input
+parser to get right. So a library it is, under three constraints: a permissive licence (this
+project is Apache-2.0; PyMuPDF and borb are AGPL), no native code or external program on the read
+path, and maintained. **`pypdf` 6.19.0** (2026-09-16; BSD-3-Clause, recorded in its package
+metadata and its `LICENSE` file) meets all three: pure Python, no dependency of its own on Python
+3.11 and later, text extraction and the outline and metadata in its public API, and — the deciding
+point — a configuration of resource limits (inflated stream size per filter, page-tree and outline
+size and depth, form invocations) that the reader can tighten. `pdfminer.six` (MIT) extracts text
+as well, with better layout analysis, but brings `charset-normalizer` and `cryptography` with it and
+has no such limits; `pypdfium2` (Apache-2.0/BSD) wraps PDFium, a C++ renderer, which is the attack
+surface this decision avoids. It is a main dependency, not an extra: the criterion is a clean
+install that imports a PDF, and `pyproject.toml` bounds it below at the version verified, as the
+others are, and above at the next major version, unlike them: the reader sets every field of the
+library's configuration and replaces one method of its reader (below), which a major version may
+rename. It is a dependency installed beside this project under its own licence, not
+redistributed in it, so `NOTICE`, which records third-party material this tree carries, does not
+change — as for every other dependency.
+
+**A PDF is untrusted input, and the bound is a process boundary.** `read_pdf` does not read the
+file. It starts a child Python process (`python -I -m ask_your_library.ingest.pdf --child <path>`;
+`-I` so that nothing in the working directory or the environment can stand in for a module of this
+package), which reads it and prints one JSON document — title, author, sections, notes, or a
+refusal's reason, or the class of an unexpected error — and exits with a known status; its stderr
+is discarded unread, and its stdout is checked for shape before it is believed. The child runs in
+a session of its own, and at 60 s (`MAX_SECONDS_PER_FILE`), or on any abnormal end, the parent
+kills its whole process group: the child never forks, and if a `fork` happened anyway the
+descendant goes with it. Memory is bounded three ways, past 1 GiB (`MAX_CHILD_RSS_BYTES`):
+
+- *From outside*: every 20 ms the parent reads the child's resident memory —
+  `proc_pidinfo(PROC_PIDTASKINFO)` from `libproc` through `ctypes` on macOS, `/proc/<pid>/statm` on
+  Linux — and kills the process group past the cap. A different process, so a C call that holds
+  the child's interpreter lock cannot keep it from looking: a child's own watcher thread could
+  not run while `bytearray(2 GiB)` zero-filled its memory, and the child reached 2,068 MiB under a
+  256 MiB cap before it was ended. On a platform with neither reading, or when the reading fails
+  while the child runs, the file is refused. The sampling is the loop that already reads the
+  child's output; the parent runs no thread, handles no signal and starts no program but the child.
+- *The kernel, on Linux*: the child limits its own address space (`RLIMIT_AS`) at start-up to the
+  cap plus a fixed 768 MiB of headroom — address space is not resident memory, and the
+  interpreter maps shared libraries and allocator arenas it never touches, so a multiple of a
+  small cap is less than the interpreter's own mappings. That limit is exact. macOS has none a process can set on itself: `setrlimit`
+  refuses `RLIMIT_AS`, `RLIMIT_DATA` and `RLIMIT_RSS` there ("current limit exceeds maximum
+  limit", even keeping the hard value), and a 600 MiB allocation goes through.
+- *In the child*: a watcher thread reads the high-water mark — `ru_maxrss` on macOS, `VmHWM` in
+  `/proc/self/status` on Linux, where `ru_maxrss` survives `execve` and a child of a parent that
+  once held 400 MiB reports 400 MiB before it has done anything — every 20 ms and once more before the result is printed, and ends the process with an exact
+  reason. The mark only rises, so an allocation made and freed between two looks is still seen —
+  the earlier sampling through `ps` accepted a child that touched 256 MiB under a 16 MiB cap — but
+  the thread cannot run while a C call holds the lock. A watcher that cannot start or read the
+  mark ends the child with a refusal, and so does a child the parent cannot start: a file is
+  never read unwatched.
+
+**The residual, on macOS.** The merge gate asked for a hard limit that does not depend on the
+child's interpreter lock, and for PDFs to be refused where the platform has none. The first half
+holds on Linux; the second is not followed, deliberately: macOS is the project's primary
+platform, and refusing every PDF there would remove the format from the release whose criterion it
+is. What macOS gets is the parent's sampled bound, and its residual is stated: what the machine
+faults in between two samples. Measured on an Apple M-series machine, a child zero-filling 2 GiB
+as fast as it could, under a 256 MiB cap, peaked at 263 to 696 MiB over ten runs before it was
+killed; the cap plus a few hundred MiB is the ceiling, and the 60 s deadline bounds how long. A
+check costs about half a microsecond in the child and one system call in the parent; a 400-page
+book reads in 0.55 s, and starting the child costs about 50 ms a file.
+
+This replaced a first version that bounded the library from inside, by counting at three names
+inside it (the stream decoder, the content-stream parser, the font builder) for the length of a
+read. Each review found one more allocation those counters did not see: forms drawn hundreds of
+times, a one-line CMap range that stands for 65,536 entries rebuilt for every page, and finally a
+font `/Differences` array of five million names in a 15 KB file, 630 MiB of resident memory before
+any counter ran. The library is free to allocate in ways no caller can enumerate; a process
+boundary bounds all of them at once, and the counters, the replaced names and the check that they
+still engaged were dropped with it.
+
+Inside the child, a first line gives a precise reason fast where the library lets a caller bound
+its work: every field of its configuration is set explicitly, and a test fails when a version adds
+one (each inflated stream at 16 MiB, the
+page-tree walk at twice the page cap or 64 levels, the outline at 10,000 entries or 32 levels, 200
+form draws a page, the XMP size and element count, the recovery of a damaged stream, `jbig2dec`
+never called), and the module caps the file at 256 MiB, the pages at 5,000, the text at 100,000
+characters a page — the bytes a page shows counted per instruction through the library's public
+extraction callback, the characters they made after the page — and 20 million a book. The
+refusals are the EPUB's convention: one line, the file's path inside the folder and a fixed
+reason, never a quote; anything the library raises is named by its class only. Its own log lines
+and warnings are silenced while it reads, because they quote the file (an outline node it could
+not read is logged verbatim): the handler lists of the `pypdf` loggers are replaced, not added
+to, `logging.lastResort` with them, and all of it is restored afterwards — process-global state,
+which the child, reading one file, is free to change. No JavaScript is run, no action followed,
+no attachment read, no page rendered, no image decoded.
+
+**Encryption is refused, and nothing is tried.** `PdfReader` tries the empty password on any
+encrypted file as it opens it, which opens a file that has only an owner password — restrictions
+on printing or copying, a form of DRM. The reader replaces that attempt with the refusal (and
+checks `is_encrypted` again afterwards), so no password is tried and nothing is decrypted, for the
+same reason ADR-029 refuses DRM.
+
+**Sections from structure, as for an EPUB.** The outline's top-level entries open sections, each
+running to the page before the next (the level under a single root entry when that is all the top
+level holds); without an outline every page with text is `Page N`. Nothing is inferred from the
+text: no heading detection, no header or footer removal, no de-hyphenation. A scanned PDF — fewer
+than 200 characters on its first 10 pages — is refused rather than indexed empty; OCR is not in
+0.5.0.
+
+**Consequences.** Running headers and page numbers are indexed as text, a word broken at a line end
+stays broken, two-column pages come out in drawing order, a chapter that starts mid-page takes the
+whole of that page (and the end of the chapter before it), and an owner-password-only PDF that any
+viewer opens is refused. A scan behind a text-layer cover passes the ten-page rule and is indexed
+with what it has, named in one line when fewer than half its pages have text. Each is in
+[Known limits](../known-limits.md). Every PDF costs one process start, and a hostile one costs at
+most a minute and a gigabyte before its line is written.
 
 [reports]: ../eval-results/
 [backlog]: ../backlog.md
