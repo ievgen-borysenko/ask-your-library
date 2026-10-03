@@ -50,6 +50,7 @@ import chainlit as cl
 import chainlit.auth.cookie as chainlit_cookie
 from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 from chainlit.server import app as chainlit_app
+from sqlalchemy import URL
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from ask_your_library.fake_backend import install_fake_backend
@@ -361,7 +362,13 @@ own_read_write_only(CHAT_DB_PATH)
 
 @cl.data_layer
 def data_layer():
-    return SQLAlchemyDataLayer(conninfo=f"sqlite+aiosqlite:///{CHAT_DB_PATH}")
+    # A URL object, not an f-string: SQLAlchemy 2.1 percent-decodes the database
+    # part of a URL it parses, so a chat dir with `%XX` in its name (`100%25`)
+    # would open a database at the DECODED path, next to the one the schema was
+    # just written into — and the layer swallows SQL errors, so the history
+    # would silently not be saved. `URL.create` takes the path as it is, and the
+    # layer hands the object to `create_async_engine` unchanged.
+    return SQLAlchemyDataLayer(conninfo=URL.create("sqlite+aiosqlite", database=str(CHAT_DB_PATH)))
 
 
 @cl.password_auth_callback
