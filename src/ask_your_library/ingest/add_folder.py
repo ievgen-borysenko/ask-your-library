@@ -1046,7 +1046,10 @@ def run_backup(db_path: Path, dest: Path, chat_db: Path | None) -> int:
         return 1
     for line in manifest_lines(target, read_manifest(target)):
         say(line)
-    say(f"restore it with:  {command('ayl restore')} {target} --db {db_path}")
+    # Both paths shell-quoted: the line is meant to be copied, and a space in
+    # either would split it into arguments that name other places.
+    say(f"restore it with:  {command('ayl restore')} {shlex.quote(str(target))} "
+        f"--db {shlex.quote(str(db_path))}")
     return 0
 
 
@@ -1063,7 +1066,7 @@ def run_restore(db_path: Path, source: Path, chat_db: Path | None, force: bool) 
     except (BackupError, IngestBusy) as error:
         say(str(error), error=True)
         return 1
-    say(f"check it with:  {command('ayl doctor')} --db {db_path}")
+    say(f"check it with:  {command('ayl doctor')} --db {shlex.quote(str(db_path))}")
     return 0
 
 

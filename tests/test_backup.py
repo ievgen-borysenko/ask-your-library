@@ -11,6 +11,7 @@ import contextlib
 import fcntl
 import json
 import os
+import shlex
 import sqlite3
 import subprocess
 import sys
@@ -662,3 +663,28 @@ def test_the_suite_never_reaches_the_checkouts_own_chat_history(tmp_path, monkey
     pinned = Path(os.environ["AYL_CHAINLIT_DIR"]).resolve()
     assert backup_module.default_chat_db() == pinned / "chat.db"
     assert checkout not in backup_module.default_chat_db().parents
+
+
+# --- the printed follow-up commands -------------------------------------------
+
+def test_the_backup_hint_quotes_paths_with_spaces(built, tmp_path, capsys):
+    """The closing line is meant to be copied: a space in the backup folder or
+    the index path must not split it into arguments that name other places."""
+    db = tmp_path / "db"
+    dest = tmp_path / "My Backups"
+    assert add_folder.run_backup(db, dest, chat_db=None) == 0
+    out = capsys.readouterr().out
+    line = next(l for l in out.splitlines() if l.startswith("restore it with:"))
+    target = next(dest.iterdir())
+    assert shlex.quote(str(target)) in line and shlex.quote(str(db)) in line
+    assert shlex.split(line.split("restore it with:", 1)[1])[-3:] == [str(target), "--db", str(db)]
+
+
+def test_the_restore_hint_quotes_a_path_with_spaces(built, tmp_path, capsys):
+    source = backup(tmp_path / "db", tmp_path / "backups")
+    db = tmp_path / "My Index"
+    assert add_folder.run_restore(db, source, chat_db=None, force=False) == 0
+    out = capsys.readouterr().out
+    line = next(l for l in out.splitlines() if l.startswith("check it with:"))
+    assert shlex.split(line.split("check it with:", 1)[1])[-2:] == ["--db", str(db)]
+
