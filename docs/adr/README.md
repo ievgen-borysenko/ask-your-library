@@ -1492,12 +1492,15 @@ descendant goes with it. Memory is bounded three ways, past 1 GiB (`MAX_CHILD_RS
   256 MiB cap before it was ended. On a platform with neither reading, or when the reading fails
   while the child runs, the file is refused. The sampling is the loop that already reads the
   child's output; the parent runs no thread, handles no signal and starts no program but the child.
-- *The kernel, on Linux*: the child limits its own address space to twice the cap (`RLIMIT_AS`)
-  at start-up. That limit is exact. macOS has none a process can set on itself: `setrlimit`
+- *The kernel, on Linux*: the child limits its own address space (`RLIMIT_AS`) at start-up to the
+  cap plus a fixed 768 MiB of headroom — address space is not resident memory, and the
+  interpreter maps shared libraries and allocator arenas it never touches, so a multiple of a
+  small cap is less than the interpreter's own mappings. That limit is exact. macOS has none a process can set on itself: `setrlimit`
   refuses `RLIMIT_AS`, `RLIMIT_DATA` and `RLIMIT_RSS` there ("current limit exceeds maximum
   limit", even keeping the hard value), and a 600 MiB allocation goes through.
-- *In the child*: a watcher thread reads the high-water mark (`getrusage(RUSAGE_SELF).ru_maxrss`)
-  every 20 ms and once more before the result is printed, and ends the process with an exact
+- *In the child*: a watcher thread reads the high-water mark — `ru_maxrss` on macOS, `VmHWM` in
+  `/proc/self/status` on Linux, where `ru_maxrss` survives `execve` and a child of a parent that
+  once held 400 MiB reports 400 MiB before it has done anything — every 20 ms and once more before the result is printed, and ends the process with an exact
   reason. The mark only rises, so an allocation made and freed between two looks is still seen —
   the earlier sampling through `ps` accepted a child that touched 256 MiB under a 16 MiB cap — but
   the thread cannot run while a C call holds the lock. A watcher that cannot start or read the

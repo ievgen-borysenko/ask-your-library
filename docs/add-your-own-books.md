@@ -356,7 +356,7 @@ the folder is indexed as usual:
   - it needed more than **1 GiB** of memory to read: `ayl add` reads the reading process's memory
     fifty times a second, from outside it, and stops it past the cap; the process also watches the
     highest its own memory has been and stops itself, and on Linux the kernel will not let it
-    reserve more than twice the cap. On macOS, which lets no process set itself a hard memory
+    reserve more than the cap plus 768 MiB of address space. On macOS, which lets no process set itself a hard memory
     limit, the bound is a sampled one: a file that allocates as fast as the machine can is
     stopped at the cap plus what the machine fills in between two looks — up to about 0.7 GiB
     under a 256 MiB cap, measured — so the most a PDF can hold for the moment before it is stopped

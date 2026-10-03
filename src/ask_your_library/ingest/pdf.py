@@ -61,10 +61,12 @@ too. Three bounds, in the order they act:
   which lets no process set a hard memory limit on itself (`setrlimit` refuses
   `RLIMIT_AS`, `RLIMIT_DATA` and `RLIMIT_RSS` there); on Linux the next line is
   exact;
-- **memory, in the child**: on Linux it caps its address space at twice
-  `MAX_CHILD_RSS_BYTES` (`RLIMIT_AS`, the kernel's limit, set at start-up).
-  Everywhere, a watcher thread reads the process's high-water mark
-  (`getrusage(RUSAGE_SELF).ru_maxrss`) every `MEMORY_SAMPLE_SECONDS`, and once
+- **memory, in the child**: on Linux it caps its address space at
+  `MAX_CHILD_RSS_BYTES` plus `ADDRESS_SPACE_HEADROOM` (`RLIMIT_AS`, the
+  kernel's limit, set at start-up). Everywhere, a watcher thread reads the
+  process's high-water mark (`VmHWM` in `/proc/self/status` on Linux, where
+  `ru_maxrss` carries the parent's peak across `execve`; `ru_maxrss` on
+  macOS) every `MEMORY_SAMPLE_SECONDS`, and once
   more before the result is printed, and ends the process with `EXIT_MEMORY`
   past the cap: a fast first line with an exact reason, which sees an
   allocation freed between two samples, but which cannot run while a C call
@@ -172,6 +174,10 @@ MAX_CHILD_RSS_BYTES = 1024 * 1024 * 1024
 # own high-water mark: this sets how far past the cap a fast allocation can
 # run before the child is killed (the parent) or ends itself (the child).
 MEMORY_SAMPLE_SECONDS = 0.02
+# Linux only: the child's address-space limit is MAX_CHILD_RSS_BYTES plus
+# this. Address space is not resident memory; glibc reserves arenas and the
+# interpreter maps its shared libraries before a byte of them is touched.
+ADDRESS_SPACE_HEADROOM = 768 * 1024 * 1024
 
 # Every field of the library's `Configuration`, set here rather than left at its
 # default, so that what bounds a read is written in this file.
@@ -418,12 +424,32 @@ def parse_child_output(status: int, out: bytes) -> PdfBook:
 
 # === the child: the read itself =====================================================
 
-def memory_over(limit: int) -> bool:
-    """Whether this process's resident memory has ever passed `limit`: the
-    high-water mark, in bytes on macOS and KiB on Linux."""
+def linux_peak_bytes(status: str) -> int:
+    """`VmHWM` of a `/proc/<pid>/status` text, in bytes (the file says kB)."""
+    for line in status.splitlines():
+        if line.startswith("VmHWM:"):
+            return int(line.split()[1]) * 1024
+    raise ValueError("no VmHWM line")
+
+
+def peak_resident_bytes() -> int:
+    """This process's high-water mark of resident memory, in bytes.
+
+    On Linux not `getrusage`: its `ru_maxrss` survives `execve`, so a child
+    started from a parent that once held 400 MiB reports 400 MiB before it has
+    done anything (the kernel carries the old image's peak into the new one).
+    `VmHWM` in `/proc/self/status` is the peak of this image alone. On macOS
+    `ru_maxrss` is this image's, in bytes."""
+    if sys.platform.startswith("linux"):
+        return linux_peak_bytes(Path("/proc/self/status").read_text())
     import resource
     peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    return peak * (1 if sys.platform == "darwin" else 1024) > limit
+    return peak if sys.platform == "darwin" else peak * 1024
+
+
+def memory_over(limit: int) -> bool:
+    """Whether this process's resident memory has ever passed `limit`."""
+    return peak_resident_bytes() > limit
 
 
 def watch_memory(limit: int) -> None:
@@ -474,11 +500,16 @@ def child_main(argv: list[str]) -> int:
     # The parent's cap, so that a MemoryError here is reported in its terms.
     MAX_CHILD_RSS_BYTES = max_bytes
     if sys.platform.startswith("linux"):
-        # A second wall on Linux, set before anything is read. Address space
-        # runs ahead of resident memory, hence twice; macOS does not enforce
-        # RLIMIT_AS.
+        # A second wall on Linux, set before anything is read: the kernel's.
+        # It limits address space, not resident memory, so it is the cap plus
+        # a fixed headroom for what the interpreter maps without touching it
+        # (shared libraries, the allocator's per-thread arenas), never a
+        # multiple of the cap: at a small cap a multiple is less than the
+        # interpreter's own mappings. The cap itself is the parent's sampling
+        # and the watcher. macOS does not let a process set RLIMIT_AS.
         import resource
-        resource.setrlimit(resource.RLIMIT_AS, (2 * max_bytes, 2 * max_bytes))
+        limit = max_bytes + ADDRESS_SPACE_HEADROOM
+        resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
     watch_memory(max_bytes)
     try:
         book = read_in_process(path)

@@ -789,16 +789,18 @@ READ_DOC = ("raise SystemExit(pdf.emit(0, {'title': 'T', 'author': '', 'notes': 
 
 
 def test_an_allocation_freed_between_two_samples_is_still_seen(tmp_path, monkeypatch):
-    """The gate's case: 256 MiB allocated, touched and freed at once, under a
-    cap of 64 MiB (the child's interpreter and this package alone are about
-    21 MiB). Sampling resident memory missed it and accepted the result; the
-    high-water mark keeps it, and the child is ended."""
-    monkeypatch.setattr(pdf, "MAX_CHILD_RSS_BYTES", 64 * 1024 * 1024)
-    allocate = ("pdf.watch_memory(LIMIT)\nb = bytearray(256 * 1024 * 1024)\n"
+    """The gate's case: 512 MiB allocated, touched and freed at once, under a
+    cap of 128 MiB (the child's interpreter and this package alone are about
+    21 MiB on macOS, more on Linux). Sampling resident memory missed it and
+    accepted the result; the high-water mark keeps it, and the child is
+    ended. The control child below, under the same cap, is read on both
+    platforms."""
+    monkeypatch.setattr(pdf, "MAX_CHILD_RSS_BYTES", 128 * 1024 * 1024)
+    allocate = ("pdf.watch_memory(LIMIT)\nb = bytearray(512 * 1024 * 1024)\n"
                 "b[::4096] = b'x' * len(b[::4096])\ndel b\n")
     monkeypatch.setattr(pdf, "child_command", lambda path: child_code(allocate + READ_DOC))
     path = make_pdf(tmp_path / "b.pdf", five_pages())
-    assert child_refused(path) == "it needed more than 64 MiB of memory to read"
+    assert child_refused(path) == "it needed more than 128 MiB of memory to read"
     # The same child without the allocation stays under the cap and is read.
     monkeypatch.setattr(pdf, "child_command",
                         lambda path: child_code("pdf.watch_memory(LIMIT)\n" + READ_DOC))
@@ -925,6 +927,32 @@ def test_a_platform_where_memory_cannot_be_read_reads_nothing(tmp_path, monkeypa
     monkeypatch.setattr(pdf, "child_command",
                         lambda path: [sys.executable, "-I", "-c", "import time; time.sleep(5)"])
     assert child_refused(path) == "memory cannot be measured here, so the file is not read"
+
+
+LINUX_STATUS = "Name:\tpython3\nVmPeak:\t  900000 kB\nVmHWM:\t   30000 kB\nVmRSS:\t   29000 kB\n"
+
+
+def test_the_linux_high_water_mark_is_this_image_s_own(monkeypatch):
+    """On Linux `ru_maxrss` survives `execve`: a child of a parent that once
+    held 400 MiB reads 400 MiB at its first instruction. The watcher reads
+    `VmHWM` instead, in kB."""
+    import resource
+    monkeypatch.setattr(pdf.sys, "platform", "linux")
+    monkeypatch.setattr(pdf.Path, "read_text", lambda self, *a, **k: LINUX_STATUS)
+    monkeypatch.setattr(resource, "getrusage",
+                        lambda who: type("R", (), {"ru_maxrss": 400 * 1024})())
+    assert pdf.peak_resident_bytes() == 30000 * 1024
+    assert not pdf.memory_over(64 * 1024 * 1024)
+    with pytest.raises(ValueError):
+        pdf.linux_peak_bytes("Name:\tpython3\n")
+
+
+def test_the_macos_high_water_mark_is_in_bytes(monkeypatch):
+    import resource
+    monkeypatch.setattr(pdf.sys, "platform", "darwin")
+    monkeypatch.setattr(resource, "getrusage",
+                        lambda who: type("R", (), {"ru_maxrss": 30 * 1024 * 1024})())
+    assert pdf.peak_resident_bytes() == 30 * 1024 * 1024
 
 
 def test_every_field_of_the_library_configuration_is_set():
