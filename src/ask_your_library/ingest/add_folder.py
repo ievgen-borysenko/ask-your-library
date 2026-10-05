@@ -50,6 +50,7 @@ from ..bookkey import (MAX_TITLE_LINE, UNKNOWN_AUTHOR, author_of, book_key, chun
                        split_title_author, title_of)
 from .. import config
 from ..config import DB_PATH, EMBED_BACKEND, confirm_db_path
+from ..dataflow import failure_text
 from ..embeddings import get_embedder
 from ..hints import command, script
 from ..index_meta import (META_TABLE, check_index, read_index_meta, refuse_version_mismatch,
@@ -851,7 +852,7 @@ def _write_books(books: list[Book], backend: str, db_path: Path, folder: Path | 
             # The ledger says `failed`, with the reason, and the book keeps
             # whatever rows it already had: the next run reports the pair
             # instead of promoting stale rows to current.
-            ledger.fail(book_id, f"{type(error).__name__}: {error}")
+            ledger.fail(book_id, f"{type(error).__name__}: {failure_text(error)}")
             raise
         counts["books"] += 1
         counts["sections"] += len(book.sections)

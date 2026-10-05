@@ -79,6 +79,7 @@ from ask_your_library.llm import usage_snapshot
 # The one home of the rule (it used to live here and in the runner, with the
 # repo root derived two different ways); re-exported because the recorder, the
 # plan replay and the tests reach for it as `harness.redact_paths`.
+from ask_your_library.dataflow import failure_text
 from ask_your_library.paths import redact_paths
 from ask_your_library.provenance import HIT_ID_STRICT
 from ask_your_library.runner import run_question
@@ -1374,15 +1375,16 @@ def main(argv: list[str] | None = None) -> None:
                     # the message goes into the report AND the sidecar, and
                     # summarize_report.py copies the report's ERROR lines into
                     # the committed summary: an absolute path in it is the
-                    # reader's home directory, so it is redacted in both
-                    said = redact_paths(f"{error}")
+                    # reader's home directory, and a URL in it can carry the
+                    # endpoint's credential (#107), so both are redacted
+                    said = failure_text(error)
                     record["attempts"].append({"attempt": attempt,
                                                "error": f"{type(error).__name__}: {said}", **spent})
                     out.write(f"\n## {item['id']} — ERROR\n{said}\n"
                               f"({f'attempt {attempt}/{repeat}, ' if repeat > 1 else ''}"
                               f"spent before the error: ${spent['cost_usd']:.4f}, "
                               f"{spent['llm_calls']} calls)\n")
-                    print(f"    ERROR: {error}", flush=True)
+                    print(f"    ERROR: {said}", flush=True)
                     continue
                 record["attempts"].append({"attempt": attempt,
                                            **{k: v for k, v in r.items() if k != "score"},

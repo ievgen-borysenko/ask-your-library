@@ -10,6 +10,8 @@ import re
 import sys
 from pathlib import Path
 
+from ask_your_library.dataflow import redact_urls
+
 
 def main() -> None:
     report = Path(sys.argv[1]).read_text(encoding="utf-8")
@@ -35,7 +37,9 @@ def main() -> None:
     for qid, ratio in facts_no:
         print(f"- `{qid}`: PASS on behaviour but only {ratio} expected facts are present in the answer")
     for qid, why in errors:
-        print(f"- `{qid}`: ERROR, not completed: {why.strip()[:160]}")
+        # redacted again: a report written before 0.5.1 carries the provider's
+        # text as it was, a URL's credential included (#107)
+        print(f"- `{qid}`: ERROR, not completed: {redact_urls(why.strip())[:160]}")
     if not fails and not drill_no and not facts_no and not errors:
         print("- none")
     print("\nAnswer correctness is not scored; the facts row is substring presence, not correctness "
