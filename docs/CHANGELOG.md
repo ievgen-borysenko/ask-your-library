@@ -28,7 +28,13 @@
   write took the half-written table for the live one and deleted the staging copy. Recovery now
   checks that the live table opens before it deletes anything, promotes the staging copy when it
   does not, and deletes the staging copy only after the copy it made opens with every row;
-  `ayl add`'s embedding-model and chunker checks look at the staging copy in that state too.
+  `ayl add`'s embedding-model and chunker checks look at the staging copy in that state too. A
+  kill inside the drop of the old table could leave it opening at an older version with fewer
+  rows, which recovery took for whole: a publish now writes a marker file
+  (`.publish-<name>.json`, in a local index directory) before that drop and removes it once the
+  copy is whole, and while it is there recovery promotes the staging copy. A copy that ends short
+  drops its target, and a staging copy that never committed stops the run on one line instead of
+  a traceback on every run.
 
 ## 0.5.0 (2026-10-04)
 

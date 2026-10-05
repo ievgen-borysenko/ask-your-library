@@ -13,6 +13,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 
 import lancedb
 import pytest
@@ -233,6 +234,170 @@ def test_a_rebuild_over_a_broken_live_table_does_not_drop_the_staging_copy_first
     assert db.open_table("t").count_rows() == 4
 
 
+# --- the publish marker: a kill inside the live table's drop -------------------
+
+def marker_file(tmp_path, name="t"):
+    return tmp_path / f".publish-{name}.json"
+
+
+def test_a_rebuild_writes_the_marker_before_the_drop_and_removes_it_after(tmp_path):
+    db = lancedb.connect(tmp_path)
+    db.create_table("t", rows("old", 3))
+    drop = db.drop_table
+    seen = {}
+
+    def drop_and_look(name, *args, **kwargs):
+        seen[name] = marker_file(tmp_path).exists()
+        return drop(name, *args, **kwargs)
+    db.drop_table = drop_and_look
+
+    publish.rebuild_table(db, "t", [rows("new", ROWS)])
+    assert seen == {"t": True, "t__staging": False}  # there for the live drop, gone before staging's
+    assert not marker_file(tmp_path).exists()
+    assert db.open_table("t").count_rows() == ROWS
+
+
+def test_a_live_table_that_opens_at_an_older_version_is_not_taken_for_whole(tmp_path,
+                                                                            monkeypatch):
+    """A kill a few milliseconds into `drop_table` deletes part of the version
+    history: the old table then opens, at an older version with fewer rows.
+    Without the marker recovery took it for the live table and dropped the
+    complete staging copy."""
+    db = lancedb.connect(tmp_path)
+    live = db.create_table("t", rows("old", 1))
+    for i in range(1, 5):
+        live.add(rows("old", 1, start=i))
+    drop = db.drop_table
+
+    def killed_inside_the_drop(name, *args, **kwargs):
+        if name == "t":
+            db.open_table("t").restore(2)      # what is left opens, two rows of five
+            raise KeyboardInterrupt
+        return drop(name, *args, **kwargs)
+    monkeypatch.setattr(db, "drop_table", killed_inside_the_drop)
+    with pytest.raises(KeyboardInterrupt):
+        publish.rebuild_table(db, "t", [rows("new", ROWS)])
+    monkeypatch.undo()
+    assert publish.opens(db, "t") and db.open_table("t").count_rows() == 2
+    assert publish.readable_table(db, "t") == "t__staging"   # what the write guards judge
+
+    publish.recover_staging(db, "t")
+    table = db.open_table("t")
+    assert table.count_rows() == ROWS
+    assert set(table.to_arrow().column("note").to_pylist()) == {"new"}
+    assert "t__staging" not in publish.table_names(db)
+    assert not marker_file(tmp_path).exists()
+
+
+DROP_CHILD = r"""
+import importlib.util, sys, lancedb
+spec = importlib.util.spec_from_file_location("publish", sys.argv[1])
+publish = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(publish)
+db = lancedb.connect(sys.argv[2])
+publish._write_marker(db, "t", db.open_table("t__staging").count_rows())
+print("DROPPING", flush=True)
+db.drop_table("t")
+print("DONE", flush=True)
+"""
+
+
+@pytest.mark.parametrize("delay", [0.0, 0.004, 0.01])
+def test_after_a_kill_inside_the_live_drop_recovery_keeps_every_staged_row(tmp_path, delay):
+    """The real thing, timing-dependent by nature: whatever a SIGKILL inside
+    the drop leaves of the old table, recovery publishes the staged rows."""
+    db = lancedb.connect(tmp_path)
+    live = db.create_table("t", rows("old", 1))
+    for i in range(1, 200):
+        live.add(rows("old", 1, start=i))
+    db.create_table("t__staging", rows("new", ROWS))
+    child = subprocess.Popen([sys.executable, "-c", DROP_CHILD, publish.__file__, str(tmp_path)],
+                             stdout=subprocess.PIPE, text=True)
+    try:
+        assert child.stdout.readline().strip() == "DROPPING"
+        time.sleep(delay)
+    finally:
+        child.send_signal(signal.SIGKILL)
+        child.wait()
+        child.stdout.close()
+
+    publish.recover_staging(db, "t")
+    table = db.open_table("t")
+    assert table.count_rows() == ROWS
+    assert set(table.to_arrow().column("note").to_pylist()) == {"new"}
+    assert not marker_file(tmp_path).exists()
+
+
+def test_a_marker_whose_staging_does_not_open_drops_nothing(tmp_path, monkeypatch):
+    db = lancedb.connect(tmp_path)
+    db.create_table("t", rows("old", 3))
+    db.create_table("t__staging", rows("new", ROWS))
+    publish._write_marker(db, "t", ROWS)
+    open_table = db.open_table
+
+    def unreadable(name, *args, **kwargs):
+        if name == "t__staging":
+            raise OSError("permission denied")
+        return open_table(name, *args, **kwargs)
+    monkeypatch.setattr(db, "open_table", unreadable)
+    dropped = watch_drops(db)
+
+    with pytest.raises(publish.RecoveryError, match="a publish of t was interrupted"):
+        publish.recover_staging(db, "t")
+    assert dropped == []
+    assert marker_file(tmp_path).exists()
+
+
+def test_a_marker_with_no_staging_left_is_removed(tmp_path):
+    db = lancedb.connect(tmp_path)
+    db.create_table("t", rows("a", 3))
+    publish._write_marker(db, "t", 3)
+    publish.recover_staging(db, "t")
+    assert not marker_file(tmp_path).exists()
+    assert db.open_table("t").count_rows() == 3
+
+
+# --- a short copy, and a first build that never committed -----------------------
+
+def test_a_short_copy_drops_the_target_so_the_next_recovery_promotes_the_source(tmp_path,
+                                                                               monkeypatch):
+    """Kept, the short target would open, and the next recovery would take it
+    for the live table and drop the complete source."""
+    db = lancedb.connect(tmp_path)
+    db.create_table("t__staging", rows("a", ROWS))
+
+    def short(db_, source, target, batch_rows=publish.COPY_BATCH_ROWS):
+        return db_.create_table(target, db_.open_table(source).search().limit(ROWS // 2)
+                                .to_list())
+    monkeypatch.setattr(publish, "copy_table", short)
+    with pytest.raises(RuntimeError, match="t was dropped and t__staging is kept"):
+        publish.publish_copy(db, "t__staging", "t")
+    monkeypatch.undo()
+    assert publish.table_names(db) == ["t__staging"]
+
+    publish.recover_staging(db, "t")
+    assert db.open_table("t").count_rows() == ROWS
+
+
+def test_no_live_table_and_a_staging_copy_that_never_committed_stops_on_one_error(
+        tmp_path, monkeypatch):
+    """A first build killed before its first commit: there is nothing to promote,
+    and `publish_copy` used to fail on it with a ValueError every run."""
+    db = lancedb.connect(tmp_path)
+    db.create_table("source", rows("a", ROWS))
+    original = failing_after(monkeypatch, 2)
+    with pytest.raises(Exception):
+        publish.copy_table(db, "source", "t__staging")
+    monkeypatch.setattr(publish, "table_batches", original)
+    db.drop_table("source")
+    dropped = watch_drops(db)
+
+    with pytest.raises(publish.RecoveryError, match="t does not exist and its staging copy"):
+        publish.recover_staging(db, "t")
+    assert dropped == []
+    assert publish.table_names(db) == ["t__staging"]
+
+
 # --- `ayl add` over the interrupted state ---------------------------------------
 
 TABLE = "transcripts_ollama"
@@ -291,3 +456,35 @@ def test_the_write_guards_judge_the_staged_copy_before_recovery_promotes_it(tmp_
         add_folder.add_books(add_folder.read_folder(folder), "ollama", tmp_path / "db", folder)
     assert sorted(publish.table_names(db)) == names        # the refusal wrote nothing
     assert not publish.opens(db, TABLE)
+
+
+def test_an_interrupted_index_meta_publish_does_not_stop_the_write_guard(tmp_path):
+    """`read_index_meta` chose `_index_meta` because it was listed; after an
+    interrupted publish copy it does not open, and the guard ended on a
+    ValueError before recovery could promote the staged copy."""
+    from ask_your_library import index_meta
+    db = lancedb.connect(tmp_path)
+    db.create_table(TABLE, [dict(row, vector=[float(i), 1.0, 0.0, 0.0])
+                            for i, row in enumerate(rows("a", 3))])     # FakeEmbedder's 4 dims
+    for table in (TABLE, "cards_ollama", "transcripts_other"):     # three rows to copy
+        index_meta.write_index_meta(db, table, "ollama", "fake-embed", 4)
+    meta = index_meta.META_TABLE
+    publish.copy_table(db, meta, meta + publish.STAGING_SUFFIX)
+    db.drop_table(meta)
+    original = publish.table_batches
+
+    def broken(table, batch_rows=publish.COPY_BATCH_ROWS):
+        yield next(iter(original(table, 1)))                    # one row written, then
+        raise RuntimeError("disk full")
+    publish.table_batches = broken
+    try:
+        with pytest.raises(Exception):
+            publish.copy_table(db, meta + publish.STAGING_SUFFIX, meta)
+    finally:
+        publish.table_batches = original
+    assert meta in publish.table_names(db) and not publish.opens(db, meta)
+
+    assert index_meta.read_index_meta(db, TABLE)["model"] == "fake-embed"
+    add_folder.refuse_model_mismatch(db, TABLE, FakeEmbedder("fake-embed"))
+    with pytest.raises(IngestError, match="was built with 'fake-embed'"):
+        add_folder.refuse_model_mismatch(db, TABLE, FakeEmbedder("other-embed"))

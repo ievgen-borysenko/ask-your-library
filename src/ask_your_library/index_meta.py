@@ -35,7 +35,7 @@ from .ingest.chunking import (CARD_CHUNKER_VERSION, CHUNKER_VERSION, TRANSCRIPT_
                               TRANSCRIPT_TARGET_CHARS)
 from .hints import command, from_clone
 from .ingest.ledger import LEGACY_CHUNKER
-from .ingest.publish import (LEDGER_COLUMNS, STAGING_SUFFIX, rebuild_table,
+from .ingest.publish import (LEDGER_COLUMNS, STAGING_SUFFIX, readable_table, rebuild_table,
                              recover_staging)
 
 log = logging.getLogger(__name__)
@@ -165,18 +165,20 @@ def read_index_meta(db, table: str) -> dict | None:
     So recovery belongs to the write path, and is done there: at the start of
     every ingest run and inside `write_index_meta`."""
     names = _table_names(db)
-    if META_TABLE in names:
-        source = META_TABLE
-    elif META_TABLE + STAGING_SUFFIX in names:
-        # Mid-widening, or a crash during one. The staged copy is complete by
-        # construction (it is built before the live table is dropped), so it is
-        # the honest answer — and reading it is better than reporting an index
-        # with no fingerprint, which is what the caller would act on.
-        source = META_TABLE + STAGING_SUFFIX
+    if META_TABLE not in names and META_TABLE + STAGING_SUFFIX not in names:
+        return None
+    # The table that opens, not the name that is listed: an interrupted publish
+    # copy leaves `_index_meta` listed with no readable version, and the staged
+    # copy beside it is complete by construction (it is built before the live
+    # table is dropped). Reading it is better than reporting an index with no
+    # fingerprint, which is what the caller would act on.
+    source = readable_table(db, META_TABLE)
+    if source is None:
+        # Neither opens: let `open_table` say why, as before.
+        source = META_TABLE if META_TABLE in names else META_TABLE + STAGING_SUFFIX
+    elif source != META_TABLE:
         log.info("%s is being rebuilt; reading %s instead (the next ingest finishes it)",
                  META_TABLE, source)
-    else:
-        return None
     rows = db.open_table(source).search().where(f"`table` = '{table}'").limit(1).to_list()
     return rows[0] if rows else None
 

@@ -1599,9 +1599,25 @@ partial target before re-raising, and staging is dropped only after the copy ope
 row count. `rebuild_table` no longer drops a leftover staging table on its way in; it hands it to
 `recover_staging`. The write guards of `ayl add` (the embedding fingerprint and the chunker stamp)
 judge the table recovery will publish, the staging copy when the live name is gone or unreadable,
-so a write after a promotion is checked like any other. The cost is one `open_table` and a row
-count per recovery and per guard. Measurement: a reproduction in the review of 2026-10-04 (an
-exception and a SIGKILL mid-copy, the installed LanceDB, no network), no eval report.
+so a write after a promotion is checked like any other.
+
+A live table that opens is not always whole. A kill a few milliseconds into `drop_table` deletes
+part of its version history, and what is left opens at an older version with fewer rows (598 of
+600 in the review's reproduction). So a publish writes a marker, `.publish-<name>.json` in the
+index directory with the staging name and its row count, by an atomic rename before the live
+table is dropped, and removes it once the copy opens with every row, before staging is dropped.
+While the marker is there, recovery promotes staging whatever state the live name is in, and
+stops on one line, dropping nothing, when staging does not open or no longer holds the rows the
+marker names; a marker with no staging beside it is removed. A copy that ends with fewer rows than
+its source drops the short target, so the next recovery cannot take it for the live table. With
+no live table and a staging copy that does not open (a build stopped before its first commit),
+recovery drops nothing and stops on one line. The marker exists only for a local index: on a
+remote URI none is written, and the older rule, a live table that opens is kept, decides.
+
+The cost is one `open_table` and a row count per recovery and per guard, and one small file
+written and removed per publish. Measurement: reproductions in the review of 2026-10-04 and of
+its round 1 (an exception and a SIGKILL mid-copy, a SIGKILL inside the live table's drop, the
+installed LanceDB, no network), no eval report.
 
 [reports]: ../eval-results/
 [backlog]: ../backlog.md

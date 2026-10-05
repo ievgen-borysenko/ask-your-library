@@ -9,8 +9,17 @@ One rule holds every step together: staging is never dropped while the live
 table cannot be opened. A copy interrupted part way (an exception, a full disk,
 a kill) leaves the live name listed with no readable version behind it, and in
 that state staging is the only complete copy of the table (ADR-031).
+
+A live table that opens is not proof enough on its own: a kill inside
+`drop_table` can leave its version history partly deleted, and the table then
+opens at an older version with fewer rows. So a publish writes a marker file
+(`.publish-<name>.json` in the index directory) before it drops the live table,
+and removes it only once the copy opens with every row. While the marker is
+there, staging is the table, whatever state the live name is in.
 """
+import json
 import logging
+import os
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -89,24 +98,80 @@ def committed(db, name: str) -> bool:
     now (a permission, a transient read error) is not a half-written copy, and
     dropping it could lose the only complete table. False when the index is not
     a local directory: then `opens` alone decides."""
-    uri = str(getattr(db, "uri", "") or "")
-    if not uri or ("://" in uri and not uri.startswith("file://")):
+    root = _local_dir(db)
+    if root is None:
         return False
-    versions = Path(uri.removeprefix("file://")) / f"{name}.lance" / "_versions"
+    versions = root / f"{name}.lance" / "_versions"
     try:
         return versions.is_dir() and any(versions.iterdir())
     except OSError:
         return True                      # cannot tell: treat it as a real table
 
 
+def _local_dir(db) -> Path | None:
+    """The index directory when the index is a local one, else None."""
+    uri = str(getattr(db, "uri", "") or "")
+    if not uri or ("://" in uri and not uri.startswith("file://")):
+        return None
+    return Path(uri.removeprefix("file://"))
+
+
+def _marker_path(db, name: str) -> Path | None:
+    root = _local_dir(db)
+    return None if root is None else root / f".publish-{name}.json"
+
+
+def publish_marker(db, name: str) -> dict | None:
+    """The marker a publish of `name` left, or None.
+
+    Written before the live table is dropped and removed once the copy opens
+    with every row, so its presence means a publish began and did not finish:
+    staging was complete then and is the table now. Always None for an index
+    that is not a local directory, where no marker is written."""
+    path = _marker_path(db, name)
+    if path is None or not path.exists():
+        return None
+    try:
+        marker = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        # Written by an atomic rename, so a marker that is there is whole; one
+        # that cannot be read still says a publish began.
+        return {"staging": name + STAGING_SUFFIX, "rows": None}
+    return marker if isinstance(marker, dict) else {"staging": name + STAGING_SUFFIX,
+                                                    "rows": None}
+
+
+def _write_marker(db, name: str, rows: int) -> None:
+    path = _marker_path(db, name)
+    if path is None:
+        return
+    partial = path.with_name(path.name + ".tmp")
+    with open(partial, "w", encoding="utf-8") as handle:
+        json.dump({"staging": name + STAGING_SUFFIX, "rows": rows}, handle)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(partial, path)
+
+
+def _clear_marker(db, name: str) -> None:
+    path = _marker_path(db, name)
+    if path is not None:
+        path.unlink(missing_ok=True)
+        path.with_name(path.name + ".tmp").unlink(missing_ok=True)
+
+
 def readable_table(db, name: str) -> str | None:
     """Which table holds the rows of `name` right now, read-only: `name` itself
     when it opens, else its staging copy when that opens (the state an
     interrupted publish leaves, which `recover_staging` promotes), else None.
+    While a publish marker is there, staging comes first: the live name may
+    open at an older version of itself.
 
     For the write guards, which run before recovery and must judge the table the
     write will land in, not only a live name that may be gone or unreadable."""
-    for candidate in (name, name + STAGING_SUFFIX):
+    staging = name + STAGING_SUFFIX
+    order = (staging, name) if publish_marker(db, name) is not None else (name, staging)
+    for candidate in order:
         if candidate in table_names(db) and opens(db, candidate):
             return candidate
     return None
@@ -130,7 +195,10 @@ def publish_copy(db, source: str, target: str, batch_rows: int = COPY_BATCH_ROWS
     An interrupted copy (any exception, Ctrl-C included) drops the partial
     `target` before re-raising, and `source` is left as it was; a kill that no
     handler sees leaves a listed `target` that does not open, which
-    `recover_staging` drops before it promotes `source` again."""
+    `recover_staging` drops before it promotes `source` again. The publish
+    marker of `target` is removed once the copy is whole, before `source` is
+    dropped: a kill inside that drop then leaves a whole `target` and a
+    staging copy recovery may discard."""
     expected = db.open_table(source).count_rows()
     try:
         published = copy_table(db, source, target, batch_rows)
@@ -139,10 +207,13 @@ def publish_copy(db, source: str, target: str, batch_rows: int = COPY_BATCH_ROWS
         raise
     copied = db.open_table(target).count_rows()
     if copied != expected:
-        # Not a state any known interruption produces; refusing to drop the
-        # source is the only answer that cannot lose the table.
-        raise RuntimeError(f"{target} holds {copied} rows after the copy, {source} {expected}; "
-                           f"{source} is kept")
+        # Not a state any known interruption produces. The short target is
+        # dropped, or the next recovery would take it for the live table and
+        # discard the source; the source is kept for that recovery to promote.
+        _drop_if_listed(db, target)
+        raise RuntimeError(f"{target} held {copied} rows after the copy, {source} {expected}; "
+                           f"{target} was dropped and {source} is kept")
+    _clear_marker(db, target)
     db.drop_table(source)
     return published
 
@@ -150,17 +221,45 @@ def publish_copy(db, source: str, target: str, batch_rows: int = COPY_BATCH_ROWS
 def recover_staging(db, name: str) -> None:
     """Finish or discard an interrupted rebuild of `name`.
 
-    Staging is dropped only when the live table opens: then the staging build
-    is the part that did not finish. When the live name is listed but does not
-    open, the publish copy was interrupted and staging is the only complete
-    copy: the broken live name is dropped and staging is promoted. When staging
-    does not open either, or the live table has a committed version (it was
-    whole once, and fails to open for another reason), nothing is dropped and
-    the run stops on RecoveryError."""
+    While a publish marker is there, the publish began: staging was complete
+    and the live table was being dropped or replaced, so staging is promoted
+    whatever state the live name is in (a kill inside `drop_table` can leave it
+    opening at an older version). Without one, staging is dropped only when the
+    live table opens: then the staging build is the part that did not finish.
+    When the live name is listed but does not open, the publish copy was
+    interrupted and staging is the only complete copy: the broken live name is
+    dropped and staging is promoted. When staging does not open either, or the
+    live table has a committed version (it was whole once, and fails to open
+    for another reason), nothing is dropped and the run stops on
+    RecoveryError."""
     staging = name + STAGING_SUFFIX
     names = table_names(db)
+    marker = publish_marker(db, name)
     if staging not in names:
+        if marker is not None:
+            # Staging is gone, so there is nothing left to promote.
+            _clear_marker(db, name)
         return
+    if marker is not None:
+        rows = marker.get("rows")
+        if not opens(db, staging) or (
+                isinstance(rows, int) and db.open_table(staging).count_rows() != rows):
+            raise RecoveryError(
+                f"a publish of {name} was interrupted and its staging copy {staging} "
+                f"cannot be opened or no longer holds the {rows} rows it had, so neither is "
+                f"dropped. Restore a backup, or move the index directory aside and add the "
+                f"books again")
+        if name in names:
+            db.drop_table(name)
+            log.warning("dropped %s: a publish of it was interrupted", name)
+        publish_copy(db, staging, name)
+        log.warning("promoted %s to %s (finished an interrupted publish)", staging, name)
+        return
+    if name not in names and not opens(db, staging):
+        raise RecoveryError(
+            f"{name} does not exist and its staging copy {staging} cannot be opened (a build "
+            f"stopped before its first rows were committed), so it is not dropped. Restore a "
+            f"backup, or move the index directory aside and add the books again")
     if name in names:
         if opens(db, name):
             # Old table still there: the staging build did not finish — start over.
@@ -174,8 +273,11 @@ def recover_staging(db, name: str) -> None:
                 f"Restore a backup, or move the index directory aside and add the books "
                 f"again")
         # Listed, unreadable: what an interrupted publish copy leaves behind.
+        _write_marker(db, name, db.open_table(staging).count_rows())
         db.drop_table(name)
         log.warning("dropped %s: it could not be opened (interrupted publish)", name)
+    else:
+        _write_marker(db, name, db.open_table(staging).count_rows())
     # Old table gone, staging complete: promote it.
     publish_copy(db, staging, name)
     log.warning("promoted %s to %s (recovered interrupted swap)", staging, name)
@@ -213,6 +315,9 @@ def rebuild_table(db, name: str, batches: Iterable[Any]):
     if table is None:
         raise NoRowsError(f"no rows produced for {name}")
 
+    # From here staging is the table: the marker says so to a recovery that
+    # finds the live name half-dropped, or opening at an older version.
+    _write_marker(db, name, table.count_rows())
     if name in table_names(db):
         db.drop_table(name)
     return publish_copy(db, staging, name)
