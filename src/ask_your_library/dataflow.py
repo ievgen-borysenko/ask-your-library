@@ -216,12 +216,17 @@ def failure_text(error: BaseException) -> str:
     folded into spaces, and cut at MAX_FAILURE_CHARS. The class name is the
     caller's to add."""
     from .paths import redact_paths      # here, like config: keep this module light
-    from .sanitize import strip_control_chars
     if is_provider_error(error) and credential_configured():
-        text = WITHHELD
-    else:
-        text = redact_urls(redact_paths(f"{error}"))
-    text = " ".join(strip_control_chars(text).split())
+        return clean_failure_text(WITHHELD)
+    return clean_failure_text(redact_paths(f"{error}"))
+
+
+def clean_failure_text(text: str) -> str:
+    """`text` as a failure line may carry it: every URL reduced, control
+    characters dropped, line breaks folded into spaces, cut at MAX_FAILURE_CHARS.
+    Also for failure text stored before 0.5.1 (eval/summarize_report.py)."""
+    from .sanitize import strip_control_chars
+    text = " ".join(strip_control_chars(redact_urls(text)).split())
     if len(text) > MAX_FAILURE_CHARS:
         text = text[:MAX_FAILURE_CHARS - 1].rstrip() + "…"
     return text
