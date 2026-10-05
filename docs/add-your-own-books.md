@@ -43,7 +43,8 @@ in which *nothing* is indexable is an error, and then the existing index is left
 Two file-level failures do stop the run. A `.txt` or `.md` that cannot be opened at all (no
 permission, or gone since the folder was listed) ends it before anything is written (`read_book`
 in `src/ask_your_library/ingest/add_folder.py`). An embedding call that fails ends it at that
-book, which is marked `failed` in the ledger with the error's text (#107): on an index that
+book, which is marked `failed` in the ledger with the error's text, any URL in it reduced to
+scheme, host and port (#107): on an index that
 already has its table, the books before it stay indexed and that one keeps the rows it had; a
 first run or a `--rebuild` publishes nothing (after a failed `--rebuild`, restore the backup).
 
