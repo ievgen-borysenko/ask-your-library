@@ -67,7 +67,7 @@ from .ledger import (INDEXED, LEGACY_CHUNKER, REQUESTED, Ledger, backfill_from_i
 from .backup import BackupError, backup, manifest_lines, read_manifest, restore
 from .lock import IngestBusy, ingest_lock
 from .publish import NoRowsError, add_ledger_columns, book_revisions, rebuild_table, \
-    recover_staging, replace_book_rows, revision_of, rows_of_book, table_names
+    readable_table, recover_staging, replace_book_rows, revision_of, rows_of_book, table_names
 
 log = logging.getLogger(__name__)
 
@@ -414,10 +414,15 @@ def refuse_model_mismatch(db, table: str, embedder) -> None:
     Unlike the readers (`library`, `preflight`), which tolerate a table built
     before fingerprints existed, `ayl-add` requires a full fingerprint match:
     an unstamped table would let a partial write mix two embedding models and
-    then stamp the whole table with the model that wrote only some of it."""
-    if table not in table_names(db):
+    then stamp the whole table with the model that wrote only some of it.
+
+    Judged on the table the write will land in: the staging copy when an
+    interrupted publish left the live name gone or unreadable, since recovery
+    promotes it before the write and nothing checks again after that."""
+    source = readable_table(db, table)
+    if source is None:
         return
-    problem = check_index(db, table, embedder.model, embedder.dims)
+    problem = check_index(db, table, embedder.model, embedder.dims, source=source)
     if problem:
         raise IngestError(
             f"refusing to write {table}: {problem}\n"
@@ -451,8 +456,10 @@ def refuse_chunker_mismatch(db, table: str) -> None:
     repair left is rebuilding all of it.
 
     A table that is not there yet, and one whose stamp says nothing about a
-    chunker, are both written to without a word: see `index_meta.version_mismatch`."""
-    if table not in table_names(db):
+    chunker, are both written to without a word: see `index_meta.version_mismatch`.
+    A table mid-swap (only its staging copy readable) is there: recovery
+    publishes it before the write."""
+    if readable_table(db, table) is None:
         return
     refusal = refuse_version_mismatch(db, table)
     if refusal:

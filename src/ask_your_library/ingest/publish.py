@@ -2,8 +2,13 @@
 
 LanceDB OSS has no rename, so a rebuild goes through a staging table: build
 `<name>__staging` completely, then drop the old table and copy staging over.
-The only crash window (old dropped, new not yet created) is closed by
+The crash window (old dropped, new not yet complete) is closed by
 `recover_staging`, which the ingest calls before every stage.
+
+One rule holds every step together: staging is never dropped while the live
+table cannot be opened. A copy interrupted part way (an exception, a full disk,
+a kill) leaves the live name listed with no readable version behind it, and in
+that state staging is the only complete copy of the table (ADR-031).
 """
 import logging
 from collections.abc import Iterable
@@ -55,27 +60,102 @@ def copy_table(db, source: str, target: str, batch_rows: int = COPY_BATCH_ROWS):
     return db.create_table(target, reader)
 
 
+def opens(db, name: str) -> bool:
+    """Whether `name` is a table that can be read, not merely a listed name.
+
+    LanceDB lists a table by its directory. A copy interrupted part way leaves
+    that directory holding data files and no committed version: the name is
+    listed, and `open_table` says it was not found. Only a table that opens and
+    counts its rows is one a recovery may keep instead of staging."""
+    try:
+        db.open_table(name).count_rows()
+    except Exception:
+        return False
+    return True
+
+
+def readable_table(db, name: str) -> str | None:
+    """Which table holds the rows of `name` right now, read-only: `name` itself
+    when it opens, else its staging copy when that opens (the state an
+    interrupted publish leaves, which `recover_staging` promotes), else None.
+
+    For the write guards, which run before recovery and must judge the table the
+    write will land in, not only a live name that may be gone or unreadable."""
+    for candidate in (name, name + STAGING_SUFFIX):
+        if candidate in table_names(db) and opens(db, candidate):
+            return candidate
+    return None
+
+
+def _drop_if_listed(db, name: str) -> None:
+    """Best effort, on the way out of a failed copy: the original error is the
+    one to report, so a failure here is logged and not raised."""
+    try:
+        if name in table_names(db):
+            db.drop_table(name)
+    except Exception as error:   # pragma: no cover - the store refusing a drop
+        log.warning("could not drop the partial %s (%s); the next run retries",
+                    name, type(error).__name__)
+
+
+def publish_copy(db, source: str, target: str, batch_rows: int = COPY_BATCH_ROWS):
+    """Copy `source` over to `target` and drop `source` only once `target` opens
+    and holds every row of it.
+
+    An interrupted copy (any exception, Ctrl-C included) drops the partial
+    `target` before re-raising, and `source` is left as it was; a kill that no
+    handler sees leaves a listed `target` that does not open, which
+    `recover_staging` drops before it promotes `source` again."""
+    expected = db.open_table(source).count_rows()
+    try:
+        published = copy_table(db, source, target, batch_rows)
+    except BaseException:
+        _drop_if_listed(db, target)
+        raise
+    copied = db.open_table(target).count_rows()
+    if copied != expected:
+        # Not a state any known interruption produces; refusing to drop the
+        # source is the only answer that cannot lose the table.
+        raise RuntimeError(f"{target} holds {copied} rows after the copy, {source} {expected}; "
+                           f"{source} is kept")
+    db.drop_table(source)
+    return published
+
+
 def recover_staging(db, name: str) -> None:
-    """Finish or discard an interrupted rebuild of `name`."""
+    """Finish or discard an interrupted rebuild of `name`.
+
+    Staging is dropped only when the live table opens: then the staging build
+    is the part that did not finish. When the live name is listed but does not
+    open, the publish copy was interrupted and staging is the only complete
+    copy: the broken live name is dropped and staging is promoted. When staging
+    does not open either, nothing is dropped and the run stops on the error."""
     staging = name + STAGING_SUFFIX
     names = table_names(db)
     if staging not in names:
         return
     if name in names:
-        # Old table still there: the staging build did not finish — start over.
-        db.drop_table(staging)
-        log.warning("dropped stale %s (interrupted rebuild)", staging)
-        return
+        if opens(db, name):
+            # Old table still there: the staging build did not finish — start over.
+            db.drop_table(staging)
+            log.warning("dropped stale %s (interrupted rebuild)", staging)
+            return
+        if not opens(db, staging):
+            raise RuntimeError(f"neither {name} nor {staging} can be opened; both are kept "
+                               f"for a restore or a rebuild to replace")
+        # Listed, unreadable: what an interrupted publish copy leaves behind.
+        db.drop_table(name)
+        log.warning("dropped %s: it could not be opened (interrupted publish)", name)
     # Old table gone, staging complete: promote it.
-    copy_table(db, staging, name)
-    db.drop_table(staging)
+    publish_copy(db, staging, name)
     log.warning("promoted %s to %s (recovered interrupted swap)", staging, name)
 
 
 def rebuild_table(db, name: str, batches: Iterable[Any]):
     """Staged, recoverable replacement of `name`: the old table stays queryable
     until the staging build has fully succeeded. Not atomic — the drop/create
-    window is closed by recover_staging() on the next run, not by the store.
+    window is closed by recover_staging() on the next run, not by the store,
+    and an interrupted copy keeps staging for it to promote.
 
     A batch is anything LanceDB accepts as data — a list of row dicts, or an
     Arrow table or record batch (which `ayl-add` uses to carry existing rows
@@ -83,8 +163,10 @@ def rebuild_table(db, name: str, batches: Iterable[Any]):
     schema. Raises NoRowsError when the batches produced nothing, leaving the
     old table in place."""
     staging = name + STAGING_SUFFIX
-    if staging in table_names(db):
-        db.drop_table(staging)
+    # A staging copy left by an earlier run is finished or discarded by the one
+    # function that knows when it may be dropped, never dropped blindly here:
+    # it can be the only complete copy of `name`.
+    recover_staging(db, name)
     table = None
     try:
         for rows in batches:
@@ -103,9 +185,7 @@ def rebuild_table(db, name: str, batches: Iterable[Any]):
 
     if name in table_names(db):
         db.drop_table(name)
-    published = copy_table(db, staging, name)
-    db.drop_table(staging)
-    return published
+    return publish_copy(db, staging, name)
 
 
 def upsert_book_rows(table, note: str, rows: list[dict]) -> None:

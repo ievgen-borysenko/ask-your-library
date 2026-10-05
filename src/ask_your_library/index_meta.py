@@ -188,11 +188,16 @@ def vector_dims(table) -> int | None:
         return None
 
 
-def check_index(db, table_name: str, model: str, dims: int) -> str | None:
+def check_index(db, table_name: str, model: str, dims: int,
+                source: str | None = None) -> str | None:
     """Return a human-readable problem if `table_name` was not built by
     (model, dims); None when it matches. A table without a stamp (built before
-    fingerprints existed) is checked on dims alone and logged, not rejected."""
-    table = db.open_table(table_name)
+    fingerprints existed) is checked on dims alone and logged, not rejected.
+
+    `source` is the table whose vectors are measured, when it is not
+    `table_name` itself: the staging copy an interrupted publish left, which
+    carries `table_name`'s stamp and is what a recovery will publish."""
+    table = db.open_table(source or table_name)
     actual_dims = vector_dims(table)
     if actual_dims is not None and actual_dims != dims:
         return (f"{table_name}: vectors have {actual_dims} dims, configured embedder "

@@ -5,13 +5,13 @@ what it was measured to buy. They were written from the code rather than ahead o
 describe the system as built; where a variant was tried and dropped, the rejected variant is part
 of the record, because it is usually the more useful half.
 
-Thirty decisions, in the order they were taken. ADR-016 is written out as a file of its own
+Thirty-one decisions, in the order they were taken. ADR-016 is written out as a file of its own
 because it changed the planner's contract and added a node to the graph; the rest are summarised
 here. ADR-017 to ADR-023 were recorded on 2026-09-16, after the fact: a review of this tree found
 seven decisions the code had made and no record named. The four that constrain what may be built
 next are written out below; the other three are reserved as stubs — number, title, one sentence —
 to be written when the code they describe is next touched, so that the numbering is taken and the
-decision is not forgotten. ADR-024 and ADR-025 were taken on 2026-09-17, ADR-026 on 2026-09-25, ADR-027 to ADR-029 on 2026-10-02 and ADR-030 on 2026-10-03,
+decision is not forgotten. ADR-024 and ADR-025 were taken on 2026-09-17, ADR-026 on 2026-09-25, ADR-027 to ADR-029 on 2026-10-02, ADR-030 on 2026-10-03 and ADR-031 on 2026-10-05,
 each written out with the code it describes. The measurements are not repeated in full: the reports under
 [`docs/eval-results/`][reports] are the primary record, and each entry below names the one that
 carries its numbers. Reports of
@@ -1577,6 +1577,29 @@ viewer opens is refused. A scan behind a text-layer cover passes the ten-page ru
 with what it has, named in one line when fewer than half its pages have text. Each is in
 [Known limits](../known-limits.md). Every PDF costs one process start, and a hostile one costs at
 most a minute and a gigabyte before its line is written.
+
+## ADR-031: Staging is never dropped while the live table cannot be opened
+
+Status: accepted (2026-10-05, 0.5.1).
+
+LanceDB OSS has no rename, so a rebuild builds `<name>__staging`, drops the live table and copies
+staging over (`ingest/publish.py`); `recover_staging` finishes the swap on the next write. Until
+0.5.1 it decided by the table list alone: a listed live name meant "the staging build did not
+finish", and staging was dropped. A publish copy interrupted part way (an exception from the
+reader, a full disk, Ctrl-C, a kill) leaves exactly that: the live name listed, its directory
+holding data files and no committed version, `open_table` failing. Recovery then dropped the only
+complete copy of the table, and the same window was open inside recovery's own promote copy.
+
+The rule now: a table counts as live only when it opens and counts its rows. Staging is dropped
+only beside a live table that opens; a listed live name that does not open is dropped and staging
+promoted; when neither opens, nothing is dropped and the run stops. An interrupted copy drops its
+partial target before re-raising, and staging is dropped only after the copy opens with the same
+row count. `rebuild_table` no longer drops a leftover staging table on its way in; it hands it to
+`recover_staging`. The write guards of `ayl add` (the embedding fingerprint and the chunker stamp)
+judge the table recovery will publish, the staging copy when the live name is gone or unreadable,
+so a write after a promotion is checked like any other. The cost is one `open_table` and a row
+count per recovery and per guard. Measurement: a reproduction in the review of 2026-10-04 (an
+exception and a SIGKILL mid-copy, the installed LanceDB, no network), no eval report.
 
 [reports]: ../eval-results/
 [backlog]: ../backlog.md

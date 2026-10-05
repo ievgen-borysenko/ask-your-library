@@ -527,7 +527,9 @@ ADR_COUNT_SENTENCE = re.compile(r"(\S+) decisions, in the order they were taken"
 NUMBER_WORDS = {word: value for value, word in enumerate(
     ("one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
      "sixteen seventeen eighteen nineteen twenty twenty-one twenty-two twenty-three twenty-four "
-     "twenty-five twenty-six twenty-seven twenty-eight twenty-nine thirty").split(), start=1)}
+     "twenty-five twenty-six twenty-seven twenty-eight twenty-nine thirty thirty-one thirty-two "
+     "thirty-three thirty-four thirty-five thirty-six thirty-seven thirty-eight thirty-nine "
+     "forty").split(), start=1)}
 
 
 def adr_entries() -> list[tuple[int, int, list[str]]]:
@@ -560,7 +562,7 @@ def test_the_adr_index_counts_its_own_entries_correctly():
     claimed = int(written) if written.isdigit() else NUMBER_WORDS.get(written)
     assert claimed is not None, (
         f"{ADR_INDEX.relative_to(REPO)}: \"{sentence.group(1)}\" is not a number this test "
-        f"knows (digits, or one..thirty in words)")
+        f"knows (digits, or one..forty in words)")
     held = len(adr_entries())
     assert claimed == held, (
         f"{ADR_INDEX.relative_to(REPO)}: the index says {claimed} decisions and holds {held} "
