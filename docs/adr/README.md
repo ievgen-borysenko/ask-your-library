@@ -376,7 +376,9 @@ deterministic at temperature 0.
 **The eval run (2026-10-02), with a same-index control.** Core ×3 and extended ×3, the same model
 and command line, three runs: the 22.09 baseline on the index of 18.09, a control (`main` before
 this change) on today's index, rebuilt after #97, and the fix on today's index. The control is
-what the fix is compared with, because the index changed in between.
+what the fix is compared with, because the index changed in between. No report of these three
+runs, the 22.09 baseline included, is under [`docs/eval-results/`][reports]; the numbers below are
+recorded here only.
 
 | per attempt | baseline 22.09 | control | fix |
 |---|---|---|---|
@@ -543,8 +545,9 @@ rather than `single run`), its headline is a range with the per-attempt mean bes
 record — the three rows that cannot be confused, the fourth deterministic row beside them, no LLM
 judge, `--require-clean` for published numbers. A run at `--repeat 1` writes the Markdown report
 byte for byte as before (pinned by a test), so every artifact committed under
-`docs/eval-results/` and the summary tool that reads them are unaffected. No repeated run has been
-made yet and no published number changed here.
+`docs/eval-results/` and the summary tool that reads them are unaffected. No repeated run had been
+made when this was written and no published number changed here; the first repeated runs followed
+on 2026-09-16 ([`2026-09-16-local-models-repeat3.md`][repeat3]).
 
 Amended 2026-09-15: a FOURTH harness, and the first one whose runs are free. `plan()` is one model
 call followed by a hundred lines of deterministic post-processing, and until now the only way to
@@ -563,7 +566,9 @@ either has moved, stamping the report when it is told to anyway. A prompt change
 recording and therefore a paid run — the cost this decision has always accepted for anything that
 gets published, moved to the one place where it is unavoidable. The three rows that cannot be
 confused, the fourth deterministic row, no LLM judge and `--require-clean` all stand; no number
-here changed, and no recording of a real golden set has been made yet.
+here changed, and no recording of a real golden set had been made when this was written. The first
+were committed on 2026-09-16, with the runs of [`2026-09-16-local-models-repeat3.md`][repeat3]
+(`eval/recordings/`).
 
 ## ADR-011: Publishing by allowlist into a fresh repository, fail-closed tooling
 
@@ -663,8 +668,10 @@ a matrix over every question and every knob.
 
 The result is the most uncomfortable number in the project: on answer content the full loop is not
 better than the model's own memory for these twelve famous classics — 9 correct / 1 incorrect / 2
-incomplete in both conditions — while behavioural compliance goes from 6/12 to 12/12, the refusal
-holds where the memory condition narrates a book the library does not have, and the clarify
+incomplete in both conditions, by an AI pre-check of every answer against the golden notes, not by
+the reader, whose per-question checkboxes in the report are unticked — while behavioural
+compliance goes from 6/12 to 12/12, the refusal holds where the memory condition narrates a book the
+library does not have, and the clarify
 interrupt exists only in the loop, at roughly 6.8 times the cost of answering from memory.
 Provenance comes from the extraction-and-validation contract, which this run did not separate from
 the loop. The consequence for how the project describes itself is in the README: grounded, refuses,
@@ -1519,8 +1526,10 @@ platform, and refusing every PDF there would remove the format from the release 
 is. What macOS gets is the parent's sampled bound, and its residual is stated: what the machine
 faults in between two samples. Measured on an Apple M-series machine, a child zero-filling 2 GiB
 as fast as it could, under a 256 MiB cap, peaked at 263 to 696 MiB over ten runs before it was
-killed; the cap plus a few hundred MiB is the ceiling, and the 60 s deadline bounds how long. A
-check costs about half a microsecond in the child and one system call in the parent; a 400-page
+killed (the description of PR #110 gives the range as 263 to 707 MiB; the ten runs have no report
+under [`docs/eval-results/`][reports]); the cap plus a few hundred MiB is the ceiling, and the
+60 s deadline bounds how long. A check costs about half a microsecond in the child and one system
+call in the parent; a 400-page
 book reads in 0.55 s, and starting the child costs about 50 ms a file.
 
 This replaced a first version that bounded the library from inside, by counting at three names
@@ -1580,3 +1589,4 @@ most a minute and a gigabyte before its line is written.
 [catalogue-set]: ../eval-results/2026-09-09-catalogue-set.md
 [catalogue-core]: ../eval-results/2026-09-09-catalogue-branch-core.md
 [rechunk-feedback]: ../eval-results/2026-09-18-rechunk-and-observe-feedback.md
+[repeat3]: ../eval-results/2026-09-16-local-models-repeat3.md

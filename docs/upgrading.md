@@ -8,7 +8,7 @@ it needs and leaves the index answering until you decide to spend the rebuild.
 **Before any upgrade, take a backup.** It is the only copy that survives a rebuild:
 
 ```bash
-uv run ayl backup ~/ayl-backups --db ~/ayl-index
+uv run ayl backup ~/ayl-backups
 ```
 
 The commands on this page are written as a clone types them, after `uv run`; installed as a tool
@@ -16,8 +16,10 @@ The commands on this page are written as a clone types them, after `uv run`; ins
 
 `ayl backup`, `ayl restore`, `ayl doctor` and `ayl add` are one program under four verbs, so
 every flag on this page is one of its flags; `ayl <verb> --help` lists the ones that verb takes.
-`--db <dir>` aims the whole command at that index — the checks it runs and the report it prints
-alike. Upgrading from a version before `ayl`: the two names
+Without `--db` they work on your index, the one every command reads by default
+(`LIBRARY_DB_PATH`, else `$AYL_HOME/index`: `~/AskYourLibrary/index` unless you set either);
+`--db <dir>` aims the whole command at another index — the checks it runs and the report it
+prints alike. Upgrading from a version before `ayl`: the two names
 it replaced, `ask-library` and `ayl-add`, are still installed and still run the same code — each
 prints one deprecation line and is removed at `0.6.0`, so a script of your own has one minor
 release to change the name it types.
@@ -179,10 +181,10 @@ Either way, the rebuild below is what brings the index to the new chunks.
 **Your own library, in order:**
 
 ```bash
-uv run ayl backup ~/ayl-backups --db ~/ayl-index    # 1. the copy that survives step 3
-uv run ayl doctor --db ~/ayl-index                  # 2. the stamps and chunk lengths; non-zero on a stamped mismatch
-uv run ayl add ~/books --rebuild --backup ~/ayl-backups --db ~/ayl-index   # 3. re-chunk and re-embed
-uv run ayl add ~/more-books --db ~/ayl-index        # 4. every OTHER folder, plain
+uv run ayl backup ~/ayl-backups                     # 1. the copy that survives step 3
+uv run ayl doctor                                   # 2. the stamps and chunk lengths; non-zero on a stamped mismatch
+uv run ayl add ~/books --rebuild --backup ~/ayl-backups   # 3. re-chunk and re-embed
+uv run ayl add ~/more-books                         # 4. every OTHER folder, plain
 ```
 
 Step 3 takes its own backup first and then replaces every row, so step 1 is only belt-and-braces
@@ -251,7 +253,7 @@ A plain `ayl add <folder>` would hit that same refusal — a rebuild is what get
 and it is one command:
 
 ```bash
-uv run ayl add ~/books --rebuild --backup ~/ayl-backups --db ~/ayl-index
+uv run ayl add ~/books --rebuild --backup ~/ayl-backups
 ```
 
 It takes the backup **first** (a failed backup stops the rebuild), drops the transcripts
@@ -283,11 +285,11 @@ The first is the demo library, in its own index; the second is the engineer's sh
 `--doctor` reads every stamp out, agreeing or not, and exits non-zero on a mismatch:
 
 ```bash
-uv run ayl doctor --db ~/ayl-index
+uv run ayl doctor
 ```
 
 ```
-index /Users/…/ayl-index
+index /Users/…/AskYourLibrary/index
 ledger: 33 book(s); index (transcripts_ollama, cards_ollama): 33 book key(s)
   stamp: transcripts_ollama: bge-m3 / 1024d, chunker sentence-pack-2, row schema 2, stamped 2026-09-17T05:12:44
   stamp: cards_ollama: bge-m3 / 1024d, chunker card-sections-2, row schema 1, stamped 2026-09-17T05:19:02
@@ -339,7 +341,7 @@ stamps. Leave it off if you are not sure.
 ## Backup
 
 ```bash
-uv run ayl backup ~/ayl-backups --db ~/ayl-index
+uv run ayl backup ~/ayl-backups
 ```
 
 writes `~/ayl-backups/<timestamp>/` holding
@@ -422,8 +424,8 @@ release is recognisable as one rather than discovered column by column.
 ## Restore
 
 ```bash
-uv run ayl restore ~/ayl-backups/20260917-051244 --db ~/ayl-index          # fresh location
-uv run ayl restore ~/ayl-backups/20260917-051244 --db ~/ayl-index --force  # over an index
+uv run ayl restore ~/ayl-backups/20260917-051244           # no index there yet
+uv run ayl restore ~/ayl-backups/20260917-051244 --force   # over an index
 ```
 
 The backup is verified against its manifest first, every time. Three things are refused, and
@@ -449,37 +451,37 @@ put the restored one on whichever volume the link lives on.
 Then check what you have:
 
 ```bash
-uv run ayl doctor --db ~/ayl-index
+uv run ayl doctor
 ```
 
 ## The procedure, end to end
 
 ```bash
 # 1. before pulling: know what you have, and keep it
-uv run ayl doctor --db ~/ayl-index
-uv run ayl backup ~/ayl-backups --db ~/ayl-index
+uv run ayl doctor
+uv run ayl backup ~/ayl-backups
 
 # 2. upgrade: from a clone, or as a tool (the tag of the release you want)
 git pull && uv sync
 uv tool install --force git+https://github.com/ievgen-borysenko/ask-your-library@v0.5.0
 
 # 3. what does the new code think of the old index?
-uv run ayl doctor --db ~/ayl-index
+uv run ayl doctor
 
 # 4a. no mismatch: nothing to do. A newer ROW SCHEMA is migrated in place by the next run:
-uv run ayl add ~/books --db ~/ayl-index
+uv run ayl add ~/books
 
 # 4b. a chunker or embedder mismatch: rebuild, which discards every row it replaces
-uv run ayl add ~/books --db ~/ayl-index                       # refused, and it names --rebuild
-uv run ayl add ~/books --rebuild --backup ~/ayl-backups --db ~/ayl-index   # copy, drop, re-index
+uv run ayl add ~/books                                       # refused, and it names --rebuild
+uv run ayl add ~/books --rebuild --backup ~/ayl-backups      # copy, drop, re-index
 # for the demo library, in its own index, a full rebuild is the repair (it replaces every row):
 uv run ayl init --demo                                      # --demo --full for the whole corpus
 
 # 5. only now, and only if step 4b succeeded, is the index what the stamp would claim
-uv run ayl doctor --db ~/ayl-index
+uv run ayl doctor
 
 # 6. if the rebuild goes wrong, the backup is the way back
-uv run ayl restore ~/ayl-backups/<timestamp> --db ~/ayl-index --force
+uv run ayl restore ~/ayl-backups/<timestamp> --force
 ```
 
 Run steps 4b and 5 from a **script** rather than pasting them into a terminal, so that a failing
@@ -490,7 +492,7 @@ line ends the run instead of the next line going ahead on top of it:
 set -euo pipefail                  # any failing line ends the run
 
 uv run ayl init --demo
-uv run ayl doctor --db ~/ayl-index
+uv run ayl doctor
 ```
 
 **A failed ingest stops the chain: never stamp after one.** `ayl init --demo` exits non-zero
