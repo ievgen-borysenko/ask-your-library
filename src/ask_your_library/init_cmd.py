@@ -754,8 +754,14 @@ def _run(args) -> int:
     demo_missed = False
     demo_blocked = False        # refused over configuration: exit 2, like every such refusal
     if not want_demo:
-        note(f"demo library: not built. `{command('ayl init --demo')}` builds six classics in "
-             f"{ESTIMATE['starter']}, kept apart from your index")
+        if REPO_ROOT and (Path(REPO_ROOT) / "scripts" / "ingest_demo_corpus.py").is_file():
+            note(f"demo library: not built. `{command('ayl init --demo')}` builds six classics in "
+                 f"{ESTIMATE['starter']}, kept apart from your index")
+        else:
+            # The same test as the refusal below: an installed tool has no corpus
+            # to build from, so the hint names where the command does work.
+            note(f"demo library: not built. It is built from a clone, where `ayl init --demo` "
+                 f"builds six classics in {ESTIMATE['starter']}, kept apart from your index")
     elif dataflow.credential_configured():
         # The demo build is a child process whose error output this PR does
         # not control (the embedders' HTTP errors print the URL they were

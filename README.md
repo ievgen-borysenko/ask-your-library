@@ -20,9 +20,12 @@ What is the name of the book, and why did that happen?" — the default local mo
 the demo corpus, no API key. 147.7 s by the CLI's own metrics line in the last frame — a cold first
 ask, the same band as the 160.8 s a different first question takes from a clean clone
 ([`docs/eval-results/2026-09-10-first-question-local.md`](docs/eval-results/2026-09-10-first-question-local.md)).
-Recorded before 16.09 — the badge and the evidence labels have since changed: a quote matched only
-inside a book card is still retrieved, still checked and still counted, but it is counted
-separately and no longer as a traced quote from the book's text. The counts in these frames are
+Recorded on 2026-09-10 and first shipped in `v0.2.1`, so it types `uv run ask-library`, the older
+name of `ayl ask` (still installed, deprecated), and its one citation, "Plot", is a heading of the
+book's card rather than a chapter. The badge and the evidence labels have changed since 16.09: a
+quote matched only inside a book card is still retrieved, still checked and still counted, but it
+is counted separately and no longer as a traced quote from the book's text. The counts in these
+frames are
 not the counts a run shows today.*
 
 ![The web UI answering what d'Artagnan said before fighting three men at once: the answer, the quote-provenance badge, and one evidence passage opened under it](docs/img/ask-library-ui.gif)
@@ -30,7 +33,8 @@ not the counts a run shows today.*
 *"What exactly did Dartangnan say before the fight with not 1 but 3 people? And why?" — the same
 library in the web UI, this run on a hosted model (`LLM_BACKEND=openrouter` with Sonnet 4.6, which
 is not the default and is what the $0.0724 on its metrics line paid for): the verified-quotes
-badge, and the evidence passage under it. Recorded before 16.09 — the badge counts book-card matches
+badge, and the evidence passage under it. Recorded on 2026-09-10, before 16.09 — the badge counts
+book-card matches
 apart from traced book-text quotes now (they are still checked, and still counted), the evidence
 passages say which kind they are, the watermark under the composer is different, and the first
 frame is the login page rather than the chat. Both GIFs are due a re-record
@@ -154,9 +158,15 @@ LIBRARY_DB_PATH=~/AskYourLibrary/demo/index uv run ayl ask "What does Marcus Aur
 **Local is slower, and it quotes less reliably: both halves are the trade.** The quoting half is
 under [Privacy and cost](#privacy-and-cost) below and in
 [`docs/known-limits.md`](docs/known-limits.md). On a Mac the default `qwen2.5:14b` answers a catalogue
-question ("how many books do I have?") in 1 to 12 s and a research one in 61 to 217 s, at $0; the
+question ("how many books do I have?") in 1 to 12 s and a research one in 61 to 217 s (83 to 217 s
+over the research set; the catalogue set's four research controls widen it to 61 s), at $0; the
 hosted `claude-sonnet-4.6` (the hosted default until 18.09) takes 1 to 2 s and 8 to 61 s — a mean of 27 to 28 s over the eleven
-research questions of the core eval set — for about $0.002 and $0.05 respectively. Free costs time.
+research questions of the core eval set — for about $0.002 and $0.05 respectively. The hosted
+default since 18.09, DeepSeek V4 Flash with thinking off, averaged 22.3 to 31.9 s per core
+question over its three core runs of 18 and 19.09
+([`docs/eval-results/2026-09-18-hosted-models.md`](docs/eval-results/2026-09-18-hosted-models.md),
+[`docs/eval-results/2026-09-19-hosted-default-quality.md`](docs/eval-results/2026-09-19-hosted-default-quality.md)).
+Free costs time.
 Every figure here is a measured single run, over the rows of that one kind of question, and
 [`docs/cost.md`](docs/cost.md) names which run and which rows each one comes from.
 
@@ -170,7 +180,9 @@ the web UI and the eval commands.
   whole sentences, then bge-m3 embeddings — local Ollama by default — in a LanceDB index that is
   searched both ways, vectors and BM25, fused with Reciprocal Rank Fusion.
 - Only `observe` sees retrieved text, sanitized and cut to a budget; the loop sees distilled evidence.
-- A 4-step budget, a CRAG-style stop after 2 dry steps, drill-down, one clarify interrupt per run.
+- A 4-step budget, a CRAG-style stop after 2 dry steps (a step whose every quote the gate dropped
+  counts as dry from the second such step in a row, `MAX_DROPPED_STREAK`), drill-down, one clarify
+  interrupt per run.
 - Catalogue questions skip retrieval; the count is the length of the list read from the tables (ADR-016).
 - The quote check is plain code: a quote must be a contiguous whole-token run of the passage it
   names. It runs at the `observe` gate, so a quote that is in no retrieved passage never becomes
@@ -184,6 +196,11 @@ routing conditions are drawn node by node, with the decision records behind them
 
 ## Measured
 
+Measured on 2026-09-07 (the two `v0.2.0-rc1` columns) and 2026-09-05 (`v0.1.0`) on Sonnet 4.6, the
+former hosted default — before the catalogue path, the evidence gate and the card-only split (#29),
+the re-chunk (#28) and the `reflect` change (#93), and not re-run since; five releases, `v0.2.0` to
+`v0.5.0`, have followed.
+
 | Measurement | Core v0.2.0-rc1 (11 questions, 2,500 + gate) | Extended v0.1.0 | Extended v0.2.0-rc1 |
 |---|---|---|---|
 | Retriever window, single-book presence | 8/8 | 12/12 | 12/12 |
@@ -191,10 +208,21 @@ routing conditions are drawn node by node, with the decision records behind them
 | Agent eval, questions completed | 11/11 | 21/21 | 21/21 |
 | Behavioural compliance (heuristic scorer: titles, refusal, clarify, drill-down) | 11/11 | 17/21 | 18/21 |
 | Answer quality, correct / incorrect / incomplete ([how each run was graded](docs/evaluation.md)) | 10 / 0 / 1 | not scored | not scored |
-| Quote provenance, validator v0.1: confirmed / unattributed / broken | 47 / 0 / 0 | 53 / 0 / 0 | 73 / 0 / 0 |
+| Quote provenance, validator v0.1 (before the gate and the card-only split): confirmed / unattributed / broken | 47 / 0 / 0 | 53 / 0 / 0 | 73 / 0 / 0 |
 | Clarify where the golden requires it | 1/1 | 0/2 | 1/2 |
 | Chapter drill-down where expected | not in set | 0/1 | 0/1 |
 | Cost per question, mean (Sonnet 4.6 via OpenRouter, configured rates) | $0.049 | $0.027 | $0.043 |
+
+Sources: Core v0.2.0-rc1 from
+[`2026-09-07-v0.2.0-rc1-core.md`](docs/eval-results/2026-09-07-v0.2.0-rc1-core.md) and
+[`2026-09-07-v0.2.0-rc1-retrieval-canary.md`](docs/eval-results/2026-09-07-v0.2.0-rc1-retrieval-canary.md);
+Extended v0.1.0 from
+[`2026-09-05-v0.1.0-extended.md`](docs/eval-results/2026-09-05-v0.1.0-extended.md); Extended
+v0.2.0-rc1 from
+[`2026-09-07-v0.2.0-rc1-extended.md`](docs/eval-results/2026-09-07-v0.2.0-rc1-extended.md) and the
+same retrieval report. Since #29 (2026-09-16) a run's provenance triple reads `n / 0 / 0` by
+construction, so the triples above are not comparable with a later one
+([`docs/evaluation.md`](docs/evaluation.md)).
 
 **Every number in this table was measured on the hosted configuration** (`LLM_BACKEND=openrouter`,
 Sonnet 4.6), which is what the cost row prices. **It was measured before the hosted default
@@ -228,7 +256,11 @@ themselves are in [`docs/eval-results/`](docs/eval-results/).
   of either. The three are named in the report, which is published. Three numbers under that
   verdict:
   - **3 bad quotes of 61.** Quote provenance is plain code, so this number is not a model's
-    opinion of a model.
+    opinion of a model. Since 2026-09-16 the same check is a gate before the answer is written
+    (#29), and on `qwen2.5:14b` the two quotes it drops are those two broken ones: a repeated run
+    under it (`--repeat 3`) scored 9/11 on the research set and 10/10 on the catalogue set, the
+    same as without it, with broken 2 → 0 ([`docs/known-limits.md`](docs/known-limits.md),
+    [`docs/evaluation.md`](docs/evaluation.md)).
   - **18/20 behavioural compliance** for the default `qwen2.5:14b` (10/10 on the catalogue set,
     8/10 on the research set) against **19/20** for the smaller `qwen2.5:7b`, which is not the
     default because 14b grounds more heavily: 61 quotes checked against 39. Behavioural compliance
@@ -246,11 +278,14 @@ themselves are in [`docs/eval-results/`](docs/eval-results/).
 - Run this on your own machine, over books you legally own.
 - **By default nothing leaves the machine**: the answering model and the embeddings both run on
   this Ollama, and with tracing off there is no other path out **of the Python process that answers
-  your question** — which is the part that is tested (`tests/test_egress_local.py` records every
-  connection attempt of a real run and asserts they all go to loopback on the configured Ollama
-  port). It sees every network call made through Python's socket module; a native extension or a
-  `ctypes` call that talks to libc directly is its blind spot, and a test asserts no such package
-  is installed. It is not a claim about Ollama, which is a separate process, nor about the browser
+  your question**. The test covers that path up to the first model call:
+  `tests/test_egress_local.py` records every connection attempt of a real run with Ollama not
+  running — the resolved configuration, the preflight, one embedding call and the planner's call,
+  where the run ends — and asserts they all go to loopback on the configured Ollama port; the later
+  nodes and `ayl add` do not run under it. It sees every network call made through Python's socket
+  module; a native extension or a `ctypes` call that talks to libc directly is its blind spot, and
+  a test asserts no such package is installed. It is not a claim about Ollama, which is a separate
+  process, nor about the browser
   or the Chainlit server, which the test does not exercise; the scope is spelled out in
   [`docs/privacy-and-threat-model.md`](docs/privacy-and-threat-model.md).
 - **Choose the hosted model and it does leave.** With `LLM_BACKEND=openrouter` the question **and

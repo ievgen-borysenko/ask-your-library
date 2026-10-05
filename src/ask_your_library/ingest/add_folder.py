@@ -259,9 +259,12 @@ def book_files(folder: Path) -> list[Path]:
 def read_book(path: Path, folder: Path) -> Book | None:
     """One file -> a Book, or None when the file cannot be indexed.
 
-    Unreadable files are warned about and skipped, never fatal: a folder of a
-    few hundred books should not be blocked by one stray PDF that happens to be
-    named .txt, and the run reports every file it left out."""
+    An EPUB or PDF that cannot be read, and a .txt/.md that is not UTF-8 text,
+    is warned about and skipped: a folder of a few hundred books should not be
+    blocked by one stray PDF that happens to be named .txt, and the run reports
+    every file it left out. A .txt/.md that cannot be opened at all (no
+    permission, or gone since the folder was listed) is not caught here: the
+    OSError ends the run before anything is written."""
     if path.suffix.lower() == EPUB_SUFFIX:
         return read_epub_book(path, folder)
     if path.suffix.lower() == PDF_SUFFIX:
@@ -1108,17 +1111,21 @@ def build_parser(prog: str = "ayl-add") -> argparse.ArgumentParser:
                         help="also DELETE the rows of books whose file is no longer in the "
                              "folder (without it they are reported and kept)")
     parser.add_argument("--doctor", action="store_true",
-                        help="reconcile the book ledger against the index tables and report "
+                        help="the index half of `ayl doctor`, which is the command to type: "
+                             "reconcile the book ledger against the index tables and report "
                              "any drift, and check the stamped chunker and row schema against "
                              "what this code writes; read nothing else, write nothing")
     parser.add_argument("--backup", type=Path, metavar="DIR", default=None,
-                        help="copy the index and the web UI's chat database into "
+                        help="with --rebuild, take this copy first; on its own, what "
+                             "`ayl backup DIR` runs, which is the command to type: "
+                             "copy the index and the web UI's chat database into "
                              "DIR/<timestamp>/ with a MANIFEST.json (what was copied, the "
                              "stamps, the row counts, a sha256 per file). Refuses while an "
                              "ingest is running. Take one before any upgrade that rebuilds")
     parser.add_argument("--restore", type=Path, metavar="BACKUP_DIR", default=None,
-                        help="verify a backup directory against its manifest and put it back; "
-                             "refuses to overwrite an existing index unless --force")
+                        help="what `ayl restore BACKUP_DIR` runs, which is the command to "
+                             "type: verify a backup directory against its manifest and put it "
+                             "back; refuses to overwrite an existing index unless --force")
     parser.add_argument("--rebuild", action="store_true",
                         help="drop the transcripts table and index the folder from scratch — the "
                              "way out of a chunker or embedder mismatch, and the only write that "
@@ -1137,7 +1144,8 @@ def build_parser(prog: str = "ayl-add") -> argparse.ArgumentParser:
                              "(default: AYL_CHAINLIT_DIR, else "
                              "$AYL_HOME/ui/.chainlit/chat.db)")
     parser.add_argument("--cards", action="store_true",
-                        help="not implemented (see the message it prints)")
+                        help="not a feature: book cards are not built for your own books; "
+                             "the flag prints why and exits 2")
     return parser
 
 

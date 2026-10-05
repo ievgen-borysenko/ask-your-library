@@ -76,15 +76,14 @@ open ones often refer to them.
 - **"How exactly / what happens" questions answered from card summaries.** h13 (Moby Dick ending)
   passes on facts but skips the chapter drill-down the golden expects; reflect should prefer
   read_chapter when evidence for a detail question comes only from cards.
-- **What the chunk-is-the-window change bought is not measured yet** (#28 shipped 17.09,
+- **What the chunk-is-the-window change bought was measured on 2026-09-18** (#28 shipped 17.09,
   [ADR-025](adr/README.md)). The defect is closed and counted — 90.3% of chunks over the window
-  became 0%, on the prepared texts — but behaviour is not: it needs a full re-ingest at the new
-  chunker (~30 min) and a paired core + catalogue run at `--repeat 3` against the #66 gate
-  baseline, with c03 intact and c06 reported whichever way it comes out. Until that is in
-  `docs/eval-results/`, no claim about answers belongs anywhere in these pages. The same run is
-  the first chance to see whether the local model ever fills `looking_for` on a `read_chapter`
-  decision; if it does not, the chapter window never opens and the field needs the prompt work,
-  not the code.
+  became 0%, on the prepared texts — and the paired core + catalogue run at `--repeat 3` on
+  `qwen2.5:14b` after a full re-ingest is
+  [`eval-results/2026-09-18-rechunk-and-observe-feedback.md`](eval-results/2026-09-18-rechunk-and-observe-feedback.md):
+  behaviour unchanged item for item (9/11 and 10/10), a before/after over six merges rather than an
+  isolated measurement of the re-chunk, and the local model filled `looking_for` on 7 of 7
+  `read_chapter` decisions of the research set.
 - **A chapter read has no cursor.** The window is chosen once per request, and a second request for
   the same chapter stops the loop (`stop_chapter_again`) rather than showing the next window —
   right while there was nothing to show, thinner now that a read can be aimed. If aimed reads turn
@@ -420,12 +419,13 @@ open ones often refer to them.
   re-enters the graph without re-planning on some branch, or the recorder misses that call on one of
   the two paths; both are defects and they are not the same defect. Read
   `eval/recordings/en-demo.edc151948a58.*.jsonl` beside the three sidecars' `clarify_*` fields.
-- **A hosted run for behaviour spread.** Next, and the reason the row above is not fully closed: at
-  `temperature=0` a local model answers the same way every time, so `--repeat` cannot tell a stable
-  9/11 from a lucky one on that backend. The question needs a provider that samples —
-  `LLM_BACKEND=openrouter`, the core set at `--repeat 3` or more, `--require-clean`, on the user's
-  explicit go and inside a named budget. Until then every published behaviour verdict is a single
-  behavioural sample however many attempts produced it.
+- **A hosted run for behaviour spread.** Done on 2026-09-18 and 19: at `temperature=0` a local
+  model answers the same way every time, so `--repeat` cannot tell a stable 9/11 from a lucky one
+  on that backend, and the hosted default was run on the core and extended sets at `--repeat 3`
+  with `--require-clean`
+  ([`eval-results/2026-09-19-hosted-default-quality.md`](eval-results/2026-09-19-hosted-default-quality.md)).
+  Every local behaviour verdict is still a single behavioural sample however many attempts
+  produced it.
 - ADR-012: `SEARCH_HIT_CHARS` is a config knob, default raised 1,200 -> 2,500 after measuring
   1,200 / 2,500 / 4,000 on the core set (c03 complete at 2,500 and 4,000; c06 is not a window
   problem, the answering passage is never in the window). **Superseded by ADR-025** (17.09): the

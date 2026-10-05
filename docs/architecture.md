@@ -16,7 +16,7 @@ flowchart TB
         CRD["book cards: one model call<br/>per book, demo corpus only"]:::ai
         BK --> CHK["ayl add: chapters from headings (.txt / .md),<br/>the spine and contents (.epub),<br/>the outline or the pages (.pdf),<br/>chunks packed from whole sentences"]:::code
         CHK --> EMB["bge-m3 embeddings,<br/>local Ollama by default"]:::ai
-        EMB --> DB[("LanceDB — transcripts, optional cards<br/>hybrid BM25 + vectors, model fingerprint")]:::code
+        EMB --> DB[("LanceDB, one per library (ADR-028):<br/>yours at $AYL_HOME/index, the demo at $AYL_HOME/demo/index<br/>transcripts, optional cards<br/>hybrid BM25 + vectors, model fingerprint")]:::code
         CRD --> DB
     end
     subgraph online["ONLINE — LangGraph loop, one question"]
@@ -29,8 +29,8 @@ flowchart TB
         ACT --> OBS["observe: evidence distillate (book, chapter, candidate quote, hit id),<br/>then the quote gate in plain code: kept, re-pinned or dropped"]:::ai
         OBS --> REF{"reflect:<br/>enough<br/>evidence?"}:::ai
         REF -->|"next query, or a<br/>chapter not read yet"| ACT
-        REF -->|"step limit, deadline,<br/>CRAG gate after 2 dry steps,<br/>no usable decision"| SYN["synthesize: answer with<br/>book, chapter citations"]:::ai
-        REF -->|"model says<br/>enough or clarify"| COV{"coverage gate: plain code,<br/>no model (ADR-013)"}:::code
+        REF -->|"step limit, deadline,<br/>CRAG gate after 2 dry steps (an all-dropped<br/>step counts dry from MAX_DROPPED_STREAK in a row),<br/>no usable decision"| SYN["synthesize: answer with<br/>book, chapter citations"]:::ai
+        REF -->|"model says<br/>enough or clarify"| COV{"coverage gate: plain code<br/>inside reflect, no model (ADR-013)"}:::code
         COV -->|"once per run, before the exit:<br/>a book the question names is in the window<br/>but not in the evidence (identify mode:<br/>one book covered, a queued query left)"| ACT
         COV -->|"ambiguous,<br/>once per run"| CLR["clarify: the run suspends,<br/>candidates go to the reader"]:::human
         CLR --> PLAN
@@ -72,8 +72,8 @@ flowchart TD
     R -->|"read_chapter: not attempted yet"| A
     R -->|"ambiguous, once per run"| C["clarify: interrupt with a candidate list"]:::human
     C --> P
-    R -->|"enough / step limit / CRAG gate after 2 dry steps /<br/>question deadline / observe's or reflect's own call timed out /<br/>chapter already attempted / reflect JSON failed twice"| S["synthesize: answer with book, chapter citations"]:::ai
-    S --> V["validate: plain code, confirmed / unattributed / broken"]:::code
+    R -->|"enough / step limit / CRAG gate after 2 dry steps (an all-dropped step<br/>counts dry from MAX_DROPPED_STREAK in a row) /<br/>question deadline / observe's or reflect's own call timed out /<br/>chapter already attempted / reflect JSON failed twice"| S["synthesize: answer with book, chapter citations"]:::ai
+    S --> V["validate: plain code, confirmed / unattributed / card-only / broken"]:::code
     V --> E(["END"]):::code
     classDef code fill:#dbeafe,stroke:#1d4ed8,color:#000
     classDef ai fill:#fed7aa,stroke:#c2410c,color:#000
@@ -107,7 +107,8 @@ says nothing about whether an answer is faithful or correct); it named one hoste
 `OpenRouter: Sonnet 4.6`, where the product lets you configure the answering model and runs fully
 locally with no account ([`configuration.md`](configuration.md)); and it priced a question at
 `~$0.02-0.08` against the author's private 169-book library, where the figure measured on the demo
-corpus is $0.04-0.05 at v0.2.0-rc1 ([`cost.md`](cost.md)). Its canvas also named an `MCP server
+corpus is $0.04-0.05 at v0.2.0-rc1 on Sonnet 4.6, the hosted default until 2026-09-18; the hosted
+default since then measured $0.0006-0.0007 per core question ([`cost.md`](cost.md)). Its canvas also named an `MCP server
 (future)`, which the Chainlit configuration this project ships declines by policy, and wrote
 `CODE = deterministic code`, the phrasing 0.3.1 replaced with "no answering-model call" because
 `act` embeds its query.

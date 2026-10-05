@@ -1,20 +1,21 @@
 # Add your own books
 
 ```bash
-LIBRARY_DB_PATH=~/ayl-index uv run ayl add ~/books            # index a folder
-LIBRARY_DB_PATH=~/ayl-index uv run ayl add ~/books --dry-run  # what it would change, no writes
-LIBRARY_DB_PATH=~/ayl-index uv run ayl doctor                 # ledger vs index, no writes
-LIBRARY_DB_PATH=~/ayl-index uv run ayl add ~/books --prune    # also delete books whose file is gone
-LIBRARY_DB_PATH=~/ayl-index uv run ayl backup ~/backups       # copy the index + chat.db, verified
-LIBRARY_DB_PATH=~/ayl-index uv run ayl add ~/books --rebuild --backup ~/backups  # copy, then rebuild
-LIBRARY_DB_PATH=~/ayl-index uv run ayl books                  # what the index holds; no model call
-LIBRARY_DB_PATH=~/ayl-index uv run ayl ask "..."              # ask it
+uv run ayl add ~/books            # index a folder
+uv run ayl add ~/books --dry-run  # what it would change, no writes
+uv run ayl doctor                 # ledger vs index, no writes
+uv run ayl add ~/books --prune    # also delete books whose file is gone
+uv run ayl backup ~/backups       # copy the index + chat.db, verified
+uv run ayl add ~/books --rebuild --backup ~/backups  # copy, then rebuild
+uv run ayl books                  # what the index holds; no model call
+uv run ayl ask "..."              # ask it
 ```
 
-Written as a clone types them; installed as a tool (`uv tool install`), drop the `uv run`. The
-`LIBRARY_DB_PATH=~/ayl-index` prefix keeps that library in a folder of its own. Without it the
-same commands work on your index, `~/AskYourLibrary/index` — the one `ayl init` names and every
-command reads by default; the demo library `ayl init --demo` builds is a separate index beside it,
+Written as a clone types them; installed as a tool (`uv tool install`), drop the `uv run`. They
+work on your index, `~/AskYourLibrary/index` — the one `ayl init` names and every command reads by
+default. A prefix such as `LIBRARY_DB_PATH=~/ayl-index` on every one of them, the `ayl ask`
+included, builds and reads a second index in a folder of its own instead; a plain `ayl ask` does
+not see it. The demo library `ayl init --demo` builds is a separate index beside it,
 so your books and the classics are never mixed unless you point `ayl add` at the demo's folder.
 
 `ayl add`, `ayl doctor`, `ayl backup` and `ayl restore` are one program under four verbs. Each

@@ -592,11 +592,12 @@ print(json.dumps({"raised": raised,
 
 
 def test_the_local_configuration_talks_only_to_loopback():
-    """A full pass of the real graph in the fully local configuration, with
-    Ollama not running: preflight, an embedding call and the orchestrator's own
-    calls all go to loopback on the configured Ollama port, and nothing else is
-    contacted — not OpenRouter, not LangSmith, and no resolver is asked about
-    either of them.
+    """A run of the real graph in the fully local configuration, with Ollama
+    not running, which ends at `plan` with a ConnectionError: preflight, an
+    embedding call and the planner's call with its retries all go to loopback on
+    the configured Ollama port, and nothing else is contacted — not OpenRouter,
+    not LangSmith, and no resolver is asked about either of them. The nodes
+    after `plan` do not run here.
 
     The port is a reserved loopback port rather than 11434 so that a developer
     with Ollama actually running does not have this test make a model call; what

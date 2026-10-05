@@ -10,6 +10,14 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   says so at question time. `ayl init --print-env-resolution`, run from that directory, shows what
   each data-flow setting resolves to and where it came from.
 
+- **A credential in an endpoint's URL can reach the failure line** (#107). When a call fails,
+  the error's text reaches the line `ayl ask` prints and the message the web chat shows, and the
+  embedders' HTTP errors carry the URL they were sent to, a `user:password@` in it included. The
+  first-run path (`ayl init`, the model pull, the preflight) already withholds such text, and
+  `ayl init --demo` is not started while a URL-valued setting carries a credential; the answer
+  path is the open part. Ollama on loopback with no credential in its URL is not affected; a
+  remote or proxied endpoint is.
+
 - **The default local answering model is not good enough to advertise as a strong default, and
   this project's own measurement of it says so.** Measured on the local backend on 2026-09-10
   ([`eval-results/2026-09-10-local-models.md`](eval-results/2026-09-10-local-models.md)). Two
@@ -160,6 +168,8 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
 - **A two-book identify question can be answered without a clarify** (#93). `reflect` stops when
   the quotes cover the question, and quotes from only one of the two candidate books can: h22
   skipped its clarify in 1 of 3 attempts on 2026-10-02, where the earlier rules clarified 9 of 9.
+  That run has no report under [`eval-results/`](eval-results/); ADR-005 in
+  [`adr/README.md`](adr/README.md) carries its numbers.
 - **The loop can re-issue an identical search query until the step limit.** Nothing stops `reflect`
   from naming a query it already ran; two of the three step-limit stops in the eval run of
   2026-10-02 were that: steps spent on a search the run had already made.

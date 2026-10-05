@@ -34,9 +34,11 @@ process that the parent bounds from outside: stopped past 60 s or 1 GiB of resid
 a 256 MiB file cap and a 5,000-page cap; an encrypted PDF is refused and no password is tried
 (ADR-030). On macOS the memory bound is sampled, not a kernel limit, so a file that allocates as
 fast as the machine can is stopped a few hundred MiB past it; on Linux the child also caps its own
-address space. A refused file is named in one line, never quoted, and the rest of the folder is
-indexed. What comes out is text, and from then on it is corpus text like any other book's: the
-injection layers in `docs/privacy-and-threat-model.md` apply to it the same way. Every limit and
+address space. A refused EPUB or PDF is named in one line, never quoted, and the rest of the
+folder is indexed. That holds for those two formats: a `.txt` or `.md` that cannot be opened at
+all (one that is not UTF-8 is skipped), or an embedding call that fails, stops the run. What comes
+out is text, and from then on it is corpus text like any other book's: the injection layers in
+`docs/privacy-and-threat-model.md` apply to it the same way. Every limit and
 refusal: `docs/add-your-own-books.md`.
 
 One environment knob loads and runs code by design, and it is a test seam, not a feature:

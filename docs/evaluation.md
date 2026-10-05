@@ -6,8 +6,8 @@ same table without this text around it.
 Every run reported **on this page** was produced on the **hosted** configuration
 (`LLM_BACKEND=openrouter`, `anthropic/claude-sonnet-4.6`), which is not the shipped default: the
 default is local and free, a different answering model and therefore a different system, and no
-number on this page describes it. [`eval-results/`](eval-results/) is not hosted-only, and the three
-local reports there say so in their own provenance headers:
+number on this page describes it. [`eval-results/`](eval-results/) is not hosted-only, and the four
+local agent-eval reports there say so in their own provenance headers:
 [`2026-09-10-local-models.md`](eval-results/2026-09-10-local-models.md), two `qwen2.5` sizes on
 `LLM_BACKEND=ollama`;
 [`2026-09-10-first-question-local.md`](eval-results/2026-09-10-first-question-local.md), one local
@@ -18,8 +18,14 @@ the facts row and the card-only split on real numbers, and to commit their plann
 [`2026-09-18-rechunk-and-observe-feedback.md`](eval-results/2026-09-18-rechunk-and-observe-feedback.md),
 which continues that page on the **re-chunked** index — the paired `#28` measurement on
 `qwen2.5:14b` and the `#29` branch runs on both local models. None of the four feeds the table
-below. The rule that separates the two kinds at a glance is the
-cost line: a hosted run carries its model's configured rates (`$3.0/M in, $15.0/M out` on every Sonnet 4.6 run here), a local one `$0.0/M
+below, and neither do the local scope canary of 2026-09-17 (described further down) or the two
+hosted reports on models other than Sonnet 4.6:
+[`2026-09-18-hosted-models.md`](eval-results/2026-09-18-hosted-models.md), which chose the hosted
+default of 18.09, and
+[`2026-09-19-hosted-default-quality.md`](eval-results/2026-09-19-hosted-default-quality.md), that
+default at `--repeat 3` with its answers graded by hand. The rule that separates the two kinds at
+a glance is the cost line: a hosted run carries its model's configured rates (`$3.0/M in, $15.0/M
+out` on every Sonnet 4.6 run here), a local one `$0.0/M
 in, $0.0/M out`. From this release the harness fingerprint also names the backend outright — `model
 <name> via <backend>` — but every report committed before it prints `model <name>` alone, so for
 those the backend is read from the report's provenance header, not from the fingerprint.
@@ -143,9 +149,14 @@ reported in the report line ("N quotes matched only a book card, not the book te
 when there are any) and in the sidecar. The confirmed ratio's denominator is `checked_book_text`
 (= `checked - card_only`), so a run answered half off cards reads "3/3 of the book text, plus 3
 card matches" rather than "6/6 confirmed". **Every report under
-[`eval-results/`](eval-results/) predates this split and counts card matches inside the triple**;
-the numbers in those files are correct for what they measured and are not comparable, quote for
-quote, with a run made after it. Nothing was re-run to change them, and the harness reads a
+[`eval-results/`](eval-results/) dated before 2026-09-16 predates this split and counts card matches
+inside the triple**; the runs reported from 2026-09-16 on were made with it, and three of those
+reports publish the card-only count —
+[`2026-09-16-local-models-repeat3.md`](eval-results/2026-09-16-local-models-repeat3.md) (the first),
+[`2026-09-18-rechunk-and-observe-feedback.md`](eval-results/2026-09-18-rechunk-and-observe-feedback.md)
+and [`2026-09-18-hosted-models.md`](eval-results/2026-09-18-hosted-models.md). The numbers in the
+earlier files are correct for what they measured and are not comparable, quote for quote, with a run
+made after it. Nothing was re-run to change them, and the harness reads a
 sidecar written before the split as a run with no card matches in it rather than as a run with
 nothing traced.
 
@@ -271,9 +282,10 @@ Three golden sets for the demo corpus, reported separately (the engineer's shelf
 default `GOLDEN_PATH`): eight questions on books the golden author has read and a two-book
 comparison of two of them (Ivanhoe and Don Quixote), all nine reader-verified; h06, one of the two
 questions the example traces are built on, verified against the source text by an AI session only;
-and one genuinely ambiguous identify (Crusoe or Gulliver), proposed and awaiting the reader's
-verdict on the item itself. Each item's notes state its level. The file held twelve questions when
-the v0.1.0 column was measured; the reader removed h12 on 06.09, and the v0.2.0-rc1 column is the
+and one genuinely ambiguous identify (Crusoe or Gulliver), whose notes carry the reader's verdict
+on the item itself, of 2026-09-19. Each item's notes state its level. The file held twelve
+questions when the v0.1.0 column was measured; the reader removed h12 on 06.09, and the v0.2.0-rc1
+column is the
 eleven-question set (see the note under the table).
 **Extended**
 (`eval/golden/en-demo-extended.yaml`, 21 questions) is the former v3 draft with near-duplicates
@@ -314,7 +326,10 @@ rather than described, and it is the paired baseline the gate's own run is to be
 returned the same answers three times over — no per-question behaviour verdict moved on any of
 189 item-attempts, `qwen2.5:32b` was byte-identical on every item of both sets, and the only things
 that varied were seconds. So `--repeat` on a local model measures a latency distribution; **the
-behaviour spread it was built for has to be measured on a hosted run**, where the provider samples.
+behaviour spread it was built for has to be measured on a hosted run**, where the provider samples
+— and was, on 2026-09-18 and 19, for the hosted default
+([`2026-09-19-hosted-default-quality.md`](eval-results/2026-09-19-hosted-default-quality.md),
+core and extended sets at `--repeat 3`, behaviour and hand grades per attempt).
 Nothing in the tables below has been re-measured, and the numbers in them are what they always were.
 
 **Every number on this page was produced against the old chunker.** On 2026-09-17 (#28,
@@ -754,13 +769,14 @@ every release PR.
   which is a real narrowing of what can go wrong — and it stops exactly there. The sentences the
   model writes around that evidence, including anything it puts in quotation marks of its own, are
   model output and nothing verifies them. Citing by evidence id and checking those citations against
-  the answer's sentences is the other half of #29 and is not built.
+  the answer's sentences is the other half of #29, tracked as #112 since #29 was closed on
+  2026-10-03, and is not built.
 - **Not that a confirmed quote is a quote from a book.** It was until 2026-09-16: a quote found
   verbatim inside a book card counted as confirmed, and the card is a model's summary of the book,
   not the book. `validate` now counts those apart (`card_only`, never in the confirmed ratio) and
   every interface labels the passage it opens "book text" or "book card". The reports already
   published counted them in the triple — which is why "quote provenance 73 / 0 / 0" in the table
-  below is a claim about retrieval provenance and not about the author's words.
+  above is a claim about retrieval provenance and not about the author's words.
 - **Not answer quality.** Behavioural PASS means the expected titles were mentioned, a refusal
   refused, a clarify clarified. It does not grade reasoning or prose. c06 (Fogg's missing day)
   is PASS with provenance 2/2 and does not answer the second half of its question: the scene that

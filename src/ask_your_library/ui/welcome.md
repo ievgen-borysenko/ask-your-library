@@ -13,7 +13,9 @@ code — no second model — checks every quote against the passage it was copie
 - The agent's steps appear above the answer — what it planned to look for, what it searched, and
   the real reason it stopped (enough evidence, step limit, two dry steps, chapter already
   attempted).
-- The footer shows what the question cost: LLM calls, tokens, USD.
+- The line under each answer shows the model, what the question cost in USD (and the session so
+  far), the time, the steps and the stop reason; LLM calls and tokens, per node, are under "run
+  details" beside it.
 - If the library has no answer, the agent says so honestly.
 
 Language switch: chat profile at the top (English / Українська).

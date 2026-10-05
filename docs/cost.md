@@ -25,7 +25,7 @@ are between six fast rows and four slow ones.
 | | Catalogue question | Research question | Cost per question |
 |---|---|---|---|
 | Local `qwen2.5:14b` | 1-12 s over six rows (mean 3.3 s) | 61-217 s over 14 rows (mean 133 s over the research set's ten) | $0 for either |
-| Hosted `claude-sonnet-4.6` | 1-2 s over six rows (mean 1.8 s) | 8-61 s over 26 rows (mean 27-28 s over each core set's eleven) | ~$0.002 catalogue, ~$0.05 research |
+| Hosted `claude-sonnet-4.6` (the hosted default until 2026-09-18) | 1-2 s over six rows (mean 1.8 s) | 8-61 s over 26 rows (mean 27-28 s over each core set's eleven) | ~$0.002 catalogue, ~$0.05 research |
 
 Which rows each figure covers. **Local**, all from the mini-eval of 10.09
 ([`eval-results/2026-09-10-local-models.md`](eval-results/2026-09-10-local-models.md)) on
@@ -67,8 +67,9 @@ catalogue set at $0.0002; Gemini 10/11 at $0.0202 and 10/10 at $0.0103; Sonnet 4
 $0.0456 and 10/10 at $0.0164. Single runs, answers not graded by hand. A repeated run graded by
 hand came after
 ([`eval-results/2026-09-19-hosted-default-quality.md`](eval-results/2026-09-19-hosted-default-quality.md)):
-$0.0007 per core question over three attempts, and about 6 of 11 answers fully correct against 9
-for Sonnet 4.6 — cheaper by about 65×, and thinner ([Known limits](known-limits.md)). Every other
+$0.0007 per core question over three attempts (mean 31.9 s; 22.3 s on the branch run of the 18.09
+report, so 22.3 to 31.9 s over its three core runs), and about 6 of 11 answers fully correct
+against 9 for Sonnet 4.6 — cheaper by about 65×, and thinner ([Known limits](known-limits.md)). Every other
 hosted figure on this page is Sonnet 4.6 at its $3/$15 rates, measured before the change.
 
 The hosted orchestrator of the runs below is Claude Sonnet 4.6 via OpenRouter. A typical *research* question costs roughly
