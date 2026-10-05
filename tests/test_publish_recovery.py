@@ -152,10 +152,34 @@ def test_when_neither_table_opens_nothing_is_dropped(tmp_path, monkeypatch):
     monkeypatch.setattr(publish, "table_batches", original)
     dropped = watch_drops(db)
 
-    with pytest.raises(publish.RecoveryError, match="neither t nor t__staging can be opened"):
+    with pytest.raises(publish.RecoveryError, match="t__staging cannot be opened either"):
         publish.recover_staging(db, "t")
     assert dropped == []
     assert {"t", "t__staging"} <= set(publish.table_names(db))
+
+
+def test_a_committed_live_table_that_fails_to_open_is_not_dropped(tmp_path, monkeypatch):
+    """A table that was whole once and does not open now (a permission, a
+    transient read error) is not what an interrupted copy leaves. Beside a
+    staging build that may not have finished, dropping it could lose the only
+    complete copy, so recovery drops neither and says so."""
+    db = lancedb.connect(tmp_path)
+    db.create_table("t", rows("a", ROWS))
+    db.create_table("t__staging", rows("b", 1))     # a staging build that did not finish
+    open_table = db.open_table
+
+    def unreadable(name, *args, **kwargs):
+        if name == "t":
+            raise OSError("permission denied")
+        return open_table(name, *args, **kwargs)
+    monkeypatch.setattr(db, "open_table", unreadable)
+    dropped = watch_drops(db)
+
+    with pytest.raises(publish.RecoveryError, match="t cannot be opened and was not left by"):
+        publish.recover_staging(db, "t")
+    assert dropped == []
+    monkeypatch.undo()
+    assert db.open_table("t").count_rows() == ROWS
 
 
 def test_a_stale_staging_beside_a_live_table_that_opens_is_still_dropped(tmp_path):

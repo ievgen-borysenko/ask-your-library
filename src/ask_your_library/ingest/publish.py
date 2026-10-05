@@ -12,6 +12,7 @@ that state staging is the only complete copy of the table (ADR-031).
 """
 import logging
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Any
 
 import pyarrow as pa
@@ -79,6 +80,25 @@ def opens(db, name: str) -> bool:
     return True
 
 
+def committed(db, name: str) -> bool:
+    """Whether `name`'s directory holds a committed version (`_versions/` with
+    a manifest in it), for a local index.
+
+    What tells the two unreadable tables apart: an interrupted copy leaves
+    `data/` and nothing else, while a table that was committed and fails to open
+    now (a permission, a transient read error) is not a half-written copy, and
+    dropping it could lose the only complete table. False when the index is not
+    a local directory: then `opens` alone decides."""
+    uri = str(getattr(db, "uri", "") or "")
+    if not uri or ("://" in uri and not uri.startswith("file://")):
+        return False
+    versions = Path(uri.removeprefix("file://")) / f"{name}.lance" / "_versions"
+    try:
+        return versions.is_dir() and any(versions.iterdir())
+    except OSError:
+        return True                      # cannot tell: treat it as a real table
+
+
 def readable_table(db, name: str) -> str | None:
     """Which table holds the rows of `name` right now, read-only: `name` itself
     when it opens, else its staging copy when that opens (the state an
@@ -134,7 +154,9 @@ def recover_staging(db, name: str) -> None:
     is the part that did not finish. When the live name is listed but does not
     open, the publish copy was interrupted and staging is the only complete
     copy: the broken live name is dropped and staging is promoted. When staging
-    does not open either, nothing is dropped and the run stops on the error."""
+    does not open either, or the live table has a committed version (it was
+    whole once, and fails to open for another reason), nothing is dropped and
+    the run stops on RecoveryError."""
     staging = name + STAGING_SUFFIX
     names = table_names(db)
     if staging not in names:
@@ -145,9 +167,10 @@ def recover_staging(db, name: str) -> None:
             db.drop_table(staging)
             log.warning("dropped stale %s (interrupted rebuild)", staging)
             return
-        if not opens(db, staging):
+        if committed(db, name) or not opens(db, staging):
             raise RecoveryError(
-                f"neither {name} nor {staging} can be opened, so neither is dropped. "
+                f"{name} cannot be opened and was not left by an interrupted copy, or "
+                f"{staging} cannot be opened either, so neither is dropped. "
                 f"Restore a backup, or move the index directory aside and add the books "
                 f"again")
         # Listed, unreadable: what an interrupted publish copy leaves behind.

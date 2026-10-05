@@ -1591,8 +1591,10 @@ holding data files and no committed version, `open_table` failing. Recovery then
 complete copy of the table, and the same window was open inside recovery's own promote copy.
 
 The rule now: a table counts as live only when it opens and counts its rows. Staging is dropped
-only beside a live table that opens; a listed live name that does not open is dropped and staging
-promoted; when neither opens, nothing is dropped and the run stops. An interrupted copy drops its
+only beside a live table that opens; a listed live name that does not open and holds no committed
+version (data files only, what an interrupted copy leaves) is dropped and staging promoted; when
+staging does not open either, or the live table was committed once and fails to open for another
+reason, nothing is dropped and the run stops on one line. An interrupted copy drops its
 partial target before re-raising, and staging is dropped only after the copy opens with the same
 row count. `rebuild_table` no longer drops a leftover staging table on its way in; it hands it to
 `recover_staging`. The write guards of `ayl add` (the embedding fingerprint and the chunker stamp)
