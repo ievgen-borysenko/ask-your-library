@@ -24,6 +24,15 @@ a LangSmith key is the third path, and `LANGSMITH_TRACING_V2=false` plus
 `LANGCHAIN_TRACING_V2=false` close it whatever was inherited. See "Privacy and data flow" and
 "Threat model" in `docs/privacy-and-threat-model.md` for what is protected and what is not.
 
+**A credential in an endpoint's URL is kept out of failure text** (#107, fixed in 0.5.1). Every
+failure line the CLI prints, the web chat shows and stores, the books ledger records and the eval
+reports carry goes through one function (`failure_text` in `src/ask_your_library/dataflow.py`)
+that reduces any URL to its scheme, host and port, and withholds an HTTP or model library's text
+entirely while a configured URL carries a credential; the embedders word their own errors. A
+Python traceback, a library's log lines and failure text stored before 0.5.1 are outside it:
+`docs/known-limits.md` says which. A credential kept out of the URL (for OpenRouter,
+`OPENROUTER_API_KEY`) is still the safer configuration.
+
 **The books are untrusted input.** `ayl add` parses files nobody here wrote, and two of its formats
 are containers: an EPUB is a zip archive of XML and XHTML, a PDF a compressed object graph. An
 EPUB is read with the standard library, in memory, never extracted to disk, and refused before it

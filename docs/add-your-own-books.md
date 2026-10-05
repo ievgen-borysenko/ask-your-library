@@ -53,6 +53,12 @@ Re-running the command re-indexes, **one book at a time**. Each book is resolved
 appended, and its ledger row is written before and after — so a run that adds one book to a
 library of three hundred touches that book alone, and the other 299 are neither read nor
 rewritten. The first build of a table is still a single staged publish (nothing to update yet).
+A staged publish builds `<table>__staging`, drops the live table and copies staging over; one
+interrupted there (an error, a full disk, Ctrl-C, a kill) is finished by the next `ayl add`, which
+promotes the staging copy when the live table does not open or when the marker the publish wrote
+(`.publish-<table>.json` in the index directory) is still there. When neither copy opens, nothing
+is dropped and the run stops on one line: restore a backup, or move the index directory aside and
+add the books again (ADR-031).
 
 The id is **minted, never derived**. That is what makes a correction cheap: fix `author:` in the
 front matter (or on the title line), re-run, and the same book is updated rather than indexed a

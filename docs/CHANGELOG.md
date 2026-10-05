@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.5.1 (2026-10-05)
+
+A patch release for two defects the audits of 04.10 reproduced: a P0 credential leak, where a
+credential in an endpoint's URL could reach the failure text (#107), and a P1 window in publish
+recovery, where an interrupted rebuild could lose the only complete copy of a table. The
+documentation is brought in line with the 0.5.0 code; a reader coming from 0.5.0 starts at
+[upgrading](upgrading.md#from-050-to-051).
+
 - **Documentation in line with the 0.5.0 code and the published reports.** The README's results
   table says when and on what it was measured and which report each column comes from; the README,
   `SECURITY.md`, the evaluation, cost, architecture, backlog, known-limits and ADR pages correct
@@ -35,6 +43,11 @@
   copy is whole, and while it is there recovery promotes the staging copy. A copy that ends short
   drops its target, and a staging copy that never committed stops the run on one line instead of
   a traceback on every run.
+- **The release pass over the documentation.** The install lines name `v0.5.1`; the upgrading
+  page has what a 0.5.0 install meets (the marker file, the heal of an index a 0.5.0 rebuild left
+  broken, failure text stored before the fix); `SECURITY.md` and the threat model say what the
+  failure-text fix covers and what it does not; add-your-own-books says what happens after an
+  interrupted publish; the backlog marks the staging completion marker done.
 
 ## 0.5.0 (2026-10-04)
 
