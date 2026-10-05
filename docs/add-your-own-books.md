@@ -40,11 +40,12 @@ if you want it indexed. A file skipped for any of these reasons never aborts the
 others are still indexed, and every skip is named on stderr (hidden ones as a single line with
 the count and the first few names, so one hidden directory cannot bury the rest). Only a folder
 in which *nothing* is indexable is an error, and then the existing index is left untouched.
-Two failures do stop the run (`read_book` in `src/ask_your_library/ingest/add_folder.py`): a
-`.txt` or `.md` that cannot be opened at all (no permission, or gone since the folder was listed)
-ends it before anything is written, and an embedding call that fails ends it at that book — the
-books before it stay indexed, and that one is marked `failed` in the ledger with the error's text
-(#107) and keeps the rows it had.
+Two file-level failures do stop the run. A `.txt` or `.md` that cannot be opened at all (no
+permission, or gone since the folder was listed) ends it before anything is written (`read_book`
+in `src/ask_your_library/ingest/add_folder.py`). An embedding call that fails ends it at that
+book, which is marked `failed` in the ledger with the error's text (#107): on an index that
+already has its table, the books before it stay indexed and that one keeps the rows it had; a
+first run or a `--rebuild` publishes nothing (after a failed `--rebuild`, restore the backup).
 
 Re-running the command re-indexes, **one book at a time**. Each book is resolved to a stable
 `book_id` in the index's `books` ledger, its rows are deleted by that id and the new ones
