@@ -24,6 +24,34 @@ it replaced, `ask-library` and `ayl-add`, are still installed and still run the 
 prints one deprecation line and is removed at `0.6.0`, so a script of your own has one minor
 release to change the name it types.
 
+## From 0.5.0 to 0.5.1
+
+A patch: nothing to migrate and nothing to rebuild. Upgrade the install (`uv tool install --force
+git+https://github.com/ievgen-borysenko/ask-your-library@v0.5.1`, or `git pull && uv sync` in a
+clone); the index, its stamps and `config.env` are read as they are. What an existing install
+meets:
+
+1. **A file `.publish-<name>.json` may appear in the index directory**, beside the tables (for
+   `_index_meta`, or the transcripts table). A rebuild of a table writes it, atomically, before it
+   drops the live table, and removes it once the copy opens with every row; it stays only when a
+   publish was interrupted, and while it is there the next write promotes the staging copy
+   (ADR-031). Leave it where it is: deleting it takes away the one record that the live table may
+   be an older, shorter version of itself. It is written only for an index in a local directory.
+2. **An index an interrupted 0.5.0 rebuild left broken heals on the next `ayl add`.** In 0.5.0, a
+   publish copy interrupted part way (an error, a full disk, Ctrl-C, a kill) left the live table
+   listed and unreadable beside a complete staging copy, and the next write deleted the staging
+   copy. While that staging copy is still there, the next `ayl add` (or `ayl backup`) drops the
+   unreadable table and promotes it. When neither opens, nothing is dropped and the run stops on a
+   `RecoveryError` that says what to do: restore a backup, or move the index directory aside and
+   add the books again. `ayl add` prints it as one line; `ayl backup` stops on the same message
+   under a traceback. An index where a 0.5.0 run already went past such an interruption has lost
+   its staging copy, and 0.5.1 cannot bring it back: restore a backup, or rebuild.
+3. **Failure text no longer carries a URL's credential (#107)**, and what was stored before is not
+   rewritten. If an endpoint URL with a `user:password@` or a token in it failed under 0.5.0, the
+   failure line may be in `chat.db`, the books ledger or an eval report: rotate that credential,
+   and move it out of the URL ([known limits](known-limits.md) lists the outputs the fix does not
+   reach).
+
 ## From 0.3.1 to 0.5.0
 
 0.5.0 is the next release after 0.3.1: the 0.4.0 milestone was closed without a tag, and its work
@@ -34,9 +62,10 @@ ships here. What a reader of 0.3.1 meets, in the order it matters:
    same code and print one deprecation line each; they are removed at 0.6.0. A flag of
    `ayl-add` that chose another command (`--doctor`, `--backup`, `--restore`) is its own verb now.
 2. **An install that is not a clone.** `uv tool install
-   git+https://github.com/ievgen-borysenko/ask-your-library@v0.5.0` puts `ayl` on your `PATH`
-   ([quick start](quick-start.md#install)); a clone keeps working as before, with `git pull &&
-   uv sync`. The demo library and the evals still need a clone.
+   git+https://github.com/ievgen-borysenko/ask-your-library@v0.5.1` (0.5.0's patch, the one to
+   install) puts `ayl` on your `PATH` ([quick start](quick-start.md#install)); a clone keeps
+   working as before, with `git pull && uv sync`. The demo library and the evals still need a
+   clone.
 3. **`AYL_HOME`.** Everything built on this machine — your index, the demo library, the
    scratchpads, the web chat's database, the configuration `ayl init` writes — now defaults to
    `~/AskYourLibrary` instead of the directory a command is typed in. An index at the old default,
@@ -378,7 +407,9 @@ the command exists rather than a line in the README:
 2. **No staged rebuild is half-finished.** LanceDB has no rename, so replacing a table goes
    through a staging copy, and there is a moment with the live table dropped and the staged one
    not yet promoted. A copy taken there restores to an index with a table missing. `--backup`
-   finishes or discards any such rebuild before it copies, and the manifest records that it did.
+   finishes or discards any such rebuild before it copies, and the manifest records that it did;
+   since 0.5.1 it discards a staging copy only beside a live table that opens, and stops,
+   dropping nothing, when neither opens (ADR-031).
 3. **Nothing rotted since.** `--restore` recomputes every digest before it touches anything.
 
 And the restore itself is staged: the verified copy is built **beside** the target and only a
@@ -463,7 +494,7 @@ uv run ayl backup ~/ayl-backups
 
 # 2. upgrade: from a clone, or as a tool (the tag of the release you want)
 git pull && uv sync
-uv tool install --force git+https://github.com/ievgen-borysenko/ask-your-library@v0.5.0
+uv tool install --force git+https://github.com/ievgen-borysenko/ask-your-library@v0.5.1
 
 # 3. what does the new code think of the old index?
 uv run ayl doctor

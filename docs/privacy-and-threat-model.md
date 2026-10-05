@@ -194,6 +194,12 @@ Designed for **localhost, single user**. Not designed for internet exposure:
   other books are indexed. The limits are in [Add your own books](add-your-own-books.md); the
   extracted text is corpus text from then on, covered by the injection layers below and nothing
   more.
+- **A credential in an endpoint's URL is kept out of failure text, not out of every output**
+  (#107, 0.5.1). The failure line `ayl ask` prints, the web chat and `chat.db`, the books ledger
+  and the eval reports all go through `dataflow.failure_text`: any URL reduced to scheme, host and
+  port, an HTTP or model library's text withheld while a configured URL carries a credential. A
+  traceback, a library's log lines and what was stored before 0.5.1 are not; the exact list is in
+  [Known limits](known-limits.md).
 - The injection layers cover instructions embedded in the *corpus*. They do not protect against
   a hostile *user*, do not cover paraphrased or non-EN/UA injections, and do not make the
   XML-like data blocks a boundary.

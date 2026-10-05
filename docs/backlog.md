@@ -42,6 +42,10 @@ open ones often refer to them.
   clean `uv tool install` on macOS Apple silicon with Ollama, then `ayl init`, then `ayl add` of
   the reader's own EPUB or PDF, then a first answer with verified citations. What that run found
   and this release does not fix is in #116, #117 and #118.
+- 0.5.1 (2026-10-05) is a patch: a credential in an endpoint's URL kept out of failure text (#107)
+  and an interrupted rebuild that no longer loses the only complete copy of a table (ADR-031),
+  both reproduced by the audits of 04.10, and the documentation brought in line with the 0.5.0
+  code.
 
 ## Agent behaviour
 
@@ -182,8 +186,10 @@ open ones often refer to them.
   prompt boundary and the detection mechanics of every node).
 - Eval: record the provider's model revision actually served (the metrics carry the routed model
   name only); the dirty hash does not recurse into untracked directories.
-- Partial re-ingest and `ayl-add` check the index fingerprint before writing; still open: a staging
-  completion marker.
+- Partial re-ingest and `ayl-add` check the index fingerprint before writing. The staging
+  completion marker is done in 0.5.1: a publish writes `.publish-<name>.json` once staging is
+  built, before the live table is dropped, and recovery promotes staging while it is there
+  (ADR-031); still open: the marker exists for a local index only.
 - `library.search`'s book filter is still a quoted SQL string; move it to the `lancedb.expr`
   builder the chapter filters use (LanceDB has no bound parameters, but `col` / `lit` / `contains`
   are pushed down as an expression; `Expr.to_sql()` is a lossy debugging rendering and must never be

@@ -256,7 +256,8 @@ src/ask_your_library/  agent package: graph, nodes, model client (llm.py), promp
                        `ayl init` (init_cmd.py), AYL_HOME and the configuration layers
                        (home.py, config.py), hints.py (commands as this install types them), i18n
   ingest/              chapter splitting, chunking, LanceDB rows, FTS index, staged and
-                       per-book publishing, ledger.py (the books ledger), doctor.py
+                       per-book publishing (publish.py, with the recovery of an
+                       interrupted publish, ADR-031), ledger.py (the books ledger), doctor.py
                        (ledger vs index), epub.py and pdf.py (the two untrusted formats),
                        backup.py and lock.py (`ayl backup` / `ayl restore`, the ingest lock),
                        and add_folder.py - the `ayl add` folder ingest
