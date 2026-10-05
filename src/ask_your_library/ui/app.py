@@ -1036,7 +1036,10 @@ async def on_message(message: cl.Message) -> None:
     if result.failure is not None:
         # Class + short message only: a raw exception can leak paths and
         # provider details into the chat (the runner has already replaced this
-        # machine's paths; the length cap is this interface's own rule).
+        # machine's paths and every URL's credential, path and query, and
+        # withheld a provider's text while a configured URL carries a
+        # credential: `dataflow.failure_text`; the 200-character cut is this
+        # interface's own rule). The same text is stored in the chat database.
         short = f"{result.failure.type}: {result.failure.message[:200]}"
         # Same treatment as every other message: an exception message can carry
         # corpus text (a book title in a lookup error). Plain markdown, not an

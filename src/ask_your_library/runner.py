@@ -78,7 +78,7 @@ from langgraph.types import Command
 
 from .i18n import t
 from .llm import pause_deadline, reset_usage, usage_snapshot
-from .paths import redact_paths
+from .dataflow import failure_text
 
 
 def initial_state(question: str, history: list[str], scratchpad: Path) -> dict:
@@ -229,8 +229,12 @@ class RunResult:
 
 def _failure(error: BaseException) -> RunFailure:
     """One place that turns an exception into the record of it: the class name,
-    and the message with this machine's paths taken out of it."""
-    return RunFailure(type=type(error).__name__, message=redact_paths(f"{error}"), error=error)
+    and the message as `dataflow.failure_text` lets it be shown — this
+    machine's paths and every URL's credential, path and query taken out of it,
+    a provider's own text withheld while a configured URL carries a credential
+    (#107). The CLI prints it, the web chat shows it and stores it, and the eval
+    reports copy it."""
+    return RunFailure(type=type(error).__name__, message=failure_text(error), error=error)
 
 
 def failed_result(question: str, error: Exception) -> RunResult:

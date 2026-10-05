@@ -50,6 +50,7 @@ from ..bookkey import (MAX_TITLE_LINE, UNKNOWN_AUTHOR, author_of, book_key, chun
                        split_title_author, title_of)
 from .. import config
 from ..config import DB_PATH, EMBED_BACKEND, confirm_db_path
+from ..dataflow import failure_text
 from ..embeddings import get_embedder
 from ..hints import command, script
 from ..index_meta import (META_TABLE, check_index, read_index_meta, refuse_version_mismatch,
@@ -66,8 +67,9 @@ from .ledger import (INDEXED, LEGACY_CHUNKER, REQUESTED, Ledger, backfill_from_i
                      open_ledger)
 from .backup import BackupError, backup, manifest_lines, read_manifest, restore
 from .lock import IngestBusy, ingest_lock
-from .publish import NoRowsError, add_ledger_columns, book_revisions, rebuild_table, \
-    recover_staging, replace_book_rows, revision_of, rows_of_book, table_names
+from .publish import NoRowsError, RecoveryError, add_ledger_columns, book_revisions, \
+    rebuild_table, readable_table, recover_staging, replace_book_rows, revision_of, \
+    rows_of_book, table_names
 
 log = logging.getLogger(__name__)
 
@@ -414,10 +416,15 @@ def refuse_model_mismatch(db, table: str, embedder) -> None:
     Unlike the readers (`library`, `preflight`), which tolerate a table built
     before fingerprints existed, `ayl-add` requires a full fingerprint match:
     an unstamped table would let a partial write mix two embedding models and
-    then stamp the whole table with the model that wrote only some of it."""
-    if table not in table_names(db):
+    then stamp the whole table with the model that wrote only some of it.
+
+    Judged on the table the write will land in: the staging copy when an
+    interrupted publish left the live name gone or unreadable, since recovery
+    promotes it before the write and nothing checks again after that."""
+    source = readable_table(db, table)
+    if source is None:
         return
-    problem = check_index(db, table, embedder.model, embedder.dims)
+    problem = check_index(db, table, embedder.model, embedder.dims, source=source)
     if problem:
         raise IngestError(
             f"refusing to write {table}: {problem}\n"
@@ -451,8 +458,10 @@ def refuse_chunker_mismatch(db, table: str) -> None:
     repair left is rebuilding all of it.
 
     A table that is not there yet, and one whose stamp says nothing about a
-    chunker, are both written to without a word: see `index_meta.version_mismatch`."""
-    if table not in table_names(db):
+    chunker, are both written to without a word: see `index_meta.version_mismatch`.
+    A table mid-swap (only its staging copy readable) is there: recovery
+    publishes it before the write."""
+    if readable_table(db, table) is None:
         return
     refusal = refuse_version_mismatch(db, table)
     if refusal:
@@ -844,7 +853,7 @@ def _write_books(books: list[Book], backend: str, db_path: Path, folder: Path | 
             # The ledger says `failed`, with the reason, and the book keeps
             # whatever rows it already had: the next run reports the pair
             # instead of promoting stale rows to current.
-            ledger.fail(book_id, f"{type(error).__name__}: {error}")
+            ledger.fail(book_id, f"{type(error).__name__}: {failure_text(error)}")
             raise
         counts["books"] += 1
         counts["sections"] += len(book.sections)
@@ -1224,7 +1233,7 @@ def main(argv: list[str] | None = None, prog: str = "ayl-add") -> int:
         say(f"embedding {len(books)} books with {args.backend} into {db_path} ...")
         counts = add_books(books, args.backend, db_path, folder, prune=args.prune,
                            rebuild=args.rebuild, force=args.force)
-    except (IngestError, IngestBusy) as error:  # one readable line, not a traceback
+    except (IngestError, IngestBusy, RecoveryError) as error:  # one line, not a traceback
         say(str(error), error=True)
         return 1
 

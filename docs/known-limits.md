@@ -10,14 +10,18 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   says so at question time. `ayl init --print-env-resolution`, run from that directory, shows what
   each data-flow setting resolves to and where it came from.
 
-- **A credential in an endpoint's URL can reach the failure line** (#107). When a call fails,
-  the error's text reaches the line `ayl ask` prints and the message the web chat shows, an
-  embedding call that fails during `ayl add` ends the run with that text on stderr and in the
-  book's ledger entry, and the embedders' HTTP errors carry the URL they were sent to, a
-  `user:password@` in it included. The first-run path (`ayl init`, the model pull, the preflight)
-  already withholds such text, and `ayl init --demo` is not started while a URL-valued setting
-  carries a credential; the answer path and `ayl add` are the open part. Ollama on loopback with no credential in its URL is not affected; a
-  remote or proxied endpoint is.
+- **A credential in an endpoint's URL is kept out of the failure text, not out of every output**
+  (#107). The embedders word their own errors (the endpoint as
+  `scheme://host[:port]` or the setting's name, the HTTP status or the connection error's class),
+  and every failure text goes through one function that reduces any URL in it to scheme, host and
+  port and withholds an HTTP or model library's text while a configured URL carries a credential.
+  So the line `ayl ask` prints, the web chat, `chat.db`, the books ledger and the eval reports no
+  longer carry it. Three outputs are not routed through that function: a Python traceback
+  (`ASK_DEBUG=1`, and an embedding error `ayl add` does not catch; the embedders' own errors carry
+  no URL, a model library's traceback is unchanged), library log lines (an HTTP client's request
+  line at INFO), and what `chat.db`, the ledger and the reports stored before #107 was fixed. A credential
+  that an error echoes without a URL around it is not recognised. Ollama on loopback with no
+  credential in its URL is not affected; a remote or proxied endpoint is.
 
 - **The default local answering model is not good enough to advertise as a strong default, and
   this project's own measurement of it says so.** Measured on the local backend on 2026-09-10

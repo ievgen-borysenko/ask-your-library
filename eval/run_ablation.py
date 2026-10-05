@@ -52,6 +52,7 @@ import yaml
 from ask_your_library import llm as llm_mod
 from ask_your_library import nodes as nodes_mod
 from ask_your_library.prompts import SYNTHESIZE_RULES
+from ask_your_library.dataflow import failure_text
 from ask_your_library.i18n import t
 from ask_your_library.library import search as corpus_search
 from ask_your_library.library import search_both as library_search_both
@@ -507,9 +508,9 @@ def main(argv: list[str] | None = None) -> None:
                     totals["errors"] += 1
                     spent = harness.usage_fields()
                     add_spend(totals, spent)
-                    records.append({"id": item["id"], "error": f"{type(error).__name__}: {error}",
-                                    **spent})
-                    print(f"      ERROR: {type(error).__name__}: {error} "
+                    said = f"{type(error).__name__}: {failure_text(error)}"   # #107
+                    records.append({"id": item["id"], "error": said, **spent})
+                    print(f"      ERROR: {said} "
                           f"(spent ${spent['cost_usd']:.4f})", flush=True)
                     continue
                 records.append(r)

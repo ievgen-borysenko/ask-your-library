@@ -13,6 +13,28 @@
   page describes the metrics line as it is, in a new install only (`ayl ui` copies it to
   `chainlit.md` in the UI's directory, `$AYL_HOME/ui` by default, only when that file is absent,
   so an existing one keeps the old text until it is deleted). No behaviour changed.
+- **A credential in an endpoint's URL no longer reaches a failure line (#107).** When an
+  embedding or model call failed, the error's text could carry the URL it was sent to, with a
+  `user:password@` or a token in its path, into the line `ayl ask` prints, the web chat and its
+  stored history, the books ledger and the eval reports. The embedders now say in their own words
+  which endpoint failed (`scheme://host[:port]` only) and with which HTTP status or connection
+  error; every failure text goes through one function that reduces any URL in it to its scheme,
+  host and port, drops control characters, keeps it to one line of at most 500 characters, and
+  withholds the text of an HTTP or model-library error entirely while a configured URL carries a
+  credential.
+- **An interrupted index rebuild no longer loses the only complete copy (ADR-031).** A rebuild
+  publishes by dropping the live table and copying its staging copy over. When that copy was
+  interrupted (an error, a full disk, Ctrl-C, a kill), the next `ayl add`, `ayl backup` or stamp
+  write took the half-written table for the live one and deleted the staging copy. Recovery now
+  checks that the live table opens before it deletes anything, promotes the staging copy when it
+  does not, and deletes the staging copy only after the copy it made opens with every row;
+  `ayl add`'s embedding-model and chunker checks look at the staging copy in that state too. A
+  kill inside the drop of the old table could leave it opening at an older version with fewer
+  rows, which recovery took for whole: a publish now writes a marker file
+  (`.publish-<name>.json`, in a local index directory) before that drop and removes it once the
+  copy is whole, and while it is there recovery promotes the staging copy. A copy that ends short
+  drops its target, and a staging copy that never committed stops the run on one line instead of
+  a traceback on every run.
 
 ## 0.5.0 (2026-10-04)
 

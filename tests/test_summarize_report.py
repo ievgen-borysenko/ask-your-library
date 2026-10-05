@@ -3,6 +3,7 @@ marker, and a summary that says 'Failures: none' while totals count an error
 misleads the reader."""
 import importlib.util
 import sys
+import unicodedata
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -47,3 +48,21 @@ def test_headings_with_cost_and_calls_still_parse(tmp_path, capsys, monkeypatch)
     out = capsys.readouterr().out
     assert "`q01-a` (identify, 2 steps, 9s, $0.0123, 5 calls, 100 in / 20 out tokens, clarify): titles 0/1" in out
     assert "cost $0.0123 total" in out
+
+
+def test_legacy_error_line_loses_control_characters_and_credential(tmp_path, capsys, monkeypatch):
+    """A report written before 0.5.1 carries the provider's text as it was: the
+    summary must not copy an escape sequence or a URL's credential from it."""
+    report = tmp_path / "answers-3.md"
+    report.write_text(
+        "# Agent eval — x\n\nrun: code abc\n\n"
+        "## q02-b — ERROR\n"
+        "HTTPError: provider said \x1b[2J for url: http://user:pw@example.test/token\n\n"
+        "---\n0 completed, 1 errors, 0 clarify interrupts\n", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["summarize_report.py", str(report)])
+    load().main()
+    out = capsys.readouterr().out
+    line = next(line for line in out.splitlines() if line.startswith("- `q02-b`"))
+    assert not [c for c in line if unicodedata.category(c) == "Cc"]
+    assert "user" not in line and "pw" not in line and "token" not in line
+    assert line.endswith("HTTPError: provider said [2J for url: <URL not shown>")
