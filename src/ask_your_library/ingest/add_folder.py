@@ -67,8 +67,9 @@ from .ledger import (INDEXED, LEGACY_CHUNKER, REQUESTED, Ledger, backfill_from_i
                      open_ledger)
 from .backup import BackupError, backup, manifest_lines, read_manifest, restore
 from .lock import IngestBusy, ingest_lock
-from .publish import NoRowsError, add_ledger_columns, book_revisions, rebuild_table, \
-    readable_table, recover_staging, replace_book_rows, revision_of, rows_of_book, table_names
+from .publish import NoRowsError, RecoveryError, add_ledger_columns, book_revisions, \
+    rebuild_table, readable_table, recover_staging, replace_book_rows, revision_of, \
+    rows_of_book, table_names
 
 log = logging.getLogger(__name__)
 
@@ -1232,7 +1233,7 @@ def main(argv: list[str] | None = None, prog: str = "ayl-add") -> int:
         say(f"embedding {len(books)} books with {args.backend} into {db_path} ...")
         counts = add_books(books, args.backend, db_path, folder, prune=args.prune,
                            rebuild=args.rebuild, force=args.force)
-    except (IngestError, IngestBusy) as error:  # one readable line, not a traceback
+    except (IngestError, IngestBusy, RecoveryError) as error:  # one line, not a traceback
         say(str(error), error=True)
         return 1
 

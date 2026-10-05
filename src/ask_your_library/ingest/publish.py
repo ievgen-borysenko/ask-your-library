@@ -34,6 +34,11 @@ class NoRowsError(ValueError):
     instead of a traceback."""
 
 
+class RecoveryError(RuntimeError):
+    """Neither a table nor its staging copy can be opened: recovery drops
+    neither, and the run stops on one line that names the way out."""
+
+
 def table_names(db) -> list[str]:
     names = db.list_tables() if hasattr(db, "list_tables") else db.table_names()
     return list(getattr(names, "tables", names))
@@ -141,8 +146,10 @@ def recover_staging(db, name: str) -> None:
             log.warning("dropped stale %s (interrupted rebuild)", staging)
             return
         if not opens(db, staging):
-            raise RuntimeError(f"neither {name} nor {staging} can be opened; both are kept "
-                               f"for a restore or a rebuild to replace")
+            raise RecoveryError(
+                f"neither {name} nor {staging} can be opened, so neither is dropped. "
+                f"Restore a backup, or move the index directory aside and add the books "
+                f"again")
         # Listed, unreadable: what an interrupted publish copy leaves behind.
         db.drop_table(name)
         log.warning("dropped %s: it could not be opened (interrupted publish)", name)

@@ -152,7 +152,7 @@ def test_when_neither_table_opens_nothing_is_dropped(tmp_path, monkeypatch):
     monkeypatch.setattr(publish, "table_batches", original)
     dropped = watch_drops(db)
 
-    with pytest.raises(RuntimeError, match="neither t nor t__staging can be opened"):
+    with pytest.raises(publish.RecoveryError, match="neither t nor t__staging can be opened"):
         publish.recover_staging(db, "t")
     assert dropped == []
     assert {"t", "t__staging"} <= set(publish.table_names(db))
