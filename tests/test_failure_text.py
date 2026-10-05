@@ -17,7 +17,7 @@ import lancedb
 import pytest
 import requests
 
-from ask_your_library import config, dataflow, embeddings
+from ask_your_library import cli, config, dataflow, embeddings
 from ask_your_library.dataflow import (MAX_FAILURE_CHARS, PATH_NOT_SHOWN, WITHHELD, failure_text,
                                        redact_urls)
 from ask_your_library.ingest import add_folder
@@ -195,6 +195,25 @@ def test_the_web_chat_and_cli_record_carries_no_credential(monkeypatch, credenti
     result = failed_result("q", error)
     assert SECRET not in str(result.failure)
     assert SECRET not in f"{result.failure.type}: {result.failure.message[:200]}"
+
+
+@pytest.mark.parametrize("configured", [False, True])
+def test_the_line_ayl_ask_prints_carries_no_credential(monkeypatch, capsys,
+                                                       no_credential_configured, configured):
+    """The CLI's own failure line, for an error raised around the run."""
+    if configured:
+        monkeypatch.setattr(config, "OLLAMA_URL", f"http://user:{SECRET}@127.0.0.1:9")
+
+    def explode(*_args, **_kwargs):
+        raise requests.HTTPError("500 Server Error: Internal Server Error for url: "
+                                 f"http://user:{SECRET}@127.0.0.1:9/{TOKEN}/api/embed")
+    monkeypatch.setattr(cli, "run_question", explode)
+    monkeypatch.delenv("ASK_DEBUG", raising=False)
+    result = cli._run(None, "q", [])
+    err = capsys.readouterr().err
+    assert result.failure is not None and "HTTPError" in err
+    assert SECRET not in err and TOKEN not in err
+    assert (WITHHELD in err) == configured
 
 
 def test_the_books_ledger_stores_no_credential(tmp_path, monkeypatch, credential_configured):
