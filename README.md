@@ -163,7 +163,7 @@ over the research set; the catalogue set's four research controls widen it to 61
 hosted `claude-sonnet-4.6` (the hosted default until 18.09) takes 1 to 2 s and 8 to 61 s — a mean of 27 to 28 s over the eleven
 research questions of the core eval set — for about $0.002 and $0.05 respectively. The hosted
 default since 18.09, DeepSeek V4 Flash with thinking off, averaged 22.3 to 31.9 s per core
-question over its three core runs of 18 and 19.09
+question over its three core runs of 18.09
 ([`docs/eval-results/2026-09-18-hosted-models.md`](docs/eval-results/2026-09-18-hosted-models.md),
 [`docs/eval-results/2026-09-19-hosted-default-quality.md`](docs/eval-results/2026-09-19-hosted-default-quality.md)).
 Free costs time.

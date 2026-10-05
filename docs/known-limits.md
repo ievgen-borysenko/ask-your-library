@@ -11,11 +11,12 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   each data-flow setting resolves to and where it came from.
 
 - **A credential in an endpoint's URL can reach the failure line** (#107). When a call fails,
-  the error's text reaches the line `ayl ask` prints and the message the web chat shows, and the
-  embedders' HTTP errors carry the URL they were sent to, a `user:password@` in it included. The
-  first-run path (`ayl init`, the model pull, the preflight) already withholds such text, and
-  `ayl init --demo` is not started while a URL-valued setting carries a credential; the answer
-  path is the open part. Ollama on loopback with no credential in its URL is not affected; a
+  the error's text reaches the line `ayl ask` prints and the message the web chat shows, an
+  embedding call that fails during `ayl add` ends the run with that text on stderr and in the
+  book's ledger entry, and the embedders' HTTP errors carry the URL they were sent to, a
+  `user:password@` in it included. The first-run path (`ayl init`, the model pull, the preflight)
+  already withholds such text, and `ayl init --demo` is not started while a URL-valued setting
+  carries a credential; the answer path and `ayl add` are the open part. Ollama on loopback with no credential in its URL is not affected; a
   remote or proxied endpoint is.
 
 - **The default local answering model is not good enough to advertise as a strong default, and

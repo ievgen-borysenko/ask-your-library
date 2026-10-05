@@ -10,7 +10,9 @@
   printed texts follow: `ayl init` in a tool install says the demo library is built from a clone
   instead of offering a command that refuses there; `ayl add --help` names the verbs `--doctor`,
   `--backup` and `--restore` belong to and says `--cards` is not a feature; the web chat's welcome
-  page describes the metrics line as it is. No behaviour changed.
+  page describes the metrics line as it is, in a new install only (`ayl ui` copies it to
+  `chainlit.md` in the UI's directory, `$AYL_HOME/ui` by default, only when that file is absent,
+  so an existing one keeps the old text until it is deleted). No behaviour changed.
 
 ## 0.5.0 (2026-10-04)
 

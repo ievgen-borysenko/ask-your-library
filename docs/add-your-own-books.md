@@ -36,10 +36,15 @@ declaration in its package files, not readable in the encoding a document declar
 archive limits, or without text; and a PDF that is refused ([below](#a-pdf)): without a text layer
 (a scan), encrypted, unreadable, or over its limits.
 A link is not followed, so nothing outside the folder is ever read or embedded; copy the file in
-if you want it indexed. One bad file never aborts the run — the
+if you want it indexed. A file skipped for any of these reasons never aborts the run — the
 others are still indexed, and every skip is named on stderr (hidden ones as a single line with
 the count and the first few names, so one hidden directory cannot bury the rest). Only a folder
 in which *nothing* is indexable is an error, and then the existing index is left untouched.
+Two failures do stop the run (`read_book` in `src/ask_your_library/ingest/add_folder.py`): a
+`.txt` or `.md` that cannot be opened at all (no permission, or gone since the folder was listed)
+ends it before anything is written, and an embedding call that fails ends it at that book — the
+books before it stay indexed, and that one is marked `failed` in the ledger with the error's text
+(#107) and keeps the rows it had.
 
 Re-running the command re-indexes, **one book at a time**. Each book is resolved to a stable
 `book_id` in the index's `books` ledger, its rows are deleted by that id and the new ones
@@ -125,10 +130,10 @@ by a different rule and are not affected. See [upgrading](upgrading.md) for what
 the refusal actually say.
 
 ```bash
-uv run ayl backup ~/ayl-backups --db ~/ayl-index          # index + chat.db + a verified manifest
-uv run ayl doctor --db ~/ayl-index                        # what this code makes of that index
-uv run ayl add ~/books --rebuild --backup ~/ayl-backups --db ~/ayl-index   # copy, drop, re-index
-uv run ayl restore ~/ayl-backups/<timestamp> --db ~/ayl-index --force
+uv run ayl backup ~/ayl-backups                          # index + chat.db + a verified manifest
+uv run ayl doctor                                        # what this code makes of that index
+uv run ayl add ~/books --rebuild --backup ~/ayl-backups  # copy, drop, re-index
+uv run ayl restore ~/ayl-backups/<timestamp> --force
 ```
 
 `--rebuild` is what a refusal names, because a plain re-run hits the same refusal: it drops the
@@ -399,7 +404,7 @@ nothing else. Point it somewhere new, add a folder, and every command — `ayl a
 ```bash
 LIBRARY_DB_PATH=~/ayl-tech uv run ayl add ~/engineering-books
 LIBRARY_DB_PATH=~/ayl-tech uv run ayl ask "where is the error budget formula?"
-LIBRARY_DB_PATH=~/ayl-index uv run ayl ask "who is Fagin?"     # the other one, untouched
+uv run ayl ask "who is Fagin?"                                 # your own index, untouched
 ```
 
 Two indexes rather than a shelf column on one, deliberately: the catalogue ("what do I have?",

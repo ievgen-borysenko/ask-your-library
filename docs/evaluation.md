@@ -151,10 +151,11 @@ when there are any) and in the sidecar. The confirmed ratio's denominator is `ch
 card matches" rather than "6/6 confirmed". **Every report under
 [`eval-results/`](eval-results/) dated before 2026-09-16 predates this split and counts card matches
 inside the triple**; the runs reported from 2026-09-16 on were made with it, and three of those
-reports publish the card-only count —
+reports publish a card-only count —
 [`2026-09-16-local-models-repeat3.md`](eval-results/2026-09-16-local-models-repeat3.md) (the first),
 [`2026-09-18-rechunk-and-observe-feedback.md`](eval-results/2026-09-18-rechunk-and-observe-feedback.md)
-and [`2026-09-18-hosted-models.md`](eval-results/2026-09-18-hosted-models.md). The numbers in the
+and [`2026-09-18-hosted-models.md`](eval-results/2026-09-18-hosted-models.md), whose "card-only"
+column counts answers whose every quote matched only a card, not card-only quotes. The numbers in the
 earlier files are correct for what they measured and are not comparable, quote for quote, with a run
 made after it. Nothing was re-run to change them, and the harness reads a
 sidecar written before the split as a run with no card matches in it rather than as a run with
@@ -327,7 +328,7 @@ returned the same answers three times over — no per-question behaviour verdict
 189 item-attempts, `qwen2.5:32b` was byte-identical on every item of both sets, and the only things
 that varied were seconds. So `--repeat` on a local model measures a latency distribution; **the
 behaviour spread it was built for has to be measured on a hosted run**, where the provider samples
-— and was, on 2026-09-18 and 19, for the hosted default
+— and was, on 2026-09-18, for the hosted default
 ([`2026-09-19-hosted-default-quality.md`](eval-results/2026-09-19-hosted-default-quality.md),
 core and extended sets at `--repeat 3`, behaviour and hand grades per attempt).
 Nothing in the tables below has been re-measured, and the numbers in them are what they always were.

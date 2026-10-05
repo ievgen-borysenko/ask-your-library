@@ -500,6 +500,7 @@ def test_installed_as_a_tool_no_hint_says_uv_run(machine, capsys):
     assert "uv run" not in out
     assert "  ayl add ~/books" in out and "AYL_ALLOW_DEFAULT_LOGIN=1 ayl ui" in out
     assert "uv tool install --force 'ask-your-library[ui] @ git+" in out
+    assert "demo library: not built. It is built from a clone, where `ayl init --demo`" in out
 
 
 def test_a_built_demo_library_is_not_built_again(machine, capsys):

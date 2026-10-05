@@ -419,7 +419,7 @@ open ones often refer to them.
   re-enters the graph without re-planning on some branch, or the recorder misses that call on one of
   the two paths; both are defects and they are not the same defect. Read
   `eval/recordings/en-demo.edc151948a58.*.jsonl` beside the three sidecars' `clarify_*` fields.
-- **A hosted run for behaviour spread.** Done on 2026-09-18 and 19: at `temperature=0` a local
+- **A hosted run for behaviour spread.** Done on 2026-09-18: at `temperature=0` a local
   model answers the same way every time, so `--repeat` cannot tell a stable 9/11 from a lucky one
   on that backend, and the hosted default was run on the core and extended sets at `--repeat 3`
   with `--require-clean`
