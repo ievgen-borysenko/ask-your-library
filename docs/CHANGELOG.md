@@ -9,7 +9,7 @@
   0.4.2 to 0.4.8 (PYSEC-2026-4240 / GHSA-fvww-7h3r-vfhp), mcp 1.29.0 to 1.30.0
   (GHSA-84m7-p3x7-pcfv) and multidict 6.7.1 to 6.9.1 (PYSEC-2026-4244 / GHSA-54p9-h82j-f925);
   yarl moves from 1.24.5 to 1.25.1 because the new aiohttp requires it. `pyproject.toml` is
-  unchanged and no behaviour changed.
+  unchanged; no application behaviour changed, and certifi drops the emSign roots.
 
 ## 0.5.1 (2026-10-05)
 

@@ -177,8 +177,8 @@ jobs:
           # The job tests the installer: an interpreter newer than the newest
           # one the locked wheels are built for turns `uv sync` into a source
           # build (tiktoken, pydantic-core, pyarrow) that needs a Rust toolchain
-          # and crates.io. 3.14 is the newest series with wheels for the whole
-          # locked set as of 2026-10; the action exports it as UV_PYTHON, which
+          # and crates.io. 3.14 is the newest series with wheels for every compiled
+          # package of the locked set as of 2026-10; the action exports it as UV_PYTHON, which
           # the `uv sync` and `uv run` below honour.
           python-version: "3.14"
       - name: Install (locked)
