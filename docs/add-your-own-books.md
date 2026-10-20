@@ -60,9 +60,9 @@ promotes the staging copy when the live table does not open or when the marker t
 interrupted there is the exception: the table is stamped with its embedding model only when the
 run finishes (a rebuild drops the old stamp with the old table, #147), so the next plain `ayl add`
 refuses the staging copy as having no embedding fingerprint, and
-`uv run ayl add <folder> --rebuild` is the way out. When neither copy opens, nothing is dropped
-and the run stops on one line: restore a backup, or move the index directory aside and add the
-books again (ADR-031).
+`uv run ayl add <folder> --rebuild --backup <dir>` is the way out. When neither copy opens,
+nothing is dropped and the run stops on one line: restore a backup, or move the index directory
+aside and add the books again (ADR-031).
 
 The id is **minted, never derived**. That is what makes a correction cheap: fix `author:` in the
 front matter (or on the title line), re-run, and the same book is updated rather than indexed a

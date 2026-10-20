@@ -12,8 +12,8 @@
   fingerprint, and the refusal names the way out, `ayl add <folder> --rebuild --backup <dir>`. It
   is also the way out of a first build interrupted the same way, which has never been stamped and
   which 0.5.1 refused without naming that command. A rebuild that finishes is stamped as before.
-  A rebuild interrupted under 0.5.1 or earlier still carries the old stamp: run that `--rebuild`
-  again rather than a plain `ayl add`.
+  A rebuild interrupted in its publish copy under 0.5.1 or earlier still carries the old stamp:
+  run that `--rebuild` again rather than a plain `ayl add`.
 - **`ayl backup` stops on one line when an interrupted rebuild cannot be finished.** A backup
   finishes any interrupted staged rebuild before it copies, and when neither copy of a table opens
   that recovery stops on an error that says what to do (restore a backup, or move the index

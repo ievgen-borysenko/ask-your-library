@@ -594,16 +594,64 @@ def test_after_an_interrupted_first_build_the_way_out_is_rebuild(tmp_path, monke
     with pytest.raises(KeyboardInterrupt):
         add_folder.add_books(add_folder.read_folder(shelf), "ollama", db_path, shelf)
     monkeypatch.setattr(publish, "copy_table", copy)
+    db = lancedb.connect(db_path)
+    names = sorted(publish.table_names(db))
 
+    embedder = use(monkeypatch, "model-x")
     with pytest.raises(IngestError, match="no embedding fingerprint") as refused:
         add_folder.add_books(add_folder.read_folder(shelf), "ollama", db_path, shelf)
     assert "--rebuild" in str(refused.value)
+    assert embedder.seen == []
+    assert sorted(publish.table_names(db)) == names        # the refusal wrote nothing
 
     add_folder.add_books(add_folder.read_folder(shelf), "ollama", db_path, shelf,
                          rebuild=True, force=True)
-    db = lancedb.connect(db_path)
     assert read_index_meta(db, TABLE)["model"] == "model-x"
     assert models_in(db) == {"model-x"}
+
+
+def test_a_stamp_left_without_its_table_is_forgotten_before_a_first_build_publishes(
+        tmp_path, monkeypatch):
+    """A stop between the rebuild's drop and its forget (or a rebuild an older
+    release stopped before its publish) leaves no table and a stale stamp. The
+    next run takes the first-build path; interrupted in its publish copy, it
+    left its staging copy under that stamp, and a plain `ayl add` with the
+    stamp's model was accepted into the other model's rows."""
+    from ask_your_library.index_meta import read_index_meta
+
+    shelf_a = a_folder(tmp_path, "a", "The Green Ledger - A. Keeper")
+    shelf_b = a_folder(tmp_path, "b", "Sea Notes - B. Mate")
+    db_path = tmp_path / "db"
+    use(monkeypatch, "model-x")
+    add_folder.add_books(add_folder.read_folder(shelf_a), "ollama", db_path, shelf_a)
+
+    use(monkeypatch, "model-y")
+
+    def stopped(db, table):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(add_folder, "forget_index_meta", stopped)
+    with pytest.raises(KeyboardInterrupt):    # the table is dropped, its stamp is not
+        add_folder.add_books(add_folder.read_folder(shelf_a), "ollama", db_path, shelf_a,
+                             rebuild=True, force=True)
+    monkeypatch.undo()
+    db = lancedb.connect(db_path)
+    assert TABLE not in publish.table_names(db)
+    assert read_index_meta(db, TABLE)["model"] == "model-x"
+
+    use(monkeypatch, "model-y")
+    copy = interrupt_the_publish_copy(monkeypatch)
+    with pytest.raises(KeyboardInterrupt):
+        add_folder.add_books(add_folder.read_folder(shelf_a), "ollama", db_path, shelf_a)
+    monkeypatch.setattr(publish, "copy_table", copy)
+    assert models_in(db, TABLE + publish.STAGING_SUFFIX) == {"model-y"}
+    assert read_index_meta(db, TABLE) is None
+    names = sorted(publish.table_names(db))
+
+    embedder = use(monkeypatch, "model-x")
+    with pytest.raises(IngestError, match="no embedding fingerprint"):
+        add_folder.add_books(add_folder.read_folder(shelf_b), "ollama", db_path, shelf_b)
+    assert embedder.seen == []
+    assert sorted(publish.table_names(db)) == names        # the refusal wrote nothing
 
 
 def test_an_uninterrupted_rebuild_ends_stamped_by_the_model_that_wrote_it(tmp_path,

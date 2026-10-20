@@ -905,6 +905,12 @@ def _write_books(books: list[Book], backend: str, db_path: Path, folder: Path | 
                 written.append((book_id, len(rows)))
                 yield rows
 
+        # No live table after recovery, so any stamp for it is stale: left by a
+        # stop between the drop and the forget of a `--rebuild`, or by a rebuild
+        # an older release stopped before its publish. Kept, it would name
+        # another model over the staging copy this publish leaves if it is
+        # interrupted, and the next run's guards judge that copy by it (#147).
+        forget_index_meta(db, table_name)
         try:
             rebuild_table(db, table_name, batches())
         except NoRowsError as error:
