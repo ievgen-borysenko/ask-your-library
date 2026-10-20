@@ -18,9 +18,11 @@
   document whose decoded text has a NUL among its first four characters, which a UTF-16 or UTF-32
   file without a byte-order mark produces, is refused as not readable instead of being indexed as
   raw markup. Running `ayl add <folder>` again re-extracts an affected book. A book 0.5.1 indexed
-  from a file without a byte-order mark, with raw tags in its rows, is refused now instead, and
-  its old rows stay: a run keeps them, and `--prune` deletes only the rows of a file that is no
-  longer in the folder. Move the file out of the folder, then run `ayl add <folder> --prune`.
+  from a UTF-16 or UTF-32 file without a byte-order mark, with raw tags in its rows, is refused now
+  instead, and its old rows stay: a run keeps them, and `--prune` deletes only the rows of a file
+  that is no longer in the folder. Move the file out of the folder, then run
+  `ayl add <folder> --prune`; that run stops before it prunes anything when no book in the folder
+  reads, so if the file was the folder's only book, leave another readable book there for it.
 - **A chapter's DOCTYPE is dropped only from the start of the document, and only whole.** The HTML
   parser leaves the tail of an internal subset (`]>`) in the text, so a content document's DOCTYPE
   is taken off before it is read. That step took the first `<!DOCTYPE` anywhere in the document, in
