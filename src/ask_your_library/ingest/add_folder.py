@@ -53,8 +53,8 @@ from ..config import DB_PATH, EMBED_BACKEND, confirm_db_path
 from ..dataflow import failure_text
 from ..embeddings import get_embedder
 from ..hints import command, script
-from ..index_meta import (META_TABLE, check_index, read_index_meta, refuse_version_mismatch,
-                          write_index_meta)
+from ..index_meta import (META_TABLE, check_index, forget_index_meta, read_index_meta,
+                          refuse_version_mismatch, write_index_meta)
 from ..sanitize import LINE_BREAK_RE, strip_control_chars
 from .chapters import MergedHeading, split_book_sections
 from .chunking import CHUNKER_VERSION, Chunk, embedding_text, pack_sentences, \
@@ -438,8 +438,10 @@ def refuse_model_mismatch(db, table: str, embedder) -> None:
             f"another model of the same size, and mixing two models in one table degrades "
             f"retrieval silently.\n"
             f"Stamp the existing table if you know it was built with {embedder.model!r} "
-            f"({script('scripts/ingest_demo_corpus.py --stage stamp-meta')}), or rebuild the "
-            f"index, or point LIBRARY_DB_PATH at a different database.")
+            f"({script('scripts/ingest_demo_corpus.py --stage stamp-meta')}), or rebuild it "
+            f"(`{command('ayl add <folder> --rebuild --backup <dir>')}`, also the way out when "
+            f"a first build or a rebuild was interrupted), or point LIBRARY_DB_PATH at a "
+            f"different database.")
     if int(meta["dims"]) != int(embedder.dims):
         raise IngestError(
             f"refusing to write {table}: it is stamped {meta['dims']} dims, configured "
@@ -709,10 +711,23 @@ def drop_for_rebuild(db, table_name: str, ledger: Ledger, keeping: set[str]) -> 
     table, so the ledger's `indexed` is no longer true of them; they are put
     back to `requested`, which is what they are, and returned so the run can
     name them. Silently leaving them `indexed` would make `--doctor` the only
-    place the loss ever surfaced."""
-    if table_name not in table_names(db):
+    place the loss ever surfaced.
+
+    The table's fingerprint row goes with it, here and not at the end of the
+    run (#147): the staged publish that follows is the step an interruption
+    leaves half done, and the guards of the next run judge its staging copy by
+    this row. Left in place, it named the model that built the DROPPED rows."""
+    present = table_name in table_names(db)
+    if present:
+        db.drop_table(table_name)
+    # After the drop, and whether or not there was a table: a stamp with no
+    # table under it (a run stopped between these two lines, or an older
+    # release's rebuild that stopped before its publish) would describe the
+    # rows this run is about to write. Before the drop, a stop between the two
+    # would leave the old rows unstamped, which a reader checks on dims alone.
+    forget_index_meta(db, table_name)
+    if not present:
         return []
-    db.drop_table(table_name)
     orphaned = []
     for row in sorted(ledger.all_rows(), key=lambda r: r.get("key") or ""):
         key = row.get("key") or ""
@@ -1050,10 +1065,12 @@ def run_backup(db_path: Path, dest: Path, chat_db: Path | None) -> int:
 
     No folder is read and nothing is embedded. The one thing it writes to the
     index is `recover_staging`, which is what makes the copy a copy of a whole
-    index rather than of one caught mid-rebuild."""
+    index rather than of one caught mid-rebuild. When that recovery cannot
+    finish (`RecoveryError`: neither copy of a table opens), nothing is copied
+    and the run stops on the recovery's own line, as `ayl add` does."""
     try:
         target = backup(db_path, dest, chat_db=chat_db)
-    except (BackupError, IngestBusy) as error:
+    except (BackupError, IngestBusy, RecoveryError) as error:  # one line, not a traceback
         say(str(error), error=True)
         return 1
     for line in manifest_lines(target, read_manifest(target)):

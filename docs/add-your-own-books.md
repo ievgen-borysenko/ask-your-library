@@ -56,9 +56,13 @@ rewritten. The first build of a table is still a single staged publish (nothing 
 A staged publish builds `<table>__staging`, drops the live table and copies staging over; one
 interrupted there (an error, a full disk, Ctrl-C, a kill) is finished by the next `ayl add`, which
 promotes the staging copy when the live table does not open or when the marker the publish wrote
-(`.publish-<table>.json` in the index directory) is still there. When neither copy opens, nothing
-is dropped and the run stops on one line: restore a backup, or move the index directory aside and
-add the books again (ADR-031).
+(`.publish-<table>.json` in the index directory) is still there. A first build or a `--rebuild`
+interrupted there is the exception: the table is stamped with its embedding model only when the
+run finishes (a rebuild drops the old stamp with the old table, #147), so the next plain `ayl add`
+refuses the staging copy as having no embedding fingerprint, and
+`uv run ayl add <folder> --rebuild` is the way out. When neither copy opens, nothing is dropped
+and the run stops on one line: restore a backup, or move the index directory aside and add the
+books again (ADR-031).
 
 The id is **minted, never derived**. That is what makes a correction cheap: fix `author:` in the
 front matter (or on the title line), re-run, and the same book is updated rather than indexed a
@@ -148,7 +152,8 @@ uv run ayl restore ~/ayl-backups/<timestamp> --force
 transcripts table and indexes the folder from scratch. The `books` ledger is kept, so every book
 keeps its minted id; books the ledger holds that this folder does not lose their rows with the
 table, go back to `requested` and are named at the end of the run. It needs `--backup <dir>` in
-the same command (taken first) or `--force`.
+the same command (taken first) or `--force`, and it is also the way out of a first build or a
+rebuild that was interrupted (above).
 
 `--backup` refuses while an ingest is running (both write paths hold an `flock` on a lock file
 beside the index directory, `.ayl-ingest-<name>.lock`) and finishes any half-swapped staged rebuild

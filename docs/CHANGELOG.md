@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **An interrupted `--rebuild` no longer lets a write with the old embedding model in (#147).**
+  `ayl add --rebuild` drops the table and stamps it again only when the run finishes, and the
+  dropped table's stamp stayed in place in between. A rebuild interrupted in its publish copy (an
+  error, a full disk, Ctrl-C, a kill) left the staging copy holding the new model's rows under the
+  old model's stamp; the next plain `ayl add` with the old model was judged against that stamp and
+  accepted, and the table ended with two embedding models in it and one on its stamp. The stamp now
+  goes with the table, so the next plain `ayl add` refuses that staging copy as having no embedding
+  fingerprint, and the refusal names the way out, `ayl add <folder> --rebuild --backup <dir>`. It
+  is also the way out of a first build interrupted the same way, which has never been stamped and
+  which 0.5.1 refused without naming that command. A rebuild that finishes is stamped as before.
+  A rebuild interrupted under 0.5.1 or earlier still carries the old stamp: run that `--rebuild`
+  again rather than a plain `ayl add`.
+- **`ayl backup` stops on one line when an interrupted rebuild cannot be finished.** A backup
+  finishes any interrupted staged rebuild before it copies, and when neither copy of a table opens
+  that recovery stops on an error that says what to do (restore a backup, or move the index
+  directory aside and add the books again). `ayl add` printed it as one line and `ayl backup` under
+  a traceback; `ayl backup` now prints the same line, exits 1 and copies nothing.
+
 ## 0.5.1 (2026-10-05)
 
 A patch release for two defects the audits of 04.10 reproduced: a P0 credential leak, where a

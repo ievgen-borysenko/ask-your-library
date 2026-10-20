@@ -1580,7 +1580,7 @@ most a minute and a gigabyte before its line is written.
 
 ## ADR-031: Staging is never dropped while the live table cannot be opened
 
-Status: accepted (2026-10-05, 0.5.1).
+Status: accepted (2026-10-05, 0.5.1); amended 2026-10-20 (#147, see below).
 
 LanceDB OSS has no rename, so a rebuild builds `<name>__staging`, drops the live table and copies
 staging over (`ingest/publish.py`); `recover_staging` finishes the swap on the next write. Until
@@ -1618,6 +1618,25 @@ The cost is one `open_table` and a row count per recovery and per guard, and one
 written and removed per publish. Measurement: reproductions in the review of 2026-10-04 and of
 its round 1 (an exception and a SIGKILL mid-copy, a SIGKILL inside the live table's drop, the
 installed LanceDB, no network), no eval report.
+
+**Amended 2026-10-20 (#147): two sentences above said more than the code did.** The first is that
+the write guards judging the staged copy close the recovery edge. They judge it against the
+`_index_meta` row of the live name, and `ayl add --rebuild` dropped the table and left that row in
+place until the end of a run that succeeded: a rebuild interrupted in its publish copy left staging
+holding the new model's rows under the old model's stamp, a plain `ayl add` with the old model was
+accepted into it, and the table ended with two embedders under one stamp (a model of another width
+was still caught, on the staged vectors). `drop_for_rebuild` now deletes the row in the same step
+as the drop (`index_meta.forget_index_meta`, after the drop and whether or not a table was there),
+so the staging copy such a run leaves is unstamped: the guards refuse it as having no fingerprint,
+and the refusal names `--rebuild`, which is the way out of a first build interrupted in its publish
+copy as well (never stamped either). A run that finishes stamps the table as before. The second is
+"the run stops on one line": true of `ayl add`, while `ayl backup`, which recovers before it
+copies, let the `RecoveryError` out as a traceback; it prints the same one line now. Not covered:
+the demo build (`scripts/ingest_demo_corpus.py`) has no separate drop, its whole-table rebuild goes
+through `rebuild_table` and is stamped at the end, so its `--book` upsert after such a rebuild,
+interrupted with another model of the same width, is still judged against the old stamp.
+Measurement: the issue's case replayed as a test (a fake 4-dimension embedder whose vector sign
+marks the model, the publish copy raising `KeyboardInterrupt`), no eval report.
 
 [reports]: ../eval-results/
 [backlog]: ../backlog.md
