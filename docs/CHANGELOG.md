@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **The locked dependency set is updated for the open advisories.** `uv.lock` moves aiohttp
+  3.14.3 to 3.14.5 (GHSA-2g87-pp6c-29x5, GHSA-494j-54xm-rwp3, GHSA-5wr8-gcqf-gqf3,
+  GHSA-6cjc-53gc-5rqm, GHSA-9xw5-w5jj-pvcg, GHSA-f9xw-jh8m-3mwq, GHSA-gx76-c99x-2c96,
+  GHSA-pqxq-w44r-73xw), certifi 2026.7.22 to 2026.10.19 (GHSA-6q48-6c7w-9gw2), langgraph-sdk
+  0.4.2 to 0.4.8 (PYSEC-2026-4240 / GHSA-fvww-7h3r-vfhp), mcp 1.29.0 to 1.30.0
+  (GHSA-84m7-p3x7-pcfv) and multidict 6.7.1 to 6.9.1 (PYSEC-2026-4244 / GHSA-54p9-h82j-f925);
+  yarl moves from 1.24.5 to 1.25.1 because the new aiohttp requires it. `pyproject.toml` is
+  unchanged and no behaviour changed.
+
 ## 0.5.1 (2026-10-05)
 
 A patch release for two defects the audits of 04.10 reproduced: a P0 credential leak, where a
