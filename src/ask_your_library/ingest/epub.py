@@ -57,9 +57,9 @@ An EPUB is untrusted input. What is bounded, and how:
   a declared entity, so they are not checked: the DTD in a content document's
   prolog is dropped rather than refused;
 - every document is decoded strictly, as the encoding it declares, and must
-  come out as text that UTF-8 can carry and that holds no NUL: UTF-7 and the
-  escape codecs are not accepted as a book's encoding, and a UTF-16 or UTF-32
-  document needs its byte-order mark;
+  come out as text that UTF-8 can carry, with no NUL in its first four
+  characters: UTF-7 and the escape codecs are not accepted as a book's
+  encoding, and a UTF-16 or UTF-32 document needs its byte-order mark;
 - only spine items with an XHTML/HTML media type are read; scripts, styles,
   SVG and images are ignored; text is taken out of the markup with
   `html.parser` (not a regular expression), its whitespace normalised and its
@@ -330,11 +330,12 @@ def decode(data: bytes) -> str:
     # all (`encoding="undefined"`) raises the base class.
     except (LookupError, UnicodeError) as error:
         raise EpubRefused(UNREADABLE) from error
-    # A NUL is not a character XML or HTML allows, and it is what a UTF-16 or
-    # UTF-32 document without a byte-order mark holds between its characters
-    # when it is read as UTF-8: the parser would find no markup in it, and its
-    # raw tags would be indexed as text.
-    if "\x00" in text:
+    # A UTF-16 or UTF-32 document without a byte-order mark, read as UTF-8,
+    # holds a NUL between its characters: within its first four when it starts
+    # with `<` or whitespace, as every one does. The parser would find no markup
+    # in it, and its raw tags would be indexed as text. A NUL further in is
+    # stripped with the other control characters (`strip_control_chars`).
+    if "\x00" in text[:4]:
         raise EpubRefused(UNREADABLE)
     return text
 
@@ -360,6 +361,10 @@ def parse_xml(archive: Archive, name: str) -> ET.Element:
         raise EpubRefused("malformed: a package file in it is not well-formed XML") from error
 
 
+# These patterns need Python 3.11.5 or later (`requires-python`): they put
+# possessive quantifiers over groups that hold a negative lookahead, which
+# CPython 3.11.0 to 3.11.4 matched wrongly (gh-100061, gh-106052).
+#
 # A comment and a processing instruction (the XML declaration has the same
 # shape), each matched in one pass: every quantifier is possessive, so nothing
 # backtracks.
@@ -370,14 +375,17 @@ _SPACE = r"[ \t\r\n\f]"
 # text, whitespace, the XML declaration, comments, processing instructions.
 _PROLOG = re.compile(r"\ufeff?(?:" + _SPACE + "++|" + _COMMENT + "|" + _PI + ")*+")
 # The DOCTYPE, in any case: its name and external identifier, where a quoted
-# literal may hold `[` or `>`; then the internal subset, which ends at the first
+# literal may hold `[` but not `>` (no public or system identifier does, and an
+# unclosed quote must not run on to an apostrophe in the text and a later `>`:
+# the match fails instead, and `html.parser` ends the declaration at its first
+# `>`, as it always did); then the internal subset, which ends at the first
 # `]` outside a quoted literal, a comment or a processing instruction, so a
 # `]>` inside an entity's value does not end it. A `<` that opens neither a
 # comment nor an instruction is a declaration's; one that opens either and
 # never closes it ends the match there, so the rest of the document is scanned
 # for its end once, never again from each later `<!--`.
 _DOCTYPE = re.compile(
-    r"""<!DOCTYPE(?:[^"'\[>]++|"[^"]*+"|'[^']*+')*+"""
+    r"""<!DOCTYPE(?:[^"'\[>]++|"[^">]*+"|'[^'>]*+')*+"""
     r"""(?:\[(?:[^"'\]<]++|"[^"]*+"|'[^']*+'|""" + _COMMENT + "|" + _PI
     + r"|<(?!!--|\?))*+"
     r"\]" + _SPACE + "*+)?>",

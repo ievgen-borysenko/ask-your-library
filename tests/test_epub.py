@@ -339,16 +339,16 @@ def test_a_utf32_document_is_not_read_as_utf16(codec):
     assert epub.extract_text(epub.decode(data)) == "ok"
 
 
-@pytest.mark.parametrize("data", [
-    *("<script>evil</script><p>ok</p>".encode(codec)
-      for codec in ("utf-16-le", "utf-16-be", "utf-32-le", "utf-32-be")),
-    b"<p>a\x00b</p>",
-], ids=["utf-16-le", "utf-16-be", "utf-32-le", "utf-32-be", "utf-8"])
-def test_a_document_whose_decoded_text_holds_a_nul_is_refused(data):
+@pytest.mark.parametrize("codec", ["utf-16-le", "utf-16-be", "utf-32-le", "utf-32-be"])
+def test_a_wide_document_without_a_byte_order_mark_is_refused(codec):
     """Without a byte-order mark a UTF-16 or UTF-32 document reads as UTF-8
     with NULs between its characters, in which the parser finds no markup."""
     with pytest.raises(epub.EpubRefused, match="encoding it declares"):
-        epub.decode(data)
+        epub.decode("<script>evil</script><p>ok</p>".encode(codec))
+
+
+def test_a_nul_further_into_a_document_is_stripped_not_refused():
+    assert epub.extract_text(epub.decode(b"<p>a\x00b</p>")) == "ab"
 
 
 # --- metadata --------------------------------------------------------------------
@@ -693,6 +693,10 @@ def test_an_entity_bomb_in_a_utf32_package_is_refused_as_one(tmp_path, codec):
     ("<!DOCTYPE html [<!-- ]> --><?pi ]>?>]><p>a</p>", "a"),     # nor in a comment or PI
     ('<?xml version="1.0"?>\n<!-- c -->\n<?pi x?>\n<!DOCTYPE html [<!ENTITY a "b">]>\n<p>a</p>',
      "a"),
+    # an unclosed quote in the identifier must not run on to an apostrophe in the text
+    ("<!DOCTYPE html PUBLIC '-//W3C//DTD XHTML 1.1//EN>\n<html><head><title>Ch 1</title></head>\n"
+     "<body>\n<h1>One</h1>\n<p>It wasn't a dark night.</p>\n<p>Next.</p>\n</body></html>",
+     "One\n\nIt wasn't a dark night.\n\nNext."),
 ])
 def test_drop_doctype(markup, expected):
     assert epub.extract_text(epub.drop_doctype(markup)) == expected
@@ -714,6 +718,16 @@ def test_a_lowercase_doctype_is_dropped_with_its_subset():
 def test_a_subset_end_inside_a_quoted_value_does_not_end_the_doctype():
     markup = '<!DOCTYPE html [<!ENTITY a "x]>b">]><html><body><p>Text.</p></body></html>'
     assert epub.extract_text(epub.drop_doctype(markup)) == "Text."
+
+
+def test_the_xhtml11_prolog_an_epub_editor_writes_is_dropped():
+    """The prolog Sigil writes into every XHTML 1.1 file it saves."""
+    prolog = ('<?xml version="1.0" encoding="utf-8"?>\n'
+              '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"\n'
+              '  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">\n\n')
+    rest = '<html xmlns="http://www.w3.org/1999/xhtml">\n<head>\n  <title>Ch 1</title>\n</head>'
+    assert epub.drop_doctype(prolog + rest) == (
+        '<?xml version="1.0" encoding="utf-8"?>\n\n\n' + rest)
 
 
 def test_a_doctype_after_a_byte_order_mark_and_whitespace_is_dropped():
