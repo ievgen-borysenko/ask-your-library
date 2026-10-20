@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+- **A chapter whose HTML leaves out `</head>` keeps its text.** `</head>` is optional in HTML, and
+  in a spine document that left it out (most likely a `text/html` one) the whole body was read as
+  part of the head and left out: the chapter was missing from the book, and a book written that way
+  throughout was refused as having no text. A `<body>` start tag now ends the head, as it does in a
+  browser; text placed directly inside the head is still left out. `ayl add` reads every book in
+  the folder anew on every run, so running `ayl add <folder>` again re-extracts an affected book;
+  `--rebuild` is not needed.
+- **A UTF-32 document is read as UTF-32.** The UTF-32 little-endian byte-order mark begins with the
+  UTF-16 one, and a document that started with it was decoded as UTF-16 with a NUL between its
+  characters: the HTML parser found no markup in it, so a chapter's raw tags, with the text of its
+  head, scripts and styles, were indexed as the chapter's text, and a package file written that way
+  refused the book as malformed. A document with the big-endian mark refused the book as not
+  readable in its encoding. Both UTF-32 marks are now checked before the UTF-16 ones, and a
+  document whose decoded text holds a NUL, which a UTF-16 or UTF-32 file without a byte-order mark
+  produces, is refused as not readable instead of being indexed as raw markup. Running
+  `ayl add <folder>` again re-extracts an affected book.
+- **A chapter's DOCTYPE is dropped only from the start of the document, and only whole.** The HTML
+  parser leaves the tail of an internal subset (`]>`) in the text, so a content document's DOCTYPE
+  is taken off before it is read. That step took the first `<!DOCTYPE` anywhere in the document, in
+  capitals only, and ended its subset at the first `]>`: a DOCTYPE quoted in a CDATA section cut
+  the rest of the chapter after it out of the book, a lowercase `<!doctype html [ … ]>` left `]>`
+  at the start of the chapter's text, and a `]>` inside a quoted entity value left the rest of the
+  declaration there. Only a DOCTYPE in the prolog (after the XML declaration, comments, processing
+  instructions and whitespace) is dropped now, in any case, and its subset ends at a `]>` outside
+  quotes, comments and processing instructions. Running `ayl add <folder>` again re-extracts an
+  affected book.
+
 ## 0.5.1 (2026-10-05)
 
 A patch release for two defects the audits of 04.10 reproduced: a P0 credential leak, where a

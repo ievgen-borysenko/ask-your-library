@@ -54,10 +54,12 @@ An EPUB is untrusted input. What is bounded, and how:
   `xml.etree.ElementTree`, which fetches no external entity; any of those that
   declares an entity (the only way to a "billion laughs") is refused before it
   is parsed. Content documents are read by `html.parser`, which never expands
-  a declared entity, so a DTD there is dropped rather than refused;
+  a declared entity, so they are not checked: the DTD in a content document's
+  prolog is dropped rather than refused;
 - every document is decoded strictly, as the encoding it declares, and must
-  come out as text that UTF-8 can carry: UTF-7 and the escape codecs are not
-  accepted as a book's encoding;
+  come out as text that UTF-8 can carry and that holds no NUL: UTF-7 and the
+  escape codecs are not accepted as a book's encoding, and a UTF-16 or UTF-32
+  document needs its byte-order mark;
 - only spine items with an XHTML/HTML media type are read; scripts, styles,
   SVG and images are ignored; text is taken out of the markup with
   `html.parser` (not a regular expression), its whitespace normalised and its
@@ -298,12 +300,21 @@ NOT_A_CHARSET = frozenset({"unicode_escape", "raw_unicode_escape", "punycode", "
                            "utf_7"})
 
 
+UNREADABLE = "a document in it is not readable in the encoding it declares"
+
+# Byte-order marks, longest first: the UTF-16-LE mark is the first two bytes of
+# the UTF-32-LE one, so testing it first read a UTF-32 document as UTF-16 with a
+# NUL between its characters, in which the parser found no markup at all.
+BOMS = ((codecs.BOM_UTF32_LE, "utf-32-le"), (codecs.BOM_UTF32_BE, "utf-32-be"),
+        (codecs.BOM_UTF8, "utf-8"),
+        (codecs.BOM_UTF16_LE, "utf-16-le"), (codecs.BOM_UTF16_BE, "utf-16-be"))
+
+
 def decode(data: bytes) -> str:
     """The document as text: a byte-order mark first, then the encoding the XML
     declaration names, then UTF-8. Strict: a document that does not decode as
     what it says it is refuses the book rather than indexing mojibake."""
-    for bom, encoding in ((codecs.BOM_UTF8, "utf-8"), (codecs.BOM_UTF16_LE, "utf-16-le"),
-                          (codecs.BOM_UTF16_BE, "utf-16-be")):
+    for bom, encoding in BOMS:
         if data.startswith(bom):
             data, declared = data[len(bom):], encoding
             break
@@ -315,19 +326,26 @@ def decode(data: bytes) -> str:
             raise LookupError(declared)
         text = data.decode(declared)
         text.encode("utf-8")            # a lone surrogate would fail every later step
-        return text
     # UnicodeError, not only UnicodeDecodeError: a codec that cannot decode at
     # all (`encoding="undefined"`) raises the base class.
     except (LookupError, UnicodeError) as error:
-        raise EpubRefused("a document in it is not readable in the encoding it "
-                          "declares") from error
+        raise EpubRefused(UNREADABLE) from error
+    # A NUL is not a character XML or HTML allows, and it is what a UTF-16 or
+    # UTF-32 document without a byte-order mark holds between its characters
+    # when it is read as UTF-8: the parser would find no markup in it, and its
+    # raw tags would be indexed as text.
+    if "\x00" in text:
+        raise EpubRefused(UNREADABLE)
+    return text
 
 
 def refuse_entities(text: str) -> None:
     """Entity declarations are the one way XML text can multiply itself while
     it is parsed (the "billion laughs"), and a book has no use for them. The
-    check is a literal one over the whole document, before any parser sees it:
-    there is no DOCTYPE shape that can hide a declaration from it."""
+    check is a literal one over the whole of a package file, before
+    `ElementTree` sees it: there is no DOCTYPE shape that can hide a
+    declaration from it. Content documents are not checked: `html.parser`
+    expands nothing (`drop_doctype`)."""
     if "<!ENTITY" in text:
         raise EpubRefused("a document in it declares XML entities, which a book does "
                           "not need and which can expand without bound")
@@ -342,22 +360,44 @@ def parse_xml(archive: Archive, name: str) -> ET.Element:
         raise EpubRefused("malformed: a package file in it is not well-formed XML") from error
 
 
-_DOCTYPE_SUBSET_END = re.compile(r"\]\s*>")
+# A comment and a processing instruction (the XML declaration has the same
+# shape), each matched in one pass: every quantifier is possessive, so nothing
+# backtracks.
+_COMMENT = r"<!--(?:[^-]++|-(?!->))*+-->"
+_PI = r"<\?(?:[^?]++|\?(?!>))*+\?>"
+_SPACE = r"[ \t\r\n\f]"
+# What may come before a DOCTYPE (XML's `prolog`): a byte-order mark left in the
+# text, whitespace, the XML declaration, comments, processing instructions.
+_PROLOG = re.compile(r"\ufeff?(?:" + _SPACE + "++|" + _COMMENT + "|" + _PI + ")*+")
+# The DOCTYPE, in any case: its name and external identifier, where a quoted
+# literal may hold `[` or `>`; then the internal subset, which ends at the first
+# `]` outside a quoted literal, a comment or a processing instruction, so a
+# `]>` inside an entity's value does not end it. A `<` that opens neither a
+# comment nor an instruction is a declaration's; one that opens either and
+# never closes it ends the match there, so the rest of the document is scanned
+# for its end once, never again from each later `<!--`.
+_DOCTYPE = re.compile(
+    r"""<!DOCTYPE(?:[^"'\[>]++|"[^"]*+"|'[^']*+')*+"""
+    r"""(?:\[(?:[^"'\]<]++|"[^"]*+"|'[^']*+'|""" + _COMMENT + "|" + _PI
+    + r"|<(?!!--|\?))*+"
+    r"\]" + _SPACE + "*+)?>",
+    re.IGNORECASE)
 
 
 def drop_doctype(text: str) -> str:
     """A content document without its DOCTYPE. `html.parser` never expands a
     declared entity, so a DTD in XHTML is harmless, but it does not parse an
-    internal subset either and would leave its tail (`]>`) as text."""
-    start = text.find("<!DOCTYPE")
-    if start < 0:
-        return text
-    close = text.find(">", start)
-    bracket = text.find("[", start)
-    if 0 <= bracket < close or (bracket >= 0 and close < 0):
-        end = _DOCTYPE_SUBSET_END.search(text, bracket)
-        close = end.end() - 1 if end else -1
-    return text if close < 0 else text[:start] + text[close + 1:]
+    internal subset either and would leave its tail (`]>`) as text.
+
+    Only the prolog holds a DOCTYPE: after any XML declaration, comments,
+    processing instructions and whitespace, before the first element. It is
+    matched in any case (`<!doctype html>` is HTML's spelling). Anything
+    DOCTYPE-shaped later in the document (in a CDATA section, say) is left to
+    the parser like the rest of the markup, and so is a DOCTYPE whose internal
+    subset never ends."""
+    start = _PROLOG.match(text).end()
+    doctype = _DOCTYPE.match(text, start)
+    return text if doctype is None else text[:start] + text[doctype.end():]
 
 
 def read_text_member(archive: Archive, name: str) -> str:
@@ -403,7 +443,19 @@ class _TextExtractor(HTMLParser):
             self.paragraphs.append(text)
         self._current = []
 
+    def _end_head(self) -> None:
+        """A `<body>` start tag ends an open `head`, and anything left open
+        inside it, as HTML's own parser does: `</head>` is optional in HTML,
+        and a document that leaves it out must not lose its whole body. Text
+        inside the head stays out. Every element popped here was pushed once,
+        so this costs no more than the pushes did."""
+        while self._open["head"]:
+            popped = self._skip.pop()
+            self._open[popped] -= 1
+
     def handle_starttag(self, tag, attrs):
+        if tag == "body":
+            self._end_head()
         if self._skip:
             if tag not in VOID:
                 self._push(tag)
@@ -415,6 +467,8 @@ class _TextExtractor(HTMLParser):
             self._end_paragraph()
 
     def handle_startendtag(self, tag, attrs):
+        if tag == "body":
+            self._end_head()
         if not self._skip and tag in BLOCKS:
             self._end_paragraph()
 
