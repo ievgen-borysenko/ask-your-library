@@ -36,7 +36,10 @@
   stream still fails to decode) is capped at 16 MiB like every other inflated stream, one stream
   may chain at most 4 filters (the library allows 16), and the bytes its decoding passes
   through are capped at 128 MiB (the library allows 300 MB); a real book's streams use one
-  or two filters and stay far under both. Nothing else in the reader changed.
+  or two filters and stay far under both. A Brotli-filtered PDF is refused as before, its reason
+  now `could not be read (DependencyError)` instead of `(NotImplementedError)`; pypdf 6.20 would
+  use a `brotli` native extension if one were importable, and none is locked or installed here,
+  since ADR-030 keeps native code off the read path. Nothing else in the reader changed.
 
 ## 0.5.1 (2026-10-05)
 

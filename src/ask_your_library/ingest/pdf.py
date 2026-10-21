@@ -154,7 +154,11 @@ MAX_STREAM_BYTES = 16 * 1024 * 1024          # one inflated stream (the library'
 # A real stream has one filter or two (ASCII85 over Flate); the library allows 16.
 MAX_STREAM_FILTERS = 4
 # The library sums each filter's input and output for one stream: room for
-# every allowed filter to take in and give out one capped stream.
+# every allowed filter to take in and give out one capped stream. The raw stream
+# is bounded only by the file and an ASCII filter's output is not capped, so
+# that is not a proof; but a chain that reaches this cap moves several times the
+# 16 MiB inflate cap every real book's stream stays under. It bounds the sum of
+# counted bytes, not which books can be read.
 MAX_STREAM_DECODING_BYTES = 2 * MAX_STREAM_FILTERS * MAX_STREAM_BYTES
 MAX_PAGE_CHARS = 100_000
 MAX_TOTAL_CHARS = 20_000_000

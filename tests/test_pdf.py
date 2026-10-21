@@ -68,7 +68,8 @@ def make_pdf(path, pages, *, info=None, outline=None, encrypt=False, compress=Fa
     page can draw as `/X1 Do`; `outline_first` replaces the outline root's
     `/First` with raw bytes. `cmaps` maps more font names to `/ToUnicode`
     CMaps (Helvetica with that map, one CMap stream each); with
-    `fonts_per_page`, every page gets font dictionaries of its own."""
+    `fonts_per_page`, every page gets font dictionaries of its own. `compress`
+    is a number of `/FlateDecode` filters a content stream chains (True is one)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     objects: list[bytes | None] = [None, None]        # 1: catalog, 2: page tree
 
@@ -79,7 +80,10 @@ def make_pdf(path, pages, *, info=None, outline=None, encrypt=False, compress=Fa
     def stream(data: bytes) -> int:
         extra = b""
         if compress:
-            data, extra = zlib.compress(data, 9), b" /Filter /FlateDecode"
+            for _ in range(int(compress)):
+                data = zlib.compress(data, 9)
+            extra = (b" /Filter /FlateDecode" if int(compress) == 1 else
+                     b" /Filter [%s]" % b" ".join([b"/FlateDecode"] * int(compress)))
         return add(b"<< /Length %d%s >>\nstream\n" % (len(data), extra) + data
                    + b"\nendstream")
 
@@ -565,6 +569,27 @@ def test_a_compression_bomb_over_the_stream_cap_is_cut_off_by_the_library(tmp_pa
     assert refused(path) == "could not be read (LimitReachedError)"
     assert peak < 2 * pdf.MAX_STREAM_BYTES + 4 * 1024 * 1024, peak
     assert time.monotonic() - started < 5
+
+
+def test_a_stream_chains_four_filters_and_no_more(tmp_path):
+    """MAX_STREAM_FILTERS: four `/FlateDecode` filters on one content stream
+    are read, a fifth is refused by the library, in the process and the child."""
+    assert pdf.MAX_STREAM_FILTERS == 4
+    four = make_pdf(tmp_path / "four.pdf", [room("amber")], compress=4)
+    assert pdf.read_in_process(four).sections == [("Page 1", "\n".join(room("amber")))]
+    assert pdf.read_pdf(four) == pdf.read_in_process(four)
+    five = make_pdf(tmp_path / "five.pdf", [room("amber")], compress=5)
+    assert refused(five) == "could not be read (LimitReachedError)"
+    assert child_refused(five) == refused(five)
+
+
+def test_the_decoding_work_of_a_stream_is_capped(tmp_path, monkeypatch):
+    """MAX_STREAM_DECODING_BYTES: the library sums each filter's input and
+    output; past the cap the stream is refused the same way."""
+    path = make_pdf(tmp_path / "b.pdf", [room("amber")], compress=2)
+    assert pdf.read_in_process(path).sections[0][0] == "Page 1"
+    monkeypatch.setitem(pdf.CONFIGURATION, "stream_decoding_work_maximum_length", 64)
+    assert refused(path) == "could not be read (LimitReachedError)"
 
 
 def test_the_form_draws_on_a_page_are_capped(tmp_path, monkeypatch):
