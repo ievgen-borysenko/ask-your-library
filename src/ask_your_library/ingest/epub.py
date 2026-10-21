@@ -47,7 +47,10 @@ An EPUB is untrusted input. What is bounded, and how:
   bytes actually read from each member are capped (`MAX_MEMBERS`,
   `MAX_MEMBER_BYTES`, `MAX_TOTAL_BYTES`): a zip bomb is refused before it is
   inflated, and a member whose header lies about its size is cut off at the cap
-  and refused;
+  and refused; the text the spine yields is capped too (`MAX_TOTAL_CHARS`, the
+  PDF reader's figure), counted as each document is extracted, so a book of
+  text alone is refused at the document that takes it over, before the rest of
+  the spine is read;
 - a reference from the package or the navigation that resolves outside the
   archive's root is ignored, and one to a member that is not there is refused;
 - XML (`container.xml`, the package, the NCX, `encryption.xml`) is parsed by
@@ -95,6 +98,10 @@ from .chapters import FRONT_MATTER_SECTION, FULL_TEXT_SECTION, unique_titles
 MAX_MEMBERS = 10_000
 MAX_MEMBER_BYTES = 64 * 1024 * 1024          # declared and actually read, per member
 MAX_TOTAL_BYTES = 512 * 1024 * 1024          # declared, all members together
+# The byte caps bound the archive, not the text: at one character a byte, the
+# spine could yield about 512 Mi characters, every one of them to embed. The
+# same figure as the PDF reader's `MAX_TOTAL_CHARS`.
+MAX_TOTAL_CHARS = 20_000_000
 # The central directory is read whole by `zipfile`; 16 MiB is over 1.6 KiB an
 # entry at MAX_MEMBERS, several times what a real EPUB's entry takes.
 MAX_DIRECTORY_BYTES = 16 * 1024 * 1024
@@ -671,13 +678,17 @@ def read_epub(path: Path) -> EpubBook:
                 ordered = [(m, linear) for m, linear in ordered if m != package.nav]
                 if not ordered:
                     raise EpubRefused("no readable spine: it lists no XHTML/HTML document")
-                documents, seen = [], set()
+                documents, seen, total = [], set(), 0
                 for member, linear in ordered:
                     if member in seen:
                         continue
                     seen.add(member)
-                    documents.append((member, extract_text(read_text_member(archive, member)),
-                                      linear))
+                    text = extract_text(read_text_member(archive, member))
+                    total += len(text)
+                    if total > MAX_TOTAL_CHARS:
+                        raise EpubRefused(f"it holds more than {MAX_TOTAL_CHARS:,} characters "
+                                          "of text")
+                    documents.append((member, text, linear))
                 sections = build_sections(documents, titles_by_document(archive, package))
     except zipfile.BadZipFile as error:
         raise EpubRefused("malformed: not a readable zip archive") from error

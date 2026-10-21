@@ -421,6 +421,42 @@ def test_too_many_members_are_refused(tmp_path, monkeypatch):
         epub.read_epub(make_epub(tmp_path / "b.epub", three_chapters()))
 
 
+def text_chars(path) -> int:
+    """The characters the spine yields, as `read_epub` counts them."""
+    with zipfile.ZipFile(path) as zf:
+        archive = epub.Archive(zf)
+        return sum(len(epub.extract_text(epub.read_text_member(archive, member)))
+                   for member, _ in epub.read_package(archive, epub.package_path(archive)).spine)
+
+
+def test_a_book_at_the_total_text_cap_is_read(tmp_path, monkeypatch):
+    """The byte caps bound the archive; the text itself is capped like a PDF's,
+    and a book exactly at the cap is still read (the bound is `more than`)."""
+    path = make_epub(tmp_path / "b.epub", three_chapters())
+    monkeypatch.setattr(epub, "MAX_TOTAL_CHARS", text_chars(path))
+    assert titles(epub.read_epub(path)) == ["Chapter One", "Chapter Two", "Chapter Three"]
+
+
+def test_a_book_over_the_total_text_cap_is_refused_with_the_pdf_readers_line(tmp_path,
+                                                                            monkeypatch):
+    path = make_epub(tmp_path / "b.epub", three_chapters())
+    monkeypatch.setattr(epub, "MAX_TOTAL_CHARS", text_chars(path) - 1)
+    assert refused(path) == f"it holds more than {text_chars(path) - 1:,} characters of text"
+
+
+def test_the_text_cap_refuses_at_the_document_that_crosses_it(tmp_path, monkeypatch):
+    """A running total, checked as each document is extracted: the first
+    chapter alone is over this cap, so the other two are never read."""
+    extracted = []
+    extract_text = epub.extract_text
+    monkeypatch.setattr(epub, "extract_text", lambda markup: extracted.append(markup) or
+                        extract_text(markup))
+    monkeypatch.setattr(epub, "MAX_TOTAL_CHARS", 10)
+    with pytest.raises(epub.EpubRefused, match="more than 10 characters of text"):
+        epub.read_epub(make_epub(tmp_path / "b.epub", three_chapters()))
+    assert len(extracted) == 1 and "amber" in extracted[0]
+
+
 # --- the archive's directory, before zipfile reads it -----------------------------------
 
 def many_entries(path, n: int):
