@@ -138,6 +138,32 @@ def test_a_fingerprint_table_written_before_the_two_fields_is_widened_not_narrow
     assert old["chunker"] == "" and old["schema_version"] == 1
 
 
+def test_forgetting_a_stamp_removes_that_row_alone_from_a_five_column_table(tmp_path):
+    """`ayl add --rebuild` forgets the stamp of the table it drops (#147). On a
+    fingerprint table written before the two fields existed that is a plain
+    delete: the other rows stay, and the next stamp widens the table as before.
+    With no fingerprint table at all there is nothing to forget."""
+    import lancedb
+
+    db = lancedb.connect(tmp_path / "db")
+    db.create_table(index_meta.META_TABLE, [
+        {"table": name, "backend": "ollama", "model": "bge-m3", "dims": 1024,
+         "created": "2026-01-01T00:00:00"} for name in ("cards_ollama", "transcripts_ollama")])
+
+    index_meta.forget_index_meta(db, "transcripts_ollama")
+
+    assert index_meta.read_index_meta(db, "transcripts_ollama") is None
+    assert index_meta.read_index_meta(db, "cards_ollama")["model"] == "bge-m3"
+    _table_with_ledger_columns(db, "transcripts_ollama")
+    index_meta.write_index_meta(db, "transcripts_ollama", "ollama", "bge-m3", 1024,
+                                chunker=CHUNKER_VERSION)
+    assert index_meta.read_index_meta(db, "transcripts_ollama")["chunker"] == CHUNKER_VERSION
+
+    empty = lancedb.connect(tmp_path / "empty")
+    index_meta.forget_index_meta(empty, "transcripts_ollama")
+    assert index_meta.META_TABLE not in empty.table_names()
+
+
 def test_readers_tolerate_a_stamp_without_the_new_fields(tmp_path):
     """A five-column fingerprint row — every index built before ADR-024 — is
     read without a word: the embedder check passes on it, and the chunker

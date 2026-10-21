@@ -378,6 +378,32 @@ def test_the_cli_turns_a_refusal_into_one_line(built, tmp_path, capsys):
     assert error.count("\n") <= 2 and "--force" in error
 
 
+def test_a_recovery_that_cannot_finish_stops_the_backup_on_one_line(built, tmp_path, capsys,
+                                                                     monkeypatch):
+    """`ayl backup` finishes an interrupted rebuild before it copies, and that
+    recovery stops on a RecoveryError when neither copy of a table opens.
+    `ayl add` printed it as one line; `ayl backup` let it out as a traceback."""
+    from ask_your_library.ingest import publish
+    from test_publish_recovery import ROWS, failing_after, rows
+
+    db = lancedb.connect(tmp_path / "db")
+    db.create_table("source", rows("a", ROWS))
+    original = failing_after(monkeypatch, 2)
+    with pytest.raises(Exception):      # a staging copy that never committed ...
+        publish.copy_table(db, "source", "transcripts_ollama__staging")
+    monkeypatch.setattr(publish, "table_batches", original)
+    db.drop_table("source")
+    db.drop_table("transcripts_ollama")    # ... and no live table beside it
+    assert "transcripts_ollama__staging" in publish.table_names(db)
+
+    code = add_folder.main(["--backup", str(tmp_path / "backups"), "--db", str(tmp_path / "db")])
+
+    assert code == 1
+    error = capsys.readouterr().err
+    assert error.count("\n") == 1 and "transcripts_ollama__staging cannot be opened" in error
+    assert not (tmp_path / "backups").exists() or not any((tmp_path / "backups").iterdir())
+
+
 def test_the_default_chat_db_follows_the_variable_the_ui_reads(tmp_path, monkeypatch):
     """Resolved at call time, not at import: the web chat reads the same variable at
     ITS import, and the tests set it per test."""

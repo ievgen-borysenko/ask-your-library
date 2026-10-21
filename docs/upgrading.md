@@ -43,9 +43,10 @@ meets:
    copy. While that staging copy is still there, the next `ayl add` (or `ayl backup`) drops the
    unreadable table and promotes it. When neither opens, nothing is dropped and the run stops on a
    `RecoveryError` that says what to do: restore a backup, or move the index directory aside and
-   add the books again. `ayl add` prints it as one line; `ayl backup` stops on the same message
-   under a traceback. An index where a 0.5.0 run already went past such an interruption has lost
-   its staging copy, and 0.5.1 cannot bring it back: restore a backup, or rebuild.
+   add the books again. `ayl add` prints it as one line; in 0.5.1 `ayl backup` stops on the same
+   message under a traceback, and from the next release it prints the one line too. An index
+   where a 0.5.0 run already went past such an interruption has lost its staging copy, and 0.5.1
+   cannot bring it back: restore a backup, or rebuild.
 3. **Failure text no longer carries a URL's credential (#107)**, and what was stored before is not
    rewritten. If an endpoint URL with a `user:password@` or a token in it failed under 0.5.0, the
    failure line may be in `chat.db`, the books ledger or an eval report: rotate that credential,
