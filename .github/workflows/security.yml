@@ -190,7 +190,7 @@ jobs:
       # The SHA pins the action's code; the action itself runs the scanner from
       # a container image referenced by version tag, which the pin does not
       # cover.
-      - uses: google/osv-scanner-action/osv-scanner-action@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0
+      - uses: google/osv-scanner-action/osv-scanner-action@b1d267aea5211fa648d9d442fa64b90dbdcbdd36 # v2.7.0
         with:
           # uv.lock is the resolved set CI installs from; the ranges in
           # pyproject.toml are not what ships. Table output, no SARIF upload:
