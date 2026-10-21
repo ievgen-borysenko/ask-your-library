@@ -446,8 +446,9 @@ def test_no_ollama_stops_at_step_1_with_exit_5_and_the_preflight_s_remedy(machin
     machine.tags.down = True
     assert init() == preflight.EXIT_NO_LOCAL_RUNTIME
     err = capsys.readouterr().err
-    assert t("pf_no_ollama", url="http://localhost:11434",
-             pulls=f"`ollama pull {ANSWERS}`, `ollama pull {EMBEDS}`") in err
+    # the three lines, each under the `error:` of the first
+    assert ("error: " + t("pf_no_ollama", url="http://localhost:11434",
+                          action=preflight.no_ollama_action()).replace("\n", "\n       ")) in err
     assert machine.pulls == [] and not machine.home.exists()
 
 
@@ -742,7 +743,7 @@ def test_a_failed_tags_call_names_the_url_without_its_credential(machine, capsys
     machine.mp.setattr(config, "OLLAMA_URL", CREDENTIAL_URL)
     machine.tags.down = True
     assert init("--no-demo") == preflight.EXIT_NO_LOCAL_RUNTIME
-    assert f"Could not reach Ollama at {dataflow.NOT_SHOWN}" in no_secret(capsys)
+    assert f"Ollama is not running at {dataflow.NOT_SHOWN}" in no_secret(capsys)
 
 
 @pytest.mark.parametrize("answer", ["http_error", "error_line", "connection"])

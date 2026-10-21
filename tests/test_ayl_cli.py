@@ -535,8 +535,9 @@ def test_doctor_still_reports_the_unreachable_ollama(unreachable_everything, cap
     assert ayl.main(["doctor", "--db", str(unreachable_everything)]) == 5
     err = capsys.readouterr().err
     assert t("pf_header") in err
-    assert t("pf_no_ollama", url=preflight.OLLAMA_URL,
-             pulls=preflight.pull_commands()) in err
+    # the three lines of the message, each under its bullet
+    assert ("  - " + t("pf_no_ollama", url=preflight.OLLAMA_URL,
+                       action=preflight.no_ollama_action()).replace("\n", "\n    ")) in err
     assert t("pf_no_key") in err
 
 

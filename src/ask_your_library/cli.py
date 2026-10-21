@@ -279,7 +279,8 @@ def main(argv: list[str] | None = None, prog: str = "ask-library") -> None:
     if problems:
         say(t("pf_header"), error=True)
         for problem in problems:
-            say(f"  - {problem}", error=True)
+            # A problem of several lines (pf_no_ollama) keeps them under its bullet.
+            say(f"  - {problem}".replace("\n", "\n    "), error=True)
         # Every problem is printed; the status names the one to fix first. A
         # missing Ollama and a missing index are the two ways a fresh clone
         # fails, they are not the same failure, and neither is a traceback —
