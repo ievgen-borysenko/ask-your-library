@@ -28,6 +28,11 @@
   (GHSA-84m7-p3x7-pcfv) and multidict 6.7.1 to 6.9.1 (PYSEC-2026-4244 / GHSA-54p9-h82j-f925);
   yarl moves from 1.24.5 to 1.25.1 because the new aiohttp requires it. `pyproject.toml` is
   unchanged; no application behaviour changed, and certifi drops the emSign roots.
+- **An EPUB's text is capped at 20 million characters, as a PDF's is (#124).** The archive caps
+  (64 MiB a file, 512 MiB in all) bounded the bytes, not the text they decode to, so one EPUB of
+  text alone could hand the embedder about 25 times what a PDF may. `ayl add` now keeps a running
+  count as the spine's documents are read and refuses the file, with the PDF reader's line, at the
+  document that takes it over, reading no further.
 
 ## 0.5.1 (2026-10-05)
 

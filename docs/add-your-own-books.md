@@ -306,7 +306,9 @@ the folder is indexed as usual:
 - **Could not be read**: anything else that goes wrong reading the file. The line names the kind
   of error and nothing of what it said, and the rest of the folder is indexed as usual.
 - **Too large**: more than 10,000 files in the archive, a directory over 16 MiB, any one file
-  over 64 MiB uncompressed, or over 512 MiB uncompressed in total. The file count is checked from
+  over 64 MiB uncompressed, over 512 MiB uncompressed in total, or more than **20 million
+  characters** of text in its documents (the PDF figure; counted as the documents are read, so the
+  rest of the book is not read once it is over). The file count is checked from
   the archive's end record and its directory, before the archive is opened, so a directory of a
   million entries costs no memory to refuse. A **ZIP64** archive is refused outright: ZIP64 exists
   for more than 65,535 files or a file over 4 GiB, which no EPUB needs. What is read is read into memory by name — nothing is ever

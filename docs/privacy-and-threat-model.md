@@ -185,8 +185,9 @@ Designed for **localhost, single user**. Not designed for internet exposure:
   an entry naming a port this server is not on is a page there allowed to read its threads.
 - **Book files are untrusted input, and parsing them is bounded.** `ayl add` reads EPUB and PDF
   files the reader did not write. An EPUB (ADR-029) is read in memory with the standard library,
-  with its archive limits checked before it is opened, unsafe member paths, XML entity
-  declarations in its package files and DRM refused. A PDF (ADR-030) is read by `pypdf` in a child
+  with its archive limits checked before it is opened, its text capped at 20 million characters as
+  a PDF's is, and unsafe member paths, XML entity declarations in its package files and DRM
+  refused. A PDF (ADR-030) is read by `pypdf` in a child
   process the parent stops past 60 s or 1 GiB of resident memory — a sampled bound, so a file that
   allocates as fast as the machine can is stopped a few hundred MiB past it on macOS, which lets no
   process set itself a hard memory limit; on Linux the child also caps its own address space —

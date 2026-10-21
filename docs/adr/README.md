@@ -1429,7 +1429,11 @@ are read by name into memory and never extracted, so a member path is never a fi
 absolute or `..` member name refuses the file all the same, since nothing legitimate needs one;
 member count, per-member and total uncompressed size are capped by three constants, and every read
 is cut off at the per-member cap whatever the archive's header claims; a reference that resolves
-outside the archive root is ignored. A ZIP64 archive is refused before `zipfile` opens it, rather
+outside the archive root is ignored. The text is capped on its own, at 20 million characters a
+book, the figure ADR-030 sets for a PDF (#124): the byte caps bound the archive, and at one
+character a byte the spine could otherwise yield twenty-five times that, every character of it to
+embed. The total is kept as each spine document is extracted, so the file is refused at the
+document that takes it over and the rest of the spine is not read. A ZIP64 archive is refused before `zipfile` opens it, rather
 than parsed: an EPUB never needs one, and its end record's variable-length sector is a format
 detail a bound should not depend on. XML is parsed by ElementTree, which never fetches an external
 entity, and a package file that declares any entity is refused before a parser sees it — a
