@@ -252,6 +252,37 @@ def test_scripts_styles_images_and_svg_are_not_text(tmp_path):
     assert text == "The amber room has a lamp.\n\nSecond paragraph.\n\nAfter a break."
 
 
+@pytest.mark.parametrize("markup", [
+    "<html><head><title>T</title><body><p>Chapter text here.</p></body></html>",
+    "<html><head><title>T</title><noscript><p>x</p><body><p>Chapter text here.</p></body></html>",
+    "<html><head><title>T</title><body/><p>Chapter text here.</p></html>",
+])
+def test_a_body_start_tag_ends_a_head_left_open(markup):
+    """`</head>` is optional in HTML: a document that leaves it out keeps its body."""
+    assert epub.extract_text(markup) == "Chapter text here."
+
+
+@pytest.mark.parametrize("markup", [
+    "<html><head>Head text.<title>T</title></head><body><p>Body text.</p></body></html>",
+    "<html><head>Head text.<title>T</title><body><p>Body text.</p></body></html>",
+    "<html><head><title>T</title>Head text.<body><p>Body text.</p></body></html>",
+])
+def test_text_directly_inside_the_head_is_not_book_text(markup):
+    assert epub.extract_text(markup) == "Body text."
+
+
+def test_a_body_start_tag_ends_only_the_head():
+    """Whatever else is open around the head stays skipped."""
+    assert epub.extract_text("<p>a</p><svg><head><body>svg words</body></svg><p>b</p>") == "a\n\nb"
+
+
+def test_an_html_document_without_a_head_end_tag_keeps_its_body(tmp_path):
+    raw = "<html><head><title>T</title><body><p>The amber room.</p></body></html>"
+    book = epub.read_epub(make_epub(tmp_path / "b.epub", [
+        Doc("c1.html", "", "One", raw=raw, media="text/html")]))
+    assert book.sections == [("One", "The amber room.")]
+
+
 def test_control_and_invisible_characters_are_stripped(tmp_path):
     raw = xhtml("<p>The amber\x1b[2J room\u200b is \u202equiet.</p>")
     book = epub.read_epub(make_epub(
@@ -291,6 +322,48 @@ def test_a_utf16_document_with_a_bom_is_decoded(tmp_path):
     book = epub.read_epub(make_epub(tmp_path / "b.epub",
                                     [Doc("c1.xhtml", "", "One", raw=raw.encode("utf-16-le"))]))
     assert book.sections[0][1] == "The amber room."
+
+
+@pytest.mark.parametrize("codec", ["utf-8", "utf-16-le", "utf-16-be", "utf-32-le", "utf-32-be"])
+def test_every_byte_order_mark_decodes_to_the_same_text(codec):
+    document = "<html><body><p>The amber room.</p></body></html>"
+    assert epub.decode(("\ufeff" + document).encode(codec)) == document
+
+
+@pytest.mark.parametrize("codec", ["utf-32-le", "utf-32-be"])
+def test_a_utf32_document_is_not_read_as_utf16(codec):
+    """The UTF-16-LE mark is the first half of the UTF-32-LE one: read as
+    UTF-16, the document had a NUL between its characters, no markup, and its
+    tags and script came out as text."""
+    data = "\ufeff<script>evil</script><p>ok</p>".encode(codec)
+    assert epub.extract_text(epub.decode(data)) == "ok"
+
+
+@pytest.mark.parametrize("codec", ["utf-16-le", "utf-16-be", "utf-32-le", "utf-32-be"])
+def test_a_wide_document_without_a_byte_order_mark_is_refused(codec):
+    """Without a byte-order mark a UTF-16 or UTF-32 document reads as UTF-8
+    with NULs between its characters, in which the parser finds no markup."""
+    with pytest.raises(epub.EpubRefused, match="NUL bytes"):
+        epub.decode("<script>evil</script><p>ok</p>".encode(codec))
+
+
+@pytest.mark.parametrize("text", [
+    "\u6f22\u5b57<script>EVIL</script><p>OK</p>",
+    "\u6f22\u5b57\u4e2d" * 3 + "<p>OK</p>",
+], ids=["two characters", "nine characters"])
+@pytest.mark.parametrize("codec", ["utf-16-le", "utf-16-be"])
+def test_a_wide_document_that_opens_with_text_is_refused_too(text, codec):
+    """Characters whose UTF-16 bytes are all ASCII and none of them zero read
+    as UTF-8 without a NUL, so the first one comes only with the first tag."""
+    data = text.encode(codec)
+    assert b"\x00" not in data[:4]
+    with pytest.raises(epub.EpubRefused, match="NUL bytes"):
+        epub.decode(data)
+
+
+def test_a_stray_nul_in_a_utf8_document_is_refused():
+    with pytest.raises(epub.EpubRefused, match="NUL bytes"):
+        epub.decode(b"<p>a\x00b</p>")
 
 
 # --- metadata --------------------------------------------------------------------
@@ -596,15 +669,94 @@ def test_a_dtd_in_a_content_document_is_dropped_and_never_expanded(tmp_path):
     assert text.count("lol") == 1                                   # not expanded
 
 
+@pytest.mark.parametrize("raw, expected", [
+    ('<html><body><p>a</p><!DOCTYPE x [<!ENTITY e "EXPANDED">]><p>b &e; c</p></body></html>',
+     "a\n\n]>\n\nb &e; c"),
+    ('<html><body><![CDATA[<!DOCTYPE x [<!ENTITY e "EXPANDED">]>]]><p>b &e; c</p></body></html>',
+     "b &e; c"),
+    ('<html><body><!-- <!ENTITY e "EXPANDED"> --><p>b &e; c</p></body></html>', "b &e; c"),
+    ('<html><body><!ENTITY e "EXPANDED"><p>b &e; c</p></body></html>', "b &e; c"),
+], ids=["doctype past the prolog", "cdata", "comment", "bare"])
+def test_an_entity_declared_past_the_prolog_is_read_and_never_expanded(tmp_path, raw, expected):
+    """A content document is not checked for entities: `html.parser` expands
+    none, so a declaration past the prolog is markup like any other and the
+    reference to it stays as it is written."""
+    book = epub.read_epub(make_epub(tmp_path / "b.epub", [Doc("c1.xhtml", "", "One", raw=raw)]))
+    assert book.sections == [("One", expected)]
+
+
+@pytest.mark.parametrize("codec", ["utf-32-le", "utf-32-be"])
+def test_an_entity_bomb_in_a_utf32_package_is_refused_as_one(tmp_path, codec):
+    """The literal check sees a declaration only in correctly decoded text."""
+    docs = three_chapters()
+    path = make_epub(tmp_path / "b.epub", docs)
+    with zipfile.ZipFile(path) as zf:
+        opf = zf.read("OEBPS/content.opf").decode()
+    bombed = "\ufeff" + BOMB + opf.split("?>", 1)[1].replace(
+        "<dc:title>The Copper Kettle</dc:title>", "<dc:title>&lol9;</dc:title>")
+    with pytest.raises(epub.EpubRefused, match="declares XML entities"):
+        epub.read_epub(make_epub(tmp_path / "bomb.epub", docs, opf=bombed.encode(codec)))
+
+
 @pytest.mark.parametrize("markup, expected", [
     ('<!DOCTYPE html><p>a</p>', "a"),
     ('<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "x.dtd"><p>a [b]</p>', "a [b]"),
     ('<!DOCTYPE html [<!ENTITY e "x">]><p>a</p>', "a"),
     ("<!DOCTYPE html [ unclosed <p>a</p>", "a"),                 # left to html.parser
     ('<p>no doctype ]></p>', "no doctype ]>"),
+    ("<!DOCTYPE html [<!ENTITY a 'x]>b'>]><p>a</p>", "a"),
+    ("<!DOCTYPE html [<!-- ]> --><?pi ]>?>]><p>a</p>", "a"),     # nor in a comment or PI
+    ('<?xml version="1.0"?>\n<!-- c -->\n<?pi x?>\n<!DOCTYPE html [<!ENTITY a "b">]>\n<p>a</p>',
+     "a"),
+    # an unclosed quote in the identifier must not run on to an apostrophe in the text
+    ("<!DOCTYPE html PUBLIC '-//W3C//DTD XHTML 1.1//EN>\n<html><head><title>Ch 1</title></head>\n"
+     "<body>\n<h1>One</h1>\n<p>It wasn't a dark night.</p>\n<p>Next.</p>\n</body></html>",
+     "One\n\nIt wasn't a dark night.\n\nNext."),
 ])
 def test_drop_doctype(markup, expected):
     assert epub.extract_text(epub.drop_doctype(markup)) == expected
+
+
+def test_a_doctype_in_a_cdata_section_later_is_not_dropped():
+    """Only the prolog holds a DOCTYPE: one further in is the parser's to read,
+    and taking it out used to take the rest of the chapter with it."""
+    markup = ("<html><body><p>Before.</p><![CDATA[<!DOCTYPE note [ ... ]]><p>After.</p>"
+              "</body></html>")
+    assert epub.extract_text(epub.drop_doctype(markup)) == "Before.\n\nAfter."
+
+
+def test_a_lowercase_doctype_is_dropped_with_its_subset():
+    markup = '<!doctype html [<!ENTITY a "b">]><html><body><p>Text.</p></body></html>'
+    assert epub.extract_text(epub.drop_doctype(markup)) == "Text."
+
+
+def test_a_subset_end_inside_a_quoted_value_does_not_end_the_doctype():
+    markup = '<!DOCTYPE html [<!ENTITY a "x]>b">]><html><body><p>Text.</p></body></html>'
+    assert epub.extract_text(epub.drop_doctype(markup)) == "Text."
+
+
+def test_the_xhtml11_prolog_an_epub_editor_writes_is_dropped():
+    """The prolog Sigil writes into every XHTML 1.1 file it saves."""
+    prolog = ('<?xml version="1.0" encoding="utf-8"?>\n'
+              '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN"\n'
+              '  "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">\n\n')
+    rest = '<html xmlns="http://www.w3.org/1999/xhtml">\n<head>\n  <title>Ch 1</title>\n</head>'
+    assert epub.drop_doctype(prolog + rest) == (
+        '<?xml version="1.0" encoding="utf-8"?>\n\n\n' + rest)
+
+
+def test_a_doctype_after_a_byte_order_mark_and_whitespace_is_dropped():
+    assert (epub.drop_doctype("\ufeff \n<!DOCTYPE html [<!ENTITY a 'b'>]><p>a</p>")
+            == "\ufeff \n<p>a</p>")
+
+
+@pytest.mark.parametrize("markup", [
+    "<p>a</p><!DOCTYPE html><p>b</p>",
+    "<html><!DOCTYPE html><p>b</p>",
+    "<!-- never closed <!DOCTYPE html><p>b</p>",
+])
+def test_a_doctype_past_the_prolog_is_left_to_the_parser(markup):
+    assert epub.drop_doctype(markup) == markup
 
 
 @pytest.mark.parametrize("damage", ["not a zip", "no container", "no spine", "bad xml",
@@ -805,6 +957,29 @@ def test_two_hundred_thousand_mixed_tags_cost_linear_time():
     markup = unit * 20_000
     started = time.monotonic()
     assert epub.extract_text(markup).count("w") == 20_000
+    assert time.monotonic() - started < 2
+
+
+def test_heads_left_open_cost_linear_time():
+    unit = "<head><title>t</title><style>s</style><g><i>x<body><p>w</p>"      # 10 tags
+    markup = unit * 20_000
+    started = time.monotonic()
+    assert epub.extract_text(markup).count("w") == 20_000
+    assert time.monotonic() - started < 2
+
+
+@pytest.mark.parametrize("markup", [
+    "<!DOCTYPE x [" + "<!--" * 50_000,          # every comment opened, none closed
+    "<!DOCTYPE x [" + "<?" * 100_000,
+    '<!DOCTYPE x ["' + "a" * 1_000_000,
+    "<!--" * 50_000,                            # in the prolog
+])
+def test_a_doctype_that_never_ends_costs_linear_time(markup):
+    """An internal subset that lets a bare `<` stand in for an unclosed comment
+    rescans the rest of the document from every later `<!--`: measured at 6 s
+    for 20,000 of them, before that alternative was narrowed."""
+    started = time.monotonic()
+    assert epub.drop_doctype(markup) == markup
     assert time.monotonic() - started < 2
 
 

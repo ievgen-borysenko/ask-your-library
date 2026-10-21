@@ -348,6 +348,29 @@ def test_a_real_run_hands_step_11_to_ayl_init_and_a_failure_there_stops_it(sandb
 
 
 @mac_only
+def test_step_6_installs_the_series_of_the_python_floor_not_the_floor(sandbox):
+    """The floor (`requires-python`) is what `uv python find` checks; what is
+    installed when nothing meets it is the minor series, which uv resolves to
+    its newest patch release. `uv python install 3.11.5` would install exactly
+    3.11.5, without the fixes of every later 3.11 release."""
+    root, records, env = sandbox
+    floor = re.search(r'^requires-python = ">=([0-9.]+)"',
+                      (root / "pyproject.toml").read_text(), re.MULTILINE).group(1)
+    series = ".".join(floor.split(".")[:2])
+    assert re.fullmatch(r"\d+\.\d+", series)
+    assert (f"would run 'uv python install {series}' when no interpreter answers that\n"
+            in dry_run(sandbox))
+    stub = Path(env["PATH"].split(os.pathsep)[0]) / "uv"
+    stub.write_text(f'#!/bin/sh\necho "$@" >> "{records}/uv"\n'
+                    f'[ "$1" = "python" ] && [ "$2" = "find" ] && exit 1\nexit 0\n')
+    result = real_run(sandbox)
+    assert result.returncode == 0, result.stderr
+    calls = (records / "uv").read_text().splitlines()
+    assert f"python install {series}" in calls
+    assert floor == series or f"python install {floor}" not in calls
+
+
+@mac_only
 def test_no_demo_points_at_ayl_add_instead(sandbox):
     out = dry_run(sandbox, "--no-demo")
     assert "no demo library (--no-demo)" in out
