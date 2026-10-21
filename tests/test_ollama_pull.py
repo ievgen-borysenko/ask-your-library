@@ -115,7 +115,6 @@ def test_the_models_to_pull_follow_the_pair_asked_about(monkeypatch):
     monkeypatch.setattr(preflight, "OLLAMA_EMBED_MODEL", "local-embeds")
     assert preflight.pull_models() == ["local-answers", "local-embeds"]
     assert preflight.pull_models("openrouter", "ollama") == ["local-embeds"]
-    assert preflight.pull_commands() == "`ollama pull local-answers`, `ollama pull local-embeds`"
 
 
 def test_a_local_mode_asked_about_from_a_hosted_process_names_the_local_model(monkeypatch):

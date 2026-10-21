@@ -34,17 +34,21 @@ def get_lang() -> str:
 # installer does everything (Ollama included); a tool install has `ayl init`,
 # which pulls the models and writes the configuration once Ollama runs. Built
 # per call (`hints` reads the install at call time) and filled in by `t()`
-# itself, as `{setup_all}` and `{setup_pulls}`, so every caller of `t()` stays
-# as it is.
+# itself, as `{setup_init}`, `{setup_mac}` and `{setup_pulls}`, so every caller
+# of `t()` stays as it is. `setup_mac` is the clone's installer as a sentence
+# of its own, and empty outside a clone: it goes only into the macOS line of
+# pf_no_ollama_mac, because the script is a macOS installer.
 def _setup(lang: str) -> dict[str, str]:
     clone = from_clone()
     installer = "bash scripts/install-mac.sh" if clone else command("ayl init")
     if lang == "ua":
-        return {"setup_all": "Одна команда робить усе це: `bash scripts/install-mac.sh`. " if clone
-                else "Потім `ayl init` завантажить моделі й запише конфігурацію. ",
+        return {"setup_init": command("ayl init"),
+                "setup_mac": " З цього клону `bash scripts/install-mac.sh` робить усе це." if clone
+                else "",
                 "setup_pulls": f"`{installer}` завантажує моделі саме цієї конфігурації."}
-    return {"setup_all": "One command does all of that: `bash scripts/install-mac.sh`. " if clone
-            else "Then `ayl init` pulls the models and writes the configuration. ",
+    return {"setup_init": command("ayl init"),
+            "setup_mac": " From this clone, `bash scripts/install-mac.sh` does all of that." if clone
+            else "",
             "setup_pulls": f"`{installer}` pulls the models this configuration opens."}
 
 
@@ -261,23 +265,36 @@ _T = {
               "Only the hosted configuration needs a key; the default one is local "
               "(LLM_BACKEND=ollama) and needs none.",
     },
-    # The first-run failure of the shipped default, so it carries the whole
-    # remedy rather than the one step that used to be missing: nothing is
-    # installed yet on the machine this is printed on. The pulls are the models
-    # THIS configuration reads (preflight.pull_commands), never a fixed pair.
+    # The first-run failure of the shipped default, in three lines: what is
+    # wrong, the one action for the platform this runs on (`action` is
+    # pf_no_ollama_mac or pf_no_ollama_other, picked by
+    # preflight.no_ollama_action), and the two ways around a local Ollama. No
+    # `ollama pull` lines: `ayl init`, which the action line ends on, pulls the
+    # models this configuration opens.
     "pf_no_ollama": {
-        "ua": "Не вдалося звернутися до Ollama на {url} (помилка з'єднання або запиту). "
-              "Типова конфігурація відповідає локально, і саме Ollama її запускає: "
-              "встанови (`brew install ollama`), запусти (`ollama serve`), потім {pulls}. "
-              "{setup_all}"
+        "ua": "Ollama не запущена на {url}.\n"
+              "{action}\n"
               "Якщо сервер в іншому місці — задай OLLAMA_URL; щоб відповідати на хмарній "
               "моделі — LLM_BACKEND=openrouter (потрібен ключ, і це коштує грошей).",
-        "en": "Could not reach Ollama at {url} (a connection or request error). "
-              "The default configuration answers locally, and Ollama is what runs it: "
-              "install it (`brew install ollama`), start it (`ollama serve`), then {pulls}. "
-              "{setup_all}"
+        "en": "Ollama is not running at {url}.\n"
+              "{action}\n"
               "Set OLLAMA_URL if your server is elsewhere, or LLM_BACKEND=openrouter to "
               "answer on a hosted model instead (that needs a key, and costs money).",
+    },
+    # macOS: most people run the Ollama app, and Homebrew is the other way; the
+    # clone's installer is offered here and nowhere else (`setup_mac`).
+    "pf_no_ollama_mac": {
+        "ua": "Відкрий застосунок Ollama або встанови її (`brew install ollama`), потім запусти "
+              "`{setup_init}` ще раз.{setup_mac}",
+        "en": "Open the Ollama app, or install it with `brew install ollama`; then re-run "
+              "`{setup_init}`.{setup_mac}",
+    },
+    # Linux, Windows and anything else: no Homebrew, no macOS installer.
+    "pf_no_ollama_other": {
+        "ua": "Встанови її з https://ollama.com/download або запусти `ollama serve`, потім "
+              "запусти `{setup_init}` ще раз.",
+        "en": "Install it from https://ollama.com/download, or start it with `ollama serve`; "
+              "then re-run `{setup_init}`.",
     },
     "pf_ollama_bad_reply": {
         "ua": "Щось на {url} відповіло (HTTP {status}), але це не придатна відповідь /api/tags "
@@ -331,9 +348,9 @@ _T = {
         "en": "The environment is not ready:",
     },
     # ---- preflight: non-fatal notices (it works, but in a degraded shape)
-    # An interrupted install lands here, so these carry the same remedy as
-    # pf_no_ollama above: the pull is a download of gigabytes that has to
-    # finish, and the installer is the one command that finishes it. The size
+    # An interrupted install lands here, so these carry the pull and the
+    # command that finishes it, as pf_no_ollama's action line does: the pull
+    # is a download of gigabytes that has to finish. The size
     # is deliberately not a number: `ollama list` cannot be read for a model
     # that is not there, and a figure hard-coded per model would go stale the
     # first time OLLAMA_LLM_MODEL points elsewhere.

@@ -17,6 +17,7 @@ yet, or there is no index yet. A script that wraps the CLI needs to tell them
 apart without matching on translated prose, so `exit_code()` turns the kinds
 into the distinct status the CLI exits with.
 """
+import sys
 from pathlib import Path
 from typing import NamedTuple
 
@@ -143,10 +144,17 @@ def pull_models(llm_backend: str | None = None, embed_backend: str | None = None
     return models
 
 
-def pull_commands() -> str:
-    """The `ollama pull` lines THIS configuration needs (`pull_models`), as
-    the remedy a problem message prints."""
-    return ", ".join(f"`ollama pull {model}`" for model in pull_models())
+def no_ollama_action(platform: str | None = None) -> str:
+    """The one line that says what to do about an Ollama that is not running,
+    for the platform this runs on: `sys.platform` unless a test names one.
+
+    macOS gets the Ollama app or Homebrew (and, from a clone, the macOS
+    installer, which `i18n._setup` adds there alone); everything else gets the
+    download page or `ollama serve`. Both end on `ayl init`, in the form this
+    install types it, because that is what pulls the models — so the line
+    carries no `ollama pull` of its own."""
+    platform = sys.platform if platform is None else platform
+    return t("pf_no_ollama_mac" if platform == "darwin" else "pf_no_ollama_other")
 
 
 class OllamaTags(NamedTuple):
@@ -259,10 +267,10 @@ def check_environment(index_only: bool = False, db_path: Path | None = None,
                                           status=reply.status))
         elif reply.kind == "no_ollama":
             # The first-run failure of the shipped default, so the message
-            # carries the whole remedy: install, start, pull, or the one command
-            # that does all three.
+            # carries the remedy: the one action for this platform, ending on
+            # the `ayl init` that pulls the models.
             problem("no_ollama", t("pf_no_ollama", url=shown_url(OLLAMA_URL),
-                                   pulls=pull_commands()))
+                                   action=no_ollama_action()))
         else:
             names = reply.names
             if LLM_BACKEND == "ollama" and not _pulled(ORCHESTRATOR_MODEL, names):

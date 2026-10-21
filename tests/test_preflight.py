@@ -156,14 +156,15 @@ def test_a_reply_that_cannot_be_read_is_not_reported_as_a_dead_ollama(monkeypatc
         preflight = local_llm(monkeypatch, tmp_path, Tags(payload))
         problems = preflight.check_environment()
         assert problems == [t("pf_ollama_bad_reply", url=preflight.OLLAMA_URL, status=200)]
-        assert t("pf_no_ollama", url=preflight.OLLAMA_URL, pulls=preflight.pull_commands()) not in problems
+        assert "Ollama is not running" not in problems[0]
 
 
 def test_a_dead_ollama_in_the_local_mode_is_still_a_dead_ollama(monkeypatch, tmp_path):
     from ask_your_library.i18n import t
 
     preflight = local_llm(monkeypatch, tmp_path, requests.ConnectionError("refused"))
-    assert preflight.check_environment() == [t("pf_no_ollama", url=preflight.OLLAMA_URL, pulls=preflight.pull_commands())]
+    assert preflight.check_environment() == [t("pf_no_ollama", url=preflight.OLLAMA_URL,
+                                               action=preflight.no_ollama_action())]
 
 
 def test_an_http_error_is_a_bad_reply_and_names_the_status(monkeypatch, tmp_path):
@@ -181,7 +182,7 @@ def test_an_http_error_is_a_bad_reply_and_names_the_status(monkeypatch, tmp_path
     problems = preflight.check_environment()
     assert problems == [t("pf_ollama_bad_reply", url=preflight.OLLAMA_URL, status=503)]
     assert "503" in problems[0]
-    assert t("pf_no_ollama", url=preflight.OLLAMA_URL, pulls=preflight.pull_commands()) not in problems
+    assert "Ollama is not running" not in problems[0]
 
 
 def test_local_embeddings_need_their_model_pulled_too(monkeypatch, tmp_path):
@@ -504,20 +505,91 @@ def test_anything_else_keeps_the_status_it_always_had(monkeypatch, tmp_path):
     assert pf.exit_code(result) == pf.EXIT_NOT_READY == 1
 
 
-def test_the_remedy_names_the_models_this_configuration_will_open(monkeypatch, tmp_path):
-    """`ollama pull bge-m3` printed to somebody running nomic-embed-text sends
-    them to fetch a model their run never opens. The message is built from the
-    configured names, and it carries the whole first-run remedy: install, start,
-    pull, or the one command that does all three."""
+# The message for an Ollama that is not running (#140): three lines, the middle
+# one for the platform this runs on, and no `ollama pull` of its own, because
+# the `ayl init` it ends on pulls the models.
+
+def test_the_no_ollama_message_is_three_lines_the_first_with_the_url(monkeypatch, tmp_path):
+    preflight = local_llm(monkeypatch, tmp_path, requests.ConnectionError("refused"))
+    monkeypatch.setattr(preflight, "OLLAMA_URL", "http://ollama.local:11434")
+
+    message = preflight.check_environment()[0]
+    first, action, alternatives = message.split("\n")
+    assert first == "Ollama is not running at http://ollama.local:11434."
+    assert action == preflight.no_ollama_action()
+    assert "OLLAMA_URL" in alternatives and "LLM_BACKEND=openrouter" in alternatives
+
+
+def test_the_action_line_is_the_platform_s(monkeypatch):
+    from ask_your_library import paths, preflight
+
+    monkeypatch.setattr(paths, "REPO_ROOT", "")
+    mac = preflight.no_ollama_action("darwin")
+    assert "Ollama app" in mac and "brew install ollama" in mac
+    assert "ollama serve" not in mac and "ollama.com/download" not in mac
+    for other in ("linux", "win32", "freebsd14"):
+        line = preflight.no_ollama_action(other)
+        assert "ollama.com/download" in line and "ollama serve" in line
+        assert "brew" not in line and "Ollama app" not in line
+    # both end on the command that pulls the models, as a tool install types it
+    assert mac.endswith("re-run `ayl init`.")
+    assert preflight.no_ollama_action("linux").endswith("re-run `ayl init`.")
+
+
+def test_the_action_line_defaults_to_this_platform(monkeypatch):
+    from ask_your_library import preflight
+
+    monkeypatch.setattr(preflight.sys, "platform", "darwin")
+    assert preflight.no_ollama_action() == preflight.no_ollama_action("darwin")
+    monkeypatch.setattr(preflight.sys, "platform", "linux")
+    assert preflight.no_ollama_action() == preflight.no_ollama_action("linux")
+
+
+def test_the_mac_installer_is_offered_on_a_mac_from_a_clone_only(monkeypatch):
+    from ask_your_library import paths, preflight
+
+    monkeypatch.setattr(paths, "REPO_ROOT", "/some/clone")
+    assert "bash scripts/install-mac.sh" in preflight.no_ollama_action("darwin")
+    assert preflight.no_ollama_action("darwin").count("re-run `uv run ayl init`") == 1
+    assert "install-mac.sh" not in preflight.no_ollama_action("linux")
+    assert "re-run `uv run ayl init`" in preflight.no_ollama_action("linux")
+    monkeypatch.setattr(paths, "REPO_ROOT", "")
+    assert "install-mac.sh" not in preflight.no_ollama_action("darwin")
+
+
+def test_the_no_ollama_message_leaves_the_pulls_to_ayl_init(monkeypatch, tmp_path):
+    """`ayl init` pulls the models this configuration opens, and the message
+    sends the reader there; a list of `ollama pull` lines next to it was the
+    same work twice, and the configured names stay out of a message that no
+    longer needs them."""
+    from ask_your_library import preflight as pf
+
     preflight = local_llm(monkeypatch, tmp_path, requests.ConnectionError("refused"),
                           model="qwen2.5:3b")
     monkeypatch.setattr(preflight, "OLLAMA_EMBED_MODEL", "nomic-embed-text")
 
-    message = preflight.check_environment()[0]
-    assert "ollama pull qwen2.5:3b" in message and "ollama pull nomic-embed-text" in message
-    assert "bge-m3" not in message and "qwen2.5:14b" not in message
-    assert "brew install ollama" in message and "ollama serve" in message
-    assert "bash scripts/install-mac.sh" in message
+    result = preflight.check_environment()
+    assert "ollama pull" not in result[0] and "nomic-embed-text" not in result[0]
+    assert "ayl init" in result[0]
+    assert pf.exit_code(result) == pf.EXIT_NO_LOCAL_RUNTIME == 5
+
+
+def test_the_no_ollama_message_renders_in_both_languages(monkeypatch, tmp_path):
+    from ask_your_library import i18n, paths, preflight
+
+    monkeypatch.setattr(paths, "REPO_ROOT", "/some/clone")
+    before = i18n.get_lang()
+    try:
+        for lang in ("en", "ua"):
+            i18n.set_lang(lang)
+            for platform in ("darwin", "linux"):
+                message = i18n.t("pf_no_ollama", url="http://localhost:11434",
+                                 action=preflight.no_ollama_action(platform))
+                assert message.count("\n") == 2 and "{" not in message
+                assert "http://localhost:11434" in message and "OLLAMA_URL" in message
+                assert ("install-mac.sh" in message) == (platform == "darwin")
+    finally:
+        i18n.set_lang(before)
 
 
 def test_an_exported_home_or_chat_folder_cannot_hand_the_suite_real_locations(tmp_path):

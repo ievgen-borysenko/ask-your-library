@@ -136,7 +136,8 @@ def plan(text: str) -> None:
 
 
 def problem(text: str) -> None:
-    say(f"error: {text}", error=True)
+    # A problem of several lines (pf_no_ollama) keeps them under the `error:`.
+    say(f"error: {text}".replace("\n", "\n       "), error=True)
 
 
 def quoted(path: Path) -> str:
@@ -602,9 +603,7 @@ def _run(args) -> int:
     else:
         reply = preflight.ollama_tags(url)
         if reply.kind == "no_ollama":
-            problem(t("pf_no_ollama", url=shown,
-                      pulls=", ".join(f"`ollama pull {m}`"
-                                      for m in preflight.pull_models(llm, embed))))
+            problem(t("pf_no_ollama", url=shown, action=preflight.no_ollama_action()))
             return preflight.EXIT_NO_LOCAL_RUNTIME
         if reply.kind == "ollama_bad_reply":
             problem(t("pf_ollama_bad_reply", url=shown, status=reply.status))
