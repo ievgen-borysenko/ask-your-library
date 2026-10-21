@@ -586,6 +586,9 @@ def test_a_stream_chains_four_filters_and_no_more(tmp_path):
 def test_the_decoding_work_of_a_stream_is_capped(tmp_path, monkeypatch):
     """MAX_STREAM_DECODING_BYTES: the library sums each filter's input and
     output; past the cap the stream is refused the same way."""
+    assert pdf.MAX_STREAM_DECODING_BYTES == 128 * 1024 * 1024
+    assert pdf.CONFIGURATION["stream_decoding_work_maximum_length"] == pdf.MAX_STREAM_DECODING_BYTES
+    assert pdf.CONFIGURATION["stream_filters_maximum_length"] == pdf.MAX_STREAM_FILTERS
     path = make_pdf(tmp_path / "b.pdf", [room("amber")], compress=2)
     assert pdf.read_in_process(path).sections[0][0] == "Page 1"
     monkeypatch.setitem(pdf.CONFIGURATION, "stream_decoding_work_maximum_length", 64)
