@@ -28,6 +28,18 @@
   (GHSA-84m7-p3x7-pcfv) and multidict 6.7.1 to 6.9.1 (PYSEC-2026-4244 / GHSA-54p9-h82j-f925);
   yarl moves from 1.24.5 to 1.25.1 because the new aiohttp requires it. `pyproject.toml` is
   unchanged; no application behaviour changed, and certifi drops the emSign roots.
+- **The locked PDF library is updated for the open advisories.** `uv.lock` moves pypdf 6.19.0
+  to 6.20.1 (GHSA-39mj-jf6j-2qj3, GHSA-7mh2-4gg2-979f, GHSA-9mx8-4j7g-633p,
+  GHSA-qfv9-64jg-mh7p), and `pyproject.toml` now asks for `pypdf>=6.20.1,<7`, since the PDF
+  reader sets every field of the library's configuration and 6.20.0 added three. They are set
+  as the others are: a Brotli stream (PDF 2.0, whose decoder is not installed here, so such a
+  stream still fails to decode) is capped at 16 MiB like every other inflated stream, one stream
+  may chain at most 4 filters (the library allows 16), and the bytes its decoding passes
+  through are capped at 128 MiB (the library allows 300 MB); a real book's streams use one
+  or two filters and stay far under both. A Brotli-filtered PDF is refused as before, its reason
+  now `could not be read (DependencyError)` instead of `(NotImplementedError)`; pypdf 6.20 would
+  use a `brotli` native extension if one were importable, and none is locked or installed here,
+  since ADR-030 keeps native code off the read path. Nothing else in the reader changed.
 
 ## 0.5.1 (2026-10-05)
 

@@ -1457,7 +1457,7 @@ real books show the need.
 
 ## ADR-030: PDF is read through its text layer with pypdf, in a child process bounded from outside, and encryption is refused
 
-Status: accepted (2026-10-03, #34, with `ayl add` reading `.pdf`).
+Status: accepted (2026-10-03, #34, with `ayl add` reading `.pdf`); amended 2026-10-21 (#159, see below).
 
 The second half of the 0.5.0 criterion: a reader's own PDF, imported on a clean install. Three
 decisions again, and the first is the one the EPUB did not need.
@@ -1543,7 +1543,7 @@ still engaged were dropped with it.
 
 Inside the child, a first line gives a precise reason fast where the library lets a caller bound
 its work: every field of its configuration is set explicitly, and a test fails when a version adds
-one (each inflated stream at 16 MiB, the
+one (each inflated stream at 16 MiB, 4 filters a stream and 128 MiB of decoding work for it, the
 page-tree walk at twice the page cap or 64 levels, the outline at 10,000 entries or 32 levels, 200
 form draws a page, the XMP size and element count, the recovery of a damaged stream, `jbig2dec`
 never called), and the module caps the file at 256 MiB, the pages at 5,000, the text at 100,000
@@ -1577,6 +1577,20 @@ viewer opens is refused. A scan behind a text-layer cover passes the ten-page ru
 with what it has, named in one line when fewer than half its pages have text. Each is in
 [Known limits](../known-limits.md). Every PDF costs one process start, and a hostile one costs at
 most a minute and a gigabyte before its line is written.
+
+**Amended 2026-10-21 (#159): the floor is 6.20.1, and the configuration has two more caps.** pypdf
+6.19.0 carries four advisories (GHSA-39mj-jf6j-2qj3, GHSA-7mh2-4gg2-979f, GHSA-9mx8-4j7g-633p,
+GHSA-qfv9-64jg-mh7p), fixed in 6.20.0 and 6.20.1, and 6.20.0 added three fields to its
+configuration, so `pyproject.toml` now bounds it below at 6.20.1, the version verified to have
+every field the reader sets; the 6.19.0 above is the version this decision was taken on. The new
+fields are set as the others are: one stream chains at most 4 filters (`MAX_STREAM_FILTERS`; the
+library allows 16), the bytes its decoding passes through, each filter's input and output summed,
+are capped at 128 MiB (`MAX_STREAM_DECODING_BYTES`, 2 x 4 x 16 MiB; the library allows 300 MB),
+and a Brotli stream (PDF 2.0) inflates to at most 16 MiB like every other. Brotli's decoder is a
+native extension and is not installed, so such a stream is still refused, now as
+`DependencyError` rather than `NotImplementedError`. Measurement: tests that a stream chaining
+four `/FlateDecode` filters is read and one chaining five is refused, in the process and the
+child, and that a lowered decoding-work cap refuses the same way; no eval report.
 
 ## ADR-031: Staging is never dropped while the live table cannot be opened
 
