@@ -93,7 +93,9 @@ fast, on what the library lets a caller bound:
   images, is switched off in its configuration; an encrypted file is refused
   before any password, the empty one included, is tried;
 - **the library's configuration**, every field set explicitly (`CONFIGURATION`):
-  each inflated stream capped (`MAX_STREAM_BYTES`), the page-tree walk stopped
+  each inflated stream capped (`MAX_STREAM_BYTES`), the filters one stream
+  chains (`MAX_STREAM_FILTERS`) and the bytes its decoding passes through
+  (`MAX_STREAM_DECODING_BYTES`), the page-tree walk stopped
   past `2 * MAX_PAGES` entries or `MAX_PAGE_TREE_DEPTH` levels and the outline
   walk past `MAX_OUTLINE_ENTRIES` entries or `MAX_OUTLINE_DEPTH` levels, at most
   `MAX_FORM_DRAWS` forms drawn a page, XMP size and element count, the
@@ -149,6 +151,11 @@ from .chapters import FRONT_MATTER_SECTION, unique_titles
 MAX_FILE_BYTES = 256 * 1024 * 1024
 MAX_PAGES = 5_000
 MAX_STREAM_BYTES = 16 * 1024 * 1024          # one inflated stream (the library's cap)
+# A real stream has one filter or two (ASCII85 over Flate); the library allows 16.
+MAX_STREAM_FILTERS = 4
+# The library sums each filter's input and output for one stream: room for
+# every allowed filter to take in and give out one capped stream.
+MAX_STREAM_DECODING_BYTES = 2 * MAX_STREAM_FILTERS * MAX_STREAM_BYTES
 MAX_PAGE_CHARS = 100_000
 MAX_TOTAL_CHARS = 20_000_000
 MAX_OUTLINE_ENTRIES = 10_000
@@ -189,6 +196,12 @@ CONFIGURATION = dict(
     lzw_maximum_output_length=MAX_STREAM_BYTES,
     run_length_maximum_output_length=MAX_STREAM_BYTES,
     jbig2_maximum_output_length=MAX_STREAM_BYTES,
+    # Brotli (PDF 2.0); its decoder is not installed here, so such a stream
+    # fails to decode, and is capped all the same.
+    brotli_maximum_output_length=MAX_STREAM_BYTES,
+    # The filters one stream chains, and the bytes its decoding passes through.
+    stream_filters_maximum_length=MAX_STREAM_FILTERS,
+    stream_decoding_work_maximum_length=MAX_STREAM_DECODING_BYTES,
     # A page whose content is split over several streams, joined.
     array_based_stream_maximum_output_length=MAX_STREAM_BYTES,
     # Images are never decoded here; capped all the same.
