@@ -28,8 +28,9 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 # The staged publish this module needs is the ingest's, and `ingest.publish`
-# imports nothing from the package, so this direction costs no cycle. Only
-# `write_index_meta` uses the recovery half: see the note in `read_index_meta`.
+# imports nothing from the package, so this direction costs no cycle. Only the
+# two writers, `write_index_meta` and `forget_index_meta`, use the recovery
+# half: see the note in `read_index_meta`.
 from .ingest.chunking import (CARD_CHUNKER_VERSION, CHUNKER_VERSION, TRANSCRIPT_CEILING_CHARS,
                               TRANSCRIPT_MAX_CHARS, TRANSCRIPT_OVERLAP_CHARS,
                               TRANSCRIPT_TARGET_CHARS)
@@ -110,6 +111,30 @@ def write_index_meta(db, table: str, backend: str, model: str, dims: int,
     log.info("%s: widening the fingerprint table with chunker/schema_version", META_TABLE)
     snapshot = [_with_new_fields(r) for r in _all_meta_rows(db) if r.get("table") != table]
     rebuild_table(db, META_TABLE, [snapshot + [row]])
+
+
+def forget_index_meta(db, table: str) -> None:
+    """Remove `table`'s fingerprint row: the stamp goes with the rows it
+    describes.
+
+    For `ayl add --rebuild`, which drops the table and stamps it again only at
+    the end of a run that succeeded (#147). Until this existed the old row
+    outlived its table, and a rebuild interrupted in its publish copy left the
+    staging copy holding the NEW model's rows under the OLD model's stamp. The
+    write guards judge staging against that stamp, so a plain `ayl add` with
+    the old model was accepted, and the table ended with two embedders under
+    one name. Without the row, staging is unstamped: the guards refuse it as
+    having no fingerprint, a refusal that names `--rebuild`, and the readers
+    check it on dims alone, as they do every index built before stamps existed.
+
+    A delete, so the width of the fingerprint table does not matter: a legacy
+    five-column `_index_meta` loses the row and keeps its schema, and the next
+    `write_index_meta` widens it as before. No fingerprint table, or no row for
+    `table`, leaves nothing to do."""
+    recover_staging(db, META_TABLE)
+    if META_TABLE not in _table_names(db):
+        return
+    db.open_table(META_TABLE).delete(f"`table` = '{table}'")
 
 
 def schema_version_of(db, table: str) -> int:
