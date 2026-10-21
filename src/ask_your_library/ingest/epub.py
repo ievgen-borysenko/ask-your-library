@@ -57,9 +57,9 @@ An EPUB is untrusted input. What is bounded, and how:
   a declared entity, so they are not checked: the DTD in a content document's
   prolog is dropped rather than refused;
 - every document is decoded strictly, as the encoding it declares, and must
-  come out as text that UTF-8 can carry, with no NUL in its first four
-  characters: UTF-7 and the escape codecs are not accepted as a book's
-  encoding, and a UTF-16 or UTF-32 document needs its byte-order mark;
+  come out as text that UTF-8 can carry and that holds no NUL: UTF-7 and the
+  escape codecs are not accepted as a book's encoding, and a UTF-16 or UTF-32
+  document needs its byte-order mark;
 - only spine items with an XHTML/HTML media type are read; scripts, styles,
   SVG and images are ignored; text is taken out of the markup with
   `html.parser` (not a regular expression), its whitespace normalised and its
@@ -301,6 +301,8 @@ NOT_A_CHARSET = frozenset({"unicode_escape", "raw_unicode_escape", "punycode", "
 
 
 UNREADABLE = "a document in it is not readable in the encoding it declares"
+HOLDS_NUL = ("a document in it holds NUL bytes, which no text encoding of a book produces: "
+             "a UTF-16 or UTF-32 file without a byte-order mark, or a damaged file")
 
 # Byte-order marks, longest first: the UTF-16-LE mark is the first two bytes of
 # the UTF-32-LE one, so testing it first read a UTF-32 document as UTF-16 with a
@@ -330,13 +332,14 @@ def decode(data: bytes) -> str:
     # all (`encoding="undefined"`) raises the base class.
     except (LookupError, UnicodeError) as error:
         raise EpubRefused(UNREADABLE) from error
-    # A UTF-16 or UTF-32 document without a byte-order mark, read as UTF-8,
-    # holds a NUL between its characters: within its first four when it starts
-    # with `<` or whitespace, as every one does. The parser would find no markup
-    # in it, and its raw tags would be indexed as text. A NUL further in is
-    # stripped with the other control characters (`strip_control_chars`).
-    if "\x00" in text[:4]:
-        raise EpubRefused(UNREADABLE)
+    # A NUL is not a character XML or HTML allows, and no text encoding of a
+    # book produces one. Its usual source is a UTF-16 or UTF-32 document
+    # without a byte-order mark, read as UTF-8: a NUL between its characters,
+    # no markup the parser can find, and its raw tags indexed as text. Any NUL,
+    # wherever it falls: a document that opens with text before its first tag
+    # can have none in its first characters.
+    if "\x00" in text:
+        raise EpubRefused(HOLDS_NUL)
     return text
 
 

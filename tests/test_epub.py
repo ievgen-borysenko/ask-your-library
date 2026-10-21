@@ -343,12 +343,27 @@ def test_a_utf32_document_is_not_read_as_utf16(codec):
 def test_a_wide_document_without_a_byte_order_mark_is_refused(codec):
     """Without a byte-order mark a UTF-16 or UTF-32 document reads as UTF-8
     with NULs between its characters, in which the parser finds no markup."""
-    with pytest.raises(epub.EpubRefused, match="encoding it declares"):
+    with pytest.raises(epub.EpubRefused, match="NUL bytes"):
         epub.decode("<script>evil</script><p>ok</p>".encode(codec))
 
 
-def test_a_nul_further_into_a_document_is_stripped_not_refused():
-    assert epub.extract_text(epub.decode(b"<p>a\x00b</p>")) == "ab"
+@pytest.mark.parametrize("text", [
+    "\u6f22\u5b57<script>EVIL</script><p>OK</p>",
+    "\u6f22\u5b57\u4e2d" * 3 + "<p>OK</p>",
+], ids=["two characters", "nine characters"])
+@pytest.mark.parametrize("codec", ["utf-16-le", "utf-16-be"])
+def test_a_wide_document_that_opens_with_text_is_refused_too(text, codec):
+    """Characters whose UTF-16 bytes are all ASCII and none of them zero read
+    as UTF-8 without a NUL, so the first one comes only with the first tag."""
+    data = text.encode(codec)
+    assert b"\x00" not in data[:4]
+    with pytest.raises(epub.EpubRefused, match="NUL bytes"):
+        epub.decode(data)
+
+
+def test_a_stray_nul_in_a_utf8_document_is_refused():
+    with pytest.raises(epub.EpubRefused, match="NUL bytes"):
+        epub.decode(b"<p>a\x00b</p>")
 
 
 # --- metadata --------------------------------------------------------------------

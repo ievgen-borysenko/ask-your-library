@@ -14,15 +14,16 @@
   characters: the HTML parser found no markup in it, so a chapter's raw tags, with the text of its
   head, scripts and styles, were indexed as the chapter's text, and a package file written that way
   refused the book as malformed. A document with the big-endian mark refused the book as not
-  readable in its encoding. Both UTF-32 marks are now checked before the UTF-16 ones, and a
-  document whose decoded text has a NUL among its first four characters, which a UTF-16 or UTF-32
-  file without a byte-order mark produces, is refused as not readable instead of being indexed as
-  raw markup. Running `ayl add <folder>` again re-extracts an affected book. A book 0.5.1 indexed
-  from a UTF-16 or UTF-32 file without a byte-order mark, with raw tags in its rows, is refused now
-  instead, and its old rows stay: a run keeps them, and `--prune` deletes only the rows of a file
-  that is no longer in the folder. Move the file out of the folder, then run
-  `ayl add <folder> --prune`; that run stops before it prunes anything when no book in the folder
-  reads, so if the file was the folder's only book, leave another readable book there for it.
+  readable in its encoding. Both UTF-32 marks are now checked before the UTF-16 ones. A document
+  whose decoded text holds a NUL is refused, with a line that says so: a UTF-16 or UTF-32 file
+  without a byte-order mark, the usual cause, was indexed as raw markup, and a stray NUL in a
+  UTF-8 file, which 0.5.1 stripped silently, refuses the book now too. The way out is to save that
+  document as UTF-8 in an EPUB editor, with any stray NUL taken out. Running `ayl add <folder>`
+  again re-extracts an affected book. A book that 0.5.1 indexed and that is refused now keeps its
+  old rows: a run keeps them, and `--prune` deletes only the rows of a file that is no longer in
+  the folder. Move the file out of the folder, then run `ayl add <folder> --prune`; that run stops
+  before it prunes anything when no book in the folder reads, so if the file was the folder's only
+  book, leave another readable book there for it.
 - **A chapter's DOCTYPE is dropped only from the start of the document, and only whole.** The HTML
   parser leaves the tail of an internal subset (`]>`) in the text, so a content document's DOCTYPE
   is taken off before it is read. That step took the first `<!DOCTYPE` anywhere in the document, in
@@ -40,8 +41,9 @@
   GHSA-pqxq-w44r-73xw), certifi 2026.7.22 to 2026.10.19 (GHSA-6q48-6c7w-9gw2), langgraph-sdk
   0.4.2 to 0.4.8 (PYSEC-2026-4240 / GHSA-fvww-7h3r-vfhp), mcp 1.29.0 to 1.30.0
   (GHSA-84m7-p3x7-pcfv) and multidict 6.7.1 to 6.9.1 (PYSEC-2026-4244 / GHSA-54p9-h82j-f925);
-  yarl moves from 1.24.5 to 1.25.1 because the new aiohttp requires it. `pyproject.toml` is
-  unchanged; no application behaviour changed, and certifi drops the emSign roots.
+  yarl moves from 1.24.5 to 1.25.1 because the new aiohttp requires it. No dependency declaration
+  in `pyproject.toml` changed; no application behaviour changed, and certifi drops the emSign
+  roots.
 
 ## 0.5.1 (2026-10-05)
 
