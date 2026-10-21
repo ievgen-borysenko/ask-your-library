@@ -113,8 +113,8 @@ on translated prose:
 | `5` | Ollama is not reachable, does not answer as Ollama, or a configured model is not pulled |
 
 `3` and `5` are the two ordinary ways a fresh install fails, and both messages carry the commands
-that fix them — `ayl init` for the models, and from a clone `bash scripts/install-mac.sh` too —
-in the form this install types them. Before the first `ayl add`, `ayl doctor` prints `3` as a
+that fix them — `ayl init` for the models, and on a Mac from a clone `bash scripts/install-mac.sh`
+too — in the form this install types them. Before the first `ayl add`, `ayl doctor` prints `3` as a
 state ("index: empty — no books added yet") rather than under "The environment is not ready". `ayl init` exits with the same numbers
 (5 when Ollama does not answer; 2 when `LLM_BACKEND` or `EMBED_BACKEND` is neither `ollama` nor
 `openrouter`, when an exported one contradicts the local mode it would write, when a local
@@ -185,8 +185,11 @@ Measured on 2026-09-16
 `name:latest` counts as `name`), and so does `OLLAMA_EMBED_MODEL` whenever embeddings are local —
 otherwise a reachable Ollama without `bge-m3` passes every check and fails on the first search.
 Preflight also separates the two ways `OLLAMA_URL` can disappoint: nothing answered at all
-("could not reach Ollama" — nothing is listening, or the request timed out; start with
-`ollama serve` and the URL) versus something that answered but did not answer as `/api/tags` — an
+("Ollama is not running at ..." — nothing is listening, or the request timed out; the message's
+second line is the action for the platform it runs on — open the Ollama app or `brew install
+ollama` on macOS, install from ollama.com/download or `ollama serve` elsewhere — then `ayl init`,
+and its third names `OLLAMA_URL` and `LLM_BACKEND=openrouter` as the ways around a local Ollama)
+versus something that answered but did not answer as `/api/tags` — an
 HTTP 4xx/5xx, a body that is not JSON, or an unexpected shape — which usually means something other
 than Ollama is on that port, and the message names the status it got. The reply is read whenever
 anything runs on Ollama, embeddings included, so a hosted-model setup gets the same early
