@@ -367,7 +367,9 @@ the folder is indexed as usual:
 - **Could not be read**: anything the library raises while it reads the file — not a PDF, cut
   short, a damaged object, a reference cycle, a stream that inflates past **16 MiB**, a font map
   past the library's own limits, an array or a dictionary of more than **100,000** entries, a
-  page whose instructions hold more than **2 million** tokens. The line names the kind of error
+  page whose instructions hold more than **2 million** tokens (a vector figure of more than about
+  650,000 segments drawn on the page itself; one drawn as a form is skipped and the page read).
+  The line names the kind of error
   (`could not be read (PdfStreamError)`) and nothing of what it said. A damaged cross-reference
   table alone is not a refusal: the library rebuilds it.
 - **Too long or too large to read** — the bound that holds whatever is inside the file. Each PDF

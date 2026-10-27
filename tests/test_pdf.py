@@ -629,6 +629,32 @@ def test_one_array_and_one_dictionary_are_capped(tmp_path, monkeypatch, name, bi
     assert refused(path) == "could not be read (LimitReachedError)"
 
 
+def test_another_cap_met_while_the_page_tree_is_walked_is_not_the_tree_s(tmp_path, monkeypatch):
+    """Counting the pages reads each page's dictionary; an array over its cap
+    there (the media box, lowered to two) is refused as any other cap, not
+    with the page tree's reason, which names its own caps only."""
+    path = make_pdf(tmp_path / "b.pdf", five_pages())
+    monkeypatch.setitem(pdf.CONFIGURATION, "array_maximum_element_count", 2)
+    assert refused(path) == "could not be read (LimitReachedError)"
+    monkeypatch.setitem(pdf.CONFIGURATION, "array_maximum_element_count", pdf.MAX_ARRAY_ELEMENTS)
+    monkeypatch.setitem(pdf.CONFIGURATION, "page_tree_maximum_entries", 4)
+    assert refused(path) == "its page tree is too deep or too large to read"
+
+
+def test_another_cap_met_while_the_outline_is_read_is_not_the_outline_s(tmp_path, monkeypatch):
+    """An outline entry with children and siblings is a dictionary of eight
+    keys; past a dictionary cap of six the note says the outline could not be
+    read, not that it is too deep or too large."""
+    child = Outline("Leaf", 1)
+    outline = [Outline("One", 0), Outline("Two", 1, [child]), Outline("Three", 2)]
+    path = make_pdf(tmp_path / "b.pdf", five_pages(), outline=outline)
+    monkeypatch.setitem(pdf.CONFIGURATION, "dictionary_maximum_element_count", 6)
+    book = pdf.read_in_process(path)
+    assert titles(book)[:2] == ["Page 1", "Page 2"]
+    assert book.notes == ["its outline could not be read (LimitReachedError); its pages are "
+                          "the sections instead"]
+
+
 def test_the_form_field_walk_is_capped_as_the_outline_is():
     """Nothing here walks a form's fields; the caps are the outline's all the same."""
     assert pdf.CONFIGURATION["form_fields_maximum_entries"] == pdf.MAX_OUTLINE_ENTRIES

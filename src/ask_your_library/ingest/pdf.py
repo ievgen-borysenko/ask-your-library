@@ -170,6 +170,12 @@ MAX_PAGE_CHARS = 100_000
 # MAX_PAGE_CHARS written a glyph at a time, each glyph positioned and shown by
 # an instruction of its own, is five to nine tokens a character; twenty leaves
 # room for the drawing around the text. The library's own value, written out.
+# What it refuses that a book can hold: a vector figure drawn in the page's own
+# stream with more than about 650,000 segments (three tokens a segment), some
+# 10 MiB of instructions, refused as `could not be read`; the same figure drawn
+# as a form is skipped and the page read. Kept at the value the library's fix
+# for unbounded parsing chose rather than raised to what MAX_STREAM_BYTES
+# allows: a book read for its text rarely draws such a figure inline.
 MAX_STREAM_TOKENS = 20 * MAX_PAGE_CHARS
 # One array or dictionary, wherever it is read. A real array is a few dozen
 # elements to a few thousand: the largest are a CJK font's widths and the name
@@ -272,6 +278,16 @@ PAGE_SECTION = "Page {n}"
 # The operators that show text, whose string operands are counted against
 # MAX_PAGE_CHARS while the page is interpreted (TJ's are inside its array).
 SHOW_TEXT = frozenset({b"Tj", b"TJ", b"'", b'"'})
+
+# The library's page-tree and outline caps, told apart from its other caps by
+# the start of their messages (matched, never shown: a message can carry a
+# number from the document). Walking either tree reads other objects too: the
+# catalogue, the named destinations, every object an object stream packs with
+# a page; another cap met on one of those is not the tree's, and is refused
+# as any other. A later version that rewords these falls back to that reason.
+PAGE_TREE_LIMITS = ("Maximum page tree depth reached", "Maximum page tree entry limit reached",
+                    "Detected cycle in /Pages hierarchy")
+OUTLINE_LIMITS = ("Maximum outline depth reached", "Maximum outline entry limit reached")
 
 # The child's exit statuses. Anything else (a crash, a signal) is a refusal
 # that names the status and nothing else.
@@ -408,8 +424,13 @@ def read_pdf(path: Path) -> PdfBook:
                 raise PdfRefused(too_slow_reason())
             rss = resident(proc.pid)
             if rss is None:
-                if proc.poll() is None:              # running, and not measurable
-                    raise PdfRefused(UNMEASURED)
+                # On macOS a child on its way out can no longer be read and is
+                # not reaped yet; one sample's wait tells it from a child
+                # running unmeasured, which is refused.
+                try:
+                    proc.wait(timeout=MEMORY_SAMPLE_SECONDS)
+                except subprocess.TimeoutExpired:
+                    raise PdfRefused(UNMEASURED) from None
             elif rss > MAX_CHILD_RSS_BYTES:
                 raise PdfRefused(too_big_reason())
         normal = proc.returncode in (EXIT_READ, EXIT_REFUSED, EXIT_ERROR)
@@ -684,8 +705,8 @@ def read_pages(reader) -> list[str]:
     try:
         count = len(reader.pages)
     except LimitReachedError as error:
-        # Too many entries or too many levels, or one object of the tree over
-        # the array or dictionary cap: the library does not say which.
+        if not str(error).startswith(PAGE_TREE_LIMITS):
+            raise                                    # another cap: `could not be read`
         raise PdfRefused("its page tree is too deep or too large to read") from error
     if count > MAX_PAGES:
         raise PdfRefused(f"it has {count:,} pages, and the limit is {MAX_PAGES:,}")
@@ -753,8 +774,10 @@ def outline_starts(reader, count: int) -> tuple[list[tuple[int, str]], str]:
     from pypdf.errors import LimitReachedError
     try:
         outline = reader.outline
-    except LimitReachedError:
-        return [], "its outline is too deep or too large to read"
+    except LimitReachedError as error:
+        if str(error).startswith(OUTLINE_LIMITS):
+            return [], "its outline is too deep or too large to read"
+        return [], "its outline could not be read (LimitReachedError)"
     except Exception as error:
         return [], f"its outline could not be read ({type(error).__name__})"
     if not outline:
@@ -806,6 +829,9 @@ def read_in_process(path: Path) -> PdfBook:
             if size > MAX_FILE_BYTES:
                 raise PdfRefused(f"the file is larger than {mib(MAX_FILE_BYTES)}")
             with quiet_pypdf(), apply_configuration(**CONFIGURATION):
+                # 6.21.3 also bounds the entries of a cross-reference stream
+                # (`xref_stream_maximum_entries`, 2,000,000); left at the
+                # library's value, so that 6.21.2 stays a floor that runs this.
                 reader = reader_class()(fp, strict=False,
                                         root_object_recovery_limit=MAX_ROOT_RECOVERY)
                 if reader.is_encrypted:

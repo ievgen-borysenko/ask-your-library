@@ -42,17 +42,24 @@
   under both. The instructions of one page may hold 2,000,000 tokens, one array 100,000
   elements and one dictionary 100,000 entries (the library's own values, written out: a page
   at the 100,000-character cap written a glyph at a time needs under a million, and a real
-  array or dictionary is far smaller); the form-field walk, which the reader never makes, is
-  capped at 10,000 fields and 32 levels like the outline (the library allows 100,000 and 100).
+  array or dictionary is far smaller, though a vector figure of more than about 650,000
+  segments drawn in a page's own instructions is over the token cap); the form-field walk,
+  which the reader never makes, is capped at 10,000 fields and 32 levels like the outline (the
+  library allows 100,000 and 100).
   A Brotli-filtered PDF is refused as before, its reason now `could not be read
   (DependencyError)` instead of `(NotImplementedError)` (pypdf 6.20 would use a `brotli`
   native extension if one were importable, and none is locked or installed here, since
   ADR-030 keeps native code off the read path). A PDF with an array or a dictionary over the
   new caps, read before at whatever memory it cost up to the 1 GiB cap (a font `/Differences`
   array of five million names in a 15 KB file cost about 630 MiB), is now refused before that
-  memory is spent: as `its page tree is too deep or too large to read` when the object is
-  part of the page tree, as `could not be read (LimitReachedError)` anywhere else. Nothing
-  else in the reader changed.
+  memory is spent, as `could not be read (LimitReachedError)`, or as the outline note `its
+  outline could not be read (LimitReachedError)` when the object is read with the outline or
+  the named destinations. The page tree's reason (`its page tree is too deep or too large to
+  read`) and the outline's note (`its outline is too deep or too large to read`) are now given
+  only for their own caps. On macOS a PDF the reading process finished with quickly could be
+  refused as `memory cannot be measured here`, when the process was on its way out at the
+  moment its memory was read; it is now given one more look. Nothing else in the reader
+  changed.
 - **The locked OpenTelemetry packages are updated for an advisory.** `uv.lock` moves
   opentelemetry-api 1.44.0 to 1.45.1 (GHSA-xcq7-p3pf-p88h, unbounded `tracestate` parsing),
   with the rest of the OpenTelemetry family, which pins it exactly, and two small packages the

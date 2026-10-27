@@ -1611,21 +1611,38 @@ room for the drawing around the text. One array may hold 100,000 elements and on
 the largest real arrays are a CJK font's widths and the name-tree leaf of a book with many links,
 tens of thousands at most, and a real dictionary holds a few dozen keys. All three are the
 library's own values, written out; a lower one would refuse real books for no bound the process
-boundary does not already give. The form-field walk is never made here (nothing on the read path
+boundary does not already give. What the token cap refuses that a book can hold is a vector figure
+drawn in a page's own instructions with more than about 650,000 segments, some 10 MiB; the same
+figure drawn as a form is skipped and the page read. The cap is kept at the value the library's
+fix chose rather than raised to what the 16 MiB stream cap allows: a book read for its text
+rarely draws such a figure inline. The form-field walk is never made here (nothing on the read path
 asks for a form's fields), and is capped at 10,000 fields and 32 levels like the outline, the
 other tree a book carries (the library allows 100,000 and 100). Two refusals follow. The merge
 gate's `/Differences` fixture above, five million names in a 15 KB file, is now refused by the
 array cap, in the process and the child, before the 630 MiB is spent, as `could not be read
 (LimitReachedError)`; the memory caps still bound what no configuration field reaches (a font's
-maps, a CMap range, a form drawn many times). And a page tree one of whose objects is over the
-array or dictionary cap is refused as `its page tree is too deep or too large to read`, the reason
-the page-tree caps already give, since the library does not say which cap it reached. The
+maps, a CMap range, a form drawn many times). Walking the page tree or the outline reads other
+objects too (the catalogue, the named destinations, every object an object stream packs with a
+page), so a cap met there is not the tree's: the page tree's reason and the outline's note are
+given only for their own caps, told apart by the start of the library's message (matched, never
+shown), and any other cap is `could not be read (LimitReachedError)` for the pages and `its outline
+could not be read (LimitReachedError)` for the outline, which is also what a book without an
+outline gets when its named destinations are over a cap. A later version that rewords those
+messages falls back to the general reasons. 6.21.3 also bounds the entries of a cross-reference
+stream (`xref_stream_maximum_entries`, a constructor argument, 2,000,000 by default); it is left at
+the library's value, so that 6.21.2 stays a floor the reader runs on. Faster refusals showed a race
+in the parent's sampling: on macOS a child on its way out can no longer be read and is not yet
+reaped, and such a child was refused as unmeasured; the parent now waits one sample (20 ms) for it
+before refusing a child it cannot read. The
 replacement of `PdfReader._handle_encryption` was checked against 6.21.3: the reader still calls
 it, with the password, on any encrypted file as it opens it. Measurement: tests that the fixture
 is refused that way in the process and the child, quickly and with the parent's memory flat, that
 a lowered token cap refuses an ordinary page, that a page holding an array or a dictionary of
 twenty is read under the production caps and refused with the cap lowered to ten while a book
-without one still reads, and that each new field holds the value above; no eval report.
+without one still reads, that a cap other than the tree's met while the page tree or the outline
+is read gives the general reason, and that each new field holds the value above; the race, 5
+failures in 20 runs of the child-process tests before the wait and none in 20 after, on an Apple
+M-series machine; no eval report.
 
 ## ADR-031: Staging is never dropped while the live table cannot be opened
 
