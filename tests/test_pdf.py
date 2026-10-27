@@ -630,9 +630,10 @@ def test_one_array_and_one_dictionary_are_capped(tmp_path, monkeypatch, name, bi
 
 
 def test_another_cap_met_while_the_page_tree_is_walked_is_not_the_tree_s(tmp_path, monkeypatch):
-    """Counting the pages reads each page's dictionary; an array over its cap
-    there (the media box, lowered to two) is refused as any other cap, not
-    with the page tree's reason, which names its own caps only."""
+    """Counting the pages reads the tree's own objects; an array over its cap
+    there (the root's `/Kids` of five, the cap lowered to two) is refused as
+    any other cap, not with the page tree's reason, which names its own caps
+    only."""
     path = make_pdf(tmp_path / "b.pdf", five_pages())
     monkeypatch.setitem(pdf.CONFIGURATION, "array_maximum_element_count", 2)
     assert refused(path) == "could not be read (LimitReachedError)"
