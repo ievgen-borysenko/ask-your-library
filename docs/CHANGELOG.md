@@ -32,7 +32,7 @@
   to 6.21.3: 6.20.0 and 6.20.1 fix GHSA-39mj-jf6j-2qj3, GHSA-7mh2-4gg2-979f,
   GHSA-9mx8-4j7g-633p and GHSA-qfv9-64jg-mh7p (#159), 6.21.0 to 6.21.2 fix GHSA-6vvc-x485-93v7,
   GHSA-cgf9-327m-v77c, GHSA-f54x-cmq8-qg57, GHSA-5hx5-vpf9-5wcv and the three High ones,
-  GHSA-6c7f-9265-g8fw, GHSA-gmh7-3g9r-mjh5 and GHSA-jr96-gvgh-j3r4 (#PR). `pyproject.toml` now
+  GHSA-6c7f-9265-g8fw, GHSA-gmh7-3g9r-mjh5 and GHSA-jr96-gvgh-j3r4 (#161). `pyproject.toml` now
   asks for `pypdf>=6.21.2,<7`, since the PDF reader sets every field of the library's
   configuration and 6.20.0 added three, 6.21.0 five more. They are set as the others are: a
   Brotli stream (PDF 2.0, whose decoder is not installed here, so such a stream still fails to

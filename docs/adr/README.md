@@ -1458,7 +1458,7 @@ real books show the need.
 ## ADR-030: PDF is read through its text layer with pypdf, in a child process bounded from outside, and encryption is refused
 
 Status: accepted (2026-10-03, #34, with `ayl add` reading `.pdf`); amended 2026-10-21 (#159) and
-2026-10-27 (#PR), see below.
+2026-10-27 (#161), see below.
 
 The second half of the 0.5.0 criterion: a reader's own PDF, imported on a clean install. Three
 decisions again, and the first is the one the EPUB did not need.
@@ -1594,7 +1594,7 @@ native extension and is not installed, so such a stream is still refused, now as
 four `/FlateDecode` filters is read and one chaining five is refused, in the process and the
 child, and that a lowered decoding-work cap refuses the same way; no eval report.
 
-**Amended 2026-10-27 (#PR): the floor is 6.21.2, and the configuration has five more caps.**
+**Amended 2026-10-27 (#161): the floor is 6.21.2, and the configuration has five more caps.**
 pypdf 6.20.1 still carries seven advisories, three of them High (GHSA-6c7f-9265-g8fw,
 GHSA-gmh7-3g9r-mjh5, GHSA-jr96-gvgh-j3r4: long runtimes on repeated references to a missing
 object and on malformed cross-reference tables), all fixed by 6.21.2; three of the others are the
