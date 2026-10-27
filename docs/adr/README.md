@@ -1457,7 +1457,8 @@ real books show the need.
 
 ## ADR-030: PDF is read through its text layer with pypdf, in a child process bounded from outside, and encryption is refused
 
-Status: accepted (2026-10-03, #34, with `ayl add` reading `.pdf`); amended 2026-10-21 (#159, see below).
+Status: accepted (2026-10-03, #34, with `ayl add` reading `.pdf`); amended 2026-10-21 (#159) and
+2026-10-27 (#PR), see below.
 
 The second half of the 0.5.0 criterion: a reader's own PDF, imported on a clean install. Three
 decisions again, and the first is the one the EPUB did not need.
@@ -1543,12 +1544,13 @@ still engaged were dropped with it.
 
 Inside the child, a first line gives a precise reason fast where the library lets a caller bound
 its work: every field of its configuration is set explicitly, and a test fails when a version adds
-one (each inflated stream at 16 MiB, 4 filters a stream and 128 MiB of decoding work for it, the
-page-tree walk at twice the page cap or 64 levels, the outline at 10,000 entries or 32 levels, 200
-form draws a page, the XMP size and element count, the recovery of a damaged stream, `jbig2dec`
-never called), and the module caps the file at 256 MiB, the pages at 5,000, the text at 100,000
-characters a page — the bytes a page shows counted per instruction through the library's public
-extraction callback, the characters they made after the page — and 20 million a book. The
+one (each inflated stream at 16 MiB, 4 filters a stream and 128 MiB of decoding work for it,
+2,000,000 tokens in one page's instructions, 100,000 elements in one array and 100,000 entries in
+one dictionary, the page-tree walk at twice the page cap or 64 levels, the outline, and the
+form-field walk that is never made, at 10,000 entries or 32 levels, 200 form draws a page, the
+XMP size and element count, the recovery of a damaged stream, `jbig2dec` never called), and the
+module caps the file at 256 MiB, the pages at 5,000, the text at 100,000 characters a page — the
+bytes a page shows counted per instruction through the library's public extraction callback, the characters they made after the page — and 20 million a book. The
 refusals are the EPUB's convention: one line, the file's path inside the folder and a fixed
 reason, never a quote; anything the library raises is named by its class only. Its own log lines
 and warnings are silenced while it reads, because they quote the file (an outline node it could
@@ -1591,6 +1593,39 @@ native extension and is not installed, so such a stream is still refused, now as
 `DependencyError` rather than `NotImplementedError`. Measurement: tests that a stream chaining
 four `/FlateDecode` filters is read and one chaining five is refused, in the process and the
 child, and that a lowered decoding-work cap refuses the same way; no eval report.
+
+**Amended 2026-10-27 (#PR): the floor is 6.21.2, and the configuration has five more caps.**
+pypdf 6.20.1 still carries seven advisories, three of them High (GHSA-6c7f-9265-g8fw,
+GHSA-gmh7-3g9r-mjh5, GHSA-jr96-gvgh-j3r4: long runtimes on repeated references to a missing
+object and on malformed cross-reference tables), all fixed by 6.21.2; three of the others are the
+memory the library could spend parsing a content stream, an array or a dictionary, and walking
+form fields (GHSA-cgf9-327m-v77c, GHSA-f54x-cmq8-qg57, GHSA-6vvc-x485-93v7), and 6.21.0 fixed
+them with five new configuration fields. `pyproject.toml` now bounds the library below at 6.21.2,
+the version verified to have every field the reader sets; the lockfile resolves 6.21.3. The new
+fields are set as the others are. One page's instructions may hold 2,000,000 tokens, operands,
+operators and the elements of their arrays and dictionaries counted alike (`MAX_STREAM_TOKENS`,
+20 x `MAX_PAGE_CHARS`): a page at the text cap written a glyph at a time, each glyph positioned
+and shown by an instruction of its own, needs five to nine tokens a character, and the rest is
+room for the drawing around the text. One array may hold 100,000 elements and one dictionary
+100,000 entries (`MAX_ARRAY_ELEMENTS`, `MAX_DICTIONARY_ENTRIES`), wherever the library reads one:
+the largest real arrays are a CJK font's widths and the name-tree leaf of a book with many links,
+tens of thousands at most, and a real dictionary holds a few dozen keys. All three are the
+library's own values, written out; a lower one would refuse real books for no bound the process
+boundary does not already give. The form-field walk is never made here (nothing on the read path
+asks for a form's fields), and is capped at 10,000 fields and 32 levels like the outline, the
+other tree a book carries (the library allows 100,000 and 100). Two refusals follow. The merge
+gate's `/Differences` fixture above, five million names in a 15 KB file, is now refused by the
+array cap, in the process and the child, before the 630 MiB is spent, as `could not be read
+(LimitReachedError)`; the memory caps still bound what no configuration field reaches (a font's
+maps, a CMap range, a form drawn many times). And a page tree one of whose objects is over the
+array or dictionary cap is refused as `its page tree is too deep or too large to read`, the reason
+the page-tree caps already give, since the library does not say which cap it reached. The
+replacement of `PdfReader._handle_encryption` was checked against 6.21.3: the reader still calls
+it, with the password, on any encrypted file as it opens it. Measurement: tests that the fixture
+is refused that way in the process and the child, quickly and with the parent's memory flat, that
+a lowered token cap refuses an ordinary page, that a page holding an array or a dictionary of
+twenty is read under the production caps and refused with the cap lowered to ten while a book
+without one still reads, and that each new field holds the value above; no eval report.
 
 ## ADR-031: Staging is never dropped while the live table cannot be opened
 

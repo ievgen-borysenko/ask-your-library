@@ -29,17 +29,36 @@
   yarl moves from 1.24.5 to 1.25.1 because the new aiohttp requires it. `pyproject.toml` is
   unchanged; no application behaviour changed, and certifi drops the emSign roots.
 - **The locked PDF library is updated for the open advisories.** `uv.lock` moves pypdf 6.19.0
-  to 6.20.1 (GHSA-39mj-jf6j-2qj3, GHSA-7mh2-4gg2-979f, GHSA-9mx8-4j7g-633p,
-  GHSA-qfv9-64jg-mh7p), and `pyproject.toml` now asks for `pypdf>=6.20.1,<7`, since the PDF
-  reader sets every field of the library's configuration and 6.20.0 added three. They are set
-  as the others are: a Brotli stream (PDF 2.0, whose decoder is not installed here, so such a
-  stream still fails to decode) is capped at 16 MiB like every other inflated stream, one stream
-  may chain at most 4 filters (the library allows 16), and the bytes its decoding passes
-  through are capped at 128 MiB (the library allows 300 MB); a real book's streams use one
-  or two filters and stay far under both. A Brotli-filtered PDF is refused as before, its reason
-  now `could not be read (DependencyError)` instead of `(NotImplementedError)`; pypdf 6.20 would
-  use a `brotli` native extension if one were importable, and none is locked or installed here,
-  since ADR-030 keeps native code off the read path. Nothing else in the reader changed.
+  to 6.21.3: 6.20.0 and 6.20.1 fix GHSA-39mj-jf6j-2qj3, GHSA-7mh2-4gg2-979f,
+  GHSA-9mx8-4j7g-633p and GHSA-qfv9-64jg-mh7p (#159), 6.21.0 to 6.21.2 fix GHSA-6vvc-x485-93v7,
+  GHSA-cgf9-327m-v77c, GHSA-f54x-cmq8-qg57, GHSA-5hx5-vpf9-5wcv and the three High ones,
+  GHSA-6c7f-9265-g8fw, GHSA-gmh7-3g9r-mjh5 and GHSA-jr96-gvgh-j3r4 (#PR). `pyproject.toml` now
+  asks for `pypdf>=6.21.2,<7`, since the PDF reader sets every field of the library's
+  configuration and 6.20.0 added three, 6.21.0 five more. They are set as the others are: a
+  Brotli stream (PDF 2.0, whose decoder is not installed here, so such a stream still fails to
+  decode) is capped at 16 MiB like every other inflated stream, one stream may chain at most 4
+  filters (the library allows 16), and the bytes its decoding passes through are capped at 128
+  MiB (the library allows 300 MB); a real book's streams use one or two filters and stay far
+  under both. The instructions of one page may hold 2,000,000 tokens, one array 100,000
+  elements and one dictionary 100,000 entries (the library's own values, written out: a page
+  at the 100,000-character cap written a glyph at a time needs under a million, and a real
+  array or dictionary is far smaller); the form-field walk, which the reader never makes, is
+  capped at 10,000 fields and 32 levels like the outline (the library allows 100,000 and 100).
+  A Brotli-filtered PDF is refused as before, its reason now `could not be read
+  (DependencyError)` instead of `(NotImplementedError)` (pypdf 6.20 would use a `brotli`
+  native extension if one were importable, and none is locked or installed here, since
+  ADR-030 keeps native code off the read path). A PDF with an array or a dictionary over the
+  new caps, read before at whatever memory it cost up to the 1 GiB cap (a font `/Differences`
+  array of five million names in a 15 KB file cost about 630 MiB), is now refused before that
+  memory is spent: as `its page tree is too deep or too large to read` when the object is
+  part of the page tree, as `could not be read (LimitReachedError)` anywhere else. Nothing
+  else in the reader changed.
+- **The locked OpenTelemetry packages are updated for an advisory.** `uv.lock` moves
+  opentelemetry-api 1.44.0 to 1.45.1 (GHSA-xcq7-p3pf-p88h, unbounded `tracestate` parsing),
+  with the rest of the OpenTelemetry family, which pins it exactly, and two small packages the
+  new exporter requires (opentelemetry-exporter-http-transport, opentelemetry-exporter-otlp-common).
+  They come in only with the `ui` extra, through Chainlit's tracing dependency; nothing in this
+  project calls them.
 
 ## 0.5.1 (2026-10-05)
 

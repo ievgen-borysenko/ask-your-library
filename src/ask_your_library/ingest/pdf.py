@@ -95,9 +95,12 @@ fast, on what the library lets a caller bound:
 - **the library's configuration**, every field set explicitly (`CONFIGURATION`):
   each inflated stream capped (`MAX_STREAM_BYTES`), the filters one stream
   chains (`MAX_STREAM_FILTERS`) and the bytes its decoding passes through
-  (`MAX_STREAM_DECODING_BYTES`), the page-tree walk stopped
-  past `2 * MAX_PAGES` entries or `MAX_PAGE_TREE_DEPTH` levels and the outline
-  walk past `MAX_OUTLINE_ENTRIES` entries or `MAX_OUTLINE_DEPTH` levels, at most
+  (`MAX_STREAM_DECODING_BYTES`), the tokens one page's instructions hold
+  (`MAX_STREAM_TOKENS`), the elements of one array (`MAX_ARRAY_ELEMENTS`) and
+  the entries of one dictionary (`MAX_DICTIONARY_ENTRIES`), the page-tree walk
+  stopped past `2 * MAX_PAGES` entries or `MAX_PAGE_TREE_DEPTH` levels and the
+  outline walk, and the form-field walk that is never made, past
+  `MAX_OUTLINE_ENTRIES` entries or `MAX_OUTLINE_DEPTH` levels, at most
   `MAX_FORM_DRAWS` forms drawn a page, XMP size and element count, the
   recovery of a damaged stream; the library also detects reference cycles,
   forbids entity declarations in XMP and rebuilds a damaged cross-reference
@@ -109,12 +112,13 @@ fast, on what the library lets a caller bound:
   (`MAX_PAGE_CHARS`); the characters of the whole book (`MAX_TOTAL_CHARS`).
 
 What these do not bound — the work and memory the library spends building a
-font's maps, a `/Differences` array of millions of names, a CMap range that
-stands for 65,536 entries, a form drawn two hundred times — the process
-boundary does. An earlier version counted those from inside, by replacing names
-in the library; each review found one more allocation the counters did not
-see, and the process boundary is the bound that does not depend on finding
-them all.
+font's maps, a CMap range that stands for 65,536 entries, a form drawn two
+hundred times — the process boundary does. (A `/Differences` array of millions
+of names was one of them until the library capped the elements of an array;
+it is now refused by that cap before it costs memory.) An earlier version
+counted those from inside, by replacing names in the library; each review
+found one more allocation the counters did not see, and the process boundary
+is the bound that does not depend on finding them all.
 
 The child prints one JSON document on stdout and exits with a known status
 (`EXIT_READ`, `EXIT_REFUSED`, `EXIT_ERROR`; `EXIT_MEMORY` and
@@ -161,6 +165,18 @@ MAX_STREAM_FILTERS = 4
 # counted bytes, not which books can be read.
 MAX_STREAM_DECODING_BYTES = 2 * MAX_STREAM_FILTERS * MAX_STREAM_BYTES
 MAX_PAGE_CHARS = 100_000
+# The tokens one content stream may hold, its operands, operators and the
+# elements of their arrays and dictionaries counted alike. A page at
+# MAX_PAGE_CHARS written a glyph at a time, each glyph positioned and shown by
+# an instruction of its own, is five to nine tokens a character; twenty leaves
+# room for the drawing around the text. The library's own value, written out.
+MAX_STREAM_TOKENS = 20 * MAX_PAGE_CHARS
+# One array or dictionary, wherever it is read. A real array is a few dozen
+# elements to a few thousand: the largest are a CJK font's widths and the name
+# tree leaf of a book with many links, tens of thousands at most; a real
+# dictionary holds a few dozen keys. The library's own values, written out.
+MAX_ARRAY_ELEMENTS = 100_000
+MAX_DICTIONARY_ENTRIES = 100_000
 MAX_TOTAL_CHARS = 20_000_000
 MAX_OUTLINE_ENTRIES = 10_000
 # A real outline is a few levels deep and a real page tree four or five; the
@@ -206,6 +222,10 @@ CONFIGURATION = dict(
     # The filters one stream chains, and the bytes its decoding passes through.
     stream_filters_maximum_length=MAX_STREAM_FILTERS,
     stream_decoding_work_maximum_length=MAX_STREAM_DECODING_BYTES,
+    # The parsing of a page's instructions, and of any array or dictionary.
+    stream_parsing_work_maximum_count=MAX_STREAM_TOKENS,
+    array_maximum_element_count=MAX_ARRAY_ELEMENTS,
+    dictionary_maximum_element_count=MAX_DICTIONARY_ENTRIES,
     # A page whose content is split over several streams, joined.
     array_based_stream_maximum_output_length=MAX_STREAM_BYTES,
     # Images are never decoded here; capped all the same.
@@ -220,6 +240,10 @@ CONFIGURATION = dict(
     outline_maximum_entries=MAX_OUTLINE_ENTRIES,
     outline_maximum_depth=MAX_OUTLINE_DEPTH,
     xform_maximum_invocations_per_extraction=MAX_FORM_DRAWS,
+    # Form fields are never read here (nothing on this path walks the field
+    # tree); capped as the outline is, the other tree a book may carry.
+    form_fields_maximum_entries=MAX_OUTLINE_ENTRIES,
+    form_fields_maximum_depth=MAX_OUTLINE_DEPTH,
     xmp_maximum_input_length=MAX_XMP_BYTES,
     xmp_maximum_element_count=MAX_XMP_ELEMENTS,
     # The one external program the library can start (JBIG2 images): never.
@@ -660,7 +684,8 @@ def read_pages(reader) -> list[str]:
     try:
         count = len(reader.pages)
     except LimitReachedError as error:
-        # Too many entries or too many levels: the library does not say which.
+        # Too many entries or too many levels, or one object of the tree over
+        # the array or dictionary cap: the library does not say which.
         raise PdfRefused("its page tree is too deep or too large to read") from error
     if count > MAX_PAGES:
         raise PdfRefused(f"it has {count:,} pages, and the limit is {MAX_PAGES:,}")
