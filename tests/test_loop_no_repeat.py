@@ -158,6 +158,11 @@ def test_with_nothing_queued_the_probe_runs_once_and_then_the_loop_stops(monkeyp
                       "query_replaced": {"from": "castaway", "to": ""}}
     assert nodes.route_after_reflect({**after, **second}) == "synthesize"
 
+    # The same probe reached from an empty proposal replaced no search: the
+    # event says what runs and names no repeat.
+    decide(monkeypatch, decision="search", next_query="")
+    assert nodes.reflect(state) == {"current_query": probe, "queries": [], "coverage_probed": True}
+
 
 def test_an_ineligible_probe_means_the_loop_stops_at_once(monkeypatch):
     decide(monkeypatch, decision="search", next_query="q1")
@@ -198,8 +203,8 @@ def test_an_empty_proposal_with_nothing_queued_is_the_new_stop_not_a_silent_end(
     """It used to return an empty query and no reason, which every renderer
     read as "enough". With a queued query the old fallback is unchanged."""
     decide(monkeypatch, decision="search", next_query="")
-    assert nodes.reflect(reflect_state()) == {"current_query": "", "stop_reason": t("stop_no_new_query"),
-                                              "query_replaced": {"from": "", "to": ""}}
+    # no search was repeated, so the event names none (`query_replaced` is for repeats only)
+    assert nodes.reflect(reflect_state()) == {"current_query": "", "stop_reason": t("stop_no_new_query")}
     assert nodes.reflect(reflect_state(queries=["q2"])) == {"current_query": "q2", "queries": []}
 
 

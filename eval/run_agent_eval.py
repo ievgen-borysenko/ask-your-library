@@ -371,6 +371,7 @@ class GateLedger:
         self._step = 0        # the step number `act` last announced
         self._evidence = 0    # evidence items ON THE STATE as of the last update
         self._dropped = 0     # dropped_unverified, the run total so far
+        self._copies = 0      # duplicates_skipped, the run total so far (#163)
 
     def see(self, node_name: str, update: dict) -> None:
         """One node's update, in the order the runner delivers them."""
@@ -387,8 +388,14 @@ class GateLedger:
             kept = 0 if timed_out else max(0, len(update.get("evidence") or []) - self._evidence)
             dropped = 0 if timed_out else max(
                 0, int(update.get("dropped_unverified", self._dropped)) - self._dropped)
+            # A quote the gate confirmed and observe skipped as a copy of
+            # evidence the run already held (#163) is neither kept nor dropped,
+            # but it was distilled: without it a step of copies reads as a
+            # quote-less one.
+            copies = 0 if timed_out else max(
+                0, int(update.get("duplicates_skipped", self._copies)) - self._copies)
             streak = int(update.get("dropped_streak", 0) or 0)
-            row = {"step": self._step, "distilled": kept + dropped, "kept": kept,
+            row = {"step": self._step, "distilled": kept + dropped + copies, "kept": kept,
                    "dropped": dropped, "dropped_streak": streak,
                    # True on the MAX_DROPPED_STREAK'th all-dropped step in a row
                    # AND on every all-dropped step after it: each of them counts
@@ -397,6 +404,8 @@ class GateLedger:
                    "cap_fired": streak >= MAX_DROPPED_STREAK}
             if timed_out:
                 row["timed_out"] = True
+            if copies:
+                row["duplicates"] = copies
             self.steps.append(row)
         # Read on EVERY node and after the row above: `plan` rewrites the
         # evidence list when a clarify reply narrows the run to one book, and
@@ -406,6 +415,8 @@ class GateLedger:
             self._evidence = len(update["evidence"])
         if isinstance(update.get("dropped_unverified"), int):
             self._dropped = update["dropped_unverified"]
+        if isinstance(update.get("duplicates_skipped"), int):
+            self._copies = update["duplicates_skipped"]
 
     @property
     def peak_dropped_streak(self) -> int:
@@ -453,7 +464,8 @@ class LoopLedger:
                     for h in update.get("hits_log") or []}
             self.new_passages.append(len(step - self._seen))
             self._seen |= step
-        elif node_name == "reflect" and (update.get("query_replaced") or {}).get("to"):
+        elif node_name == "reflect" and all((update.get("query_replaced") or {}).get(k)
+                                            for k in ("from", "to")):
             self.replacements += 1
 
 

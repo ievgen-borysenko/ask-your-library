@@ -1171,3 +1171,28 @@ def test_under_repeat_the_loop_s_record_is_per_attempt(monkeypatch, tmp_path):
     report = only(out, ".md").read_text(encoding="utf-8")
     assert "- normalised search repeats 1–1 over 2 attempts" in report
     assert "- steps with no new passage 2–2 over 2 attempts" in report
+
+
+def test_a_step_of_copies_is_distilled_and_not_kept():
+    """A quote observe skipped as a copy (#163) was judged by the gate, so the
+    row counts it as distilled, says how many, and keeps `kept` honest."""
+    book = ledger(("act", {"steps_taken": 1}),
+                  ("observe", {"evidence": evidence_list(2), "empty_streak": 0}),
+                  ("act", {"steps_taken": 2}),
+                  ("observe", {"evidence": evidence_list(2), "empty_streak": 1,
+                               "duplicates_skipped": 2}))
+    assert book.steps[1] == {"step": 2, "distilled": 2, "kept": 0, "dropped": 0, "dropped_streak": 0,
+                             "cap_fired": False, "duplicates": 2}
+    assert "duplicates" not in book.steps[0]
+
+
+def test_the_loop_ledger_counts_only_the_repeats_it_replaced():
+    """A probe reached from an empty proposal replaced nothing, and a repeat
+    that stopped the loop is the stop reason, not a replacement."""
+    loop = harness.LoopLedger()
+    loop.see("reflect", {"current_query": "q2", "queries": [],
+                         "query_replaced": {"from": "q1", "to": "q2"}})
+    loop.see("reflect", {"current_query": "__book__|b|q", "queries": [], "coverage_probed": True})
+    loop.see("reflect", {"current_query": "", "stop_reason": "no new query",
+                         "query_replaced": {"from": "q1", "to": ""}})
+    assert loop.replacements == 1

@@ -137,7 +137,9 @@ def normalise_query(query: str) -> str:
     ends. "Ahab's leg?" and "  ahab's   LEG " are one search; "Ahab leg" is
     another, and so is any paraphrase — this is a repeat check, not a
     similarity measure. `catalog.fold` is not reused: it also drops accents,
-    and a search engine that ranks by the words it was given does not."""
+    and a search engine that ranks by the words it was given does not.
+    Limit: a query whose last character is punctuation that carries meaning
+    loses it here, so "C#" and "C" are one search."""
     text = " ".join(unicodedata.normalize("NFKC", query).casefold().split())
     start, end = 0, len(text)
     while start < end and (text[start].isspace() or unicodedata.category(text[start])[0] == "P"):
@@ -992,12 +994,18 @@ def reflect(state: AgentState) -> dict:
     # search the run has not made — and after that there is nothing left to
     # search that could show anything new, so the loop stops on its own reason
     # instead of spending the steps it has left on passages it already holds.
+    # `query_replaced` reports a repeat and nothing else: an empty proposal that
+    # ends up here replaced no search, and its event says only what ran or why
+    # the loop stopped.
     probe = coverage_probe(state, "enough")
     if probe and _is_new_search(state, probe, ran):
-        return {"current_query": probe, "queries": _without(state, queued, probe),
-                "coverage_probed": True, "query_replaced": {"from": repeat, "to": probe}}
-    return {"current_query": "", "stop_reason": t("stop_no_new_query"),
-            "query_replaced": {"from": repeat, "to": ""}}
+        update = {"current_query": probe, "queries": _without(state, queued, probe),
+                  "coverage_probed": True}
+    else:
+        update = {"current_query": "", "stop_reason": t("stop_no_new_query")}
+    if repeat:
+        update["query_replaced"] = {"from": repeat, "to": update["current_query"]}
+    return update
 
 
 def route_after_plan(state: AgentState) -> str:

@@ -87,7 +87,9 @@ them apart. The sidecar now carries `gate_steps` per attempt: one row per `obser
 that step, `cap_fired` (that step was the `MAX_DROPPED_STREAK`th all-dropped one in a row, **or a
 later one in the same run** — each of them counts dry) and, only where it happened, `timed_out` (the
 step's own `observe` call ran out of time, so it distilled, kept and dropped nothing; without the
-mark the row is a dry step's row exactly). Beside them, `peak_dropped_streak` and `cap_fired` for the
+mark the row is a dry step's row exactly), and since #163, only where it happened, `duplicates` (quotes
+the gate confirmed that `observe` skipped as copies of evidence the run already held; `distilled`
+counts them, `kept` does not). Beside them, `peak_dropped_streak` and `cap_fired` for the
 question, and `cap_fired_items` in the totals, which the summary line reports as "the all-dropped cap
 fired on N item(s)".
 

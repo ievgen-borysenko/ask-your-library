@@ -92,8 +92,7 @@ def test_reflect_step_says_which_search_already_ran(ui, monkeypatch):
                             + t("ui_stopped", r=t("stop_no_new_query")))
     assert shown[-1][2] is True
     # nothing named, nothing said: the stop line alone
-    ui.render_event("reflect", {"current_query": "", "stop_reason": t("stop_no_new_query"),
-                                "query_replaced": {"from": "", "to": ""}})
+    ui.render_event("reflect", {"current_query": "", "stop_reason": t("stop_no_new_query")})
     assert shown[-1][1] == t("ui_stopped", r=t("stop_no_new_query"))
 
 def test_badge_is_green_only_when_nothing_is_broken_or_unattributed(ui):
