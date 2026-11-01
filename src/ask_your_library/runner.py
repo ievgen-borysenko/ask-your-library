@@ -35,7 +35,8 @@ Event contract (node_name -> keys present in update):
              The provenance gate (#29) adds dropped_unverified with dropped_by_reason
              (no_hit / cross_book / short / not_found, summing to it) and repinned — run
              totals, each present ONLY on a step that spent it, so a run where every quote
-             checks out emits exactly the event it always did
+             checks out emits exactly the event it always did; duplicates_skipped (run
+             total of quotes the evidence already held, #163) on the same rule
   reflect    current_query ("" = synthesize; "__clarify__" + clarify_candidates; "__chapter__|book|section"
              or "__chapter_q__|looking for|book|section";
              "__book__|book|query" = coverage probe, one search inside one candidate) + coverage_probed;
@@ -94,6 +95,7 @@ def initial_state(question: str, history: list[str], scratchpad: Path) -> dict:
         "hits": [], "hits_log": [], "evidence": [], "steps_taken": 0,
         "empty_streak": 0, "dropped_streak": 0,
         "dropped_unverified": 0, "dropped_by_reason": {}, "repinned": 0, "dropped_quotes": [],
+        "duplicates_skipped": 0,
         "clarification": "", "clarify_asked": False, "coverage_probed": False,
         "plan_fallback": False, "catalog_fallback": "",
         "clarify_candidates": [], "clarify_unresolved": False, "clarify_chosen": "",
@@ -203,6 +205,8 @@ class RunResult:
     dropped_unverified: int = 0
     dropped_by_reason: dict = field(default_factory=dict)
     repinned: int = 0
+    # quotes not added again because the evidence already held them (#163)
+    duplicates_skipped: int = 0
     # the clarify interrupt: whether it happened at all (the runner knows, the
     # state does not say it after a resume), what was offered and what code
     # resolved the reply to
@@ -274,6 +278,7 @@ def _result(question: str, state: dict, usage: dict, seconds: float,
         dropped_unverified=int(state.get("dropped_unverified") or 0),
         dropped_by_reason=dict(state.get("dropped_by_reason") or {}),
         repinned=int(state.get("repinned") or 0),
+        duplicates_skipped=int(state.get("duplicates_skipped") or 0),
         clarify_asked=clarify_asked,
         clarify_candidates=state.get("clarify_candidates") or [],
         clarify_unresolved=bool(state.get("clarify_unresolved")),

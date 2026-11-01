@@ -9,6 +9,10 @@ and `reflect` replaces a repeat with the first unrun queued query, gives the
 coverage gate its one chance when none is left, and otherwise stops with its own
 reason.
 
+The same run counted a quote it already held as progress: `observe` now keeps
+one copy of each (book, section, normalised quote), and a step whose quotes were
+all copies is dry.
+
 No LLM, no network, no index: `llm.ask_json` and `search_both` are fakes.
 """
 import pytest
@@ -277,3 +281,95 @@ def test_the_cli_names_the_search_that_already_ran(capsys):
                      t("ev_reflect_repeat", q="q1"),
                      t("ev_reflect_stopped", r=t("stop_no_new_query")),
                      t("ev_reflect_search", q="q3")]
+
+
+# ---------------------------------------------------------------- one quote, one piece of evidence
+OBSERVED = [{"hit_id": "s2h1", "corpus": "transcripts", "book": MOBY, "section": "Chapter 1",
+             "text": "Call me Ishmael. Some years ago I thought I would sail about a little."},
+            {"hit_id": "s2h2", "corpus": "transcripts", "book": MOBY, "section": "Chapter 1",
+             "text": "Call me Ishmael. The watery part of the world."},
+            {"hit_id": "s2h3", "corpus": "transcripts", "book": GULLIVER, "section": "Chapter 1",
+             "text": "Call me Ishmael, said nobody in Lilliput."}]
+HELD = {"hit_id": "s1h2", "book": MOBY, "section": "Chapter 1", "quote": "Call me Ishmael.", "why": "w"}
+
+
+def observe_with(monkeypatch, distilled, **over) -> dict:
+    """`observe` over OBSERVED with a fixed distillate; `over` sets the state,
+    the evidence the run already holds included."""
+    from ask_your_library import provenance
+    monkeypatch.setattr(llm, "ask_json", lambda system, user, role: {"evidence": distilled})
+    monkeypatch.setattr(provenance, "HIT_ID_STRICT", True)
+    llm.reset_usage()
+    state = {"question": "q", "current_query": "cq", "steps_taken": 2, "empty_streak": 0,
+             "evidence": [], "hits": [dict(h) for h in OBSERVED]}
+    state.update(over)
+    return nodes.observe(state)
+
+
+def item(hit_id, quote):
+    return {"hit_id": hit_id, "book": "x", "quote": quote, "why": "w"}
+
+
+def test_a_quote_taken_twice_in_one_step_is_kept_once(monkeypatch):
+    result = observe_with(monkeypatch, [item("s2h1", "Call me Ishmael."),
+                                        item("s2h2", "call me  ISHMAEL")])
+    assert [e["hit_id"] for e in result["evidence"]] == ["s2h1"]       # the first copy is kept
+    assert result["duplicates_skipped"] == 1 and result["empty_streak"] == 0
+    assert llm._usage().evidence_distilled == 1
+
+
+def test_a_quote_the_evidence_already_holds_is_not_progress(monkeypatch):
+    """Only copies: the step is dry, exactly like a step with no evidence."""
+    result = observe_with(monkeypatch, [item("s2h1", "Call me Ishmael")],
+                          evidence=[HELD], empty_streak=1, duplicates_skipped=2)
+    assert result == {"evidence": [HELD], "empty_streak": 2, "duplicates_skipped": 3}
+
+
+def test_the_same_words_in_another_section_or_book_are_new_evidence(monkeypatch):
+    other_book = observe_with(monkeypatch, [item("s2h3", "Call me Ishmael")], evidence=[HELD])
+    assert len(other_book["evidence"]) == 2 and "duplicates_skipped" not in other_book
+    elsewhere = {**HELD, "section": "Chapter 9"}
+    other_section = observe_with(monkeypatch, [item("s2h1", "Call me Ishmael.")], evidence=[elsewhere])
+    assert len(other_section["evidence"]) == 2 and other_section["empty_streak"] == 0
+
+
+def test_one_new_quote_beside_a_copy_resets_the_streak(monkeypatch):
+    result = observe_with(monkeypatch, [item("s2h1", "Call me Ishmael."),
+                                        item("s2h2", "The watery part of the world.")],
+                          evidence=[HELD], empty_streak=1)
+    assert [e["quote"] for e in result["evidence"]] == ["Call me Ishmael.", "The watery part of the world."]
+    assert result["empty_streak"] == 0 and result["duplicates_skipped"] == 1
+
+
+def test_a_copy_beside_a_dropped_quote_follows_the_dropped_rule(monkeypatch):
+    """#29 decides a step that dropped a quote: held on the first such step,
+    dry from MAX_DROPPED_STREAK in a row. A copy beside it changes neither."""
+    from ask_your_library import config
+    distilled = [item("s2h1", "Call me Ishmael."), item("s2h1", "Ishmael was a lawyer in Boston.")]
+    held = observe_with(monkeypatch, distilled, evidence=[HELD], empty_streak=1)
+    assert held["empty_streak"] == 1 and held["dropped_streak"] == 1
+    assert held["dropped_unverified"] == 1 and held["duplicates_skipped"] == 1
+    capped = observe_with(monkeypatch, distilled, evidence=[HELD], empty_streak=0,
+                          dropped_streak=config.MAX_DROPPED_STREAK - 1)
+    assert capped["empty_streak"] == 1 and capped["dropped_streak"] == config.MAX_DROPPED_STREAK
+
+
+def test_a_step_without_copies_returns_the_update_it_always_did(monkeypatch):
+    result = observe_with(monkeypatch, [item("s2h1", "Call me Ishmael.")])
+    assert set(result) == {"evidence", "empty_streak"}
+
+
+def test_the_scratchpad_says_how_many_copies_were_skipped(monkeypatch, tmp_path):
+    scratchpad = tmp_path / "s.md"
+    scratchpad.write_text("")
+    observe_with(monkeypatch, [item("s2h1", "Call me Ishmael.")], evidence=[HELD],
+                 scratchpad_path=str(scratchpad))
+    assert "### observe, step 2: kept 0, dropped 0, 1 already in the evidence" in scratchpad.read_text()
+
+
+def test_the_result_carries_the_run_total():
+    from ask_your_library.runner import _result
+    result = _result("q", {"duplicates_skipped": 4, "searches_run": [["q1", ""]]}, {}, 0.0, None,
+                     False, None)
+    assert result.duplicates_skipped == 4 and result.searches_run == [["q1", ""]]
+    assert _result("q", {}, {}, 0.0, None, False, None).duplicates_skipped == 0

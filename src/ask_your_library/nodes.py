@@ -38,8 +38,8 @@ from .library import (HEAD_MARKER_PREFIX, BookEntry, chapter_is_cut, list_books,
                       read_chapter, search_both)
 from .llm import data_block
 from .prompts import OBSERVE_RULES, PLAN_RULES, REFLECT_RULES, SYNTHESIZE_RULES
-from .provenance import (_valid_evidence, validate, window_around,  # noqa: F401  (validate is wired by graph.py)
-                         window_span)
+from .provenance import (_normalize, _valid_evidence, validate,  # noqa: F401  (validate is wired by graph.py)
+                         window_around, window_span)
 from .sanitize import sanitize_context, strip_control_chars
 from .state import AgentState, is_loop_marker
 
@@ -623,7 +623,7 @@ def _best_effort(path: str, write) -> None:
 
 
 def _log_observed(state: AgentState, kept: list[dict], dropped=(), filtered=(),
-                  note: str = "") -> None:
+                  note: str = "", duplicates: int = 0) -> None:
     """What `observe` made of this step, appended to the scratchpad under the
     passages `act` wrote there (#81): the evidence it kept, the quotes the
     provenance gate refused and why, and anything the clarify filter took off.
@@ -640,7 +640,8 @@ def _log_observed(state: AgentState, kept: list[dict], dropped=(), filtered=(),
     step = state.get("steps_taken", 0)
     lines = [f"### observe, step {step}: " + (note or
              f"kept {len(kept)}, dropped {len(dropped)}"
-             + (f", filtered {len(filtered)}" if filtered else ""))]
+             + (f", filtered {len(filtered)}" if filtered else "")
+             + (f", {duplicates} already in the evidence" if duplicates else ""))]
     for e in kept:
         lines += [f"<<<kept>>> {s(e.get('hit_id', ''))} | {s(e['book'])} | {s(e['section'])}",
                   f"quote: \"{s(e['quote'])}\"", f"why: {s(e.get('why', ''))}"]
@@ -737,9 +738,25 @@ def observe(state: AgentState) -> dict:
         # After a resolved clarify, evidence about the rejected candidates
         # must not creep back in through later searches.
         new_evidence = [e for e in new_evidence if e["book"] == state["clarify_chosen"]]
-    _log_observed(state, new_evidence, gate.dropped,
-                  [e for e in gate.evidence if e not in new_evidence],
-                  note="no usable JSON, nothing kept" if no_json else "")
+    filtered = [e for e in gate.evidence if e not in new_evidence]
+    # One quote is one piece of evidence (#163). A passage that comes back on a
+    # later step — or twice in one step — yields the same quote again, and
+    # before this it was kept again: a comparison ended with 9 items, 5 of them
+    # unique, and a step whose only "evidence" was a repeat reset the dry
+    # streak, so the CRAG gate never fired on a run that had stopped learning.
+    # The key is the book, the section and the quote as the gate compares
+    # quotes (`provenance._normalize`); the first copy is the one kept.
+    seen = {(e["book"], e["section"], _normalize(e["quote"])) for e in state["evidence"]}
+    unique: list[dict] = []
+    for e in new_evidence:
+        key = (e["book"], e["section"], _normalize(e["quote"]))
+        if key not in seen:
+            seen.add(key)
+            unique.append(e)
+    duplicates = len(new_evidence) - len(unique)
+    new_evidence = unique
+    _log_observed(state, new_evidence, gate.dropped, filtered,
+                  note="no usable JSON, nothing kept" if no_json else "", duplicates=duplicates)
     llm._usage().evidence_distilled += len(new_evidence)
     # CRAG gate, and the one place #29 could have cost behaviour instead of
     # buying provenance (system-design review 16.09 §3(a); the owner's decision
@@ -762,6 +779,11 @@ def observe(state: AgentState) -> dict:
     # step breaks the run, a dry one included, because a dry step is the library
     # being silent and says nothing about the model's quoting. Carrying the
     # count across it would end a later run of one on somebody else's evidence.
+    #
+    # A step whose quotes were all copies of evidence the run already held is
+    # dry by the same reading (#163): the library gave nothing it had not given
+    # before. Unless it also dropped a quote — then the rule above decides, as
+    # for any step that dropped one, and a duplicate never makes it drier.
     if new_evidence:
         empty_streak = dropped_streak = 0
     elif gate.dropped_unverified:
@@ -797,6 +819,11 @@ def observe(state: AgentState) -> dict:
                                     + list(gate.dropped))[-DROPPED_QUOTES_SHOWN:]
     if gate.repinned:
         update["repinned"] = state.get("repinned", 0) + gate.repinned
+    if duplicates:
+        # A run total, on the same rule as the gate's counters: present only on
+        # a step that skipped one, so a run without duplicates emits the update
+        # it has always emitted.
+        update["duplicates_skipped"] = state.get("duplicates_skipped", 0) + duplicates
     return update
 
 

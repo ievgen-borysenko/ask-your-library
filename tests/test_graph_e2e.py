@@ -631,9 +631,13 @@ def test_synthesize_is_never_given_a_quote_that_failed_the_gate(run):
 
 def test_step_limit_ends_the_loop_with_an_honest_stop_reason(run):
     steps = config.MAX_STEPS
+    # A different quote of the same card on every step: one quote taken twice is
+    # one piece of evidence (#163), and a step that only repeats one is dry.
+    words = CORPUS[MOBY]["cards"][1].split()
     model = ScriptedModel(
         plan=[{"mode": "answer", "queries": [f"q{i}" for i in range(steps + 2)]}],
-        observe=[{"evidence": [evidence(MOBY, "cards", f"s{i}h1")]} for i in range(1, steps + 1)],
+        observe=[{"evidence": [evidence(MOBY, "cards", f"s{i}h1", quote=" ".join(words[:3 + i]))]}
+                 for i in range(1, steps + 1)],
         reflect=[{"decision": "search", "next_query": f"q{i}"} for i in range(1, steps + 1)],
         synthesize=["Whatever was found [Moby Dick, Summary]."],
     )
@@ -1316,3 +1320,26 @@ def test_a_run_without_repeats_emits_the_events_it_always_did(run):
     assert "stop_reason" not in plan and plan["queries"] == ["Pequod voyage"]
     assert [set(u) for u in by_name(events, "act")] == [{"hits", "hits_log", "steps_taken",
                                                          "read_chapters", "searches_run"}] * 2
+
+
+def test_two_steps_of_quotes_the_run_already_holds_end_at_the_crag_gate(run):
+    """One quote, one piece of evidence (#163): a model that keeps quoting the
+    passage it quoted on step 1 adds nothing after it, and two such steps in a
+    row are two dry steps — the CRAG gate ends the run instead of the step
+    limit, and the evidence holds the quote once."""
+    model = ScriptedModel(
+        plan=[{"mode": "answer", "queries": ["q1", "q2", "q3", "q4"]}],
+        observe=[{"evidence": [evidence(MOBY, "transcripts", f"s{n}h2")]} for n in (1, 2, 3)],
+        reflect=[{"decision": "search", "next_query": "q2"},
+                 {"decision": "search", "next_query": "q3"}],
+        synthesize=["Call me Ishmael [Moby Dick, Chapter 1]."],
+    )
+    _, events, _ = run(model, FakeLibrary(lambda q: [MOBY]), "Who is Ishmael?")
+
+    observed = by_name(events, "observe")
+    assert [u["empty_streak"] for u in observed] == [0, 1, 2]
+    assert [len(u["evidence"]) for u in observed] == [1, 1, 1]
+    assert [u.get("duplicates_skipped") for u in observed] == [None, 1, 2]
+    assert by_name(events, "reflect")[-1]["stop_reason"] == t("stop_crag", n=config.MAX_EMPTY_STREAK)
+    assert names(events).count("act") == 3
+    assert by_name(events, "validate")[0]["provenance"]["checked"] == 1
