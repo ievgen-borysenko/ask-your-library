@@ -99,6 +99,19 @@ def test_act_records_the_search_it_ran_and_never_a_chapter_read(monkeypatch, tmp
     assert "searches_run" not in nodes.act({**base, "current_query": "__book__|x"})
 
 
+def test_act_retrieves_nothing_for_a_query_with_no_words(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(nodes, "search_both", lambda query, k=4, book=None: calls.append(query) or [])
+    llm.reset_usage()
+    scratchpad = tmp_path / "s.md"
+    scratchpad.write_text("")
+    base = {"steps_taken": 1, "read_chapters": [], "scratchpad_path": str(scratchpad)}
+    for query in ("???", f"__book__|{escape_marker(MOBY)}| ?! "):
+        update = nodes.act({**base, "current_query": query})
+        assert update["hits"] == [] and "searches_run" not in update
+    assert calls == []
+
+
 # ---------------------------------------------------------------- reflect
 def test_a_repeat_is_replaced_by_the_first_unrun_queued_query(monkeypatch):
     decide(monkeypatch, decision="search", next_query="Q1")
@@ -189,6 +202,13 @@ def test_in_identify_mode_the_gate_probes_the_first_queued_query_not_yet_run(mon
     assert nodes.reflect(state) == {"current_query": "q3", "queries": [], "coverage_probed": True}
 
 
+def test_an_unrun_marker_from_the_model_is_not_called_a_repeat(monkeypatch):
+    """A reserved marker the model writes is never obeyed; the queue's next
+    query runs, and nothing is reported as already searched."""
+    decide(monkeypatch, decision="search", next_query="__book__|Never|fresh")
+    assert nodes.reflect(reflect_state(queries=["q2"])) == {"current_query": "q2", "queries": []}
+
+
 def test_a_query_with_no_words_is_no_search(monkeypatch):
     assert nodes.search_key(reflect_state(), "???") is None
     assert nodes.search_key(reflect_state(), "__book__|Book| ") is None
@@ -277,6 +297,15 @@ def test_plan_queues_each_search_once(monkeypatch):
     # a plan without duplicates is the plan it always was
     clean = plan_with(monkeypatch, ["q1", "q2", "q3"])
     assert clean["current_query"] == "q1" and clean["queries"] == ["q2", "q3"]
+
+
+def test_a_planner_query_with_no_words_is_not_usable(monkeypatch):
+    """Punctuation alone searches nothing: it is dropped like a blank query,
+    and a plan of nothing else falls back to the question (#163)."""
+    mixed = plan_with(monkeypatch, ["???", "white whale"])
+    assert mixed["current_query"] == "white whale" and mixed["queries"] == []
+    only = plan_with(monkeypatch, ["???", " ?! "], question="Who is Ahab?")
+    assert only["current_query"] == "Who is Ahab?" and only.get("plan_fallback") is True
 
 
 def test_a_replan_after_clarify_drops_what_ran_under_the_chosen_book_only(monkeypatch):

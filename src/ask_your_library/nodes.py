@@ -352,7 +352,8 @@ def plan(state: AgentState) -> dict:
     # JSON and no list of queries (a string would search its own letters).
     raw_queries = decision.get("queries")
     queries = [q for q in (raw_queries if isinstance(raw_queries, list) else [])
-               if isinstance(q, str) and q.strip() and not is_loop_marker(q)]
+               if isinstance(q, str) and q.strip() and not is_loop_marker(q)
+               and normalise_query(q)]   # a query of punctuation alone searches nothing (#163)
     fallback = not queries      # no JSON, no queries, or nothing usable: the planner gave no plan
     if fallback:
         queries = [state["question"].lstrip("_ ") or state["question"]]
@@ -394,8 +395,8 @@ def plan(state: AgentState) -> dict:
     unique: list[str] = []
     for query in queries:
         key = search_key(settled, query)
-        if key is None or (tuple(key) not in ran
-                           and all(search_key(settled, q) != key for q in unique)):
+        if key is not None and tuple(key) not in ran \
+                and all(search_key(settled, q) != key for q in unique):
             unique.append(query)
 
     update = {
@@ -520,18 +521,22 @@ def act(state: AgentState) -> dict:
     elif state["current_query"].startswith("__book__|"):
         # Coverage probe (ADR-013): one search inside a single candidate book.
         _, probe_book, probe_query = marker_parts
-        hits = search_both(probe_query, k=4, book=unescape_marker(probe_book))
+        searched = search_key(state, state["current_query"])
+        # A probe with no words to search for retrieves nothing and is not
+        # recorded: no node sends one, and act does not pay for one (#163).
+        hits = search_both(probe_query, k=4, book=unescape_marker(probe_book)) if searched else []
         empty_read_note = ""
         read_chapters = state.get("read_chapters", [])
-        searched = search_key(state, state["current_query"])
     else:
         # After a resolved clarify, retrieval itself is limited to the chosen
         # book (ADR-013), not only the evidence that survives observe; a book
         # the question named and the catalogue resolved works the same way (ADR-016).
-        hits = search_both(state["current_query"], k=4, book=_effective_book(state) or None)
+        searched = search_key(state, state["current_query"])
+        # The same for a query with no words: no retrieval, no record (#163).
+        hits = (search_both(state["current_query"], k=4, book=_effective_book(state) or None)
+                if searched else [])
         empty_read_note = ""
         read_chapters = state.get("read_chapters", [])
-        searched = search_key(state, state["current_query"])
 
     # Injection defense: sanitize hit text before the model ever sees it.
     # The control/invisible strip happens HERE, on the passage itself and before
@@ -995,7 +1000,8 @@ def reflect(state: AgentState) -> dict:
     # the only replacement the event reports: falling back to the queue for a
     # missing query is what this node has always done, and that event keeps
     # its shape.
-    repeat = proposed if search_key(state, proposed) is not None else ""
+    proposed_key = None if is_loop_marker(proposed) else search_key(state, proposed)
+    repeat = proposed if proposed_key is not None and tuple(proposed_key) in ran else ""
     fresh = next((q for q in queued if isinstance(q, str) and not is_loop_marker(q)
                   and _is_new_search(state, q, ran)), "")
     if fresh:
