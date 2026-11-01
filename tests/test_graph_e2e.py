@@ -1263,3 +1263,56 @@ def test_a_loop_call_that_fails_for_another_reason_still_fails_the_run(run_on_a_
     assert result.answer == "" and result.failure is not None
     assert result.failure.type == "RuntimeError" and result.failure.message == "provider said no"
     assert len(by_name(events, "metrics")) == 1          # the run is still accounted for
+
+
+# ---------------------------------------------------------------- searches already run (#163)
+def test_the_reference_run_q1_q3_q1_q1_runs_q2_and_stops_without_repeating(run):
+    """The run of the issue through the real graph: the planner queued q2 and
+    q3 behind q1, and the model chose q3, then q1, then q1 again. q2 runs where
+    the first repeat was, and the second repeat, with nothing new left and no
+    book the gate could probe, ends the loop on its own reason instead of
+    searching q1 until the step limit."""
+    model = ScriptedModel(
+        plan=[{"mode": "answer", "queries": ["q1", "q2", "q3"]}],
+        observe=[{"evidence": [evidence(MOBY, "transcripts", "s1h2")]},
+                 {"evidence": [evidence(MOBY, "cards", "s2h1")]},
+                 {"evidence": [evidence(GULLIVER, "cards", "s3h3")]}],
+        reflect=[{"decision": "search", "next_query": "q3"},
+                 {"decision": "search", "next_query": "q1"},
+                 {"decision": "search", "next_query": "Q1?"}],
+        synthesize=["An answer [Moby Dick, Chapter 1]."],
+    )
+    library = FakeLibrary(lambda q: [MOBY, GULLIVER])
+    _, events, _ = run(model, library, "What happens at sea?")
+
+    assert library.searches == [("q1", None), ("q3", None), ("q2", None)]
+    assert [a["searches_run"] for a in by_name(events, "act")] == [[["q1", ""]], [["q3", ""]], [["q2", ""]]]
+    assert by_name(events, "reflect") == [
+        {"current_query": "q3", "queries": ["q2"]},
+        {"current_query": "q2", "queries": [], "query_replaced": {"from": "q1", "to": "q2"}},
+        {"current_query": "", "stop_reason": t("stop_no_new_query"),
+         "query_replaced": {"from": "Q1?", "to": ""}}]
+    assert by_name(events, "metrics")[0]["stop_reason"] == t("stop_no_new_query")
+    assert model.roles() == ["plan"] + ["observe", "reflect"] * 3 + ["synthesize"]
+
+
+def test_a_run_without_repeats_emits_the_events_it_always_did(run):
+    """The guarantee of the change, checked as whole key sets: a run whose model
+    never names a search twice sends plan, observe and reflect exactly the
+    updates they sent before #163 — only `act` carries its new record."""
+    model = ScriptedModel(
+        plan=[{"mode": "answer", "queries": ["Ishmael sails", "Pequod voyage"]}],
+        observe=[{"evidence": [evidence(MOBY, "transcripts", "s1h2")]},
+                 {"evidence": [evidence(MOBY, "cards", "s2h1")]}],
+        reflect=[{"decision": "search", "next_query": "Pequod voyage"}, {"decision": "enough"}],
+        synthesize=["Ishmael sails on the Pequod [Moby Dick, Chapter 1]."],
+    )
+    _, events, _ = run(model, FakeLibrary(lambda q: [MOBY]), "Who narrates Moby Dick?")
+
+    assert [set(u) for u in by_name(events, "reflect")] == [{"current_query", "queries"},
+                                                            {"current_query", "stop_reason"}]
+    assert [set(u) for u in by_name(events, "observe")] == [{"evidence", "empty_streak"}] * 2
+    plan = by_name(events, "plan")[0]
+    assert "stop_reason" not in plan and plan["queries"] == ["Pequod voyage"]
+    assert [set(u) for u in by_name(events, "act")] == [{"hits", "hits_log", "steps_taken",
+                                                         "read_chapters", "searches_run"}] * 2

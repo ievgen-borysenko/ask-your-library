@@ -28,6 +28,16 @@ class AgentState(TypedDict):
                            # the whole library is searched and the answer says so
     queries: list[str]     # queue of search queries from plan
     current_query: str     # the query being executed right now
+    # every search `act` ran, as [normalised query, effective book] (`nodes.search_key`): a
+    # plain search under the book retrieval was limited to ("" = the whole library), a coverage
+    # probe under its one book; chapter reads are not searches and are not recorded. Append-
+    # reduced, so act returns only its own step's key; plan and reflect read it so the loop
+    # never pays for the same search twice (#163)
+    searches_run: Annotated[list[list[str]], operator.add]
+    # reflect's own record of a repeat it caught (#163): {"from": the query it was about to
+    # send, "to": the unrun query that ran instead, or "" when nothing new was left and the
+    # loop stopped}. Written only by a reflect that replaced or stopped, read by no node
+    query_replaced: dict
     hits: list[dict]       # raw results of the last search (live for one step), each with hit_id
     # every hit of the run as observe saw it: {hit_id, step, book, section, corpus, text};
     # append-reduced, so act returns only its own step's passages

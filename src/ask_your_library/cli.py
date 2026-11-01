@@ -117,6 +117,10 @@ def print_event(node_name: str, update: dict) -> None:
         # line a reader sees is about the chapter, so the query comes off here
         # and everything below reads the marker it always read.
         nxt, _ = split_read_query(update.get("current_query") or "")
+        # A search the run already made, caught before it ran (#163): said
+        # first, so the line after it reads as what ran instead, or the stop.
+        if (update.get("query_replaced") or {}).get("from"):
+            say(t("ev_reflect_repeat", q=update["query_replaced"]["from"]))
         if nxt == "__clarify__":
             say(t("ev_reflect_clarify"))
         elif nxt and nxt.startswith("__chapter__|"):

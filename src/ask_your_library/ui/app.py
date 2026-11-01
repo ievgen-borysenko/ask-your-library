@@ -741,6 +741,9 @@ def render_event(node_name: str, update: dict, view: RunView | None = None) -> N
             text = t("ui_stopped", r=update["stop_reason"])
         else:
             text = t("ui_enough")
+        if (update.get("query_replaced") or {}).get("from"):
+            # A search the run already made, caught before it ran (#163).
+            text = t("ui_search_repeat", q=update["query_replaced"]["from"]) + "\n" + text
         # The LAST reflect is the one that says why the search stopped, and
         # that is the sentence a reader judges the answer by; the ones that
         # only queue another query stay collapsed.

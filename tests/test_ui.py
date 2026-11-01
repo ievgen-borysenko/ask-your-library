@@ -75,6 +75,27 @@ def test_reflect_step_shows_the_real_stop_reason(ui, monkeypatch):
     assert shown[-1][1].count("stopped:") == 1
 
 
+
+def test_reflect_step_says_which_search_already_ran(ui, monkeypatch):
+    """A repeat reflect caught (#163): the step names the search that had
+    already run above what ran instead, or above the stop."""
+    from ask_your_library.i18n import t
+    shown = []
+    monkeypatch.setattr(ui, "show_step",
+                        lambda name, text, default_open=False: shown.append((name, text, default_open)))
+    ui.render_event("reflect", {"current_query": "q2", "queries": [],
+                                "query_replaced": {"from": "q1", "to": "q2"}})
+    assert shown[-1][1] == t("ui_search_repeat", q="q1") + "\n" + t("ui_search_more", q="q2")
+    ui.render_event("reflect", {"current_query": "", "stop_reason": t("stop_no_new_query"),
+                                "query_replaced": {"from": "q1", "to": ""}})
+    assert shown[-1][1] == (t("ui_search_repeat", q="q1") + "\n"
+                            + t("ui_stopped", r=t("stop_no_new_query")))
+    assert shown[-1][2] is True
+    # nothing named, nothing said: the stop line alone
+    ui.render_event("reflect", {"current_query": "", "stop_reason": t("stop_no_new_query"),
+                                "query_replaced": {"from": "", "to": ""}})
+    assert shown[-1][1] == t("ui_stopped", r=t("stop_no_new_query"))
+
 def test_badge_is_green_only_when_nothing_is_broken_or_unattributed(ui):
     def badge(**numbers):
         return ui.verification_badge({"verification": "v", "provenance": numbers})

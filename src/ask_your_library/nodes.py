@@ -16,6 +16,7 @@ live next door, one module each:
 Budgets (MAX_STEPS, MAX_EMPTY_STREAK, the per-hit windows) come from config.
 """
 import logging
+import unicodedata
 
 from langgraph.types import interrupt
 
@@ -127,6 +128,64 @@ def _reset_dropped_streak(state: AgentState, update: dict) -> dict:
     if state.get("dropped_streak"):
         update["dropped_streak"] = 0
     return update
+
+
+# ---------------------------------------------------------------- searches already run (#163)
+def normalise_query(query: str) -> str:
+    """What two spellings of one search have in common: NFKC, case folded,
+    runs of whitespace collapsed, punctuation and space stripped from both
+    ends. "Ahab's leg?" and "  ahab's   LEG " are one search; "Ahab leg" is
+    another, and so is any paraphrase — this is a repeat check, not a
+    similarity measure. `catalog.fold` is not reused: it also drops accents,
+    and a search engine that ranks by the words it was given does not."""
+    text = " ".join(unicodedata.normalize("NFKC", query).casefold().split())
+    start, end = 0, len(text)
+    while start < end and (text[start].isspace() or unicodedata.category(text[start])[0] == "P"):
+        start += 1
+    while end > start and (text[end - 1].isspace() or unicodedata.category(text[end - 1])[0] == "P"):
+        end -= 1
+    return text[start:end]
+
+
+def _effective_book(state: AgentState) -> str:
+    """The book a plain search is limited to, exactly as `act` passes it to
+    `search_both` ("" = the whole library)."""
+    return state.get("clarify_chosen") or state.get("book_filter") or ""
+
+
+def search_key(state: AgentState, query) -> list[str] | None:
+    """The record a search leaves in `searches_run`: [normalised query, the
+    book it searched], or None for what is not a search at all — a chapter read
+    (the read_chapters guard and stop_chapter_again own those), a clarify, any
+    other marker, a blank. A coverage probe is a search inside its one book, so
+    "__book__|key|query" is keyed (query, key), whatever book a plain search
+    would use. A list, not a tuple: it is a state value and goes through the
+    checkpointer."""
+    if not isinstance(query, str) or not query.strip():
+        return None
+    if query.startswith("__book__|"):
+        parts = query.split("|", 2)
+        return [normalise_query(parts[2]), unescape_marker(parts[1])] if len(parts) == 3 else None
+    if is_loop_marker(query):
+        return None
+    return [normalise_query(query), _effective_book(state)]
+
+
+def _already_run(state: AgentState) -> set[tuple[str, str]]:
+    return {tuple(key) for key in state.get("searches_run") or []}
+
+
+def _is_new_search(state: AgentState, query, ran: set[tuple[str, str]]) -> bool:
+    key = search_key(state, query)
+    return key is not None and tuple(key) not in ran
+
+
+def _without(state: AgentState, queued: list, chosen: str) -> list:
+    """The queue once `chosen` is on its way: every entry that is the same
+    search goes with it, a spelling variant included, so the queue never holds
+    a query the loop has just run."""
+    key = search_key(state, chosen)
+    return [q for q in queued if q != chosen and (key is None or search_key(state, q) != key)]
 
 
 def _catalogue() -> tuple[list[BookEntry], bool]:
@@ -307,13 +366,31 @@ def plan(state: AgentState) -> dict:
         elif not matches and catalog_read and not resolve_title(named, entries)[0]:
             book_unresolved = named
 
+    # One search per key (#163): a planner that wrote the same query twice, in
+    # another case or with a question mark, queues it once. On a re-plan after
+    # a clarify the run has already searched, and a query it already ran under
+    # the book this plan settles on is not queued again; the same words under
+    # another book are another search, so a choice that narrowed the run to one
+    # book still searches it with them. Nothing left means nothing new to
+    # search: the run goes to synthesize with what it has, and says why.
+    settled = {"clarify_chosen": chosen, "book_filter": book_filter}
+    ran = _already_run(state)
+    unique: list[str] = []
+    for query in queries:
+        key = search_key(settled, query)
+        if key is None or (tuple(key) not in ran
+                           and all(search_key(settled, q) != key for q in unique)):
+            unique.append(query)
+
     update = {
         "mode": mode,
-        "queries": queries[1:],
-        "current_query": queries[0],
+        "queries": unique[1:],
+        "current_query": unique[0] if unique else "",
         "book_filter": book_filter, "book_unresolved": book_unresolved,
         **common,
     }
+    if not unique:
+        update["stop_reason"] = t("stop_no_new_query")
     if fallback and catalog_fallback not in ("mixed_intent", "after_clarify"):
         # present only when it happened: the interfaces and the eval show it. A
         # catalogue decision carries no queries by contract, so a mixed intent or
@@ -357,6 +434,9 @@ def act(state: AgentState) -> dict:
     # Where a chapter read's window sits in its section (#81): logged, never read
     # back by any node — the passage below is chosen exactly as it always was.
     window = None
+    # The search this step runs, as `searches_run` records it (#163); stays
+    # None on a chapter read and on a malformed marker, which search nothing.
+    searched = None
     if marker_parts and len(marker_parts) != 3:
         # A malformed marker (fewer than three parts) is nothing to act on: no
         # hits, a note in the scratchpad, and the loop's CRAG gate counts the
@@ -427,14 +507,15 @@ def act(state: AgentState) -> dict:
         hits = search_both(probe_query, k=4, book=unescape_marker(probe_book))
         empty_read_note = ""
         read_chapters = state.get("read_chapters", [])
+        searched = search_key(state, state["current_query"])
     else:
         # After a resolved clarify, retrieval itself is limited to the chosen
         # book (ADR-013), not only the evidence that survives observe; a book
         # the question named and the catalogue resolved works the same way (ADR-016).
-        hits = search_both(state["current_query"], k=4,
-                           book=state.get("clarify_chosen") or state.get("book_filter") or None)
+        hits = search_both(state["current_query"], k=4, book=_effective_book(state) or None)
         empty_read_note = ""
         read_chapters = state.get("read_chapters", [])
+        searched = search_key(state, state["current_query"])
 
     # Injection defense: sanitize hit text before the model ever sees it.
     # The control/invisible strip happens HERE, on the passage itself and before
@@ -507,6 +588,11 @@ def act(state: AgentState) -> dict:
         # Only on a step that read a chapter, so every other step emits the
         # event it has always emitted.
         update["chapter_windows"] = [window]
+    if searched is not None:
+        # Recorded HERE, where the search ran, and not where it was proposed:
+        # the first query goes from plan to act without a reflect, and only a
+        # search that really reached the index has been paid for (#163).
+        update["searches_run"] = [searched]
     return update
 
 
@@ -794,10 +880,14 @@ def reflect(state: AgentState) -> dict:
         log.debug("reflect: decision outside the schema: %.80s",
                   strip_control_chars(str(decision["decision"])))
 
+    # A probe is a search too, and one the run already made buys nothing: it
+    # is skipped as if the gate had found nothing to force, and the model's own
+    # decision stands (#163).
+    ran = _already_run(state)
     probe = coverage_probe(state, what)
-    if probe:
-        remaining = [q for q in state["queries"] if q != probe]
-        return {"current_query": probe, "queries": remaining, "coverage_probed": True}
+    if probe and _is_new_search(state, probe, ran):
+        return {"current_query": probe, "queries": _without(state, state["queries"], probe),
+                "coverage_probed": True}
 
     if what == "read_chapter" and not (
             isinstance(decision.get("book"), str) and isinstance(decision.get("section"), str)):
@@ -850,12 +940,37 @@ def reflect(state: AgentState) -> dict:
             reason = t("stop_other")
         return {"current_query": "", "stop_reason": reason}
 
-    next_query = llm.str_field(decision, "next_query") or ""
-    if not next_query or is_loop_marker(next_query):
-        # Not a query (wrong type, empty, or a reserved marker): fall back to the queue
-        next_query = queued[0] if queued else ""
-    remaining = [q for q in queued if q != next_query]
-    return {"current_query": next_query, "queries": remaining}
+    proposed = llm.str_field(decision, "next_query") or ""
+    if proposed and not is_loop_marker(proposed) and _is_new_search(state, proposed, ran):
+        return {"current_query": proposed, "queries": _without(state, queued, proposed)}
+
+    # Not a query (wrong type, empty, or a reserved marker), or a search this
+    # run already made (#163): the reflect prompt shows the model its queue,
+    # not the searches behind it, and a small model names the same query again
+    # — q1, q3, q1, q1 on a real library, with q2 still queued and never run.
+    # The first queued query that has not run takes its place. A repeat is
+    # the only replacement the event reports: falling back to the queue for a
+    # missing query is what this node has always done, and that event keeps
+    # its shape.
+    repeat = proposed if proposed and not is_loop_marker(proposed) else ""
+    fresh = next((q for q in queued if isinstance(q, str) and not is_loop_marker(q)
+                  and _is_new_search(state, q, ran)), "")
+    if fresh:
+        update = {"current_query": fresh, "queries": _without(state, queued, fresh)}
+        if repeat:
+            update["query_replaced"] = {"from": repeat, "to": fresh}
+        return update
+    # Nothing new is queued: the coverage gate gets the chance it would have
+    # had if the model had said "enough" — once per run, and only with a
+    # search the run has not made — and after that there is nothing left to
+    # search that could show anything new, so the loop stops on its own reason
+    # instead of spending the steps it has left on passages it already holds.
+    probe = coverage_probe(state, "enough")
+    if probe and _is_new_search(state, probe, ran):
+        return {"current_query": probe, "queries": _without(state, queued, probe),
+                "coverage_probed": True, "query_replaced": {"from": repeat, "to": probe}}
+    return {"current_query": "", "stop_reason": t("stop_no_new_query"),
+            "query_replaced": {"from": repeat, "to": ""}}
 
 
 def route_after_plan(state: AgentState) -> str:
