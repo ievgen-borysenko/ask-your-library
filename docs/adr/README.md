@@ -290,6 +290,15 @@ options are listed in `../backlog.md` and none is adopted here.
 **Still unmeasured:** the coverage-probe firing count (no counter to read), `qwen2.5:32b` under the
 gate, and every hosted model under it.
 
+**Amended 2026-11-01: a quote the evidence already holds is not progress (#163).** After the gate and
+the clarify filter, `observe` drops a new item whose book, section and quote (compared by the gate's
+own `_normalize`) the evidence already holds, or that came earlier in the same step, and keeps the
+first copy; `duplicates_skipped` counts them as a run total. A step whose quotes were all such copies
+and that dropped nothing counts as dry, like a step with no quote: before this, a quote taken again
+from a passage retrieved again reset the empty streak, and the CRAG gate never fired on a run that
+had stopped learning. A step that also dropped a quote is decided by the hold and its cap above,
+unchanged — a copy never makes a step drier than its dropped quotes do.
+
 ## ADR-005: `observe` sees a fixed budget of each hit; the rest of the loop sees only evidence
 
 Status: accepted; the size of the budget was revised by ADR-012 and its MEANING by ADR-025
@@ -655,6 +664,11 @@ runs of 2026-09-06, and, measured together with ADR-012 on the `v0.2.0-rc1` tag,
 question and +57% per extended question against v0.1.0
 ([`2026-09-07-v0.2.0-rc1-core.md`][rc1-core], [`2026-09-07-v0.2.0-rc1-extended.md`][rc1-extended]).
 The four runs that measured the gate on its own stay in the development history.
+
+**Amended 2026-11-01 (#163):** the gate also gets its one chance when the model asks for a search the
+run already made and no unrun query is queued to take its place, and a probe whose search the run
+already made (the same query in the same book) is skipped as if the gate had found nothing to force.
+After that the loop stops with "no new query" rather than repeating a search.
 
 ## ADR-014: A small ablation on the core set
 

@@ -349,7 +349,9 @@ class GateLedger:
     evidence list without ever being dropped: `kept` is the evidence as the
     state holds it, after that filter. The scratchpad's `### observe, step N`
     line (#81) is where both are visible, as `filtered` and in the step's own
-    note.
+    note. A third kind is not in `kept` either but IS counted: a quote
+    `observe` skipped as a copy of evidence the run already held (#163), which
+    the question reports as `duplicates_skipped`.
 
     `timed_out` marks the row of a step whose `observe` call ran out of time
     (`call_timed_out`): its passages are lost, nothing was distilled, kept or
@@ -418,6 +420,49 @@ class GateLedger:
         return any(step["cap_fired"] for step in self.steps)
 
 
+class LoopLedger:
+    """What the loop searched and what each step brought back (#163), read off
+    the events like the gate ledger above.
+
+    `searches_run` on the result is the whole record of the searches a run
+    made, so the repeats are counted from it rather than from `steps_log`,
+    which cuts every line at 80 characters and cannot tell a spelling variant
+    from a new query. What the result does not carry is how many PASSAGES each
+    step added: a step that searched something new can still bring back only
+    passages an earlier step already showed the model, and that step was
+    spent. A passage is (book, section, a hash of its text as `act` logged it,
+    cut to the observe window), so the same chunk retrieved by two queries is
+    one passage. `replacements` counts the repeats `reflect` caught and sent
+    another search in place of; a repeat that stopped the loop is the stop
+    reason, not a replacement.
+    """
+
+    NOT_A_NODE = ("metrics",)
+
+    def __init__(self) -> None:
+        self.new_passages: list[int] = []
+        self.replacements = 0
+        self._seen: set[tuple[str, str, str]] = set()
+
+    def see(self, node_name: str, update: dict) -> None:
+        if node_name in self.NOT_A_NODE:
+            return
+        if node_name == "act":
+            step = {(h.get("book", ""), h.get("section", ""),
+                     hashlib.sha256(str(h.get("text", "")).encode("utf-8", "replace")).hexdigest())
+                    for h in update.get("hits_log") or []}
+            self.new_passages.append(len(step - self._seen))
+            self._seen |= step
+        elif node_name == "reflect" and (update.get("query_replaced") or {}).get("to"):
+            self.replacements += 1
+
+
+def search_repeats(searches: list) -> int:
+    """Searches that ran under a key an earlier search of the same run already
+    had: 0 is the contract since #163, and this is what checks it."""
+    return len(searches) - len({tuple(key) for key in searches})
+
+
 def run_one(graph, item: dict, attempt: int = 1) -> dict:
     """One question through the same runner the CLI and the web UI use.
 
@@ -439,9 +484,15 @@ def run_one(graph, item: dict, attempt: int = 1) -> dict:
     suffix = "" if attempt == 1 else f"-{attempt}"
     steps_log = []
     gate = GateLedger()
+    loop = LoopLedger()
 
     def on_event(node_name: str, update: dict) -> None:
         gate.see(node_name, update)
+        loop.see(node_name, update)
+        if node_name == "reflect" and (update.get("query_replaced") or {}).get("from"):
+            # a repeat reflect caught (#163): the line after it says what ran
+            # instead, or that the loop stopped
+            steps_log.append(f"reflect -> already searched: {update['query_replaced']['from'][:80]}")
         if node_name == "reflect" and update.get("current_query"):
             steps_log.append(f"reflect -> {update['current_query'][:80]}")
         elif node_name == "reflect" and update.get("stop_reason"):
@@ -497,6 +548,16 @@ def run_one(graph, item: dict, attempt: int = 1) -> dict:
         "gate_steps": gate.steps,
         "peak_dropped_streak": gate.peak_dropped_streak,
         "cap_fired": gate.cap_fired,
+        # what the loop searched (#163): every search the run made, in order, as
+        # [normalised query, book] and never cut; how many of them repeated an
+        # earlier one (0 is the contract); the repeats reflect replaced; the
+        # quotes observe did not add again; and how many passages each step
+        # added that no earlier step had shown
+        "searches": [list(key) for key in result.searches_run],
+        "search_repeats": search_repeats(result.searches_run),
+        "query_replacements": loop.replacements,
+        "duplicates_skipped": result.duplicates_skipped,
+        "new_passages_per_step": loop.new_passages,
         "clarify_asked": result.clarify_asked,
         "clarify_candidates": result.clarify_candidates,
         "clarify_unresolved": result.clarify_unresolved,
@@ -984,7 +1045,12 @@ def empty_totals() -> dict:
             "drill_expected": 0, "drill_ok": 0, "cost_usd": 0.0, "llm_calls": 0,
             "tokens_in": 0, "tokens_out": 0,
             "chapter_reads": 0, "chapter_reads_aimed": 0, "chapter_windows_opened": 0,
-            "chapter_row_cap_hits": 0}
+            "chapter_row_cap_hits": 0,
+            # the loop's own record (#163): searches made, repeats among them,
+            # repeats replaced, quotes skipped as copies, and steps that added
+            # no passage an earlier step had not shown
+            "searches_run": 0, "search_repeats": 0, "query_replacements": 0,
+            "duplicates_skipped": 0, "steps_without_new_passages": 0}
 
 
 def render_summary(totals: dict, per_group: dict, repeat: int, attempt_totals: list[dict],
@@ -1044,6 +1110,13 @@ def render_summary(totals: dict, per_group: dict, repeat: int, attempt_totals: l
                 + (f"; {totals['chapter_row_cap_hits']} chapter query(ies) hit the "
                    f"{library.CHAPTER_ROW_CAP}-row cap"
                    if totals["chapter_row_cap_hits"] else "")
+                # The loop's record (#163), on the same rule: a set of results
+                # that carries no search record writes the line it always wrote.
+                + (f"; searches {totals['searches_run']} ({totals['search_repeats']} normalised "
+                   f"repeat(s), {totals['query_replacements']} repeat(s) replaced, "
+                   f"{totals['duplicates_skipped']} duplicate quote(s) skipped, "
+                   f"{totals['steps_without_new_passages']} step(s) with no new passage)"
+                   if totals["searches_run"] else "")
                 + f"; evidence items {totals['evidence']}\n"
                 + headline
                 + f"; expected titles mentioned {totals['titles_mentioned']}/{totals['titles_expected']}"
@@ -1105,6 +1178,15 @@ def render_summary(totals: dict, per_group: dict, repeat: int, attempt_totals: l
                                          column("dropped_cross_book")))
         lines.insert(-1, spread_line("quotes re-pinned to the passage that holds them",
                                      column("repinned")))
+    if any(column("searches_run")):
+        # The loop's record (#163), added where a search record exists at all,
+        # per attempt like every other figure here.
+        for key, label in (("searches_run", "searches"),
+                           ("search_repeats", "normalised search repeats"),
+                           ("query_replacements", "repeated searches replaced"),
+                           ("duplicates_skipped", "duplicate quotes skipped"),
+                           ("steps_without_new_passages", "steps with no new passage")):
+            lines.insert(-1, spread_line(label, column(key)))
     if any(column("cap_fired_items")):
         # Added only where it happened, like the block above, and per attempt
         # like every other figure at N > 1: never a sum across attempts.
@@ -1416,6 +1498,14 @@ def main(argv: list[str] | None = None) -> None:
                 # back as the run it was, one nobody measured the cap on.
                 totals["cap_fired_items"] += int(r.get("cap_fired", False))
                 totals["evidence"] += r["evidence_items"]
+                # The loop's record (#163). `.get` with an empty record: a result
+                # written before it reads back as a run nobody measured it on.
+                totals["searches_run"] += len(r.get("searches") or [])
+                totals["search_repeats"] += r.get("search_repeats", 0)
+                totals["query_replacements"] += r.get("query_replacements", 0)
+                totals["duplicates_skipped"] += r.get("duplicates_skipped", 0)
+                totals["steps_without_new_passages"] += sum(
+                    1 for n in r.get("new_passages_per_step") or [] if n == 0)
                 for key in ("cost_usd", "llm_calls", "tokens_in", "tokens_out"):
                     totals[key] += r[key]
                 for key in ("chapter_reads", "chapter_reads_aimed",
@@ -1465,6 +1555,12 @@ def main(argv: list[str] | None = None) -> None:
                     drill += (f", peak {r['peak_dropped_streak']} all-dropped step(s) in a row"
                               + (f" (the cap of {MAX_DROPPED_STREAK} fired: such a step counted "
                                  f"dry)" if r.get("cap_fired") else ""))
+                if r.get("search_repeats"):
+                    drill += f", {r['search_repeats']} normalised search repeat(s)"
+                if r.get("query_replacements"):
+                    drill += f", {r['query_replacements']} repeated search(es) replaced"
+                if r.get("duplicates_skipped"):
+                    drill += f", {r['duplicates_skipped']} duplicate quote(s) skipped"
                 if r.get("chapter_reads"):
                     # Only on a question that read a chapter at all, so every
                     # other row is the row it has always been.

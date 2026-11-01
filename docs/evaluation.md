@@ -104,6 +104,18 @@ reply that was no usable JSON), and one the gate **confirmed and the clarify fil
 because it is about a book the reader did not choose — `kept` is the evidence as the state holds it,
 after that filter. The scratchpad's `### observe, step N` line is where both are visible.
 
+**What the loop searched has a record of its own since #163.** Per attempt the sidecar carries
+`searches`, every search the run made in order as (normalised query, book) and never cut, unlike
+`steps_log`, which stops each line at 80 characters; `search_repeats`, how many of them ran under a
+key an earlier one already had (0 is the contract); `query_replacements`, the repeats `reflect`
+caught and sent another search in place of; `duplicates_skipped`, the quotes `observe` did not add
+because the evidence already held them; and `new_passages_per_step`, how many passages (book,
+section, a hash of the text) each step brought that no earlier step had, which is what a
+paraphrased search that only finds old passages costs. The totals add them up, with the steps that
+brought no new passage, and the summary line reports them only for results that carry the record,
+so a set of older results writes the line it always wrote. The item header names repeats,
+replacements and skipped quotes only where there were any.
+
 The gate's own behavioural effect — whether a set answers as well with it as without — was measured
 on 2026-09-16/17 on **two local models**, each run under the gate on `c79018a` and compared with the
 same model's baseline run on `169b511`, both golden sets, `--repeat 3 --clarify-pick second`

@@ -175,9 +175,17 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   skipped its clarify in 1 of 3 attempts on 2026-10-02, where the earlier rules clarified 9 of 9.
   That run has no report under [`eval-results/`](eval-results/); ADR-005 in
   [`adr/README.md`](adr/README.md) carries its numbers.
-- **The loop can re-issue an identical search query until the step limit.** Nothing stops `reflect`
-  from naming a query it already ran; two of the three step-limit stops in the eval run of
-  2026-10-02 were that: steps spent on a search the run had already made.
+- **A paraphrased search still costs a step** (#163). Until #163 nothing stopped `reflect` from
+  naming a query the run had already made, and two of the three step-limit stops in the eval run
+  of 2026-10-02 were that. Exact and normalised repeats are now prevented: `act` records every
+  search it runs as (query, book), the query compared after NFKC, case folding, collapsed spaces
+  and trimmed edge punctuation, and a repeat `reflect` names is replaced by the first queued query
+  that has not run, or by the coverage gate's one probe, or ends the loop with its own stop reason,
+  "no new query". A quote the evidence already holds is not added again, and a step that brought
+  only such quotes counts as dry. What is not caught is a paraphrase: "Ahab's missing leg" after
+  "Ahab's leg" is a new search to this check, and if it brings back the passages the run already
+  holds, that step is spent. The eval record counts such steps (`new_passages_per_step`, and
+  "steps with no new passage" in the summary), so the cost is visible rather than prevented.
 - **Comparative and aggregation questions may miss a work.** The planner issues queries centred
   on one side of the comparison and the other book is never retrieved. Decomposition per implied
   work is open ([backlog](backlog.md#agent-behaviour)).

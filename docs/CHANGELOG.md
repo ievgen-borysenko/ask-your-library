@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- **The loop no longer runs a search it already ran, nor counts a quote it already holds (#163).**
+  On a library of about 250 audiobooks a research question ran q1, q3, q1, q1 and stopped at the
+  step limit with plan query q2 never searched; a comparison kept 9 evidence items, 5 of them
+  unique. Nothing recorded which searches had run, and a quote taken again was kept again and
+  reset the dry streak. `act` now records every search in the state as (query, book), the query
+  NFKC-normalised, case-folded, its spaces collapsed and its edge punctuation trimmed, and the book
+  the one retrieval was limited to (a coverage probe keyed by its own book; chapter reads are not
+  recorded). `plan` queues each key once and, after a clarify, drops what already ran under the
+  book it settles on. When `reflect` would send a search the run already made, the first queued
+  query that has not run goes instead; with none left the coverage gate gets its one chance with a
+  search the run has not made, and otherwise the loop stops on a new reason, "no new query". The
+  same stop ends a re-plan whose every query already ran, and a `search` decision with no query and
+  nothing queued, which used to end the loop with no reason and read as "enough". `observe` keeps
+  one copy of each (book, section, normalised quote), and a step whose quotes were all copies
+  counts as dry, so two of them end the run at the CRAG gate; a step that also dropped a quote keeps
+  the #29 rule. Prompts are unchanged, and a run without repeats or copies emits the events it
+  always did: `reflect` adds `query_replaced` and `observe` adds `duplicates_skipped` only when they
+  happened, and the CLI and the web UI then name the search that already ran. `act`'s event gains
+  `searches_run` on every search step, and `RunResult` gains `searches_run` and
+  `duplicates_skipped`. The agent eval records every search, the repeats among them, the repeats
+  replaced, the quotes skipped and the new passages per step, and reports the totals. A paraphrase
+  is still a new search ([known limits](known-limits.md)).
 - **An interrupted `--rebuild` no longer lets a write with the old embedding model in (#147).**
   `ayl add --rebuild` drops the table and stamps it again only when the run finishes, and the
   dropped table's stamp stayed in place in between. A rebuild interrupted in its publish copy (an

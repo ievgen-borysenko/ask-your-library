@@ -181,8 +181,9 @@ the web UI and the eval commands.
   searched both ways, vectors and BM25, fused with Reciprocal Rank Fusion.
 - Only `observe` sees retrieved text, sanitized and cut to a budget; the loop sees distilled evidence.
 - A 4-step budget, a CRAG-style stop after 2 dry steps (a step whose every quote the gate dropped
-  counts as dry from the second such step in a row, `MAX_DROPPED_STREAK`), drill-down, one clarify
-  interrupt per run.
+  counts as dry from the second such step in a row, `MAX_DROPPED_STREAK`; so does a step that
+  only repeats quotes the run already holds), no search run twice in one question, drill-down,
+  one clarify interrupt per run.
 - Catalogue questions skip retrieval; the count is the length of the list read from the tables (ADR-016).
 - The quote check is plain code: a quote must be a contiguous whole-token run of the passage it
   names. It runs at the `observe` gate, so a quote that is in no retrieved passage never becomes
