@@ -1100,11 +1100,11 @@ def test_every_field_of_the_library_configuration_is_set():
 
 
 def test_every_bound_of_the_library_reader_s_constructor_is_set(tmp_path, monkeypatch):
-    """The keyword-only bounds `PdfReader` takes are passed by name, at the
-    values written in pdf.py; a bound a later version adds fails here."""
+    """The bounds `PdfReader` takes are passed by name, at the values written
+    in pdf.py; a parameter a later version adds fails here, whatever its kind
+    (a keyword-only bound, or an ordinary one with a default like `password`)."""
     import inspect
-    bounds = {name for name, parameter in inspect.signature(pypdf.PdfReader).parameters.items()
-              if parameter.kind is inspect.Parameter.KEYWORD_ONLY}
+    bounds = set(inspect.signature(pypdf.PdfReader).parameters) - {"self", "stream", "strict", "password"}
     assert bounds == {"root_object_recovery_limit", "xref_stream_maximum_entries"}
     seen = {}
     real = pdf.reader_class

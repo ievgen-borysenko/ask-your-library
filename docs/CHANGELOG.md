@@ -60,7 +60,7 @@
   refused as `memory cannot be measured here`, when the process was on its way out at the
   moment its memory was read; it is now given one more look. Nothing else in the reader
   changed.
-- **The locked PDF library and LangGraph are updated for new advisories.** `uv.lock` moves pypdf
+- **The locked PDF library and LangGraph are updated for new advisories (#165).** `uv.lock` moves pypdf
   6.21.3 to 6.21.4 (GHSA-5849-834g-hvw5, GHSA-cggf-277g-3q54 and GHSA-mfr5-77xh-9j7h, all High)
   and langgraph 1.2.12 to 1.2.14 (GHSA-3fx2-cqw9-xr3c, in `RemoteGraph` streaming, which this
   project does not use; the SDK it locks, langgraph-sdk 0.4.8, already had the fix). Nothing else
