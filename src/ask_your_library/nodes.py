@@ -159,7 +159,7 @@ def search_key(state: AgentState, query) -> list[str] | None:
     """The record a search leaves in `searches_run`: [normalised query, the
     book it searched], or None for what is not a search at all — a chapter read
     (the read_chapters guard and stop_chapter_again own those), a clarify, any
-    other marker, a blank. A coverage probe is a search inside its one book, so
+    other marker, a blank or a query with no words. A coverage probe is a search inside its one book, so
     "__book__|key|query" is keyed (query, key), whatever book a plain search
     would use. A list, not a tuple: it is a state value and goes through the
     checkpointer."""
@@ -167,10 +167,16 @@ def search_key(state: AgentState, query) -> list[str] | None:
         return None
     if query.startswith("__book__|"):
         parts = query.split("|", 2)
-        return [normalise_query(parts[2]), unescape_marker(parts[1])] if len(parts) == 3 else None
+        if len(parts) != 3:
+            return None
+        words = normalise_query(parts[2])
+        return [words, unescape_marker(parts[1])] if words else None
     if is_loop_marker(query):
         return None
-    return [normalise_query(query), _effective_book(state)]
+    # A query of punctuation alone ("???") has no words left to search for:
+    # it is no search, not a new one.
+    words = normalise_query(query)
+    return [words, _effective_book(state)] if words else None
 
 
 def _already_run(state: AgentState) -> set[tuple[str, str]]:
@@ -184,10 +190,18 @@ def _is_new_search(state: AgentState, query, ran: set[tuple[str, str]]) -> bool:
 
 def _without(state: AgentState, queued: list, chosen: str) -> list:
     """The queue once `chosen` is on its way: every entry that is the same
-    search goes with it, a spelling variant included, so the queue never holds
-    a query the loop has just run."""
+    search goes with it, a spelling variant included, and so does every entry
+    the run already searched, so the queue never holds a query the loop has
+    run or is about to run."""
     key = search_key(state, chosen)
-    return [q for q in queued if q != chosen and (key is None or search_key(state, q) != key)]
+    ran = _already_run(state)
+    kept = []
+    for q in queued:
+        other = search_key(state, q)
+        if q == chosen or (other is not None and (other == key or tuple(other) in ran)):
+            continue
+        kept.append(q)
+    return kept
 
 
 def _catalogue() -> tuple[list[BookEntry], bool]:
@@ -909,12 +923,12 @@ def reflect(state: AgentState) -> dict:
         log.debug("reflect: decision outside the schema: %.80s",
                   strip_control_chars(str(decision["decision"])))
 
-    # A probe is a search too, and one the run already made buys nothing: it
-    # is skipped as if the gate had found nothing to force, and the model's own
-    # decision stands (#163).
+    # A probe is a search too, and one the run already made buys nothing: the
+    # gate passes it over for its next candidate, and with none left the
+    # model's own decision stands (#163).
     ran = _already_run(state)
-    probe = coverage_probe(state, what)
-    if probe and _is_new_search(state, probe, ran):
+    probe = coverage_probe(state, what, is_new=lambda q: _is_new_search(state, q, ran))
+    if probe:
         return {"current_query": probe, "queries": _without(state, state["queries"], probe),
                 "coverage_probed": True}
 
@@ -981,7 +995,7 @@ def reflect(state: AgentState) -> dict:
     # the only replacement the event reports: falling back to the queue for a
     # missing query is what this node has always done, and that event keeps
     # its shape.
-    repeat = proposed if proposed and not is_loop_marker(proposed) else ""
+    repeat = proposed if search_key(state, proposed) is not None else ""
     fresh = next((q for q in queued if isinstance(q, str) and not is_loop_marker(q)
                   and _is_new_search(state, q, ran)), "")
     if fresh:
@@ -997,8 +1011,8 @@ def reflect(state: AgentState) -> dict:
     # `query_replaced` reports a repeat and nothing else: an empty proposal that
     # ends up here replaced no search, and its event says only what ran or why
     # the loop stopped.
-    probe = coverage_probe(state, "enough")
-    if probe and _is_new_search(state, probe, ran):
+    probe = coverage_probe(state, "enough", is_new=lambda q: _is_new_search(state, q, ran))
+    if probe:
         update = {"current_query": probe, "queries": _without(state, queued, probe),
                   "coverage_probed": True}
     else:

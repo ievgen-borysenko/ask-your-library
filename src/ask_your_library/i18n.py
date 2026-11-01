@@ -399,6 +399,7 @@ _T = {
                 "en": "[plan] mode={mode}, queries: {queries}"},
     "ev_plan_catalog": {"ua": "[plan] mode=catalog, операція: {op}",
                         "en": "[plan] mode=catalog, operation: {op}"},
+    "ev_plan_stopped": {"ua": "[plan] зупинка: {r}", "en": "[plan] stopped: {r}"},
     "ev_plan_refusal": {"ua": "[plan] поза межами бібліотеки: відмова без пошуку",
                         "en": "[plan] outside the library: refusing without a search"},
     "ev_catalog_fallback_invalid_op": {"ua": "[plan] планер назвав операцію каталогу, якої нема: шукаю в текстах",

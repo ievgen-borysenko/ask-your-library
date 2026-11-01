@@ -91,6 +91,10 @@ def print_event(node_name: str, update: dict) -> None:
             # The scope gate (#70): there is no query list to print, and
             # "queries: ['']" would be the only thing this line said.
             say(t("ev_plan_refusal"))
+        elif not update.get("current_query") and update.get("stop_reason"):
+            # A re-plan with nothing left to search (#163): the reason, not an
+            # empty query list.
+            say(t("ev_plan_stopped", r=update["stop_reason"]))
         else:
             say(t("ev_plan", mode=update["mode"],
                   queries=[update["current_query"]] + update["queries"]))

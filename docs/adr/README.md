@@ -666,9 +666,12 @@ question and +57% per extended question against v0.1.0
 The four runs that measured the gate on its own stay in the development history.
 
 **Amended 2026-11-01 (#163):** the gate also gets its one chance when the model asks for a search the
-run already made and no unrun query is queued to take its place, and a probe whose search the run
-already made (the same query in the same book) is skipped as if the gate had found nothing to force.
-After that the loop stops with "no new query" rather than repeating a search.
+run already made and no unrun query is queued to take its place, and a candidate whose search the
+run already made (the same query in the same book) is passed over for the next one: the next queued
+query in identify mode, the next uncovered named book in answer mode, so a book the plan named and
+the first step already searched does not cost the comparison's other side its probe. With no
+candidate left the gate has nothing to force, and the loop stops with "no new query" rather than
+repeating a search.
 
 ## ADR-014: A small ablation on the core set
 

@@ -12,7 +12,9 @@
   recorded). `plan` queues each key once and, after a clarify, drops what already ran under the
   book it settles on. When `reflect` would send a search the run already made, the first queued
   query that has not run goes instead; with none left the coverage gate gets its one chance with a
-  search the run has not made, and otherwise the loop stops on a new reason, "no new query". The
+  search the run has not made (a candidate that already ran is passed over for the next), and
+  otherwise the loop stops on a new reason, "no new query", which the CLI and web UI also show for a
+  re-plan with nothing left. A query of punctuation alone is no search. The
   same stop ends a re-plan whose every query already ran, and a `search` decision with no query and
   nothing queued, which used to end the loop with no reason and read as "enough". `observe` keeps
   one copy of each (book, section, normalised quote), and a step whose quotes were all copies

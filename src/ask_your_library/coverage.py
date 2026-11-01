@@ -34,7 +34,7 @@ def _named_in(question: str, book: str) -> bool:
     return whole(author.split()[-1] if author else "")
 
 
-def coverage_probe(state: AgentState, decision: str | None) -> str:
+def coverage_probe(state: AgentState, decision: str | None, is_new=None) -> str:
     """Deterministic coverage gate (ADR-013, code not prompt). Before the model
     stops ("enough") or asks ("clarify"), spend ONE more search, once per run:
       identify mode, evidence for at most one book: the next QUEUED planner
@@ -49,6 +49,9 @@ def coverage_probe(state: AgentState, decision: str | None) -> str:
         first. A book the question does not name is never probed, however many
         hits it has, and unrelated books in the evidence do not switch the gate
         off. Nothing when the question names no uncovered book.
+    `is_new`, when given, says whether a candidate is a search the run has not
+    made (#163): one that already ran is passed over for the next candidate,
+    so a probe the record makes pointless does not cost the book behind it.
     Never after a resolved clarify, never at the step limit. Returns the next
     current_query (a plain query or a "__book__|key|query" marker), or "".
     Limit: the window is the universe; a book no query ever retrieved cannot be
@@ -63,13 +66,15 @@ def coverage_probe(state: AgentState, decision: str | None) -> str:
         if len({e["book"] for e in state.get("evidence", [])}) > 1:
             return ""
         queued = [q for q in state.get("queries", []) if isinstance(q, str) and q.strip()
-                  and not is_loop_marker(q)]
+                  and not is_loop_marker(q) and (is_new is None or is_new(q))]
         return queued[0] if queued else ""
     for book, _count in _uncovered_books(state):
         if _named_in(state["question"], book):
             # The key is escaped and the question is not: the question is last
             # and takes the rest of the string, the key is a lookup value that
             # has to come back out of `act` exactly as it went in.
-            return f"__book__|{escape_marker(book)}|{state['question']}"
+            probe = f"__book__|{escape_marker(book)}|{state['question']}"
+            if is_new is None or is_new(probe):
+                return probe
     return ""
 

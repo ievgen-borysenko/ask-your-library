@@ -94,6 +94,11 @@ def test_reflect_step_says_which_search_already_ran(ui, monkeypatch):
     # nothing named, nothing said: the stop line alone
     ui.render_event("reflect", {"current_query": "", "stop_reason": t("stop_no_new_query")})
     assert shown[-1][1] == t("ui_stopped", r=t("stop_no_new_query"))
+    # a re-plan with nothing left to search: the reason, not an empty "- " query
+    ui.render_event("plan", {"mode": "answer", "current_query": "", "queries": [],
+                             "stop_reason": t("stop_no_new_query")})
+    assert shown[-1][1] == (t("ui_mode", mode="answer") + "\n"
+                            + t("ui_stopped", r=t("stop_no_new_query")))
 
 def test_badge_is_green_only_when_nothing_is_broken_or_unattributed(ui):
     def badge(**numbers):

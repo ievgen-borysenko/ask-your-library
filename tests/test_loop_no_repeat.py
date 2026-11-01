@@ -125,8 +125,9 @@ def test_queued_queries_that_already_ran_are_skipped_and_leave_the_queue(monkeyp
     decide(monkeypatch, decision="search", next_query="q1")
     state = reflect_state(queries=["Q1?", "q2", "q2 "], searches_run=ran("q1"))
     result = nodes.reflect(state)
-    # "Q1?" is q1 again, so q2 is the first new one; its variant leaves with it
-    assert result["current_query"] == "q2" and result["queries"] == ["Q1?"]
+    # "Q1?" is q1 again, so q2 is the first new one; its variant leaves with
+    # it, and so does "Q1?", a search the run already made
+    assert result["current_query"] == "q2" and result["queries"] == []
 
 
 def test_a_queued_marker_is_never_the_replacement(monkeypatch):
@@ -163,6 +164,38 @@ def test_with_nothing_queued_the_probe_runs_once_and_then_the_loop_stops(monkeyp
     decide(monkeypatch, decision="search", next_query="")
     assert nodes.reflect(state) == {"current_query": probe, "queries": [], "coverage_probed": True}
 
+
+
+def test_the_gate_passes_over_a_probe_that_already_ran_for_the_next_named_book(monkeypatch):
+    """Answer mode: the most-hit uncovered named book was already searched with
+    the question itself (a book the plan named), so the gate probes the other
+    named book behind it instead of giving up."""
+    question = "How does Crusoe compare with Gulliver's Travels?"
+    hits = [{"hit_id": f"s1h{i}", "step": 1, "book": CRUSOE, "section": "s", "corpus": "cards", "text": "t"}
+            for i in (1, 2)] + [{"hit_id": "s2h1", "step": 2, "book": GULLIVER, "section": "s",
+                                 "corpus": "cards", "text": "t"}]
+    state = reflect_state(question=question, hits_log=hits, steps_taken=2)
+    state["searches_run"] = [nodes.search_key(state, f"__book__|{CRUSOE}|{question}")]
+    decide(monkeypatch, decision="enough")
+    assert nodes.reflect(state) == {"current_query": f"__book__|{GULLIVER}|{question}",
+                                    "queries": [], "coverage_probed": True}
+
+
+def test_in_identify_mode_the_gate_probes_the_first_queued_query_not_yet_run(monkeypatch):
+    decide(monkeypatch, decision="enough")
+    evidence = [{"hit_id": "s1h1", "book": MOBY, "section": "s", "quote": "q", "why": "w"}]
+    state = reflect_state(mode="identify", evidence=evidence, queries=["Q1?", "q3"],
+                          searches_run=ran("q1"))
+    assert nodes.reflect(state) == {"current_query": "q3", "queries": [], "coverage_probed": True}
+
+
+def test_a_query_with_no_words_is_no_search(monkeypatch):
+    assert nodes.search_key(reflect_state(), "???") is None
+    assert nodes.search_key(reflect_state(), "__book__|Book| ") is None
+    decide(monkeypatch, decision="search", next_query="???")
+    # not a repeat either: the queue's next query runs and no search is named as repeated
+    assert nodes.reflect(reflect_state(queries=["q2"], searches_run=ran("q1"))) == \
+        {"current_query": "q2", "queries": []}
 
 def test_an_ineligible_probe_means_the_loop_stops_at_once(monkeypatch):
     decide(monkeypatch, decision="search", next_query="q1")
@@ -281,11 +314,15 @@ def test_the_cli_names_the_search_that_already_ran(capsys):
     cli.print_event("reflect", {"current_query": "", "stop_reason": t("stop_no_new_query"),
                                 "query_replaced": {"from": "q1", "to": ""}})
     cli.print_event("reflect", {"current_query": "q3", "queries": []})
+    # a re-plan with nothing left to search says why, not "queries: ['']"
+    cli.print_event("plan", {"mode": "answer", "current_query": "", "queries": [],
+                             "stop_reason": t("stop_no_new_query")})
     lines = capsys.readouterr().out.splitlines()
     assert lines == [t("ev_reflect_repeat", q="q1"), t("ev_reflect_search", q="q2"),
                      t("ev_reflect_repeat", q="q1"),
                      t("ev_reflect_stopped", r=t("stop_no_new_query")),
-                     t("ev_reflect_search", q="q3")]
+                     t("ev_reflect_search", q="q3"),
+                     t("ev_plan_stopped", r=t("stop_no_new_query"))]
 
 
 # ---------------------------------------------------------------- one quote, one piece of evidence
