@@ -60,6 +60,19 @@
   refused as `memory cannot be measured here`, when the process was on its way out at the
   moment its memory was read; it is now given one more look. Nothing else in the reader
   changed.
+- **The locked PDF library and LangGraph are updated for new advisories.** `uv.lock` moves pypdf
+  6.21.3 to 6.21.4 (GHSA-5849-834g-hvw5, GHSA-cggf-277g-3q54 and GHSA-mfr5-77xh-9j7h, all High)
+  and langgraph 1.2.12 to 1.2.14 (GHSA-3fx2-cqw9-xr3c, in `RemoteGraph` streaming, which this
+  project does not use; the SDK it locks, langgraph-sdk 0.4.8, already had the fix). Nothing else
+  in the lock moves. `pyproject.toml` now asks for `pypdf>=6.21.4,<7` and `langgraph>=1.2.14`.
+  pypdf 6.21.4 adds one configuration field, and the PDF reader sets it as it sets the others: the
+  entries the library copies into the pages it builds while walking the page tree, a page counted
+  once for every place the tree names it, are capped at 2,000,000 (the library's own value; a real
+  page holds a dozen or two). A PDF over it, one page of 100,000 entries named hundreds of times
+  say, was read before at whatever memory it cost up to the 1 GiB cap and is now refused before
+  that memory is spent, as `its page tree is too deep or too large to read`. The bound on a
+  cross-reference stream's entries that 6.21.3 added is now passed by name at the library's value,
+  2,000,000, so nothing changes there.
 - **The locked OpenTelemetry packages are updated for an advisory.** `uv.lock` moves
   opentelemetry-api 1.44.0 to 1.45.1 (GHSA-xcq7-p3pf-p88h, unbounded `tracestate` parsing),
   with the rest of the OpenTelemetry family, which pins it exactly, and two small packages the

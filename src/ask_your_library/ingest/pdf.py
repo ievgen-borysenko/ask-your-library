@@ -98,7 +98,8 @@ fast, on what the library lets a caller bound:
   (`MAX_STREAM_DECODING_BYTES`), the tokens one page's instructions hold
   (`MAX_STREAM_TOKENS`), the elements of one array (`MAX_ARRAY_ELEMENTS`) and
   the entries of one dictionary (`MAX_DICTIONARY_ENTRIES`), the page-tree walk
-  stopped past `2 * MAX_PAGES` entries or `MAX_PAGE_TREE_DEPTH` levels and the
+  stopped past `2 * MAX_PAGES` entries or `MAX_PAGE_TREE_DEPTH` levels or
+  `MAX_PAGE_TREE_PAGE_ENTRIES` entries copied into its pages, and the
   outline walk, and the form-field walk that is never made, past
   `MAX_OUTLINE_ENTRIES` entries or `MAX_OUTLINE_DEPTH` levels, at most
   `MAX_FORM_DRAWS` forms drawn a page, XMP size and element count, the
@@ -189,6 +190,13 @@ MAX_OUTLINE_ENTRIES = 10_000
 # library walks both recursively.
 MAX_OUTLINE_DEPTH = 32
 MAX_PAGE_TREE_DEPTH = 64
+# The entries the library copies into the pages it builds while it walks the
+# page tree: each page's own and those it inherits, once for every reference to
+# it, so one page of a hundred thousand entries named ten thousand times is not
+# copied ten thousand times. A real page holds a dozen or two and inherits at
+# most four; this is 400 a page at MAX_PAGES, 200 at the walk's 2 * MAX_PAGES
+# entries. The library's own value, written out.
+MAX_PAGE_TREE_PAGE_ENTRIES = 2_000_000
 # Forms one page may draw: a running head, a watermark, a figure built of
 # parts is a handful to a few dozen; past this the library skips the rest.
 MAX_FORM_DRAWS = 200
@@ -199,6 +207,10 @@ MAX_XMP_BYTES = 1024 * 1024
 MAX_XMP_ELEMENTS = 10_000
 # Objects the library may visit to find a document catalogue that is missing.
 MAX_ROOT_RECOVERY = 10_000
+# The entries of one cross-reference stream, one an object: a long book has
+# tens of thousands of objects, rarely more than a few hundred thousand. The
+# library's own value, written out.
+MAX_XREF_STREAM_ENTRIES = 2_000_000
 
 # The process boundary. A 400-page book reads in about 0.6 s and 40 MiB.
 MAX_SECONDS_PER_FILE = 60
@@ -243,6 +255,7 @@ CONFIGURATION = dict(
     zlib_maximum_recovery_input_length=MAX_RECOVERY_BYTES,
     page_tree_maximum_entries=2 * MAX_PAGES,
     page_tree_maximum_depth=MAX_PAGE_TREE_DEPTH,
+    page_tree_maximum_page_entries=MAX_PAGE_TREE_PAGE_ENTRIES,
     outline_maximum_entries=MAX_OUTLINE_ENTRIES,
     outline_maximum_depth=MAX_OUTLINE_DEPTH,
     xform_maximum_invocations_per_extraction=MAX_FORM_DRAWS,
@@ -286,6 +299,7 @@ SHOW_TEXT = frozenset({b"Tj", b"TJ", b"'", b'"'})
 # a page; another cap met on one of those is not the tree's, and is refused
 # as any other. A later version that rewords these falls back to that reason.
 PAGE_TREE_LIMITS = ("Maximum page tree depth reached", "Maximum page tree entry limit reached",
+                    "Maximum page tree page entry limit exceeded",
                     "Detected cycle in /Pages hierarchy")
 OUTLINE_LIMITS = ("Maximum outline depth reached", "Maximum outline entry limit reached")
 
@@ -829,11 +843,11 @@ def read_in_process(path: Path) -> PdfBook:
             if size > MAX_FILE_BYTES:
                 raise PdfRefused(f"the file is larger than {mib(MAX_FILE_BYTES)}")
             with quiet_pypdf(), apply_configuration(**CONFIGURATION):
-                # 6.21.3 also bounds the entries of a cross-reference stream
-                # (`xref_stream_maximum_entries`, 2,000,000); left at the
-                # library's value, so that 6.21.2 stays a floor that runs this.
+                # The constructor's bounds, every one set as the
+                # configuration's are (the second since 6.21.3).
                 reader = reader_class()(fp, strict=False,
-                                        root_object_recovery_limit=MAX_ROOT_RECOVERY)
+                                        root_object_recovery_limit=MAX_ROOT_RECOVERY,
+                                        xref_stream_maximum_entries=MAX_XREF_STREAM_ENTRIES)
                 if reader.is_encrypted:
                     raise PdfRefused(ENCRYPTED)
                 texts = read_pages(reader)

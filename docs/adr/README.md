@@ -1457,8 +1457,8 @@ real books show the need.
 
 ## ADR-030: PDF is read through its text layer with pypdf, in a child process bounded from outside, and encryption is refused
 
-Status: accepted (2026-10-03, #34, with `ayl add` reading `.pdf`); amended 2026-10-21 (#159) and
-2026-10-27 (#161), see below.
+Status: accepted (2026-10-03, #34, with `ayl add` reading `.pdf`); amended 2026-10-21 (#159),
+2026-10-27 (#161) and 2026-11-02, see below.
 
 The second half of the 0.5.0 criterion: a reader's own PDF, imported on a clean install. Three
 decisions again, and the first is the one the EPUB did not need.
@@ -1546,7 +1546,8 @@ Inside the child, a first line gives a precise reason fast where the library let
 its work: every field of its configuration is set explicitly, and a test fails when a version adds
 one (each inflated stream at 16 MiB, 4 filters a stream and 128 MiB of decoding work for it,
 2,000,000 tokens in one page's instructions, 100,000 elements in one array and 100,000 entries in
-one dictionary, the page-tree walk at twice the page cap or 64 levels, the outline, and the
+one dictionary, the page-tree walk at twice the page cap or 64 levels or 2,000,000 entries copied
+into its pages, the outline, and the
 form-field walk that is never made, at 10,000 entries or 32 levels, 200 form draws a page, the
 XMP size and element count, the recovery of a damaged stream, `jbig2dec` never called), and the
 module caps the file at 256 MiB, the pages at 5,000, the text at 100,000 characters a page — the
@@ -1643,6 +1644,31 @@ without one still reads, that a cap other than the tree's met while the page tre
 is read gives the general reason, and that each new field holds the value above; the race, 5
 failures in 20 runs of the child-process tests before the wait and none in 20 after, on an Apple
 M-series machine; no eval report.
+
+**Amended 2026-11-02: the floor is 6.21.4, and the configuration has one more cap.** pypdf 6.21.3
+carries three High advisories, all fixed by 6.21.4: an endless loop on a standard cross-reference
+table that ends before its trailer (GHSA-5849-834g-hvw5), an endless loop cloning dictionaries
+(GHSA-mfr5-77xh-9j7h; only page merging and writing clone, never this reader), and the memory spent
+walking a page tree whose pages are named many times (GHSA-cggf-277g-3q54). The last is fixed with a
+new configuration field, `page_tree_maximum_page_entries`: the library copies a page's entries, its
+own and the ones it inherits, into the page it builds once for every reference to it, and the field
+caps their sum. It is set as the others are, at the library's value written out
+(`MAX_PAGE_TREE_PAGE_ENTRIES`, 2,000,000): a real page holds a dozen or two entries and inherits at
+most four, so the cap is 400 a page at the page cap and 200 at the walk's 10,000 entries. A file of
+0.9 MiB whose one page of 99,990 entries is named 400 times cost 2 GiB to count its pages with the
+cap lifted; under this cap it is refused at the twenty-first reference, after some 120 MiB, and
+5,000 pages of seventeen entries each count in 5 MiB (tracemalloc peaks, Apple M-series). The cap is
+met while the page tree is walked, so its refusal is the page tree's (`its page tree is too deep or
+too large to read`), told apart by the start of the library's message like the tree's other caps.
+With the floor past 6.21.3, the bound on a cross-reference stream's entries left at the library's
+value above is now passed by name too (`MAX_XREF_STREAM_ENTRIES`, 2,000,000, the same value), and a
+test fails when a version adds a keyword bound to the reader's constructor. `pyproject.toml` bounds
+the library below at 6.21.4, the version verified to have every field the reader sets; the lockfile
+resolves 6.21.4. Nothing else the reader relies on changed between 6.21.3 and 6.21.4:
+`PdfReader.__init__` and the `_handle_encryption` it calls on an encrypted file are unchanged.
+Measurement: tests that one page named thirty times is read as thirty pages under the production cap
+and refused with the page tree's reason under a cap of 100, that the new field and the constructor
+bounds hold the values above; no eval report.
 
 ## ADR-031: Staging is never dropped while the live table cannot be opened
 
