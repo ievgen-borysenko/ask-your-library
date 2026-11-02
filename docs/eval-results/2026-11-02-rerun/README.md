@@ -13,7 +13,7 @@ this page, which summarises them.
 | Code | `6d73fc3` (`6d73fc39accc3a64bb8bd10e8c474c6b97d705fd`, `main` on 02.11.2026), detached checkout; every fingerprint stamps it clean (`--require-clean`, sidecar `code_clean: true`) |
 | When | 02.11.2026 23:01 to 03.11.2026 00:50 CET, one batch, every run sequential |
 | Machine | Mac mini (Apple Silicon) |
-| Index | the demo index under `_data/lancedb`, given as `LIBRARY_DB_PATH` (resolution clause 1, an explicit path): 35 books; `cards_ollama=bge-m3/1024d chunker=card-sections-2 rows=165 built=2026-09-19T12:28:41`, `transcripts_ollama=bge-m3/1024d chunker=sentence-pack-2 rows=11236 built=2026-09-24T10:39:10`; `ayl doctor` reported no drift before the runs |
+| Index | the demo index under `_data/lancedb`, given as `LIBRARY_DB_PATH` (resolution clause 1, an explicit path): 35 books; `cards_ollama=bge-m3/1024d chunker=card-sections-2 rows=165 v2 built=2026-09-19T12:28:41`, `transcripts_ollama=bge-m3/1024d chunker=sentence-pack-2 rows=11236 v26 built=2026-09-24T10:39:10`; `ayl doctor` reported no drift before the runs |
 | Embeddings | `bge-m3` via Ollama (`EMBED_BACKEND=ollama`) for every run, hosted ones included |
 | Golden sets | core `en-demo.yaml@2c43defa8bc7` (11 items), extended `en-demo-extended.yaml@338002f35e0e` (21 items), catalogue `en-demo-catalog.yaml@72eb2c2b2655` (10 items); corpus `manifest@c1fee42124dd`, `toc@3f0e05110358` |
 | Step 1 flags | `--repeat 3 --clarify-pick second --require-clean` |
@@ -46,10 +46,11 @@ The two configurations, as `config.py` resolved them:
 
 Every figure in the tables is copied from a report's totals block (the lines after its last
 `---`), which gives each figure **per attempt**: min–max over the attempts, with the mean. The
-lines quoted under each table are copied verbatim. Seconds are the one exception: the totals
-block does not give them per set, so the seconds rows are computed from the sidecar, over every
-item-attempt's `seconds` field (`questions[].attempts[].seconds`); wall clock is the sidecar's
-top-level `seconds` for the run.
+lines quoted under each table are copied verbatim. Three exceptions: the seconds rows are computed
+from the sidecar, over every item-attempt's `seconds` field (`questions[].attempts[].seconds`),
+and wall clock is the sidecar's top-level `seconds` for the run; the per-attempt lists such as
+"(9, 10, 10)" are the sidecar's `totals.per_attempt.behavior_ok.values`; the runner exit codes of
+the bar runs come from the batch's run log, which is not committed.
 
 Behaviour PASS is the harness's heuristic, not answer correctness; "expected facts found" is
 substring presence. See [Evaluation](../../evaluation.md).

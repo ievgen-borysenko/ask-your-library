@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Both shipped configurations re-measured on one commit, reports and sidecars committed.**
+  [`docs/eval-results/2026-11-02-rerun/`](eval-results/2026-11-02-rerun/README.md) holds the
+  harness's own reports and JSON sidecars, unedited, of the hosted default and the local default on
+  the core, extended and catalogue sets at `--repeat 3`, the retriever eval, and the #29 bar on the
+  local default at `--repeat 5` (met on both sets: core weakest attempt 9/11 against a floor of 9,
+  catalogue 10/10 in all five), all on `6d73fc3`. Manual correctness is unscored there; the README
+  "Measured" table and its intervals (#131) follow with the grades.
 - **A local run says before it starts that a research answer takes minutes (#137).** On the local
   model every research answer takes 1-4 minutes (61-217 s measured, [cost](cost.md); a cold first
   one 160.8 s, its immediate repeat 62.7 s), and `ayl ask` printed the question back and then
