@@ -35,6 +35,30 @@
   quotes, comments and processing instructions. The match uses possessive quantifiers, which
   Python 3.11.0 to 3.11.4 matched wrongly, so the project now needs Python 3.11.5 or later.
   Running `ayl add <folder>` again re-extracts an affected book.
+- **The loop no longer runs a search it already ran, nor counts a quote it already holds (#163).**
+  On a library of about 250 audiobooks a research question ran q1, q3, q1, q1 and stopped at the
+  step limit with plan query q2 never searched; a comparison kept 9 evidence items, 5 of them
+  unique. Nothing recorded which searches had run, and a quote taken again was kept again and
+  reset the dry streak. `act` now records every search in the state as (query, book), the query
+  NFKC-normalised, case-folded, its spaces collapsed and its edge punctuation trimmed, and the book
+  the one retrieval was limited to (a coverage probe keyed by its own book; chapter reads are not
+  recorded). `plan` queues each key once and, after a clarify, drops what already ran under the
+  book it settles on. When `reflect` would send a search the run already made, the first queued
+  query that has not run goes instead; with none left the coverage gate gets its one chance with a
+  search the run has not made (a candidate that already ran is passed over for the next), and
+  otherwise the loop stops on a new reason, "no new query", which the CLI and web UI also show for a
+  re-plan with nothing left. A query of punctuation alone is no search. The
+  same stop ends a re-plan whose every query already ran, and a `search` decision with no query and
+  nothing queued, which used to end the loop with no reason and read as "enough". `observe` keeps
+  one copy of each (book, section, normalised quote), and a step whose quotes were all copies
+  counts as dry, so two of them end the run at the CRAG gate; a step that also dropped a quote keeps
+  the #29 rule. Prompts are unchanged, and a run without repeats or copies emits the events it
+  always did: `reflect` adds `query_replaced` and `observe` adds `duplicates_skipped` only when they
+  happened, and the CLI and the web UI then name the search that already ran. `act`'s event gains
+  `searches_run` on every search step, and `RunResult` gains `searches_run` and
+  `duplicates_skipped`. The agent eval records every search, the repeats among them, the repeats
+  replaced, the quotes skipped and the new passages per step, and reports the totals. A paraphrase
+  is still a new search ([known limits](known-limits.md)).
 - **An interrupted `--rebuild` no longer lets a write with the old embedding model in (#147).**
   `ayl add --rebuild` drops the table and stamps it again only when the run finishes, and the
   dropped table's stamp stayed in place in between. A rebuild interrupted in its publish copy (an
@@ -62,6 +86,57 @@
   yarl moves from 1.24.5 to 1.25.1 because the new aiohttp requires it. No dependency declaration
   in `pyproject.toml` changed; no application behaviour changed, and certifi drops the emSign
   roots.
+- **The locked PDF library is updated for the open advisories.** `uv.lock` moves pypdf 6.19.0
+  to 6.21.3: 6.20.0 and 6.20.1 fix GHSA-39mj-jf6j-2qj3, GHSA-7mh2-4gg2-979f,
+  GHSA-9mx8-4j7g-633p and GHSA-qfv9-64jg-mh7p (#159), 6.21.0 to 6.21.2 fix GHSA-6vvc-x485-93v7,
+  GHSA-cgf9-327m-v77c, GHSA-f54x-cmq8-qg57, GHSA-5hx5-vpf9-5wcv and the three High ones,
+  GHSA-6c7f-9265-g8fw, GHSA-gmh7-3g9r-mjh5 and GHSA-jr96-gvgh-j3r4 (#161). `pyproject.toml` now
+  asks for `pypdf>=6.21.2,<7`, since the PDF reader sets every field of the library's
+  configuration and 6.20.0 added three, 6.21.0 five more. They are set as the others are: a
+  Brotli stream (PDF 2.0, whose decoder is not installed here, so such a stream still fails to
+  decode) is capped at 16 MiB like every other inflated stream, one stream may chain at most 4
+  filters (the library allows 16), and the bytes its decoding passes through are capped at 128
+  MiB (the library allows 300 MB); a real book's streams use one or two filters and stay far
+  under both. The instructions of one page may hold 2,000,000 tokens, one array 100,000
+  elements and one dictionary 100,000 entries (the library's own values, written out: a page
+  at the 100,000-character cap written a glyph at a time needs under a million, and a real
+  array or dictionary is far smaller, though a vector figure of more than about 650,000
+  segments drawn in a page's own instructions is over the token cap); the form-field walk,
+  which the reader never makes, is capped at 10,000 fields and 32 levels like the outline (the
+  library allows 100,000 and 100).
+  A Brotli-filtered PDF is refused as before, its reason now `could not be read
+  (DependencyError)` instead of `(NotImplementedError)` (pypdf 6.20 would use a `brotli`
+  native extension if one were importable, and none is locked or installed here, since
+  ADR-030 keeps native code off the read path). A PDF with an array or a dictionary over the
+  new caps, read before at whatever memory it cost up to the 1 GiB cap (a font `/Differences`
+  array of five million names in a 15 KB file cost about 630 MiB), is now refused before that
+  memory is spent, as `could not be read (LimitReachedError)`, or as the outline note `its
+  outline could not be read (LimitReachedError)` when the object is read with the outline or
+  the named destinations. The page tree's reason (`its page tree is too deep or too large to
+  read`) and the outline's note (`its outline is too deep or too large to read`) are now given
+  only for their own caps. On macOS a PDF the reading process finished with quickly could be
+  refused as `memory cannot be measured here`, when the process was on its way out at the
+  moment its memory was read; it is now given one more look. Nothing else in the reader
+  changed.
+- **The locked PDF library and LangGraph are updated for new advisories (#165).** `uv.lock` moves pypdf
+  6.21.3 to 6.21.4 (GHSA-5849-834g-hvw5, GHSA-cggf-277g-3q54 and GHSA-mfr5-77xh-9j7h, all High)
+  and langgraph 1.2.12 to 1.2.14 (GHSA-3fx2-cqw9-xr3c, in `RemoteGraph` streaming, which this
+  project does not use; the SDK it locks, langgraph-sdk 0.4.8, already had the fix). Nothing else
+  in the lock moves. `pyproject.toml` now asks for `pypdf>=6.21.4,<7` and `langgraph>=1.2.14`.
+  pypdf 6.21.4 adds one configuration field, and the PDF reader sets it as it sets the others: the
+  entries the library copies into the pages it builds while walking the page tree, a page counted
+  once for every place the tree names it, are capped at 2,000,000 (the library's own value; a real
+  page holds a dozen or two). A PDF over it, one page of 100,000 entries named hundreds of times
+  say, was read before at whatever memory it cost up to the 1 GiB cap and is now refused before
+  that memory is spent, as `its page tree is too deep or too large to read`. The bound on a
+  cross-reference stream's entries that 6.21.3 added is now passed by name at the library's value,
+  2,000,000, so nothing changes there.
+- **The locked OpenTelemetry packages are updated for an advisory.** `uv.lock` moves
+  opentelemetry-api 1.44.0 to 1.45.1 (GHSA-xcq7-p3pf-p88h, unbounded `tracestate` parsing),
+  with the rest of the OpenTelemetry family, which pins it exactly, and two small packages the
+  new exporter requires (opentelemetry-exporter-http-transport, opentelemetry-exporter-otlp-common).
+  They come in only with the `ui` extra, through Chainlit's tracing dependency; nothing in this
+  project calls them.
 
 ## 0.5.1 (2026-10-05)
 

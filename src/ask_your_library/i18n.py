@@ -139,6 +139,14 @@ _T = {
         "ua": "досить доказів",
         "en": "enough evidence",
     },
+    # Every search the loop could still make has already run (#163): the model
+    # named one it made before, nothing unrun is queued, and the coverage gate
+    # has nothing new to force. Another step would only bring back passages the
+    # run already holds.
+    "stop_no_new_query": {
+        "ua": "немає нового запиту: кожен пошук, який лишався, уже виконано",
+        "en": "no new query: every search left has already run",
+    },
     "stop_clarify_repeat": {
         "ua": "повторний clarify не дозволено — фінішуємо з наявним",
         "en": "repeated clarify not allowed — finishing with what we have",
@@ -391,6 +399,7 @@ _T = {
                 "en": "[plan] mode={mode}, queries: {queries}"},
     "ev_plan_catalog": {"ua": "[plan] mode=catalog, операція: {op}",
                         "en": "[plan] mode=catalog, operation: {op}"},
+    "ev_plan_stopped": {"ua": "[plan] зупинка: {r}", "en": "[plan] stopped: {r}"},
     "ev_plan_refusal": {"ua": "[plan] поза межами бібліотеки: відмова без пошуку",
                         "en": "[plan] outside the library: refusing without a search"},
     "ev_catalog_fallback_invalid_op": {"ua": "[plan] планер назвав операцію каталогу, якої нема: шукаю в текстах",
@@ -419,6 +428,8 @@ _T = {
                          "en": "[reflect] coverage gate: one look inside {book}, a candidate the evidence never touched"},
     "ev_reflect_search": {"ua": "[reflect] ще шукаємо: {q}",
                           "en": "[reflect] searching more: {q}"},
+    "ev_reflect_repeat": {"ua": "[reflect] цей пошук уже був: {q}",
+                          "en": "[reflect] already searched: {q}"},
     "ev_reflect_enough": {"ua": "[reflect] досить, синтезуємо",
                           "en": "[reflect] enough, synthesizing"},
     "ev_clarify": {"ua": "[clarify] уточнення користувача: {a}",
@@ -516,6 +527,7 @@ _T = {
     "ui_probe": {"ua": "coverage gate: одна перевірка кандидата {book}",
                  "en": "coverage gate: one look inside {book}"},
     "ui_search_more": {"ua": "ще шукаємо: {q}", "en": "searching more: {q}"},
+    "ui_search_repeat": {"ua": "цей пошук уже був: {q}", "en": "already searched: {q}"},
     "ui_enough": {"ua": "досить, синтезуємо", "en": "enough, synthesizing"},
     "ui_stopped": {"ua": "зупинка: {r}", "en": "stopped: {r}"},
     "ev_reflect_stopped": {"ua": "[reflect] зупинка: {r}", "en": "[reflect] stopped: {r}"},

@@ -687,6 +687,10 @@ def render_event(node_name: str, update: dict, view: RunView | None = None) -> N
             # The scope gate (#70): no queries were planned, so the step says
             # what happened instead of listing an empty query.
             lines = [t("ui_plan_refusal")]
+        elif not update.get("current_query") and update.get("stop_reason"):
+            # A re-plan with nothing left to search (#163): the reason, not an
+            # empty query.
+            lines = [t("ui_mode", mode=update["mode"]), t("ui_stopped", r=update["stop_reason"])]
         else:
             queries = [update["current_query"]] + update["queries"]
             lines = [t("ui_mode", mode=update["mode"]), t("ui_queries")]
@@ -741,6 +745,9 @@ def render_event(node_name: str, update: dict, view: RunView | None = None) -> N
             text = t("ui_stopped", r=update["stop_reason"])
         else:
             text = t("ui_enough")
+        if (update.get("query_replaced") or {}).get("from"):
+            # A search the run already made, caught before it ran (#163).
+            text = t("ui_search_repeat", q=update["query_replaced"]["from"]) + "\n" + text
         # The LAST reflect is the one that says why the search stopped, and
         # that is the sentence a reader judges the answer by; the ones that
         # only queue another query stay collapsed.

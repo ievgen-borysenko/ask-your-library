@@ -91,6 +91,10 @@ def print_event(node_name: str, update: dict) -> None:
             # The scope gate (#70): there is no query list to print, and
             # "queries: ['']" would be the only thing this line said.
             say(t("ev_plan_refusal"))
+        elif not update.get("current_query") and update.get("stop_reason"):
+            # A re-plan with nothing left to search (#163): the reason, not an
+            # empty query list.
+            say(t("ev_plan_stopped", r=update["stop_reason"]))
         else:
             say(t("ev_plan", mode=update["mode"],
                   queries=[update["current_query"]] + update["queries"]))
@@ -117,6 +121,10 @@ def print_event(node_name: str, update: dict) -> None:
         # line a reader sees is about the chapter, so the query comes off here
         # and everything below reads the marker it always read.
         nxt, _ = split_read_query(update.get("current_query") or "")
+        # A search the run already made, caught before it ran (#163): said
+        # first, so the line after it reads as what ran instead, or the stop.
+        if (update.get("query_replaced") or {}).get("from"):
+            say(t("ev_reflect_repeat", q=update["query_replaced"]["from"]))
         if nxt == "__clarify__":
             say(t("ev_reflect_clarify"))
         elif nxt and nxt.startswith("__chapter__|"):
