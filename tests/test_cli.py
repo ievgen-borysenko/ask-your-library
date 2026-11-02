@@ -93,6 +93,63 @@ def test_the_interactive_loop_checks_the_environment_once_before_it_starts(
     assert capsys.readouterr().out.strip()                         # banner and goodbye
 
 
+@pytest.mark.parametrize("lang", ["en", "ua"])
+def test_a_local_run_says_the_first_answer_takes_minutes_before_it_starts(
+        a_working_environment, monkeypatch, capsys, lang):
+    """#137: with LLM_BACKEND=ollama, one line before the run, on stderr with
+    the preflight notices, so stdout stays the question and the answer."""
+    from ask_your_library.i18n import _T
+    from ask_your_library.runner import RunResult
+    monkeypatch.setattr(cli, "LLM_BACKEND", "ollama")
+    seen = []
+
+    def run(*a, **k):
+        seen.append(capsys.readouterr())          # what was printed before the run
+        return RunResult(question="q", answer="an answer")
+    monkeypatch.setattr(cli, "_run", run)
+
+    assert cli.main(["--lang", lang, "how", "many", "books"]) is None
+    before, line = seen[0], _T["cli_local_wait"][lang]
+    assert before.err.count(line) == 1
+    assert line not in before.out
+
+
+def test_a_local_chat_says_it_once_before_the_first_prompt(
+        a_working_environment, monkeypatch, capsys):
+    """Two questions, then EOF: the line comes before the first prompt and is
+    not said again before the second."""
+    from ask_your_library.i18n import t
+    from ask_your_library.runner import RunResult
+    monkeypatch.setattr(cli, "LLM_BACKEND", "ollama")
+    monkeypatch.setattr(cli, "_run", lambda *a, **k: RunResult(question="q", answer="an answer"))
+    questions = iter(["how many books", "and which is the longest"])
+    err = []
+
+    def ask(_prompt):
+        err.append(capsys.readouterr().err)       # what was said before this prompt
+        try:
+            return next(questions)
+        except StopIteration:
+            raise EOFError from None
+    monkeypatch.setattr("builtins.input", ask)
+    assert cli.main([]) is None
+    err.append(capsys.readouterr().err)
+    line = t("cli_local_wait")
+    assert len(err) == 4                           # three prompts and the goodbye
+    assert err[0].count(line) == 1, "said before the first prompt"
+    assert "".join(err).count(line) == 1, "and only once in the whole session"
+
+
+def test_a_hosted_run_does_not_say_it(a_working_environment, monkeypatch, capsys):
+    from ask_your_library.i18n import t
+    from ask_your_library.runner import RunResult
+    monkeypatch.setattr(cli, "LLM_BACKEND", "openrouter")
+    monkeypatch.setattr(cli, "_run", lambda *a, **k: RunResult(question="q", answer="an answer"))
+    assert cli.main(["how", "many", "books"]) is None
+    captured = capsys.readouterr()
+    assert t("cli_local_wait") not in captured.err + captured.out
+
+
 def test_a_failed_single_question_exits_non_zero(a_working_environment, monkeypatch):
     """_run() reports the failure and comes back with no answer: scripts and
     evals must see that in the exit code too, not only in the message."""

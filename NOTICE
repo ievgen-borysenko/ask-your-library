@@ -13,7 +13,7 @@ Version 2.0:
     src/ask_your_library/ui/translations/en-US.json
 
 That file is Chainlit 2.12.0's own en-US.json, copied byte for byte and then
-MODIFIED. Four values differ from the upstream copy; no other value, key or
+MODIFIED. Seven values differ from the upstream copy; no other value, key or
 line does.
 
     navigation.newChat.dialog.description   (2026-09-10)
@@ -35,6 +35,14 @@ was replaced with "Evidence provenance is checked in code. The reasoning is
 not." The stock wording, "LLMs can make mistakes. Check important info.", sits
 directly under a badge that reports a code-only provenance check of the
 evidence, and says less than this application knows about its own answer.
+
+    auth.login.form.email.label             (2026-11-02)
+    auth.login.form.email.placeholder       (2026-11-02)
+    auth.login.form.email.required          (2026-11-02)
+
+now read "Username", "admin" and "username is required". The stock login form
+asks for an "Email address" (placeholder me@example.com), while this
+application signs in with a username.
 
 No copyright line is quoted here because the installed chainlit 2.12.0
 distribution carries none: it ships neither a LICENSE nor a NOTICE file, and

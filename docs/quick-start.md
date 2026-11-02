@@ -46,7 +46,8 @@ source builds that need a Rust toolchain: run `UV_PYTHON=3.14 uv sync` instead.
 ayl init --dry-run                       # every step, printed; nothing is pulled, written or built
 ayl init                                 # check Ollama, pull the models, write the configuration
 ayl add ~/books                          # your own .txt / .md / .epub / .pdf books, into your index
-ayl ask "..."
+ayl ask "How many books do I have?"      # a catalogue question: seconds
+ayl ask "..."                            # a research one: 1-4 minutes locally, longest the first time
 ```
 
 `ayl init` runs five steps, and each one is skipped when it is already done, so a second run
@@ -79,15 +80,17 @@ changes nothing and says so:
    move it ([upgrading](upgrading.md#the-index-moved-to-ayl_homeindex)); nothing is moved for you,
    and no second index is built beside it.
 
-Then it runs `ayl doctor` and prints the next commands, in the form this install types them
-(bare `ayl` from a tool install, `uv run ayl` from a clone). Before the first `ayl add` that
-doctor says the index is empty and names `ayl add`; that is the state a first run leaves, not a
-fault, and the status it exits with is still 3. `--dry-run` ends on the status the real
-run would, wherever that can be told without a request (a refused folder, a demo that would not be
-built, an index or ledger the doctor would fail), and names what it did not check. `--yes` asks
-nothing;
-`ayl init --print-env-resolution` prints where each setting that decides where your data goes
-comes from.
+Then it runs `ayl doctor` and prints the next commands, in the form this install types them (bare
+`ayl` from a tool install, `uv run ayl` from a clone): a catalogue question first, which code
+answers from the index in seconds, then a research one. On the local model a research answer usually
+takes 1-4 minutes, longest the first time while the model loads, and both `ayl init` and `ayl ask`
+say so before you wait.
+Before the first `ayl add` that doctor says the index is empty and names `ayl add`; that is the
+state a first run leaves, not a fault, and the status it exits with is still 3. `--dry-run` ends on
+the status the real run would, wherever that can be told without a request (a refused folder, a demo
+that would not be built, an index or ledger the doctor would fail), and names what it did not check.
+`--yes` asks nothing; `ayl init --print-env-resolution` prints where each setting that decides where
+your data goes comes from.
 
 **The demo library — from a clone.** `ayl init` asks once whether to build it — on a terminal, and no is the
 default — or `--demo` builds it and `--no-demo` skips the question. It is six public-domain
@@ -180,8 +183,7 @@ ayl books                                # what the index holds, listed by code:
 ayl doctor                               # the environment and the index, both halves, nothing written
 
 # web UI (Chainlit, same core as the CLI; the `ui` extra), bound to loopback; throwaway local
-# demo, admin / change-me: the login form's first field is labelled "Email address"; type the
-# username there
+# demo, admin / change-me
 AYL_ALLOW_DEFAULT_LOGIN=1 ayl ui
 # with a real password (the UI refuses to start on the placeholder one):
 CHAINLIT_USERNAME=... CHAINLIT_PASSWORD=... ayl ui

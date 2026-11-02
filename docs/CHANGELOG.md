@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **A local run says before it starts that a research answer takes minutes (#137).** On the local
+  model every research answer takes 1-4 minutes (61-217 s measured, [cost](cost.md); a cold first
+  one 160.8 s, its immediate repeat 62.7 s), and `ayl ask` printed the question back and then
+  nothing until the answer, so a first run looked stuck. With `LLM_BACKEND=ollama`, `ayl ask` now
+  prints one line on stderr before the first run, beside the preflight notices: "Local model: a
+  research answer usually takes 1-4 minutes, longest the first time while the model loads;
+  catalogue questions take seconds." (in Ukrainian with `--lang ua`); a hosted backend
+  prints nothing new, and stdout is unchanged. `ayl init`'s next steps now suggest a catalogue
+  question first, `ayl ask "How many books do I have?"`, then a research one, and in the local mode
+  end on the same sentence; the README and the quick start list the two questions the same way.
 - **The loop no longer runs a search it already ran, nor counts a quote it already holds (#163).**
   On a library of about 250 audiobooks a research question ran q1, q3, q1, q1 and stopped at the
   step limit with plan query q2 never searched; a comparison kept 9 evidence items, 5 of them
@@ -44,6 +54,15 @@
   that recovery stops on an error that says what to do (restore a backup, or move the index
   directory aside and add the books again). `ayl add` printed it as one line and `ayl backup` under
   a traceback; `ayl backup` now prints the same line, exits 1 and copies nothing.
+- **The web chat's login form asks for a username (#139).** Its first field was labelled "Email
+  address" with the placeholder `me@example.com`, while the account is a username (`admin` with
+  the default login), and only a sentence on the welcome page and in the quick start said to type
+  the username there. The field now reads "Username", with the placeholder `admin` and "username is
+  required" when left empty, and those sentences are gone, as is the same note in `.env.example`.
+  Only the English strings are this project's; a browser set to a language Chainlit ships (German,
+  French and others) still gets Chainlit's own label. An existing install's copy of the file, and of
+  the welcome page, is replaced on the next `ayl ui` when it is the one 0.5.x shipped; a copy the
+  reader edited is left alone.
 - **The macOS installer builds the environment on a Python the locked wheels cover (#158).**
   `scripts/install-mac.sh` took any interpreter that met `requires-python`, so on a Mac whose only
   Python was Homebrew's 3.15 the `uv sync` of step 9 turned into source builds of tiktoken,
