@@ -142,7 +142,8 @@ uv run --extra ui ayl ui                 # the web chat, with the extra
 
 On a Mac, `bash scripts/install-mac.sh` (with `--dry-run` to read it first) does the installs too:
 it installs uv and Ollama through Homebrew, starts Ollama for the session, pulls the models, syncs
-the locked environment with the web chat's extra, writes a `.env` in the clone (fully local
+the locked environment with the web chat's extra on Python 3.11 to 3.14 (the series the locked
+wheels cover; uv installs 3.14 when it has none of them), writes a `.env` in the clone (fully local
 unless `--hosted`), then runs `ayl init`.
 
 **The demo library is opt-in, kept apart from yours, and built from a clone.** `uv run ayl init

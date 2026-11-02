@@ -25,12 +25,15 @@ where they actually run. `--help` and a bad flag are parsed before the platform
 check, so they are tested everywhere.
 """
 import importlib.util
+import json
 import os
 import platform
 import re
 import shutil
 import subprocess
 import sys
+import tomllib
+from functools import cache
 from pathlib import Path
 
 import pytest
@@ -99,8 +102,11 @@ def sandbox(tmp_path):
     # what several tests here are about, so a scrubbed environment is what
     # "nothing in this shell decides the run" has to mean here. The tests that
     # describe an exported variable put it back themselves.
+    # UV_PYTHON goes too: the CI job that runs this file exports it (setup-uv's
+    # python-version), and an exported one is the reader's choice that step 9
+    # leaves to decide — the tests that describe it put it back themselves.
     env = {k: v for k, v in os.environ.items()
-           if k not in SCRUBBED and not k.startswith("OLLAMA_")}
+           if k not in SCRUBBED and not k.startswith("OLLAMA_") and k != "UV_PYTHON"}
     # Stubs first, then the system directories only: no /opt/homebrew, no
     # ~/.local/bin, so `uv` and friends cannot resolve to the real binaries.
     env["PATH"] = os.pathsep.join([str(bindir), "/usr/bin", "/bin", "/usr/sbin", "/sbin"])
@@ -2172,3 +2178,298 @@ def test_yes_with_a_token_in_a_url_s_query_is_refused_before_anything(sandbox):
     # A known-safe path does not count.
     safe = real_run(sandbox, "--yes", OLLAMA_URL="http://127.0.0.1:11434/v1")
     assert "not built while a URL-valued" not in safe.stderr
+
+
+# --- the Python series uv is asked for (#158) --------------------------------
+# Left to itself uv builds the environment on the first interpreter that meets
+# requires-python, and on a Mac whose only Python was Homebrew's 3.15 that made
+# step 9 a source build of tiktoken, pydantic-core, pyarrow and more: a Rust
+# toolchain, crates.io, and a compiler error the reader did not cause. Step 6
+# asks uv for a range instead, from the requires-python floor to PYTHON_CEILING,
+# and the first test below holds that constant to what uv.lock actually covers.
+CEILING_LINE = re.compile(r"^PYTHON_CEILING=(\d+)\.(\d+)$", re.M)
+WHEEL_NAME = re.compile(r"-([^-/]+)-([^-/]+)-([^-/]+)\.whl$")
+# A macOS platform tag's architecture suffix, and the architectures it installs on.
+MAC_ARCHES = {"_arm64": {"arm64"}, "_x86_64": {"x86_64"}, "_universal2": {"arm64", "x86_64"}}
+
+
+def python_ceiling():
+    """PYTHON_CEILING in the script, as (major, minor)."""
+    match = CEILING_LINE.search(SCRIPT.read_text(encoding="utf-8"))
+    assert match, "scripts/install-mac.sh has no PYTHON_CEILING=<major>.<minor> line"
+    return int(match[1]), int(match[2])
+
+
+def requires_python():
+    """pyproject.toml's requires-python, which the script reads as the floor."""
+    pyproject = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    return pyproject["project"]["requires-python"]
+
+
+def python_floor():
+    match = re.fullmatch(r">=(\d+)\.(\d+)", requires_python())
+    assert match, f"requires-python is {requires_python()!r}, not the >=X.Y the script reads"
+    return int(match[1]), int(match[2])
+
+
+def python_range():
+    """The request steps 6 and 9 hand uv: from the floor, and below the series
+    after the ceiling."""
+    major, minor = python_ceiling()
+    return f"{requires_python()},<{major}.{minor + 1}"
+
+
+@cache
+def locked_packages():
+    return tomllib.loads((REPO / "uv.lock").read_text(encoding="utf-8"))["package"]
+
+
+def mac_arches(platform_tag):
+    """The macOS architectures a wheel's platform tag installs on; none for any
+    other platform."""
+    return {arch for tag in platform_tag.split(".") if tag.startswith("macosx_")
+            for suffix, arches in MAC_ARCHES.items() if tag.endswith(suffix)
+            for arch in arches}
+
+
+def installs_on(python_tag, abi_tag, minor):
+    """Whether a wheel with these tags installs on CPython 3.<minor>: built for
+    its own ABI (not the free-threaded 3.<minor>t), for the stable ABI from the
+    version it names on, or for no ABI at all."""
+    for tag in python_tag.split("."):
+        if tag == f"cp3{minor}" and abi_tag == f"cp3{minor}":
+            return True
+        if abi_tag == "abi3" and re.fullmatch(r"cp3\d+", tag) and int(tag[3:]) <= minor:
+            return True
+        if abi_tag == "none" and tag in ("py3", f"py3{minor}"):
+            return True
+    return False
+
+
+def macos_wheel_gaps(minor):
+    """The packages of uv.lock that `uv sync` would build from source on CPython
+    3.<minor> on a Mac: each publishes a macOS wheel for some series but none
+    that installs on this one, on an architecture it publishes for at all. A
+    package with a pure-Python wheel needs no build; one with no macOS wheel
+    (pywin32) is never installed on a Mac; one whose resolution markers leave
+    this series out is replaced by another version for it (numpy 2.4.6 is the
+    one below 3.12)."""
+    from packaging.markers import Marker      # pytest's own dependency
+    environment = {"python_version": f"3.{minor}", "python_full_version": f"3.{minor}.0",
+                   "sys_platform": "darwin", "platform_system": "Darwin", "os_name": "posix",
+                   "implementation_name": "cpython",
+                   "platform_python_implementation": "CPython"}
+    gaps = []
+    for package in locked_packages():
+        markers = package.get("resolution-markers")
+        if markers and not any(Marker(marker).evaluate(environment) for marker in markers):
+            continue
+        tags = [WHEEL_NAME.search(wheel["url"]).groups() for wheel in package.get("wheels", [])]
+        if any(platform_tag == "any" for _, _, platform_tag in tags):
+            continue
+        published = set().union(*(mac_arches(plat) for _, _, plat in tags))
+        usable = set().union(*(mac_arches(plat) for py, abi, plat in tags
+                               if installs_on(py, abi, minor)))
+        if published - usable:
+            gaps.append(f"{package['name']} {package['version']}")
+    return gaps
+
+
+def test_the_wheel_reader_reads_the_tags_that_decide_a_series():
+    """On strings, so a reader that quietly stopped matching cannot pass the
+    test below by finding no wheels to miss."""
+    assert installs_on("cp314", "cp314", 14)
+    assert not installs_on("cp314", "cp314t", 14)        # free-threaded: another ABI
+    assert not installs_on("cp315", "cp315", 14)
+    assert installs_on("cp311", "abi3", 15) and not installs_on("cp311", "abi3", 10)
+    assert installs_on("py3", "none", 15)
+    assert mac_arches("macosx_10_9_x86_64") == {"x86_64"}
+    assert mac_arches("macosx_10_13_universal2") == {"arm64", "x86_64"}
+    assert mac_arches("macosx_11_0_arm64.macosx_12_0_arm64") == {"arm64"}
+    assert mac_arches("manylinux_2_28_x86_64") == set()
+
+
+def test_the_ceiling_is_the_newest_python_series_the_locked_wheels_cover():
+    """Every series from the floor up to PYTHON_CEILING has a macOS wheel of
+    every compiled package in uv.lock, and the series after it does not. The
+    first half keeps step 9 off source builds; the second is the reminder to
+    raise the ceiling when a lock refresh brings the wheels. With the 2026-10
+    lock that is 3.14, which the CI install-script job had shown too: 3.14
+    passed, 3.15 failed on tiktoken."""
+    floor_major, floor_minor = python_floor()
+    major, minor = python_ceiling()
+    assert floor_major == major == 3
+    assert floor_minor <= minor, (
+        f"requires-python {requires_python()} is above PYTHON_CEILING={major}.{minor} in "
+        "scripts/install-mac.sh, so the installer refuses every run")
+    for series in range(floor_minor, minor + 1):
+        gaps = macos_wheel_gaps(series)
+        assert not gaps, (
+            f"uv.lock has no macOS wheel for Python 3.{series} of {', '.join(gaps)}, and the "
+            f"installer asks uv for {python_range()}, which takes 3.{series} in: step 9 would "
+            "build them from source. The range has to leave that series out: change "
+            "PYTHON_CEILING in scripts/install-mac.sh, or requires-python.")
+    assert macos_wheel_gaps(minor + 1), (
+        f"uv.lock now has a macOS wheel for Python 3.{minor + 1} of every compiled package: "
+        f"set PYTHON_CEILING=3.{minor + 1} in scripts/install-mac.sh, and the python-version "
+        "of the install-script job in .github/workflows/ci.yml with it.")
+
+
+# uv as far as steps 6 and 9 need it, over a list of interpreters kept in a
+# file: `python find` answers whether one meets the request, `python install`
+# adds the series it names, and `sync` takes the newest that meets both
+# requires-python and the request (--python, else UV_PYTHON), writes its version
+# down, and fails as the source build would on a series past the locked wheels
+# (PYTHON_CEILING, which the test above holds to uv.lock). Every call is
+# recorded as the recorder records it, and every other one answers 0. Newest
+# first is the worst case: real uv takes an interpreter it manages before one on
+# PATH, so a managed 3.12 beside Homebrew's 3.15 would have been picked anyway.
+UV_WITH_PYTHONS = """\
+#!{python}
+import json, os, re, sys
+from pathlib import Path
+from packaging.specifiers import SpecifierSet
+args = sys.argv[1:]
+with open({log!r}, "a") as log:
+    log.write(" ".join(args) + "\\n")
+state = Path({state!r})
+pythons = json.loads(state.read_text())
+def version(text):
+    return tuple(int(part) for part in text.split("."))
+def meeting(request):
+    spec = SpecifierSet(request if request[0] in "<>=!~" else "==" + request + ".*")
+    return sorted((found for found in pythons if spec.contains(found)), key=version)
+if args[:2] == ["python", "find"]:
+    sys.exit(0 if meeting(args[2]) else 2)
+if args[:2] == ["python", "install"]:
+    state.write_text(json.dumps(pythons + [args[2] + ".0"]))
+    sys.exit(0)
+if args[:1] == ["sync"]:
+    floor = re.search(r'^requires-python = "(.+)"', Path("pyproject.toml").read_text(), re.M)[1]
+    if "--python" in args:
+        request = args[args.index("--python") + 1]
+    else:
+        request = os.environ.get("UV_PYTHON", floor)
+    chosen = [found for found in meeting(request) if found in meeting(floor)]
+    if not chosen:
+        sys.exit(2)
+    Path({venv!r}).write_text(chosen[-1])
+    if version(chosen[-1])[:2] > {wheels!r}:
+        print("error: Failed to build `tiktoken`: no wheel for this Python", file=sys.stderr)
+        sys.exit(1)
+sys.exit(0)
+"""
+
+
+def uv_with_pythons(sandbox, tmp_path, *pythons):
+    """Put that uv in place of the recorder, finding `pythons`. Returns the file
+    `uv sync` writes the version of the environment's interpreter to."""
+    _, records, env = sandbox
+    state = tmp_path / "uv-pythons.json"
+    state.write_text(json.dumps(list(pythons)))
+    venv = tmp_path / "uv-venv-python"
+    stub = Path(env["PATH"].split(os.pathsep)[0]) / "uv"
+    stub.write_text(UV_WITH_PYTHONS.format(python=sys.executable, log=str(records / "uv"),
+                                           state=str(state), venv=str(venv),
+                                           wheels=python_ceiling()))
+    stub.chmod(0o755)
+    return venv
+
+
+def uv_calls(records):
+    return (records / "uv").read_text().splitlines()
+
+
+@mac_only
+def test_the_dry_run_names_the_python_series_it_asks_uv_for(sandbox):
+    """What #158 asked of the plan: the series the environment will be built on,
+    and the command that holds uv to it, where a reader can see them."""
+    major, minor = python_ceiling()
+    wanted = python_range()
+    lines = printed_lines(dry_run(sandbox))
+    assert (f"the locked wheels cover Python up to {major}.{minor}, so uv is asked for "
+            f"{wanted}") in lines
+    assert f"would check 'uv python find {wanted}'" in lines
+    assert f"would run 'uv python install {major}.{minor}' when no interpreter answers that" in lines
+    assert f"would run: uv sync --locked --extra ui --python {wanted}" in lines
+
+
+@mac_only
+def test_a_mac_whose_only_python_is_newer_than_the_wheels_gets_the_ceiling(sandbox, tmp_path):
+    """The machine of #158: one interpreter, of a series the locked wheels do not
+    cover. The floor alone found it, so nothing was installed and step 9 built
+    on it; the range does not find it, so the ceiling series is installed and
+    the environment is built on that."""
+    _, records, _ = sandbox
+    major, minor = python_ceiling()
+    venv = uv_with_pythons(sandbox, tmp_path, f"{major}.{minor + 1}.0")
+    result = real_run(sandbox, "--no-demo")
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = uv_calls(records)
+    assert f"python find {python_range()}" in calls
+    assert f"python install {major}.{minor}" in calls
+    assert f"sync --locked --extra ui --python {python_range()}" in calls
+    assert venv.read_text() == f"{major}.{minor}.0"
+
+
+@mac_only
+def test_an_interpreter_uv_already_has_in_range_is_used_and_nothing_is_installed(sandbox,
+                                                                                 tmp_path):
+    """A machine where uv already has an interpreter in the range downloads
+    nothing, and its environment is built on that interpreter, not on the newer
+    one beside it."""
+    _, records, _ = sandbox
+    floor_major, floor_minor = python_floor()
+    major, minor = python_ceiling()
+    in_range = f"{floor_major}.{floor_minor}.9"
+    venv = uv_with_pythons(sandbox, tmp_path, in_range, f"{major}.{minor + 1}.0")
+    result = real_run(sandbox, "--no-demo")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (f"an interpreter in {python_range()} is already available to uv"
+            in printed_lines(result.stdout))
+    assert [call for call in uv_calls(records) if call.startswith("python install")] == []
+    assert venv.read_text() == in_range
+
+
+@mac_only
+def test_an_exported_uv_python_still_decides(sandbox, tmp_path):
+    """UV_PYTHON is the reader's own choice, and the `uv run`s after step 9
+    honour it whatever step 9 passed, so overriding it there alone would build
+    the environment twice. Step 9 passes no range, and the plan says so by
+    name, without printing the value."""
+    _, records, _ = sandbox
+    floor_major, floor_minor = python_floor()
+    major, minor = python_ceiling()
+    chosen = f"{floor_major}.{floor_minor}"
+    venv = uv_with_pythons(sandbox, tmp_path, f"{chosen}.9", f"{major}.{minor + 1}.0")
+    plan = real_run(sandbox, "--dry-run", "--no-demo", UV_PYTHON=chosen)
+    assert plan.returncode == 0, plan.stderr
+    lines = printed_lines(plan.stdout)
+    assert "UV_PYTHON is exported, so uv uses the interpreter it names and step 9 does" in lines
+    assert "would run: uv sync --locked --extra ui" in lines
+    assert invoked(records) == []
+    result = real_run(sandbox, "--no-demo", UV_PYTHON=chosen)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "sync --locked --extra ui" in uv_calls(records)
+    assert venv.read_text() == f"{chosen}.9"
+
+
+@mac_only
+def test_a_floor_above_the_ceiling_stops_before_uv_is_asked(sandbox):
+    """requires-python raised past PYTHON_CEILING leaves no interpreter to ask
+    for. The script names the line that is out of date, in the plan and in a
+    real run, instead of an empty range from uv at step 9, and asks uv nothing."""
+    root, records, _ = sandbox
+    major, minor = python_ceiling()
+    raised = f">={major}.{minor + 1}"
+    pyproject = root / "pyproject.toml"
+    pyproject.write_text(re.sub(r'^requires-python = ".*"$', f'requires-python = "{raised}"',
+                                pyproject.read_text(encoding="utf-8"), flags=re.M),
+                         encoding="utf-8")
+    for flags in (("--dry-run",), ()):
+        result = real_run(sandbox, "--no-demo", *flags)
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert (f"requires-python {raised} is above PYTHON_CEILING={major}.{minor} in this "
+                "script, the") in error_lines(result.stderr)
+        assert "[7/12] Ollama" not in result.stdout
+        assert invoked(records) == []

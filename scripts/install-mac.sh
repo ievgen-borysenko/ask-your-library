@@ -31,6 +31,17 @@ STEPS=12
 step_no=0
 # How long a freshly started Ollama gets to answer on /api/tags.
 OLLAMA_WAIT_S=60
+# The newest Python series for which every compiled package in uv.lock has a
+# macOS wheel. Left to itself uv takes the first interpreter it finds that meets
+# requires-python, and on a Mac whose only Python is newer than this series
+# `uv sync` falls back to source builds that need a Rust toolchain and fail
+# (#158; when this was written, 3.15 had no wheel for tiktoken, pydantic-core,
+# pyarrow, jiter and others). Step 6 asks uv for an interpreter between the
+# requires-python floor and this series, and installs this series when uv has
+# none; step 9 builds the environment on that range. Revisit it when uv.lock
+# gains wheels for a newer series: tests/test_install_script.py reads the lock,
+# and fails with the value to write here once the next series is covered too.
+PYTHON_CEILING=3.14
 
 step() {
     step_no=$((step_no + 1))
@@ -1354,7 +1365,7 @@ else
 fi
 
 # --- 6. Python --------------------------------------------------------------
-step "Python: the version pyproject.toml requires, provided by uv"
+step "Python: a series pyproject.toml allows and the locked wheels cover, provided by uv"
 python_req="$(sed -n 's/^requires-python *= *">=\([0-9][0-9.]*\)".*/\1/p' pyproject.toml)"
 python_req="$(first_line "$python_req")"
 if [ -z "$python_req" ]; then
@@ -1363,13 +1374,33 @@ if [ -z "$python_req" ]; then
     exit 1
 fi
 note "requires-python >=$python_req"
+# From that floor up to PYTHON_CEILING (see its comment at the top). A floor
+# above the ceiling leaves nothing to ask uv for: that is this file out of date,
+# not the reader's machine, and it is said before uv is asked anything.
+IFS=. read -r floor_major floor_minor _ <<< "$python_req"
+IFS=. read -r ceiling_major ceiling_minor <<< "$PYTHON_CEILING"
+floor_minor="${floor_minor:-0}"
+if [ "$floor_major" -gt "$ceiling_major" ] \
+    || { [ "$floor_major" -eq "$ceiling_major" ] && [ "$floor_minor" -gt "$ceiling_minor" ]; }; then
+    fail "requires-python >=$python_req is above PYTHON_CEILING=$PYTHON_CEILING in this script, the"
+    fail "newest series the locked wheels were checked for. Raise PYTHON_CEILING, then re-run."
+    exit 1
+fi
+python_range=">=$python_req,<$ceiling_major.$((ceiling_minor + 1))"
+note "the locked wheels cover Python up to $PYTHON_CEILING, so uv is asked for $python_range"
+# Exported, UV_PYTHON is the reader's own choice of interpreter and keeps
+# deciding `uv sync` and every `uv run`, as it did before the range existed.
+if [ -n "${UV_PYTHON:-}" ]; then
+    note "UV_PYTHON is exported, so uv uses the interpreter it names and step 9 does"
+    note "not pass this range; unset it if step 9 has to build a package from source"
+fi
 if [ "$dry_run" -eq 1 ]; then
-    plan "check 'uv python find >=$python_req'"
-    plan "run 'uv python install $python_req' when no interpreter answers that"
-elif uv python find ">=$python_req" >/dev/null 2>&1; then
-    note "an interpreter >=$python_req is already available to uv"
+    plan "check 'uv python find $python_range'"
+    plan "run 'uv python install $PYTHON_CEILING' when no interpreter answers that"
+elif uv python find "$python_range" >/dev/null 2>&1; then
+    note "an interpreter in $python_range is already available to uv"
 else
-    run uv python install "$python_req"
+    run uv python install "$PYTHON_CEILING"
 fi
 
 # --- 7. Ollama --------------------------------------------------------------
@@ -1496,8 +1527,15 @@ if [ "$loaded_backend" = "ollama" ]; then
 fi
 
 # --- 9. dependencies --------------------------------------------------------
+# On step 6's range, or a newer interpreter on this machine (Homebrew's 3.15,
+# say) is the one uv builds the environment on. The `uv run`s below name no
+# interpreter, so they reuse the environment this builds: it meets requires-python.
 step "Dependencies: the locked environment, with the web UI extra"
-run uv sync --locked --extra ui
+sync_args=(uv sync --locked --extra ui)
+if [ -z "${UV_PYTHON:-}" ]; then
+    sync_args+=(--python "$python_range")
+fi
+run "${sync_args[@]}"
 
 # --- 10. configuration ------------------------------------------------------
 # `local_env > .env` truncated .env into existence before the writer produced a

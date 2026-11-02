@@ -44,6 +44,17 @@
   that recovery stops on an error that says what to do (restore a backup, or move the index
   directory aside and add the books again). `ayl add` printed it as one line and `ayl backup` under
   a traceback; `ayl backup` now prints the same line, exits 1 and copies nothing.
+- **The macOS installer builds the environment on a Python the locked wheels cover (#158).**
+  `scripts/install-mac.sh` took any interpreter that met `requires-python`, so on a Mac whose only
+  Python was Homebrew's 3.15 the `uv sync` of step 9 turned into source builds of tiktoken,
+  pydantic-core, pyarrow, jiter and others, which need a Rust toolchain, and the install failed
+  there with a compiler error. Step 6 now asks uv for an interpreter from the `requires-python`
+  floor up to 3.14, the newest series every compiled package in `uv.lock` has a macOS wheel for,
+  and installs 3.14 when uv has none in that range (it used to install 3.11 when uv had nothing
+  at 3.11 or later); step 9 builds the environment on that range, and `--dry-run` prints it. A Mac
+  where uv already has an interpreter in the range keeps it and downloads nothing, and an
+  exported `UV_PYTHON` still decides. The series is `PYTHON_CEILING` in the script; a test reads
+  `uv.lock` and fails, naming the value to write, once the lock covers a newer one.
 - **The locked dependency set is updated for the open advisories.** `uv.lock` moves aiohttp
   3.14.3 to 3.14.5 (GHSA-2g87-pp6c-29x5, GHSA-494j-54xm-rwp3, GHSA-5wr8-gcqf-gqf3,
   GHSA-6cjc-53gc-5rqm, GHSA-9xw5-w5jj-pvcg, GHSA-f9xw-jh8m-3mwq, GHSA-gx76-c99x-2c96,
