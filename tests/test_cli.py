@@ -93,6 +93,49 @@ def test_the_interactive_loop_checks_the_environment_once_before_it_starts(
     assert capsys.readouterr().out.strip()                         # banner and goodbye
 
 
+@pytest.mark.parametrize("lang", ["en", "ua"])
+def test_a_local_run_says_the_first_answer_takes_minutes_before_it_starts(
+        a_working_environment, monkeypatch, capsys, lang):
+    """#137: with LLM_BACKEND=ollama, one line before the run, on stderr with
+    the preflight notices, so stdout stays the question and the answer."""
+    from ask_your_library.i18n import _T
+    from ask_your_library.runner import RunResult
+    monkeypatch.setattr(cli, "LLM_BACKEND", "ollama")
+    seen = []
+
+    def run(*a, **k):
+        seen.append(capsys.readouterr())          # what was printed before the run
+        return RunResult(question="q", answer="an answer")
+    monkeypatch.setattr(cli, "_run", run)
+
+    assert cli.main(["--lang", lang, "how", "many", "books"]) is None
+    before, line = seen[0], _T["cli_local_wait"][lang]
+    assert before.err.count(line) == 1
+    assert line not in before.out
+
+
+def test_a_local_chat_says_it_once_before_the_first_prompt(
+        a_working_environment, monkeypatch, capsys):
+    from ask_your_library.i18n import t
+    monkeypatch.setattr(cli, "LLM_BACKEND", "ollama")
+
+    def eof(_prompt):
+        assert capsys.readouterr().err.count(t("cli_local_wait")) == 1
+        raise EOFError
+    monkeypatch.setattr("builtins.input", eof)
+    assert cli.main([]) is None
+
+
+def test_a_hosted_run_does_not_say_it(a_working_environment, monkeypatch, capsys):
+    from ask_your_library.i18n import t
+    from ask_your_library.runner import RunResult
+    monkeypatch.setattr(cli, "LLM_BACKEND", "openrouter")
+    monkeypatch.setattr(cli, "_run", lambda *a, **k: RunResult(question="q", answer="an answer"))
+    assert cli.main(["how", "many", "books"]) is None
+    captured = capsys.readouterr()
+    assert t("cli_local_wait") not in captured.err + captured.out
+
+
 def test_a_failed_single_question_exits_non_zero(a_working_environment, monkeypatch):
     """_run() reports the failure and comes back with no answer: scripts and
     evals must see that in the exit code too, not only in the message."""

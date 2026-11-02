@@ -315,6 +315,31 @@ def test_the_hosted_mode_pulls_only_the_embedder_and_leaves_the_key_to_the_reade
     assert "Left to you: this configuration needs OPENROUTER_API_KEY" in out
 
 
+def test_the_next_steps_ask_a_catalogue_question_first_and_say_the_local_wait(machine, capsys):
+    """#137: the first question suggested is one code answers in seconds, then
+    a research one, and the local mode says before the wait that the first
+    answer takes minutes, in the sentence `ayl ask` prints itself."""
+    assert init() == 0
+    out = capsys.readouterr().out
+    steps = out[out.index("Next steps:"):]
+    catalogue = steps.index(f'ayl ask "{init_cmd.CATALOGUE_QUESTION}"')
+    assert catalogue < steps.index('ayl ask "..."'), "the catalogue question comes first"
+    assert init_cmd.CATALOGUE_QUESTION == "How many books do I have?"
+    flowed = " ".join(steps.split())                  # the sentence is wrapped to the block
+    assert t("cli_local_wait") in flowed
+    assert flowed.index('ayl ask "..."') < flowed.index(t("cli_local_wait"))
+
+
+def test_the_hosted_next_steps_do_not_promise_the_local_wait(machine, capsys):
+    machine.check_status = preflight.EXIT_NO_KEY
+    machine.tags.names.clear()
+    assert init("--mode", "hosted") == 0
+    out = capsys.readouterr().out
+    steps = out[out.index("Next steps:"):]
+    assert steps.index(f'ayl ask "{init_cmd.CATALOGUE_QUESTION}"') < steps.index('ayl ask "..."')
+    assert t("cli_local_wait") not in " ".join(out.split())
+
+
 def test_an_exported_switch_that_contradicts_the_mode_is_refused_before_anything(machine,
                                                                                 capsys):
     machine.mp.setattr(config, "EXPORTED", frozenset({"LLM_BACKEND"}))

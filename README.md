@@ -90,7 +90,8 @@ uv tool update-shell                     # once, only if `ayl` is not found; the
 ayl init --dry-run                       # the plan, printed; nothing is changed
 ayl init                                 # the models (mostly download time) and the configuration
 ayl add ~/books                          # your own .txt / .md / .epub / .pdf books
-ayl ask "..."
+ayl ask "How many books do I have?"      # a catalogue question: seconds
+ayl ask "..."                            # a research one: 1-4 minutes the first time, locally
 ```
 
 `ayl init` checks that Ollama answers, pulls the two models the configuration names, writes
@@ -136,6 +137,7 @@ uv sync
 uv run ayl init --dry-run                # the plan, printed; nothing is changed
 uv run ayl init
 uv run ayl add ~/books
+uv run ayl ask "How many books do I have?"
 uv run ayl ask "..."
 uv run --extra ui ayl ui                 # the web chat, with the extra
 ```

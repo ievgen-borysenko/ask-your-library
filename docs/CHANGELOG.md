@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **A local run says before it starts that the first answer takes minutes (#137).** On the local
+  model a first research answer takes 1-4 minutes (61-217 s measured, [cost](cost.md)), and
+  `ayl ask` printed the question back and then nothing until the answer, so a first run looked
+  stuck. With `LLM_BACKEND=ollama`, `ayl ask` now prints one line on stderr before the first run,
+  beside the preflight notices: "Local model: the first answer usually takes 1-4 minutes while the
+  model loads; catalogue questions take seconds." (in Ukrainian with `--lang ua`); a hosted backend
+  prints nothing new, and stdout is unchanged. `ayl init`'s next steps now suggest a catalogue
+  question first, `ayl ask "How many books do I have?"`, then a research one, and in the local mode
+  end on the same sentence; the README and the quick start list the two questions the same way.
 - **The loop no longer runs a search it already ran, nor counts a quote it already holds (#163).**
   On a library of about 250 audiobooks a research question ran q1, q3, q1, q1 and stopped at the
   step limit with plan query q2 never searched; a comparison kept 9 evidence items, 5 of them

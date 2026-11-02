@@ -38,6 +38,7 @@ import os
 import shlex
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 
 import lancedb
@@ -110,6 +111,9 @@ ESTIMATE = {"starter": "a few minutes", "full": "about 30 minutes"}
 # The question the README and the quick start open with; its book is in the
 # starter subset (tests/test_starter_subset.py holds both ends of that).
 FIRST_QUESTION = "What does Marcus Aurelius say about anger?"
+# The first question `ayl init` suggests for the reader's own index: a catalogue
+# one, which code answers from the index tables after one planning call (#137).
+CATALOGUE_QUESTION = "How many books do I have?"
 
 # Printed by --print-env-resolution: the settings that decide where a
 # question, a passage or a trace goes (`dataflow.DATA_FLOW_VARS`, the list the
@@ -907,9 +911,15 @@ def final_status(refused: list[str], known: int, doctor: int | None,
 
 
 def next_steps(demo_index: Path | None, llm: str, reader_index: Path) -> None:
+    """The commands to type next. The first question is a catalogue one (#137):
+    code answers it from the index tables after one planning call, in seconds
+    (docs/cost.md), so the first thing a reader runs shows the index answering
+    before a research question has them wait minutes on the local model."""
     say("Next steps:")
     say(f"  {command('ayl add ~/books')}")
-    say(f"      index your own .txt / .md / .epub / .pdf books into {reader_index}, then ask:")
+    say(f"      index your own .txt / .md / .epub / .pdf books into {reader_index}, then ask")
+    say("      a catalogue question first, then a research one:")
+    say(f"      {command('ayl ask')} \"{CATALOGUE_QUESTION}\"")
     say(f"      {command('ayl ask')} \"...\"")
     if demo_index is not None:
         say(f"  LIBRARY_DB_PATH={quoted(demo_index)} {command('ayl ask')} \"{FIRST_QUESTION}\"")
@@ -920,6 +930,10 @@ def next_steps(demo_index: Path | None, llm: str, reader_index: Path) -> None:
         say("      question (docs/cost.md)")
     else:
         say("      no account, no key, nothing to pay: the answer is written on this machine")
+        # The sentence `ayl ask` itself prints before a local run, wrapped to
+        # the width of the lines around it.
+        for line in textwrap.wrap(t("cli_local_wait"), width=80):
+            say(f"      {line}")
     say(f"  AYL_ALLOW_DEFAULT_LOGIN=1 {command('--extra ui ayl ui') if from_clone() else 'ayl ui'}")
     say("      the web chat on 127.0.0.1, login admin / change-me; set CHAINLIT_USERNAME and")
     say("      CHAINLIT_PASSWORD for a real one and drop the variable")
