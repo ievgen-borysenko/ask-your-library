@@ -47,7 +47,7 @@
 - **The macOS installer builds the environment on a Python the locked wheels cover (#158).**
   `scripts/install-mac.sh` took any interpreter that met `requires-python`, so on a Mac whose only
   Python was Homebrew's 3.15 the `uv sync` of step 9 turned into source builds of tiktoken,
-  pydantic-core, pyarrow, jiter and others, which need a Rust toolchain, and the install failed
+  pydantic-core, jiter and others, which need a Rust toolchain, and the install failed
   there with a compiler error. Step 6 now asks uv for an interpreter from the `requires-python`
   floor up to 3.14, the newest series every compiled package in `uv.lock` has a macOS wheel for,
   and installs 3.14 when uv has none in that range (it used to install 3.11 when uv had nothing

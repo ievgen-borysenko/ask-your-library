@@ -2183,7 +2183,7 @@ def test_yes_with_a_token_in_a_url_s_query_is_refused_before_anything(sandbox):
 # --- the Python series uv is asked for (#158) --------------------------------
 # Left to itself uv builds the environment on the first interpreter that meets
 # requires-python, and on a Mac whose only Python was Homebrew's 3.15 that made
-# step 9 a source build of tiktoken, pydantic-core, pyarrow and more: a Rust
+# step 9 a source build of tiktoken, pydantic-core, jiter and more: a Rust
 # toolchain, crates.io, and a compiler error the reader did not cause. Step 6
 # asks uv for a range instead, from the requires-python floor to PYTHON_CEILING,
 # and the first test below holds that constant to what uv.lock actually covers.

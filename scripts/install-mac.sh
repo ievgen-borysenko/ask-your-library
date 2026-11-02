@@ -36,7 +36,7 @@ OLLAMA_WAIT_S=60
 # requires-python, and on a Mac whose only Python is newer than this series
 # `uv sync` falls back to source builds that need a Rust toolchain and fail
 # (#158; when this was written, 3.15 had no wheel for tiktoken, pydantic-core,
-# pyarrow, jiter and others). Step 6 asks uv for an interpreter between the
+# jiter and others). Step 6 asks uv for an interpreter between the
 # requires-python floor and this series, and installs this series when uv has
 # none; step 9 builds the environment on that range. Revisit it when uv.lock
 # gains wheels for a newer series: tests/test_install_script.py reads the lock,
