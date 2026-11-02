@@ -12,6 +12,39 @@
   prints nothing new, and stdout is unchanged. `ayl init`'s next steps now suggest a catalogue
   question first, `ayl ask "How many books do I have?"`, then a research one, and in the local mode
   end on the same sentence; the README and the quick start list the two questions the same way.
+- **A chapter whose HTML leaves out `</head>` before a `<body>` tag keeps its text.** `</head>` is
+  optional in HTML, and in a spine document that left it out (most likely a `text/html` one) the
+  whole body was read as part of the head and left out: the chapter was missing from the book, and a
+  book written that way throughout was refused as having no text. A `<body>` start tag now ends the
+  head, as it does in a browser; text placed directly inside the head is still left out. `ayl add`
+  reads every book in the folder anew on every run, so running `ayl add <folder>` again re-extracts
+  an affected book; `--rebuild` is not needed.
+- **A UTF-32 document is read as UTF-32.** The UTF-32 little-endian byte-order mark begins with the
+  UTF-16 one, and a document that started with it was decoded as UTF-16 with a NUL between its
+  characters: the HTML parser found no markup in it, so a chapter's raw tags, with the text of its
+  head, scripts and styles, were indexed as the chapter's text, and a package file written that way
+  refused the book as malformed. A document with the big-endian mark refused the book as not
+  readable in its encoding. Both UTF-32 marks are now checked before the UTF-16 ones. A document
+  whose decoded text holds a NUL is refused, with a line that says so: a UTF-16 or UTF-32 file
+  without a byte-order mark, the usual cause, was indexed as raw markup, and a stray NUL in a
+  UTF-8 file, which 0.5.1 stripped silently, refuses the book now too. The way out is to save that
+  document as UTF-8 in an EPUB editor, with any stray NUL taken out. Running `ayl add <folder>`
+  again re-extracts an affected book. A book that 0.5.1 indexed and that is refused now keeps its
+  old rows: a run keeps them, and `--prune` deletes only the rows of a file that is no longer in
+  the folder. Move the file out of the folder, then run `ayl add <folder> --prune`; that run stops
+  before it prunes anything when no book in the folder reads, so if the file was the folder's only
+  book, leave another readable book there for it.
+- **A chapter's DOCTYPE is dropped only from the start of the document, and only whole.** The HTML
+  parser leaves the tail of an internal subset (`]>`) in the text, so a content document's DOCTYPE
+  is taken off before it is read. That step took the first `<!DOCTYPE` anywhere in the document, in
+  capitals only, and ended its subset at the first `]>`: a DOCTYPE quoted in a CDATA section cut
+  the rest of the chapter after it out of the book, a lowercase `<!doctype html [ … ]>` left `]>`
+  at the start of the chapter's text, and a `]>` inside a quoted entity value left the rest of the
+  declaration there. Only a DOCTYPE in the prolog (after the XML declaration, comments, processing
+  instructions and whitespace) is dropped now, in any case, and its subset ends at a `]>` outside
+  quotes, comments and processing instructions. The match uses possessive quantifiers, which
+  Python 3.11.0 to 3.11.4 matched wrongly, so the project now needs Python 3.11.5 or later.
+  Running `ayl add <folder>` again re-extracts an affected book.
 - **The weekly pin check was red on Frankenstein: Project Gutenberg had recapitalised its title.**
   The `pins` job of `corpus.yml` failed on 2026-10-27 with a checksum mismatch on PG 84. Against
   the pinned copy, the new file differs in two header lines only, both above the START marker:
@@ -88,8 +121,9 @@
   GHSA-pqxq-w44r-73xw), certifi 2026.7.22 to 2026.10.19 (GHSA-6q48-6c7w-9gw2), langgraph-sdk
   0.4.2 to 0.4.8 (PYSEC-2026-4240 / GHSA-fvww-7h3r-vfhp), mcp 1.29.0 to 1.30.0
   (GHSA-84m7-p3x7-pcfv) and multidict 6.7.1 to 6.9.1 (PYSEC-2026-4244 / GHSA-54p9-h82j-f925);
-  yarl moves from 1.24.5 to 1.25.1 because the new aiohttp requires it. `pyproject.toml` is
-  unchanged; no application behaviour changed, and certifi drops the emSign roots.
+  yarl moves from 1.24.5 to 1.25.1 because the new aiohttp requires it. No dependency declaration
+  in `pyproject.toml` changed; no application behaviour changed, and certifi drops the emSign
+  roots.
 - **The locked PDF library is updated for the open advisories.** `uv.lock` moves pypdf 6.19.0
   to 6.21.3: 6.20.0 and 6.20.1 fix GHSA-39mj-jf6j-2qj3, GHSA-7mh2-4gg2-979f,
   GHSA-9mx8-4j7g-633p and GHSA-qfv9-64jg-mh7p (#159), 6.21.0 to 6.21.2 fix GHSA-6vvc-x485-93v7,
