@@ -977,7 +977,8 @@ def test_exactly_seven_values_are_ours_and_the_rest_stays_upstreams():
       placeholder and the empty-field message say "username" (#139).
 
     The rest has to stay upstream's, or the file is a fork nobody re-reads on a
-    bump. en-US only: every other locale falls back to Chainlit's own copy."""
+    bump. en-US only: a language Chainlit ships gets Chainlit's own copy, and
+    one it does not ship (Ukrainian among them) falls back to this file."""
     ours = _leaves(json.loads(PROJECT_TRANSLATION.read_text(encoding="utf-8")))
     theirs = _leaves(_shipped_translation())
     assert {path for path, text in ours.items() if theirs[path] != text} == set(OUR_VALUES)

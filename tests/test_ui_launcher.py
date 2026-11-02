@@ -16,6 +16,7 @@ on every machine that installed one.
 No Chainlit import: the launcher writes files and starts a subprocess, and
 this file must run on a clone without the `ui` extra.
 """
+import hashlib
 import importlib
 import os
 import subprocess
@@ -167,12 +168,12 @@ def test_a_hand_edited_config_is_overwritten_on_the_next_start(root):
                                                   "http://127.0.0.1:8000"]
 
 
-def test_the_translation_and_the_welcome_page_are_put_there_and_then_left_alone(root):
+def test_the_translation_and_the_welcome_page_are_put_there_and_a_readers_edit_is_left_alone(root):
     """Chainlit seeds the app root with its own copy of every language it
     ships and skips a name that is already there, so ours has to arrive first.
     Neither file carries a decision the code depends on, and the welcome page
-    is a reader's to edit — so, unlike the config, they are copied only when
-    they are absent."""
+    is a reader's to edit — so, unlike the config, a copy whose content no
+    release shipped is left as it is."""
     launcher.prepare("127.0.0.1", 8000)
     translation = root / ".chainlit" / "translations" / "en-US.json"
     welcome = root / "chainlit.md"
@@ -184,6 +185,40 @@ def test_the_translation_and_the_welcome_page_are_put_there_and_then_left_alone(
     launcher.prepare("127.0.0.1", 8000)
     assert translation.read_text(encoding="utf-8") == "{}"
     assert welcome.read_text(encoding="utf-8") == "mine"
+
+
+def test_a_copy_an_earlier_release_put_there_is_replaced_on_the_next_start(root, monkeypatch):
+    """A reader who started `ayl ui` on 0.5.0 or 0.5.1 has that release's copy
+    of both files, and without this would keep the "Email address" label and
+    the welcome sentence about it after upgrading (#139). The digests stand in
+    for those releases' files; what is checked is the rule: content whose
+    SHA-256 is listed is ours and is replaced, byte for byte, by what ships now."""
+    translation = root / ".chainlit" / "translations" / "en-US.json"
+    welcome = root / "chainlit.md"
+    translation.parent.mkdir(parents=True, exist_ok=True)
+    old = {translation: b'{"auth": {"login": {"form": {"email": {"label": "Email address"}}}}}',
+           welcome: b"Signing in: the first field is labelled \"Email address\".\n"}
+    for path, content in old.items():
+        path.write_bytes(content)
+    monkeypatch.setattr(launcher, "SHIPPED_EARLIER", {
+        launcher.TRANSLATION.name: (hashlib.sha256(old[translation]).hexdigest(),),
+        launcher.WELCOME.name: (hashlib.sha256(old[welcome]).hexdigest(),)})
+
+    launcher.prepare("127.0.0.1", 8000)
+
+    assert translation.read_bytes() == launcher.TRANSLATION.read_bytes()
+    assert welcome.read_bytes() == launcher.WELCOME.read_bytes()
+
+
+def test_the_earlier_digests_name_neither_the_current_files_nor_a_wrong_hash():
+    """A digest of the file as it ships now would be harmless but says the list
+    was copied from the wrong tree; a value that is not a SHA-256 hex digest
+    would never match anything and silently keep the old wording."""
+    for source in (launcher.TRANSLATION, launcher.WELCOME):
+        digests = launcher.SHIPPED_EARLIER[source.name]
+        assert digests
+        assert hashlib.sha256(source.read_bytes()).hexdigest() not in digests
+        assert all(len(d) == 64 and set(d) <= set("0123456789abcdef") for d in digests)
 
 
 def test_a_template_that_lost_its_origins_line_is_a_refusal_and_not_a_guess(root, monkeypatch):

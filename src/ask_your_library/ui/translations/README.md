@@ -46,9 +46,10 @@ from the application.
   (`admin` with the default login). The field keeps Chainlit's key and its
   `email` id; only what it says changes.
 
-Only `en-US` is forked. Every other locale falls back to Chainlit's own copy, so
-the Ukrainian interface still prints upstream's step prefix in front of the
-step's name.
+Only `en-US` is forked. A browser language Chainlit ships a file for (German,
+French and others) gets Chainlit's own copy; one it does not ship, Ukrainian
+among them (Chainlit 2.12 has no `uk` file), falls back to `en-US` and so gets
+this file.
 
 `tests/test_ui.py` pins all of it: the key set against the installed package's
 file, so a Chainlit bump that adds or renames a key fails the suite instead of
