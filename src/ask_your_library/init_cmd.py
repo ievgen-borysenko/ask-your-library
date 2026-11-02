@@ -50,7 +50,7 @@ from .bookkey import book_key
 from .cli import package_version, say
 from .embeddings import OllamaEmbedder, OpenRouterEmbedder
 from .hints import command, config_docs, from_clone, ui_extra
-from .i18n import t
+from .i18n import _T, t
 from .index_meta import expected_chunker, read_index_meta, rows_by_book
 from .ingest.doctor import check_ledger
 from .ingest.foreign import foreign_books
@@ -113,7 +113,9 @@ ESTIMATE = {"starter": "a few minutes", "full": "about 30 minutes"}
 FIRST_QUESTION = "What does Marcus Aurelius say about anger?"
 # The first question `ayl init` suggests for the reader's own index: a catalogue
 # one, which code answers from the index tables after one planning call (#137).
-CATALOGUE_QUESTION = "How many books do I have?"
+# The same words as the web UI's catalogue starter, taken from it so the two
+# cannot drift; the next steps are in English, so its English text.
+CATALOGUE_QUESTION = _T["starter_catalog"]["en"]
 
 # Printed by --print-env-resolution: the settings that decide where a
 # question, a passage or a trace goes (`dataflow.DATA_FLOW_VARS`, the list the

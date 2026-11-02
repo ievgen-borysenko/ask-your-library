@@ -42,7 +42,7 @@ ayl init --dry-run                       # every step, printed; nothing is pulle
 ayl init                                 # check Ollama, pull the models, write the configuration
 ayl add ~/books                          # your own .txt / .md / .epub / .pdf books, into your index
 ayl ask "How many books do I have?"      # a catalogue question: seconds
-ayl ask "..."                            # a research one: 1-4 minutes the first time, locally
+ayl ask "..."                            # a research one: 1-4 minutes locally, longest the first time
 ```
 
 `ayl init` runs five steps, and each one is skipped when it is already done, so a second run
@@ -77,8 +77,9 @@ changes nothing and says so:
 
 Then it runs `ayl doctor` and prints the next commands, in the form this install types them (bare
 `ayl` from a tool install, `uv run ayl` from a clone): a catalogue question first, which code
-answers from the index in seconds, then a research one. On the local model the first answer usually
-takes 1-4 minutes while the model loads, and both `ayl init` and `ayl ask` say so before you wait.
+answers from the index in seconds, then a research one. On the local model a research answer usually
+takes 1-4 minutes, longest the first time while the model loads, and both `ayl init` and `ayl ask`
+say so before you wait.
 Before the first `ayl add` that doctor says the index is empty and names `ayl add`; that is the
 state a first run leaves, not a fault, and the status it exits with is still 3. `--dry-run` ends on
 the status the real run would, wherever that can be told without a request (a refused folder, a demo

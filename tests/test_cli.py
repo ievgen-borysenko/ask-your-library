@@ -116,14 +116,28 @@ def test_a_local_run_says_the_first_answer_takes_minutes_before_it_starts(
 
 def test_a_local_chat_says_it_once_before_the_first_prompt(
         a_working_environment, monkeypatch, capsys):
+    """Two questions, then EOF: the line comes before the first prompt and is
+    not said again before the second."""
     from ask_your_library.i18n import t
+    from ask_your_library.runner import RunResult
     monkeypatch.setattr(cli, "LLM_BACKEND", "ollama")
+    monkeypatch.setattr(cli, "_run", lambda *a, **k: RunResult(question="q", answer="an answer"))
+    questions = iter(["how many books", "and which is the longest"])
+    err = []
 
-    def eof(_prompt):
-        assert capsys.readouterr().err.count(t("cli_local_wait")) == 1
-        raise EOFError
-    monkeypatch.setattr("builtins.input", eof)
+    def ask(_prompt):
+        err.append(capsys.readouterr().err)       # what was said before this prompt
+        try:
+            return next(questions)
+        except StopIteration:
+            raise EOFError from None
+    monkeypatch.setattr("builtins.input", ask)
     assert cli.main([]) is None
+    err.append(capsys.readouterr().err)
+    line = t("cli_local_wait")
+    assert len(err) == 4                           # three prompts and the goodbye
+    assert err[0].count(line) == 1, "said before the first prompt"
+    assert "".join(err).count(line) == 1, "and only once in the whole session"
 
 
 def test_a_hosted_run_does_not_say_it(a_working_environment, monkeypatch, capsys):

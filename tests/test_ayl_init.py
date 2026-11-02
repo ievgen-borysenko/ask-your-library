@@ -324,7 +324,7 @@ def test_the_next_steps_ask_a_catalogue_question_first_and_say_the_local_wait(ma
     steps = out[out.index("Next steps:"):]
     catalogue = steps.index(f'ayl ask "{init_cmd.CATALOGUE_QUESTION}"')
     assert catalogue < steps.index('ayl ask "..."'), "the catalogue question comes first"
-    assert init_cmd.CATALOGUE_QUESTION == "How many books do I have?"
+    assert init_cmd.CATALOGUE_QUESTION == "How many books do I have?"   # the README's words
     flowed = " ".join(steps.split())                  # the sentence is wrapped to the block
     assert t("cli_local_wait") in flowed
     assert flowed.index('ayl ask "..."') < flowed.index(t("cli_local_wait"))

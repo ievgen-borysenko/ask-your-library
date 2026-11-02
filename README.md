@@ -91,7 +91,7 @@ ayl init --dry-run                       # the plan, printed; nothing is changed
 ayl init                                 # the models (mostly download time) and the configuration
 ayl add ~/books                          # your own .txt / .md / .epub / .pdf books
 ayl ask "How many books do I have?"      # a catalogue question: seconds
-ayl ask "..."                            # a research one: 1-4 minutes the first time, locally
+ayl ask "..."                            # a research one: 1-4 minutes locally, longest the first time
 ```
 
 `ayl init` checks that Ollama answers, pulls the two models the configuration names, writes
