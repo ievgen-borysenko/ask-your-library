@@ -394,7 +394,8 @@ the folder is indexed as usual:
 - **Too large**, before that, each with its own line:
   - the file is larger than **256 MiB**;
   - it has more than **5,000 pages**, or its page tree is too deep or too large to read (more than
-    10,000 entries or 64 levels);
+    10,000 entries or 64 levels, or pages holding more than **2 million** entries between them,
+    a page counted once for every place the tree names it);
   - a page in it holds more than **100,000 characters** of text (the bytes it shows are counted
     while the page is read, the characters they make after it), or the book more than
     **20 million**.
