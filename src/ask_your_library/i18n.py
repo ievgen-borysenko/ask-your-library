@@ -413,6 +413,18 @@ _T = {
     "cli_you": {"ua": "\nТи: ", "en": "\nYou: "},
     "cli_your_answer": {"ua": "Твоя відповідь: ", "en": "Your answer: "},
     "cli_bye": {"ua": "\nБувай!", "en": "\nBye!"},
+    # Said once before the first run on the local backend (#137): every
+    # research answer there takes minutes (61-217 s measured, docs/cost.md),
+    # the first one longest, and with nothing printed in the meantime a reader
+    # may stop a run that is working. `ayl init`'s next steps print the same
+    # sentence.
+    "cli_local_wait": {
+        "ua": "Локальна модель: дослідницька відповідь зазвичай займає 1-4 хвилини, "
+              "найдовше вперше, поки модель завантажується; питання до каталогу — "
+              "кілька секунд.",
+        "en": "Local model: a research answer usually takes 1-4 minutes, longest the "
+              "first time while the model loads; catalogue questions take seconds.",
+    },
     "ev_plan_fallback": {"ua": "[plan] планер не дав придатного плану (JSON або запити): шукаю за текстом питання",
                          "en": "[plan] the planner gave no usable plan (JSON or queries): searching the raw question"},
     "ev_plan": {"ua": "[plan] mode={mode}, запити: {queries}",

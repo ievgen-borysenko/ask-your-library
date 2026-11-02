@@ -30,7 +30,7 @@ import sys
 from importlib.metadata import PackageNotFoundError, version
 
 from .bookkey import split_read_query, unescape_marker
-from .config import QUESTION_DEADLINE_S, SUPPORTED_LANGS, TABLES
+from .config import LLM_BACKEND, QUESTION_DEADLINE_S, SUPPORTED_LANGS, TABLES
 from .graph import build_graph
 from .hints import config_docs
 from .home import scratch_dir
@@ -306,6 +306,13 @@ def main(argv: list[str] | None = None, prog: str = "ask-library") -> None:
             mark_reported(TABLES["cards"])
 
     graph = build_graph()
+    # Said before the first run, while nothing has been asked of the model yet
+    # (#137): on the local backend the first research answer takes minutes and
+    # nothing is printed in the meantime. On stderr with the preflight notices,
+    # so a script reading the answer off stdout is unaffected; never with a
+    # hosted backend, where it would not be true.
+    if LLM_BACKEND == "ollama":
+        say(t("cli_local_wait"), error=True)
 
     if args.question:
         question = " ".join(args.question)
