@@ -27,16 +27,23 @@ Event contract (node_name -> keys present in update):
              tables, no model call, no search step; validate then reports a catalogue answer
              (provenance carries `catalog` {op, count, total} next to the zero quote counts)
   act        steps_taken, hits (list[dict], each with hit_id), hits_log (THIS step's
-             passages only; the graph state append-reduces them across steps)
+             passages only; the graph state append-reduces them across steps);
+             searches_run ([[normalised query, book]], this step's search only, append-
+             reduced the same way) on a step that searched — never on a chapter read (#163)
   observe    evidence (accumulated), empty_streak; a distillation call that timed out sends
              call_timed_out=True and stop_reason instead, and the loop ends at reflect.
              The provenance gate (#29) adds dropped_unverified with dropped_by_reason
              (no_hit / cross_book / short / not_found, summing to it) and repinned — run
              totals, each present ONLY on a step that spent it, so a run where every quote
-             checks out emits exactly the event it always did
+             checks out emits exactly the event it always did; duplicates_skipped (run
+             total of quotes the evidence already held, #163) on the same rule
   reflect    current_query ("" = synthesize; "__clarify__" + clarify_candidates; "__chapter__|book|section"
              or "__chapter_q__|looking for|book|section";
-             "__book__|book|query" = coverage probe, one search inside one candidate) + coverage_probed
+             "__book__|book|query" = coverage probe, one search inside one candidate) + coverage_probed;
+             query_replaced {from, to} ONLY when the search it was about to send had
+             already run (#163): `to` is the unrun query or probe sent instead, or ""
+             with stop_reason "no new query" when nothing new was left — a run that
+             never repeats a search emits exactly the event it always did
   clarify    clarification (the user's reply)
   synthesize answer
   validate   verification (human-readable) + provenance (numbers:
@@ -84,10 +91,11 @@ from .dataflow import failure_text
 def initial_state(question: str, history: list[str], scratchpad: Path) -> dict:
     return {
         "question": question, "history": history,
-        "mode": "", "queries": [], "current_query": "",
+        "mode": "", "queries": [], "current_query": "", "searches_run": [], "query_replaced": {},
         "hits": [], "hits_log": [], "evidence": [], "steps_taken": 0,
         "empty_streak": 0, "dropped_streak": 0,
         "dropped_unverified": 0, "dropped_by_reason": {}, "repinned": 0, "dropped_quotes": [],
+        "duplicates_skipped": 0,
         "clarification": "", "clarify_asked": False, "coverage_probed": False,
         "plan_fallback": False, "catalog_fallback": "",
         "clarify_candidates": [], "clarify_unresolved": False, "clarify_chosen": "",
@@ -182,6 +190,10 @@ class RunResult:
     steps_taken: int = 0
     evidence: list = field(default_factory=list)
     read_chapters: list = field(default_factory=list)
+    # every search the run made, in order, as [normalised query, book] (#163):
+    # the whole record, so a report can count repeats instead of trusting that
+    # there were none
+    searches_run: list = field(default_factory=list)
     # where each chapter read's window sat in its section (#81), one dict per read
     chapter_windows: list = field(default_factory=list)
     # what the provenance gate spent on this question (#29): every quote it
@@ -193,6 +205,8 @@ class RunResult:
     dropped_unverified: int = 0
     dropped_by_reason: dict = field(default_factory=dict)
     repinned: int = 0
+    # quotes not added again because the evidence already held them (#163)
+    duplicates_skipped: int = 0
     # the clarify interrupt: whether it happened at all (the runner knows, the
     # state does not say it after a resume), what was offered and what code
     # resolved the reply to
@@ -259,10 +273,12 @@ def _result(question: str, state: dict, usage: dict, seconds: float,
         steps_taken=state.get("steps_taken", 0),
         evidence=state.get("evidence") or [],
         read_chapters=state.get("read_chapters") or [],
+        searches_run=state.get("searches_run") or [],
         chapter_windows=state.get("chapter_windows") or [],
         dropped_unverified=int(state.get("dropped_unverified") or 0),
         dropped_by_reason=dict(state.get("dropped_by_reason") or {}),
         repinned=int(state.get("repinned") or 0),
+        duplicates_skipped=int(state.get("duplicates_skipped") or 0),
         clarify_asked=clarify_asked,
         clarify_candidates=state.get("clarify_candidates") or [],
         clarify_unresolved=bool(state.get("clarify_unresolved")),

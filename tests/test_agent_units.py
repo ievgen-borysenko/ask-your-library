@@ -564,7 +564,9 @@ def test_observe_drops_malformed_evidence_and_pins_the_rest_to_its_hit(monkeypat
         # empty book: fine, the hit knows it. The quote has to be IN the hit
         # since #29 — the gate checks it here, not only in the report.
         {"hit_id": "s1h2", "book": "", "quote": "A knight."},
-        {"hit_id": "s1h2", "book": "Ivanhoe", "quote": "A knight.", "why": None},
+        # another quote of the same hit: the same one twice is one piece of
+        # evidence since #163
+        {"hit_id": "s1h2", "book": "Ivanhoe", "quote": "A squire.", "why": None},
         {"book": "Ivanhoe", "quote": "No hit id at all."},          # strict mode: dropped
         {"hit_id": "s9h9", "book": "Ivanhoe", "quote": "Unknown hit id."},   # dropped
     ]})
@@ -574,7 +576,7 @@ def test_observe_drops_malformed_evidence_and_pins_the_rest_to_its_hit(monkeypat
              "hits": [{"hit_id": "s1h1", "corpus": "transcripts", "book": "Moby Dick — Herman Melville",
                        "section": "Chapter 1", "text": "Call me Ishmael."},
                       {"hit_id": "s1h2", "corpus": "cards", "book": "Ivanhoe — Walter Scott",
-                       "section": "Summary", "text": "A knight."}]}
+                       "section": "Summary", "text": "A knight. A squire."}]}
     result = nodes.observe(state)
     # book/section come from the hit record, whatever the model wrote
     assert [(e["hit_id"], e["book"], e["section"]) for e in result["evidence"]] == [
