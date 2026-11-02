@@ -519,6 +519,35 @@ def test_a_page_tree_too_deep_is_refused(tmp_path):
     assert refused(path) == "its page tree is too deep or too large to read"
 
 
+def test_the_entries_the_page_tree_walk_copies_are_capped(tmp_path, monkeypatch):
+    """MAX_PAGE_TREE_PAGE_ENTRIES: the library copies a page's entries into
+    the page it builds once for every reference to it. One page named thirty
+    times in the page tree is read as thirty pages under the production cap,
+    and refused with the page tree's reason when the cap is lowered below
+    thirty copies of its entries."""
+    assert pdf.MAX_PAGE_TREE_PAGE_ENTRIES == 2_000_000
+    assert pdf.CONFIGURATION["page_tree_maximum_page_entries"] == pdf.MAX_PAGE_TREE_PAGE_ENTRIES
+    path = make_pdf(tmp_path / "b.pdf", [room("amber")])
+    data = path.read_bytes()
+    # Object 2 is the page tree; it is replaced by a tree that names its one
+    # page thirty times, appended as an incremental update with its own
+    # cross-reference section.
+    page = data.split(b"/Kids [", 1)[1].split(b"]", 1)[0].strip()
+    size = int(data.rsplit(b"/Size ", 1)[1].split()[0])
+    out = bytearray(data)
+    offset = len(out)
+    out += b"2 0 obj\n<< /Type /Pages /Kids [%s] /Count 30 >>\nendobj\n" % b" ".join([page] * 30)
+    xref = len(out)
+    out += b"xref\n0 1\n0000000000 65535 f \n2 1\n%010d 00000 n \n" % offset
+    prev = int(data.rsplit(b"startxref", 1)[1].split()[0])
+    out += b"trailer\n<< /Size %d /Root 1 0 R /Prev %d >>\nstartxref\n%d\n%%%%EOF\n" % (
+        size, prev, xref)
+    path.write_bytes(bytes(out))
+    assert len(pdf.read_in_process(path).sections) == 30
+    monkeypatch.setitem(pdf.CONFIGURATION, "page_tree_maximum_page_entries", 100)
+    assert refused(path) == "its page tree is too deep or too large to read"
+
+
 def test_a_page_over_the_text_cap_is_refused(tmp_path, monkeypatch):
     monkeypatch.setattr(pdf, "MAX_PAGE_CHARS", 500)
     pages = [room("amber"), room("birch", 12)]
@@ -1068,6 +1097,30 @@ def test_every_field_of_the_library_configuration_is_set():
     """A field a later version adds fails here, rather than being left at a
     default nobody chose."""
     assert set(pdf.CONFIGURATION) == {f.name for f in dataclasses.fields(pypdf.Configuration)}
+
+
+def test_every_bound_of_the_library_reader_s_constructor_is_set(tmp_path, monkeypatch):
+    """The bounds `PdfReader` takes are passed by name, at the values written
+    in pdf.py; a parameter a later version adds fails here, whatever its kind
+    (a keyword-only bound, or an ordinary one with a default like `password`)."""
+    import inspect
+    bounds = set(inspect.signature(pypdf.PdfReader).parameters) - {"self", "stream", "strict", "password"}
+    assert bounds == {"root_object_recovery_limit", "xref_stream_maximum_entries"}
+    seen = {}
+    real = pdf.reader_class
+
+    def capturing():
+        class Capturing(real()):
+            def __init__(self, *args, **kwargs):
+                seen.update(kwargs)
+                super().__init__(*args, **kwargs)
+        return Capturing
+
+    monkeypatch.setattr(pdf, "reader_class", capturing)
+    assert len(pdf.read_in_process(make_pdf(tmp_path / "b.pdf", five_pages())).sections) == 5
+    assert seen == {"strict": False, "root_object_recovery_limit": pdf.MAX_ROOT_RECOVERY,
+                    "xref_stream_maximum_entries": pdf.MAX_XREF_STREAM_ENTRIES}
+    assert pdf.MAX_XREF_STREAM_ENTRIES == 2_000_000
 
 
 def test_the_child_cannot_be_shadowed_from_the_working_directory():
