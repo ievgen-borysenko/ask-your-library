@@ -305,7 +305,7 @@ def step(page, name: str):
 def log_in(page, server) -> None:
     page.goto(server.url, wait_until="load", timeout=LOAD_MS)  # "networkidle" never fires: the socket stays open
     expect(page.locator("input#password")).to_be_visible(timeout=LOAD_MS)
-    page.fill("input#email", server.username)            # the first field is labelled "Email address"
+    page.fill("input#email", server.username)            # Chainlit's id; the project labels it "Username"
     page.fill("input#password", server.password)
     page.click("button[type=submit]")
     expect(page.locator(COMPOSER)).to_be_visible(timeout=LOAD_MS)

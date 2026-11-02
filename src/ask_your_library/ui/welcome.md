@@ -19,5 +19,3 @@ code — no second model — checks every quote against the passage it was copie
 - If the library has no answer, the agent says so honestly.
 
 Language switch: chat profile at the top (English / Українська).
-
-Signing in: the login form's first field is labelled "Email address"; type the username there.
