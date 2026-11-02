@@ -55,6 +55,10 @@
   where uv already has an interpreter in the range keeps it and downloads nothing, and an
   exported `UV_PYTHON` still decides. The series is `PYTHON_CEILING` in the script; a test reads
   `uv.lock` and fails, naming the value to write, once the lock covers a newer one.
+- **The installer's closing lines drop the "Email address" note (#139).** They told you to type
+  the username where the web chat's login form asks for an "Email address"; with #139 that field
+  is labelled Username, so `scripts/install-mac.sh` now prints only the login, `admin` /
+  `change-me`.
 - **The locked dependency set is updated for the open advisories.** `uv.lock` moves aiohttp
   3.14.3 to 3.14.5 (GHSA-2g87-pp6c-29x5, GHSA-494j-54xm-rwp3, GHSA-5wr8-gcqf-gqf3,
   GHSA-6cjc-53gc-5rqm, GHSA-9xw5-w5jj-pvcg, GHSA-f9xw-jh8m-3mwq, GHSA-gx76-c99x-2c96,
