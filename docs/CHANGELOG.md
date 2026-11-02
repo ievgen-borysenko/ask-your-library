@@ -77,6 +77,15 @@
   that recovery stops on an error that says what to do (restore a backup, or move the index
   directory aside and add the books again). `ayl add` printed it as one line and `ayl backup` under
   a traceback; `ayl backup` now prints the same line, exits 1 and copies nothing.
+- **The web chat's login form asks for a username (#139).** Its first field was labelled "Email
+  address" with the placeholder `me@example.com`, while the account is a username (`admin` with
+  the default login), and only a sentence on the welcome page and in the quick start said to type
+  the username there. The field now reads "Username", with the placeholder `admin` and "username is
+  required" when left empty, and those sentences are gone, as is the same note in `.env.example`.
+  Only the English strings are this project's; a browser set to a language Chainlit ships (German,
+  French and others) still gets Chainlit's own label. An existing install's copy of the file, and of
+  the welcome page, is replaced on the next `ayl ui` when it is the one 0.5.x shipped; a copy the
+  reader edited is left alone.
 - **The locked dependency set is updated for the open advisories.** `uv.lock` moves aiohttp
   3.14.3 to 3.14.5 (GHSA-2g87-pp6c-29x5, GHSA-494j-54xm-rwp3, GHSA-5wr8-gcqf-gqf3,
   GHSA-6cjc-53gc-5rqm, GHSA-9xw5-w5jj-pvcg, GHSA-f9xw-jh8m-3mwq, GHSA-gx76-c99x-2c96,
