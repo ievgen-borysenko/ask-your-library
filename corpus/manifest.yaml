@@ -137,7 +137,8 @@ books:
     # re-pinned 2026-11-02: PG regenerated it on 2026-10-09 — updated-date header line,
     # the J. Ross Browne extract set one speaker per line (front matter, before
     # CHAPTER 1) and six stage directions put in parentheses (chapters 37, 38, 120,
-    # 121, 122, 127); the chapter split is unchanged
+    # 121, 122, 127); the chapter split is unchanged. Compared with the initial-release
+    # copy (9a6844ac…) minus the three 2026-09-10 fixes: the 2026-09-10 copy was not kept
     title: "Moby Dick"
     author: "Herman Melville"
     source: gutenberg
