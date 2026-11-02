@@ -90,7 +90,8 @@ uv tool update-shell                     # once, only if `ayl` is not found; the
 ayl init --dry-run                       # the plan, printed; nothing is changed
 ayl init                                 # the models (mostly download time) and the configuration
 ayl add ~/books                          # your own .txt / .md / .epub / .pdf books
-ayl ask "..."
+ayl ask "How many books do I have?"      # a catalogue question: seconds
+ayl ask "..."                            # a research one: 1-4 minutes locally, longest the first time
 ```
 
 `ayl init` checks that Ollama answers, pulls the two models the configuration names, writes
@@ -136,6 +137,7 @@ uv sync
 uv run ayl init --dry-run                # the plan, printed; nothing is changed
 uv run ayl init
 uv run ayl add ~/books
+uv run ayl ask "How many books do I have?"
 uv run ayl ask "..."
 uv run --extra ui ayl ui                 # the web chat, with the extra
 ```
@@ -333,7 +335,7 @@ and the open gaps in [`docs/backlog.md`](docs/backlog.md).
 
 The code and the project's own files are under Apache-2.0 (`LICENSE`, attribution in
 [`NOTICE`](NOTICE)). Two kinds of file in the tree are not the project's alone: Chainlit's own
-`src/ask_your_library/ui/translations/en-US.json`, Apache-2.0, copied here with four strings
+`src/ask_your_library/ui/translations/en-US.json`, Apache-2.0, copied here with seven strings
 changed, which [`NOTICE`](NOTICE) and
 [`src/ask_your_library/ui/translations/README.md`](src/ask_your_library/ui/translations/README.md)
 record; and the book cards and chapter lists of the engineer's shelf, below.

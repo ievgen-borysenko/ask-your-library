@@ -2,9 +2,9 @@
 
 `en-US.json` in this directory is not written by this project. It is Chainlit
 2.12.0's own `en-US.json`, taken from the installed package
-(`chainlit/translations/en-US.json`) and copied byte for byte, with four values
-changed — one on 2026-09-10, three on 2026-09-16. It is package data:
-`launcher.py` copies it into the app root's `.chainlit/translations/` before
+(`chainlit/translations/en-US.json`) and copied byte for byte, with seven values
+changed — one on 2026-09-10, three on 2026-09-16, three on 2026-11-02. It is
+package data: `launcher.py` copies it into the app root's `.chainlit/translations/` before
 the server starts, because Chainlit seeds that directory with its own copy of
 every language it ships and skips a name that is already there. Chainlit is licensed under the Apache License,
 Version 2.0, and `NOTICE` in the repository root carries the attribution and
@@ -17,7 +17,7 @@ page. Every other language Chainlit ships lands in the app root unversioned on
 startup; `init_config()` skips a file that already exists, so the copy made from
 here survives a start, a `chainlit init` and a `chainlit lint-translations`.
 
-The changed values are these four, and each is a claim `app.py` cannot make for
+The changed values are these seven, and each is a claim `app.py` cannot make for
 itself — the strings belong to Chainlit's own chrome, which takes no arguments
 from the application.
 
@@ -39,13 +39,20 @@ from the application.
   exactly what `validate` does and no more: it checks the provenance of the
   distilled EVIDENCE items against the passages they were copied from, not the
   quotation marks inside the answer the model then wrote.
+- `auth.login.form.email.label`, `auth.login.form.email.placeholder` and
+  `auth.login.form.email.required`, now "Username", "admin" and "username is
+  required". Chainlit's login form asks for an "Email address" with the
+  placeholder `me@example.com`, while the account `app.py` checks is a username
+  (`admin` with the default login). The field keeps Chainlit's key and its
+  `email` id; only what it says changes.
 
-Only `en-US` is forked. Every other locale falls back to Chainlit's own copy, so
-the Ukrainian interface still prints upstream's step prefix in front of the
-step's name.
+Only `en-US` is forked. A browser language Chainlit ships a file for (German,
+French and others) gets Chainlit's own copy; one it does not ship, Ukrainian
+among them (Chainlit 2.12 has no `uk` file), falls back to `en-US` and so gets
+this file.
 
 `tests/test_ui.py` pins all of it: the key set against the installed package's
 file, so a Chainlit bump that adds or renames a key fails the suite instead of
 blanking a label; the exact set of strings that differ and what each one says,
-so a fifth cannot be added in silence; that the startup seeding leaves the file
+so an eighth cannot be added in silence; that the startup seeding leaves the file
 alone; and that `NOTICE` names every changed key.

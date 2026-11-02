@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+- **A local run says before it starts that a research answer takes minutes (#137).** On the local
+  model every research answer takes 1-4 minutes (61-217 s measured, [cost](cost.md); a cold first
+  one 160.8 s, its immediate repeat 62.7 s), and `ayl ask` printed the question back and then
+  nothing until the answer, so a first run looked stuck. With `LLM_BACKEND=ollama`, `ayl ask` now
+  prints one line on stderr before the first run, beside the preflight notices: "Local model: a
+  research answer usually takes 1-4 minutes, longest the first time while the model loads;
+  catalogue questions take seconds." (in Ukrainian with `--lang ua`); a hosted backend
+  prints nothing new, and stdout is unchanged. `ayl init`'s next steps now suggest a catalogue
+  question first, `ayl ask "How many books do I have?"`, then a research one, and in the local mode
+  end on the same sentence; the README and the quick start list the two questions the same way.
+- **The weekly pin check was red on Frankenstein: Project Gutenberg had recapitalised its title.**
+  The `pins` job of `corpus.yml` failed on 2026-10-27 with a checksum mismatch on PG 84. Against
+  the pinned copy, the new file differs in two header lines only, both above the START marker:
+  "Frankenstein; or, the modern prometheus" became "Frankenstein; or, The modern Prometheus", in
+  the eBook line and in `Title:`, at the same file size. The header is stripped, so the prepared
+  book is byte-identical, still 28 sections from Letter 1 to Chapter 24, and
+  `corpus/toc/frankenstein.json` and the book-identity fixture stay as they are. The entry is
+  re-pinned with the date and the drift, as the earlier re-pins were.
+- **Behind Frankenstein, two more pins had drifted: Moby Dick and The Hound of the Baskervilles.**
+  The job stops at the first mismatch, so these surfaced only once Frankenstein was re-pinned.
+  Hound (PG 2852, regenerated 2026-10-22), diffed against the pinned copy: the updated-date header
+  line and one fix in chapter 2, where a dropped "sound of" is restored in the Baskerville legend.
+  Moby Dick (PG 2701, regenerated 2026-10-09): the pinned copy of 2026-09-10 was not kept, so the
+  new file was diffed against an older one from February 2026, and the three fixes the 2026-09-10
+  re-pin recorded were taken out of the result. What is left is the updated-date header line, the
+  J. Ross Browne extract set one speaker per line (front matter, before CHAPTER 1, which the split
+  drops) and six stage directions put in parentheses in chapters 37, 38, 120, 121, 122 and 127.
+  Both books split as before (135 and 15 sections), their `corpus/toc` files regenerate
+  unchanged, and both entries are re-pinned with the date and the drift.
 - **The loop no longer runs a search it already ran, nor counts a quote it already holds (#163).**
   On a library of about 250 audiobooks a research question ran q1, q3, q1, q1 and stopped at the
   step limit with plan query q2 never searched; a comparison kept 9 evidence items, 5 of them
@@ -44,6 +73,15 @@
   that recovery stops on an error that says what to do (restore a backup, or move the index
   directory aside and add the books again). `ayl add` printed it as one line and `ayl backup` under
   a traceback; `ayl backup` now prints the same line, exits 1 and copies nothing.
+- **The web chat's login form asks for a username (#139).** Its first field was labelled "Email
+  address" with the placeholder `me@example.com`, while the account is a username (`admin` with
+  the default login), and only a sentence on the welcome page and in the quick start said to type
+  the username there. The field now reads "Username", with the placeholder `admin` and "username is
+  required" when left empty, and those sentences are gone, as is the same note in `.env.example`.
+  Only the English strings are this project's; a browser set to a language Chainlit ships (German,
+  French and others) still gets Chainlit's own label. An existing install's copy of the file, and of
+  the welcome page, is replaced on the next `ayl ui` when it is the one 0.5.x shipped; a copy the
+  reader edited is left alone.
 - **The locked dependency set is updated for the open advisories.** `uv.lock` moves aiohttp
   3.14.3 to 3.14.5 (GHSA-2g87-pp6c-29x5, GHSA-494j-54xm-rwp3, GHSA-5wr8-gcqf-gqf3,
   GHSA-6cjc-53gc-5rqm, GHSA-9xw5-w5jj-pvcg, GHSA-f9xw-jh8m-3mwq, GHSA-gx76-c99x-2c96,
