@@ -5,7 +5,8 @@ what each step does, and every command the project ships.
 
 ## Install
 
-Requirements: [uv](https://docs.astral.sh/uv/) (it provides Python 3.11+ itself) and
+Requirements: [uv](https://docs.astral.sh/uv/) (it provides Python itself: 3.11 or newer, and
+for a clone's locked environment 3.11 to 3.14, the newest series its wheels cover) and
 [Ollama](https://ollama.com), installed and running — Ollama runs the embeddings in both modes
 and, in the default configuration, the answering model too. No account and no API key: see
 [Fully local, no account](configuration.md#fully-local-no-account).
@@ -34,6 +35,10 @@ git clone https://github.com/ievgen-borysenko/ask-your-library.git && cd ask-you
 uv sync                                  # the locked environment
 uv run ayl init --dry-run
 ```
+
+`uv sync` builds on the first interpreter uv finds that meets `requires-python`. Where that one is
+newer than 3.14 (Homebrew's 3.15, say), the locked wheels do not cover it and `uv sync` turns into
+source builds that need a Rust toolchain: run `UV_PYTHON=3.14 uv sync` instead.
 
 ## The first run: `ayl init`
 
@@ -154,7 +159,8 @@ bash scripts/install-mac.sh              # mostly download time
 [`scripts/install-mac.sh`](../scripts/install-mac.sh) installs `uv` and Ollama through Homebrew
 (whose own install command it prints and never runs for you), starts Ollama for this session
 only (`brew services run`, which registers no login item — the one-liner that makes it permanent
-is printed at the end), pulls the two models, syncs the locked environment, writes the fully local
+is printed at the end), pulls the two models, syncs the locked environment on Python 3.11 to 3.14
+(an interpreter uv already has in that range, else 3.14, which uv installs), writes the fully local
 `.env`, hands the demo library to `ayl init` (which asks its one question), and finishes on the
 preflight the CLI runs before every question. `install-mac.sh` also takes `--no-demo`,
 `--hosted` (the OpenRouter answering model, which needs a key you set yourself), `--yes` (build
