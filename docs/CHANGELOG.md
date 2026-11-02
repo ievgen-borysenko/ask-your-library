@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **A local run says before it starts that a research answer takes minutes (#137).** On the local
+  model every research answer takes 1-4 minutes (61-217 s measured, [cost](cost.md); a cold first
+  one 160.8 s, its immediate repeat 62.7 s), and `ayl ask` printed the question back and then
+  nothing until the answer, so a first run looked stuck. With `LLM_BACKEND=ollama`, `ayl ask` now
+  prints one line on stderr before the first run, beside the preflight notices: "Local model: a
+  research answer usually takes 1-4 minutes, longest the first time while the model loads;
+  catalogue questions take seconds." (in Ukrainian with `--lang ua`); a hosted backend
+  prints nothing new, and stdout is unchanged. `ayl init`'s next steps now suggest a catalogue
+  question first, `ayl ask "How many books do I have?"`, then a research one, and in the local mode
+  end on the same sentence; the README and the quick start list the two questions the same way.
 - **A chapter whose HTML leaves out `</head>` before a `<body>` tag keeps its text.** `</head>` is
   optional in HTML, and in a spine document that left it out (most likely a `text/html` one) the
   whole body was read as part of the head and left out: the chapter was missing from the book, and a
