@@ -29,6 +29,7 @@ import json
 import os
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -2188,9 +2189,12 @@ def test_yes_with_a_token_in_a_url_s_query_is_refused_before_anything(sandbox):
 # asks uv for a range instead, from the requires-python floor to PYTHON_CEILING,
 # and the first test below holds that constant to what uv.lock actually covers.
 CEILING_LINE = re.compile(r"^PYTHON_CEILING=(\d+)\.(\d+)$", re.M)
-WHEEL_NAME = re.compile(r"-([^-/]+)-([^-/]+)-([^-/]+)\.whl$")
-# A macOS platform tag's architecture suffix, and the architectures it installs on.
-MAC_ARCHES = {"_arm64": {"arm64"}, "_x86_64": {"x86_64"}, "_universal2": {"arm64", "x86_64"}}
+# A wheel's compressed tag set: the last three fields of its file name.
+WHEEL_TAGS = re.compile(r"-([^-/]+-[^-/]+-[^-/]+)\.whl$")
+# The Macs the wheels are judged for: both architectures, on a macOS recent
+# enough that a wheel's own minimum macOS never decides a Python series.
+MAC_ARCHES = ("arm64", "x86_64")
+MACOS = (26, 0)
 
 
 def python_ceiling():
@@ -2224,26 +2228,37 @@ def locked_packages():
     return tomllib.loads((REPO / "uv.lock").read_text(encoding="utf-8"))["package"]
 
 
-def mac_arches(platform_tag):
-    """The macOS architectures a wheel's platform tag installs on; none for any
-    other platform."""
-    return {arch for tag in platform_tag.split(".") if tag.startswith("macosx_")
-            for suffix, arches in MAC_ARCHES.items() if tag.endswith(suffix)
-            for arch in arches}
+@cache
+def mac_platforms(arch):
+    """Every macOS platform tag pip accepts on an `arch` Mac running MACOS."""
+    from packaging import tags                 # pytest's own dependency
+    return frozenset(tags.mac_platforms(MACOS, arch))
 
 
-def installs_on(python_tag, abi_tag, minor):
-    """Whether a wheel with these tags installs on CPython 3.<minor>: built for
-    its own ABI (not the free-threaded 3.<minor>t), for the stable ABI from the
-    version it names on, or for no ABI at all."""
-    for tag in python_tag.split("."):
-        if tag == f"cp3{minor}" and abi_tag == f"cp3{minor}":
-            return True
-        if abi_tag == "abi3" and re.fullmatch(r"cp3\d+", tag) and int(tag[3:]) <= minor:
-            return True
-        if abi_tag == "none" and tag in ("py3", f"py3{minor}"):
-            return True
-    return False
+@cache
+def supported_tags(minor, arch):
+    """Every tag pip accepts for CPython 3.<minor> on that Mac, built as pip
+    builds its own list: the interpreter's ABI (the regular build, not the
+    free-threaded 3.<minor>t), the stable ABI back to 3.2, no ABI, and the
+    py3x / py3 / any tags. PyPy and GraalPy wheels match none of them."""
+    from packaging import tags
+    platforms = sorted(mac_platforms(arch))
+    return (frozenset(tags.cpython_tags((3, minor), abis=[f"cp3{minor}"], platforms=platforms))
+            | frozenset(tags.compatible_tags((3, minor), f"cp3{minor}", platforms)))
+
+
+def installs_on(wheel_tags, minor, arch):
+    """Whether a wheel with this tag set (`cp311-abi3-macosx_10_9_universal2`)
+    installs on CPython 3.<minor> on an `arch` Mac."""
+    from packaging import tags
+    return not tags.parse_tag(wheel_tags).isdisjoint(supported_tags(minor, arch))
+
+
+def published_for(wheel_tags, arch):
+    """Whether a wheel with this tag set is built for an `arch` Mac at all, for
+    whichever interpreter."""
+    from packaging import tags
+    return any(tag.platform in mac_platforms(arch) for tag in tags.parse_tag(wheel_tags))
 
 
 def macos_wheel_gaps(minor):
@@ -2264,13 +2279,11 @@ def macos_wheel_gaps(minor):
         markers = package.get("resolution-markers")
         if markers and not any(Marker(marker).evaluate(environment) for marker in markers):
             continue
-        tags = [WHEEL_NAME.search(wheel["url"]).groups() for wheel in package.get("wheels", [])]
-        if any(platform_tag == "any" for _, _, platform_tag in tags):
-            continue
-        published = set().union(*(mac_arches(plat) for _, _, plat in tags))
-        usable = set().union(*(mac_arches(plat) for py, abi, plat in tags
-                               if installs_on(py, abi, minor)))
-        if published - usable:
+        wheels = [WHEEL_TAGS.search(wheel["url"])[1] for wheel in package.get("wheels", [])]
+        published = [arch for arch in MAC_ARCHES
+                     if any(published_for(wheel, arch) for wheel in wheels)]
+        if any(not any(installs_on(wheel, minor, arch) for wheel in wheels)
+               for arch in published):
             gaps.append(f"{package['name']} {package['version']}")
     return gaps
 
@@ -2278,15 +2291,21 @@ def macos_wheel_gaps(minor):
 def test_the_wheel_reader_reads_the_tags_that_decide_a_series():
     """On strings, so a reader that quietly stopped matching cannot pass the
     test below by finding no wheels to miss."""
-    assert installs_on("cp314", "cp314", 14)
-    assert not installs_on("cp314", "cp314t", 14)        # free-threaded: another ABI
-    assert not installs_on("cp315", "cp315", 14)
-    assert installs_on("cp311", "abi3", 15) and not installs_on("cp311", "abi3", 10)
-    assert installs_on("py3", "none", 15)
-    assert mac_arches("macosx_10_9_x86_64") == {"x86_64"}
-    assert mac_arches("macosx_10_13_universal2") == {"arm64", "x86_64"}
-    assert mac_arches("macosx_11_0_arm64.macosx_12_0_arm64") == {"arm64"}
-    assert mac_arches("manylinux_2_28_x86_64") == set()
+    assert installs_on("cp314-cp314-macosx_11_0_arm64", 14, "arm64")
+    assert not installs_on("cp314-cp314t-macosx_11_0_arm64", 14, "arm64")    # free-threaded
+    assert not installs_on("cp315-cp315-macosx_11_0_arm64", 14, "arm64")
+    assert not installs_on("cp314-cp314-macosx_10_13_x86_64", 14, "arm64")
+    assert installs_on("cp311-abi3-macosx_10_9_universal2", 15, "x86_64")
+    assert not installs_on("cp311-abi3-macosx_10_9_universal2", 10, "arm64")
+    assert installs_on("cp314-none-macosx_11_0_arm64", 14, "arm64")
+    assert installs_on("py314-none-macosx_11_0_arm64", 14, "arm64")
+    assert installs_on("py3-none-macosx_11_0_arm64", 15, "arm64")
+    assert installs_on("py2.py3-none-any", 15, "x86_64")
+    assert not installs_on("pp311-pypy311_pp73-macosx_11_0_arm64", 11, "arm64")
+    assert published_for("pp311-pypy311_pp73-macosx_11_0_arm64", "arm64")
+    assert not published_for("cp314-cp314-macosx_11_0_arm64", "x86_64")
+    assert not published_for("cp314-cp314-manylinux_2_28_aarch64", "arm64")
+    assert not published_for("py3-none-any", "arm64")
 
 
 def test_the_ceiling_is_the_newest_python_series_the_locked_wheels_cover():
@@ -2311,8 +2330,11 @@ def test_the_ceiling_is_the_newest_python_series_the_locked_wheels_cover():
             "PYTHON_CEILING in scripts/install-mac.sh, or requires-python.")
     assert macos_wheel_gaps(minor + 1), (
         f"uv.lock now has a macOS wheel for Python 3.{minor + 1} of every compiled package: "
-        f"set PYTHON_CEILING=3.{minor + 1} in scripts/install-mac.sh, and the python-version "
-        "of the install-script job in .github/workflows/ci.yml with it.")
+        f"set PYTHON_CEILING=3.{minor + 1} in scripts/install-mac.sh, and with it the 3.{minor} "
+        f"that README.md states (the install-mac.sh paragraph of \"From a clone\"), the 3.{minor} "
+        "of docs/quick-start.md (the requirements, the note under the clone's `uv sync`, and "
+        "the install-mac.sh paragraph), and the python-version of the install-script job in "
+        ".github/workflows/ci.yml.")
 
 
 # uv as far as steps 6 and 9 need it, over a list of interpreters kept in a
@@ -2361,8 +2383,9 @@ sys.exit(0)
 """
 
 
-def uv_with_pythons(sandbox, tmp_path, *pythons):
-    """Put that uv in place of the recorder, finding `pythons`. Returns the file
+def uv_with_pythons(sandbox, tmp_path, *pythons, wheels=None):
+    """Put that uv in place of the recorder, finding `pythons`, with wheels up
+    to the series `wheels` names (PYTHON_CEILING unless given). Returns the file
     `uv sync` writes the version of the environment's interpreter to."""
     _, records, env = sandbox
     state = tmp_path / "uv-pythons.json"
@@ -2371,7 +2394,7 @@ def uv_with_pythons(sandbox, tmp_path, *pythons):
     stub = Path(env["PATH"].split(os.pathsep)[0]) / "uv"
     stub.write_text(UV_WITH_PYTHONS.format(python=sys.executable, log=str(records / "uv"),
                                            state=str(state), venv=str(venv),
-                                           wheels=python_ceiling()))
+                                           wheels=wheels or python_ceiling()))
     stub.chmod(0o755)
     return venv
 
@@ -2387,11 +2410,38 @@ def test_the_dry_run_names_the_python_series_it_asks_uv_for(sandbox):
     major, minor = python_ceiling()
     wanted = python_range()
     lines = printed_lines(dry_run(sandbox))
-    assert (f"the locked wheels cover Python up to {major}.{minor}, so uv is asked for "
-            f"{wanted}") in lines
-    assert f"would check 'uv python find {wanted}'" in lines
+    assert f"the locked wheels cover Python up to {major}.{minor}: the range for uv is {wanted}" in lines
+    assert f"would check: uv python find '{wanted}'" in lines
     assert f"would run 'uv python install {major}.{minor}' when no interpreter answers that" in lines
-    assert f"would run: uv sync --locked --extra ui --python {wanted}" in lines
+    assert f"would run: uv sync --locked --extra ui --python '{wanted}'" in lines
+
+
+@mac_only
+def test_a_printed_range_reads_back_as_the_command_that_runs(sandbox, tmp_path):
+    """`--python >=3.11,<3.15` pasted from the plan into a shell is two
+    redirections: a file called `=3.11,`, and a read from `3.15`. The range is
+    quoted where the plan names the command, where the step runs it and where
+    its failure is reported, and each line reads back as the arguments uv is
+    given. A command with nothing to quote prints as it always did."""
+    embed_model, _ = config_models()
+    sync = ["uv", "sync", "--locked", "--extra", "ui", "--python", python_range()]
+    find = ["uv", "python", "find", python_range()]
+    lines = printed_lines(dry_run(sandbox))
+    assert shlex.split(next(line.removeprefix("would run: ") for line in lines
+                            if line.startswith("would run: uv sync"))) == sync
+    assert shlex.split(next(line.removeprefix("would check: ") for line in lines
+                            if line.startswith("would check: "))) == find
+    # A uv whose `sync` fails on every interpreter, so the run reaches both lines.
+    uv_with_pythons(sandbox, tmp_path, "3.14.0", wheels=(3, 0))
+    result = real_run(sandbox, "--no-demo")
+    assert result.returncode == 1, result.stdout + result.stderr
+    lines = printed_lines(result.stdout)
+    assert shlex.split(next(line.removeprefix("running: ") for line in lines
+                            if line.startswith("running: uv sync"))) == sync
+    failed = [line.removesuffix(" failed with status 1.") for line in error_lines(result.stderr)
+              if line.startswith("uv sync") and line.endswith(" failed with status 1.")]
+    assert [shlex.split(line) for line in failed] == [sync]
+    assert f"running: ollama pull {embed_model}" in lines
 
 
 @mac_only
@@ -2435,8 +2485,9 @@ def test_an_interpreter_uv_already_has_in_range_is_used_and_nothing_is_installed
 def test_an_exported_uv_python_still_decides(sandbox, tmp_path):
     """UV_PYTHON is the reader's own choice, and the `uv run`s after step 9
     honour it whatever step 9 passed, so overriding it there alone would build
-    the environment twice. Step 9 passes no range, and the plan says so by
-    name, without printing the value."""
+    the environment twice. Step 9 passes no range, step 6 neither looks for nor
+    installs an interpreter in it, which nothing would use, and the plan says
+    so by name, without printing the value."""
     _, records, _ = sandbox
     floor_major, floor_minor = python_floor()
     major, minor = python_ceiling()
@@ -2445,12 +2496,16 @@ def test_an_exported_uv_python_still_decides(sandbox, tmp_path):
     plan = real_run(sandbox, "--dry-run", "--no-demo", UV_PYTHON=chosen)
     assert plan.returncode == 0, plan.stderr
     lines = printed_lines(plan.stdout)
-    assert "UV_PYTHON is exported, so uv uses the interpreter it names and step 9 does" in lines
+    assert "UV_PYTHON is exported, so uv uses the interpreter it names: this step checks" in lines
+    assert "has no wheels for the compiled packages, which are then built from source" in lines
     assert "would run: uv sync --locked --extra ui" in lines
+    assert not [line for line in lines if line.startswith(("would check:", "would run 'uv python"))]
     assert invoked(records) == []
     result = real_run(sandbox, "--no-demo", UV_PYTHON=chosen)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "sync --locked --extra ui" in uv_calls(records)
+    calls = uv_calls(records)
+    assert "sync --locked --extra ui" in calls
+    assert not [call for call in calls if call.startswith(("python find", "python install"))]
     assert venv.read_text() == f"{chosen}.9"
 
 

@@ -186,19 +186,36 @@ while [ $# -gt 0 ]; do
     shift
 done
 
+# A command as this script prints it, so that a line copied from the plan runs
+# as printed in bash or zsh: an argument holding anything but letters, digits
+# and _ . / : @ % + , = - is single-quoted, and so is an empty one or one that
+# starts with = or ~, which the shells expand. Unquoted, the range step 9 passes
+# (`--python >=3.11,<3.15`) is two redirections. Every other command this script
+# runs holds none of these and prints exactly as it did.
+shown_command() {
+    local arg out="" LC_ALL=C quote="'\\''"
+    for arg in "$@"; do
+        case "$arg" in
+            ""|[=~]*|*[!A-Za-z0-9_./:@%+,=-]*) arg="'${arg//\'/$quote}'" ;;
+        esac
+        out="${out:+$out }$arg"
+    done
+    printf '%s\n' "$out"
+}
+
 # A failing tool is reported here and the script exits 1 — one of the documented
 # codes. Bare "$@" would let `set -e` abort with the tool's own status instead,
 # printing nothing of ours: `brew install uv` exiting 17 ended the script at 17.
 run() {
     if [ "$dry_run" -eq 1 ]; then
-        printf '       would run: %s\n' "$*"
+        printf '       would run: %s\n' "$(shown_command "$@")"
         return 0
     fi
-    printf '       running: %s\n' "$*"
+    printf '       running: %s\n' "$(shown_command "$@")"
     local status=0
     "$@" || status=$?
     if [ "$status" -ne 0 ]; then
-        fail "$* failed with status $status."
+        fail "$(shown_command "$@") failed with status $status."
         fail "fix that and re-run: every step here is idempotent, so nothing is repeated."
         exit 1
     fi
@@ -1387,15 +1404,17 @@ if [ "$floor_major" -gt "$ceiling_major" ] \
     exit 1
 fi
 python_range=">=$python_req,<$ceiling_major.$((ceiling_minor + 1))"
-note "the locked wheels cover Python up to $PYTHON_CEILING, so uv is asked for $python_range"
+note "the locked wheels cover Python up to $PYTHON_CEILING: the range for uv is $python_range"
 # Exported, UV_PYTHON is the reader's own choice of interpreter and keeps
-# deciding `uv sync` and every `uv run`, as it did before the range existed.
+# deciding `uv sync` and every `uv run`, as it did before the range existed. So
+# nothing is checked or installed for the range, which nothing would use.
 if [ -n "${UV_PYTHON:-}" ]; then
-    note "UV_PYTHON is exported, so uv uses the interpreter it names and step 9 does"
-    note "not pass this range; unset it if step 9 has to build a package from source"
-fi
-if [ "$dry_run" -eq 1 ]; then
-    plan "check 'uv python find $python_range'"
+    note "UV_PYTHON is exported, so uv uses the interpreter it names: this step checks"
+    note "and installs nothing, and step 9 passes no range. An interpreter above $PYTHON_CEILING"
+    note "has no wheels for the compiled packages, which are then built from source"
+    note "(a Rust toolchain); unset UV_PYTHON to use the range instead."
+elif [ "$dry_run" -eq 1 ]; then
+    plan "check: $(shown_command uv python find "$python_range")"
     plan "run 'uv python install $PYTHON_CEILING' when no interpreter answers that"
 elif uv python find "$python_range" >/dev/null 2>&1; then
     note "an interpreter in $python_range is already available to uv"
@@ -1527,9 +1546,8 @@ if [ "$loaded_backend" = "ollama" ]; then
 fi
 
 # --- 9. dependencies --------------------------------------------------------
-# On step 6's range, or a newer interpreter on this machine (Homebrew's 3.15,
-# say) is the one uv builds the environment on. The `uv run`s below name no
-# interpreter, so they reuse the environment this builds: it meets requires-python.
+# Pass step 6's range: without it uv builds on the first interpreter that meets
+# requires-python, Homebrew's 3.15 say. An exported UV_PYTHON is left to decide.
 step "Dependencies: the locked environment, with the web UI extra"
 sync_args=(uv sync --locked --extra ui)
 if [ -z "${UV_PYTHON:-}" ]; then
