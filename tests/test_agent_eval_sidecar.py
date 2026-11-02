@@ -1093,3 +1093,106 @@ def test_the_baseline_follows_a_real_clarify_filter(run):
          "cap_fired": False},
         {"step": 2, "distilled": 1, "kept": 1, "dropped": 0, "dropped_streak": 0,
          "cap_fired": False}]
+
+
+# ------------------------------------------- what the loop searched (#163)
+def _passage(hit_id, book, text):
+    return {"hit_id": hit_id, "step": int(hit_id[1]), "book": book, "section": "Chapter 1",
+            "corpus": "transcripts", "text": text}
+
+
+def test_run_one_records_every_search_its_repeats_and_the_new_passages_per_step(monkeypatch, tmp_path):
+    """The full search record off the result, never cut like `steps_log`; the
+    replacements and the passages per step off the events. A passage is its
+    book, section and text: the same chunk under a new hit id is not new."""
+    monkeypatch.setattr(harness, "RESULTS_DIR", tmp_path)
+    long_query = "the " * 40 + "white whale"
+    events = [{"act": {"steps_taken": 1, "hits_log": [_passage("s1h1", MOBY, "Call me Ishmael."),
+                                                      _passage("s1h2", GULLIVER, "Lilliput.")]}},
+              {"reflect": {"current_query": "q3", "queries": ["q2"]}},
+              {"act": {"steps_taken": 2, "hits_log": [_passage("s2h1", MOBY, "Call me Ishmael."),
+                                                      _passage("s2h2", MOBY, "The Pequod.")]}},
+              {"reflect": {"current_query": "q2", "queries": [],
+                           "query_replaced": {"from": long_query, "to": "q2"}}},
+              {"act": {"steps_taken": 3, "hits_log": [_passage("s3h1", GULLIVER, "Lilliput.")]}},
+              {"reflect": {"current_query": "", "stop_reason": t("stop_no_new_query"),
+                           "query_replaced": {"from": "q1", "to": ""}}}]
+    final = {"answer": "Moby Dick aboard the Pequod", "steps_taken": 3, "duplicates_skipped": 2,
+             "searches_run": [[long_query.strip(), ""], ["q3", ""], ["q2", ""]]}
+    item = {"id": "q01-moby", "type": "answer", "question": "Which whale?",
+            "expected_books": ["Moby Dick"], "expected_facts": ["Pequod"]}
+
+    record = harness.run_one(_FinalStateGraph(final, events), item)
+
+    assert record["searches"] == final["searches_run"]          # whole, never cut at 80
+    assert record["search_repeats"] == 0
+    assert record["query_replacements"] == 1                    # the stop is not a replacement
+    assert record["duplicates_skipped"] == 2
+    assert record["new_passages_per_step"] == [2, 1, 0]
+    assert f"reflect -> already searched: {long_query[:80]}" in record["steps_log"]
+    assert "reflect -> already searched: q1" in record["steps_log"]
+    assert harness.search_repeats([["q1", ""], ["q1", MOBY], ["q1", ""]]) == 1
+
+
+def loop_result(item: dict, **over) -> dict:
+    return fake_result(item, searches=[["q1", ""], ["q2", ""], ["q1", ""]], search_repeats=1,
+                       query_replacements=2, duplicates_skipped=3,
+                       new_passages_per_step=[4, 0, 0], **over)
+
+
+def test_the_report_counts_the_loop_s_record_per_item_and_in_the_summary(monkeypatch, tmp_path):
+    out = prepared(monkeypatch, tmp_path, [],
+                   lambda item, attempt: loop_result(item) if item["id"] == "q01-moby"
+                   else fake_result(item))
+    report = only(out, ".md").read_text(encoding="utf-8")
+    header = next(line for line in report.splitlines() if line.startswith("## q01-moby"))
+    assert ("1 normalised search repeat(s), 2 repeated search(es) replaced, "
+            "3 duplicate quote(s) skipped") in header
+    assert "search" not in next(line for line in report.splitlines() if line.startswith("## q02-drac"))
+    assert ("; searches 3 (1 normalised repeat(s), 2 repeat(s) replaced, 3 duplicate quote(s) "
+            "skipped, 2 step(s) with no new passage); evidence items") in report
+    sidecar = json.loads(only(out, ".json").read_text(encoding="utf-8"))
+    attempt = sidecar["questions"][0]["attempts"][0]
+    assert attempt["searches"] == [["q1", ""], ["q2", ""], ["q1", ""]]
+    assert attempt["new_passages_per_step"] == [4, 0, 0]
+    assert sidecar["totals"]["per_attempt"]["search_repeats"]["values"] == [1]
+
+
+def test_results_without_a_search_record_write_the_summary_they_always_wrote(monkeypatch, tmp_path):
+    out = prepared(monkeypatch, tmp_path, [], lambda item, attempt: fake_result(item))
+    report = only(out, ".md").read_text(encoding="utf-8")
+    assert "; searches " not in report and "normalised" not in report
+
+
+def test_under_repeat_the_loop_s_record_is_per_attempt(monkeypatch, tmp_path):
+    out = prepared(monkeypatch, tmp_path, ["--repeat", "2"],
+                   lambda item, attempt: loop_result(item) if item["id"] == "q01-moby"
+                   else fake_result(item))
+    report = only(out, ".md").read_text(encoding="utf-8")
+    assert "- normalised search repeats 1–1 over 2 attempts" in report
+    assert "- steps with no new passage 2–2 over 2 attempts" in report
+
+
+def test_a_step_of_copies_is_distilled_and_not_kept():
+    """A quote observe skipped as a copy (#163) was judged by the gate, so the
+    row counts it as distilled, says how many, and keeps `kept` honest."""
+    book = ledger(("act", {"steps_taken": 1}),
+                  ("observe", {"evidence": evidence_list(2), "empty_streak": 0}),
+                  ("act", {"steps_taken": 2}),
+                  ("observe", {"evidence": evidence_list(2), "empty_streak": 1,
+                               "duplicates_skipped": 2}))
+    assert book.steps[1] == {"step": 2, "distilled": 2, "kept": 0, "dropped": 0, "dropped_streak": 0,
+                             "cap_fired": False, "duplicates": 2}
+    assert "duplicates" not in book.steps[0]
+
+
+def test_the_loop_ledger_counts_only_the_repeats_it_replaced():
+    """A probe reached from an empty proposal replaced nothing, and a repeat
+    that stopped the loop is the stop reason, not a replacement."""
+    loop = harness.LoopLedger()
+    loop.see("reflect", {"current_query": "q2", "queries": [],
+                         "query_replaced": {"from": "q1", "to": "q2"}})
+    loop.see("reflect", {"current_query": "__book__|b|q", "queries": [], "coverage_probed": True})
+    loop.see("reflect", {"current_query": "", "stop_reason": "no new query",
+                         "query_replaced": {"from": "q1", "to": ""}})
+    assert loop.replacements == 1

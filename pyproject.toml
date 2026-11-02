@@ -7,7 +7,12 @@ license = "Apache-2.0"
 requires-python = ">=3.11"
 authors = [{ name = "Ievgen Borysenko" }]
 dependencies = [
-    "langgraph>=0.4",
+    # The orchestrator (graph.py, nodes.py, runner.py). 1.2.14 is the first
+    # version without GHSA-3fx2-cqw9-xr3c (its `RemoteGraph` streaming, which
+    # this project does not use, accepted an SDK that put identifiers into
+    # request paths unencoded), and the version the lockfile resolves and CI
+    # tests against.
+    "langgraph>=1.2.14",
     "langchain-openai>=0.3",
     # llm.py imports both at module import time, so neither is a transitive
     # detail any more: the retry loop is ours and speaks the SDK's exception
@@ -29,12 +34,13 @@ dependencies = [
     "pyyaml>=6.0",
     "python-dotenv>=1.0",
     # The PDF text layer for `ayl add` (ingest/pdf.py, ADR-030): BSD-3-Clause,
-    # pure Python, no dependencies of its own on Python 3.11+. 6.19 is the
+    # pure Python, no dependencies of its own on Python 3.11+. 6.21.4 is the
     # version verified to have `apply_configuration` with every field pdf.py
-    # sets; below 7, because pdf.py sets every one of those fields by name and
-    # replaces `PdfReader._handle_encryption`, which a major version may
-    # rename. The lockfile resolves 6.19.0.
-    "pypdf>=6.19.0,<7",
+    # sets (6.20.0 added three, 6.21 five more, 6.21.4 one more) and the first
+    # without the open advisories; below 7, because pdf.py sets every one of
+    # those fields by name and replaces `PdfReader._handle_encryption`, which a
+    # major version may rename. The lockfile resolves 6.21.4.
+    "pypdf>=6.21.4,<7",
 ]
 
 [project.urls]

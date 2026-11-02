@@ -28,8 +28,8 @@ flowchart TB
         PLAN -->|"out of scope (#70): first reading,<br/>nothing searched — the refusal<br/>is written by code, no model call"| SYN
         ACT --> OBS["observe: evidence distillate (book, chapter, candidate quote, hit id),<br/>then the quote gate in plain code: kept, re-pinned or dropped"]:::ai
         OBS --> REF{"reflect:<br/>enough<br/>evidence?"}:::ai
-        REF -->|"next query, or a<br/>chapter not read yet"| ACT
-        REF -->|"step limit, deadline,<br/>CRAG gate after 2 dry steps (an all-dropped<br/>step counts dry from MAX_DROPPED_STREAK in a row),<br/>no usable decision"| SYN["synthesize: answer with<br/>book, chapter citations"]:::ai
+        REF -->|"next query not run yet, or a<br/>chapter not read yet"| ACT
+        REF -->|"step limit, deadline,<br/>CRAG gate after 2 dry steps (an all-dropped<br/>step counts dry from MAX_DROPPED_STREAK in a row),<br/>no usable decision, no search left that has not run"| SYN["synthesize: answer with<br/>book, chapter citations"]:::ai
         REF -->|"model says<br/>enough or clarify"| COV{"coverage gate: plain code<br/>inside reflect, no model (ADR-013)"}:::code
         COV -->|"once per run, before the exit:<br/>a book the question names is in the window<br/>but not in the evidence (identify mode:<br/>one book covered, a queued query left)"| ACT
         COV -->|"ambiguous,<br/>once per run"| CLR["clarify: the run suspends,<br/>candidates go to the reader"]:::human
@@ -62,17 +62,17 @@ the graph really takes, labelled with the condition that takes it.
 flowchart TD
     Q(["question"]):::human --> P["plan: decides mode,<br/>asks for 2-4 English queries"]:::ai
     P -->|"steps left"| A["act: hybrid search, or read a chapter<br/>hit ids like s2h4, sanitized text to the scratchpad"]:::code
-    P -->|"step budget or question deadline<br/>used up after a clarify /<br/>the planner's own call timed out"| S
+    P -->|"step budget or question deadline<br/>used up after a clarify /<br/>the planner's own call timed out /<br/>every query of a re-plan already ran"| S
     P -->|"out of scope (#70), first plan of the run, no evidence yet:<br/>mode refusal, no search; synthesize writes the refusal in code"| S
     P -->|"catalogue question: count, titles, a title or an author"| K["catalog: the book list read from the index tables,<br/>count = length of that list; no search, no second model call"]:::code
     K --> V
     A --> O["observe: distill candidate quotes, each pinned to a hit id,<br/>then the quote gate: kept, re-pinned or dropped"]:::ai
     O --> R{"reflect"}:::ai
-    R -->|"search: next query, steps left"| A
+    R -->|"search: next query not run yet (a repeat is replaced<br/>by the first unrun queued query, or the coverage probe), steps left"| A
     R -->|"read_chapter: not attempted yet"| A
     R -->|"ambiguous, once per run"| C["clarify: interrupt with a candidate list"]:::human
     C --> P
-    R -->|"enough / step limit / CRAG gate after 2 dry steps (an all-dropped step<br/>counts dry from MAX_DROPPED_STREAK in a row) /<br/>question deadline / observe's or reflect's own call timed out /<br/>chapter already attempted / reflect JSON failed twice"| S["synthesize: answer with book, chapter citations"]:::ai
+    R -->|"enough / step limit / CRAG gate after 2 dry steps (an all-dropped step<br/>counts dry from MAX_DROPPED_STREAK in a row) /<br/>question deadline / observe's or reflect's own call timed out /<br/>chapter already attempted / reflect JSON failed twice /<br/>no new query: every search left has already run"| S["synthesize: answer with book, chapter citations"]:::ai
     S --> V["validate: plain code, confirmed / unattributed / card-only / broken"]:::code
     V --> E(["END"]):::code
     classDef code fill:#dbeafe,stroke:#1d4ed8,color:#000
@@ -122,6 +122,21 @@ in [`adr/README.md`](adr/README.md), each with the measurement that settled it.
   and score-scale free: only a chunk's rank in each list matters, so cosine distance and BM25
   never have to be calibrated against each other. A broken FTS index degrades to vector-only
   with a warning rather than silently.
+- **No search runs twice in one question, and no quote counts twice (#163).** `act` records every
+  search it runs in the state (`searches_run`) as the query, NFKC-normalised, case-folded, its
+  spaces collapsed and its edge punctuation trimmed, with the book the search was limited to (the
+  reader's choice, else a book the question named, else none; a coverage probe under its one
+  book). A chapter read is not a search: the `read_chapters` guard and `stop_chapter_again` own
+  those. `plan` queues each such key once, and on a re-plan after a clarify drops what already
+  ran under the book it settles on, so the same words inside a newly chosen book still run.
+  `reflect` checks the search it is about to send: a repeat is replaced by the first queued query
+  that has not run; with none left the coverage gate gets its one chance, with a search the run
+  has not made; otherwise the loop stops on its own reason, "no new query". The reflect prompt is
+  unchanged, and its event carries `query_replaced` only when one of these happened. `observe`
+  keeps one copy of each (book, section, quote as the gate compares quotes), from earlier steps or
+  the same one, and a step whose quotes were all copies counts as dry, so the CRAG gate ends a run
+  that has stopped learning; a step that also dropped a quote keeps the #29 rule. A paraphrase is
+  a new search to this check ([known limits](known-limits.md)).
 - **An out-of-scope request is refused at `plan`, before any search (#70).** The planner's one
   call may set an `out_of_scope` field — a request for something the library cannot supply (code,
   a translation, arithmetic, a persona) rather than a question about the books. On the first

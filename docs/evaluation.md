@@ -87,7 +87,9 @@ them apart. The sidecar now carries `gate_steps` per attempt: one row per `obser
 that step, `cap_fired` (that step was the `MAX_DROPPED_STREAK`th all-dropped one in a row, **or a
 later one in the same run** — each of them counts dry) and, only where it happened, `timed_out` (the
 step's own `observe` call ran out of time, so it distilled, kept and dropped nothing; without the
-mark the row is a dry step's row exactly). Beside them, `peak_dropped_streak` and `cap_fired` for the
+mark the row is a dry step's row exactly), and since #163, only where it happened, `duplicates` (quotes
+the gate confirmed that `observe` skipped as copies of evidence the run already held; `distilled`
+counts them, `kept` does not). Beside them, `peak_dropped_streak` and `cap_fired` for the
 question, and `cap_fired_items` in the totals, which the summary line reports as "the all-dropped cap
 fired on N item(s)".
 
@@ -103,6 +105,18 @@ state counts them nowhere either: one the model **malformed** (no usable object,
 reply that was no usable JSON), and one the gate **confirmed and the clarify filter then took off**,
 because it is about a book the reader did not choose — `kept` is the evidence as the state holds it,
 after that filter. The scratchpad's `### observe, step N` line is where both are visible.
+
+**What the loop searched has a record of its own since #163.** Per attempt the sidecar carries
+`searches`, every search the run made in order as (normalised query, book) and never cut, unlike
+`steps_log`, which stops each line at 80 characters; `search_repeats`, how many of them ran under a
+key an earlier one already had (0 is the contract); `query_replacements`, the repeats `reflect`
+caught and sent another search in place of; `duplicates_skipped`, the quotes `observe` did not add
+because the evidence already held them; and `new_passages_per_step`, how many passages (book,
+section, a hash of the text) each step brought that no earlier step had, which is what a
+paraphrased search that only finds old passages costs. The totals add them up, with the steps that
+brought no new passage, and the summary line reports them only for results that carry the record,
+so a set of older results writes the line it always wrote. The item header names repeats,
+replacements and skipped quotes only where there were any.
 
 The gate's own behavioural effect — whether a set answers as well with it as without — was measured
 on 2026-09-16/17 on **two local models**, each run under the gate on `c79018a` and compared with the
