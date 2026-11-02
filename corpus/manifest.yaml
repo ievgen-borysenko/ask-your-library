@@ -48,7 +48,10 @@ books:
     pg_id: 521
 
   - id: frankenstein
-    sha256: 7810cd483cffcf2cc8a1d8f0d5807931e69d4f48cd14149b8c76f88af82fead3
+    sha256: 2b97b7f8aad508649481d8dd4f6b54f9b965ddb3ba634e9151c815f537b49e42
+    # re-pinned 2026-11-02: PG recapitalised the title in two header lines ("or, the
+    # modern prometheus" -> "or, The modern Prometheus"), same file size; the header
+    # is stripped, so the prepared text and the chapter split are identical
     title: "Frankenstein"
     author: "Mary Shelley"
     source: gutenberg

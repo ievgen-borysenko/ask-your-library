@@ -12,6 +12,14 @@
   prints nothing new, and stdout is unchanged. `ayl init`'s next steps now suggest a catalogue
   question first, `ayl ask "How many books do I have?"`, then a research one, and in the local mode
   end on the same sentence; the README and the quick start list the two questions the same way.
+- **The weekly pin check was red on Frankenstein: Project Gutenberg had recapitalised its title.**
+  The `pins` job of `corpus.yml` failed on 2026-10-27 with a checksum mismatch on PG 84. Against
+  the pinned copy, the new file differs in two header lines only, both above the START marker:
+  "Frankenstein; or, the modern prometheus" became "Frankenstein; or, The modern Prometheus", in
+  the eBook line and in `Title:`, at the same file size. The header is stripped, so the prepared
+  book is byte-identical, still 28 sections from Letter 1 to Chapter 24, and
+  `corpus/toc/frankenstein.json` and the book-identity fixture stay as they are. The entry is
+  re-pinned with the date and the drift, as the earlier re-pins were.
 - **The loop no longer runs a search it already ran, nor counts a quote it already holds (#163).**
   On a library of about 250 audiobooks a research question ran q1, q3, q1, q1 and stopped at the
   step limit with plan query q2 never searched; a comparison kept 9 evidence items, 5 of them
