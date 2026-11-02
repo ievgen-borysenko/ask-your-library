@@ -103,6 +103,14 @@
   new exporter requires (opentelemetry-exporter-http-transport, opentelemetry-exporter-otlp-common).
   They come in only with the `ui` extra, through Chainlit's tracing dependency; nothing in this
   project calls them.
+- **The test suite leaves nothing in `eval/recordings/`.** One test of `--record-plans` handed
+  the harness the `plan_recording` module the test file had already loaded, whose recordings
+  directory was resolved when it was loaded, so it recorded into the checkout's `eval/recordings/`
+  whatever `AYL_PLAN_RECORDINGS_DIR` said, and the `.partial` of its deliberately broken recorder
+  stayed behind after every run (ignored by git, but written into every checkout the suite ran in,
+  and a failure in a read-only one). Every test in that file now records under pytest's `tmp_path`,
+  through the variable and the loaded module both, and the committed directory is compared before
+  and after each test.
 
 ## 0.5.1 (2026-10-05)
 
