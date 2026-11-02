@@ -526,6 +526,8 @@ def test_the_action_line_is_the_platform_s(monkeypatch):
     monkeypatch.setattr(paths, "REPO_ROOT", "")
     mac = preflight.no_ollama_action("darwin")
     assert "Ollama app" in mac and "brew install ollama" in mac
+    # the formula does not start the server; the line starts it as the installer does
+    assert "brew services run ollama" in mac
     assert "ollama serve" not in mac and "ollama.com/download" not in mac
     for other in ("linux", "win32", "freebsd14"):
         line = preflight.no_ollama_action(other)

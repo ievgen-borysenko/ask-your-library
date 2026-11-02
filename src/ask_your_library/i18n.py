@@ -290,12 +290,15 @@ _T = {
               "answer on a hosted model instead (that needs a key, and costs money).",
     },
     # macOS: most people run the Ollama app, and Homebrew is the other way; the
-    # clone's installer is offered here and nowhere else (`setup_mac`).
+    # clone's installer is offered here and nowhere else (`setup_mac`). The
+    # formula does not start the server, so the line starts it the way
+    # scripts/install-mac.sh does: `brew services run`, which adds no login item.
     "pf_no_ollama_mac": {
-        "ua": "Відкрий застосунок Ollama або встанови її (`brew install ollama`), потім запусти "
-              "`{setup_init}` ще раз.{setup_mac}",
-        "en": "Open the Ollama app, or install it with `brew install ollama`; then re-run "
-              "`{setup_init}`.{setup_mac}",
+        "ua": "Відкрий застосунок Ollama або встанови її (`brew install ollama`) і підніми "
+              "сервер (`brew services run ollama`), потім запусти `{setup_init}` ще раз."
+              "{setup_mac}",
+        "en": "Open the Ollama app, or install it with `brew install ollama` and start it with "
+              "`brew services run ollama`; then re-run `{setup_init}`.{setup_mac}",
     },
     # Linux, Windows and anything else: no Homebrew, no macOS installer.
     "pf_no_ollama_other": {
