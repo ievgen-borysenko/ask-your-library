@@ -335,7 +335,7 @@ and the open gaps in [`docs/backlog.md`](docs/backlog.md).
 
 The code and the project's own files are under Apache-2.0 (`LICENSE`, attribution in
 [`NOTICE`](NOTICE)). Two kinds of file in the tree are not the project's alone: Chainlit's own
-`src/ask_your_library/ui/translations/en-US.json`, Apache-2.0, copied here with four strings
+`src/ask_your_library/ui/translations/en-US.json`, Apache-2.0, copied here with seven strings
 changed, which [`NOTICE`](NOTICE) and
 [`src/ask_your_library/ui/translations/README.md`](src/ask_your_library/ui/translations/README.md)
 record; and the book cards and chapter lists of the engineer's shelf, below.

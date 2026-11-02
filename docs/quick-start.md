@@ -177,8 +177,7 @@ ayl books                                # what the index holds, listed by code:
 ayl doctor                               # the environment and the index, both halves, nothing written
 
 # web UI (Chainlit, same core as the CLI; the `ui` extra), bound to loopback; throwaway local
-# demo, admin / change-me: the login form's first field is labelled "Email address"; type the
-# username there
+# demo, admin / change-me
 AYL_ALLOW_DEFAULT_LOGIN=1 ayl ui
 # with a real password (the UI refuses to start on the placeholder one):
 CHAINLIT_USERNAME=... CHAINLIT_PASSWORD=... ayl ui
