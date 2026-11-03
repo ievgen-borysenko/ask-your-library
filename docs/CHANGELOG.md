@@ -88,6 +88,16 @@
   `duplicates_skipped`. The agent eval records every search, the repeats among them, the repeats
   replaced, the quotes skipped and the new passages per step, and reports the totals. A paraphrase
   is still a new search ([known limits](known-limits.md)).
+- **The Ollama-not-running message is three lines and names the action for this platform
+  (#140).** It read as one paragraph, the same everywhere: Homebrew for Linux and Windows,
+  `bash scripts/install-mac.sh` from a clone on any OS, `ollama serve` where most Mac users run the
+  app, and the `ollama pull` lines next to the `ayl init` that pulls them. It now says
+  "Ollama is not running at <url>.", then one action — on macOS open the Ollama app, or
+  `brew install ollama` and start it with `brew services run ollama` as the installer does (from a
+  clone, `scripts/install-mac.sh` is offered there alone), elsewhere install from
+  ollama.com/download or `ollama serve` — then re-run `ayl init`, and on a third line `OLLAMA_URL`
+  for a remote server and `LLM_BACKEND=openrouter` for the hosted mode. The CLI keeps the three
+  lines under its bullet or `error:`. Exit status 5 is unchanged; the Ukrainian text follows.
 - **An interrupted `--rebuild` no longer lets a write with the old embedding model in (#147).**
   `ayl add --rebuild` drops the table and stamps it again only when the run finishes, and the
   dropped table's stamp stayed in place in between. A rebuild interrupted in its publish copy (an
