@@ -37,6 +37,42 @@ FACTS = {"golden_name": "en-demo.yaml", "golden_path": "eval/golden/en-demo.yaml
 
 PLAN_REPLY = '{"mode": "answer", "queries": ["whale", "white whale"]}'
 
+# The committed recordings of paid runs. No test in this file may add to,
+# change or remove anything here.
+COMMITTED_RECORDINGS = REPO / "eval" / "recordings"
+
+
+def tree_of(directory: Path) -> list:
+    return sorted((p.name, p.stat().st_size, p.stat().st_mtime_ns) for p in directory.iterdir())
+
+
+@pytest.fixture(autouse=True)
+def recordings_under_tmp_path(monkeypatch, tmp_path):
+    """Every recording a test here makes lands under `tmp_path`, and the
+    checkout's eval/recordings/ is the same set of files after the test as
+    before.
+
+    `RECORDINGS_DIR` is resolved once, when the module is loaded, from the
+    environment of that moment: the `plan_recording` at the top of this file
+    read the collecting process's and points at the checkout's eval/recordings/.
+    The harness normally loads a module of its own, which reads
+    AYL_PLAN_RECORDINGS_DIR when a test has set it — but the test that hands
+    it the module loaded here (test_a_run_whose_recording_failed_says_so_and_
+    exits_one, to reach its exception classes) was recording into the checkout,
+    whatever the variable said, and its broken recorder left a `.partial` in
+    the tree of every checkout the suite ran in. A read-only one (a review
+    tree) fails there instead. So both doors are pointed at `tmp_path`: the
+    variable for a module the harness loads itself, the attribute for the one
+    already loaded — and the committed directory is compared on the way out,
+    so a third door would fail the test that opened it."""
+    recordings = tmp_path / "recordings"
+    monkeypatch.setenv("AYL_PLAN_RECORDINGS_DIR", str(recordings))
+    monkeypatch.setattr(plan_recording, "RECORDINGS_DIR", recordings)
+    before = tree_of(COMMITTED_RECORDINGS)
+    yield recordings
+    assert tree_of(COMMITTED_RECORDINGS) == before, \
+        "a test wrote into the checkout's eval/recordings/ instead of tmp_path"
+
 
 class Reply:
     """What `llm_invoke` returns: anything with a `.content`."""
@@ -372,7 +408,12 @@ def test_a_run_whose_recording_failed_says_so_and_exits_one(monkeypatch, tmp_pat
     report = next((tmp_path / "results").glob("answers-*.md")).read_text(encoding="utf-8")
     assert "RecordingIncomplete" in report and "No space left on device" in report
     assert "RecordingIncomplete" in capsys.readouterr().err
-    assert not list(recordings.glob("*.jsonl"))
+    # No finalised recording — and the .partial of the broken run is HERE, under
+    # tmp_path, not in the checkout's eval/recordings/ (where this test used to
+    # leave it: the module handed to the harness above carries the directory it
+    # resolved when it was loaded, not the variable staged_harness sets).
+    assert [p.name for p in recordings.iterdir()] == [
+        "en-demo.abcdef012345.anthropic-claude-sonnet-4.6.jsonl.partial"]
 
 
 # --- a call that never came back ----------------------------------------------
@@ -488,8 +529,11 @@ def staged_harness(monkeypatch, tmp_path) -> Path:
     recordings directory of its own. Returns that directory."""
     golden = tmp_path / "en-demo.yaml"
     golden.write_text(GOLDEN, encoding="utf-8")
-    recordings = tmp_path / "recordings"
-    monkeypatch.setenv("AYL_PLAN_RECORDINGS_DIR", str(recordings))
+    # The directory the autouse fixture pointed both AYL_PLAN_RECORDINGS_DIR and
+    # the loaded module at: the harness reads one or the other, depending on
+    # whether a test hands it the module loaded here or lets it load its own.
+    recordings = plan_recording.RECORDINGS_DIR
+    assert recordings == tmp_path / "recordings"
     monkeypatch.setattr(harness, "GOLDEN_PATH", golden)
     monkeypatch.setattr(harness, "RESULTS_DIR", tmp_path / "results")
     monkeypatch.setattr(harness, "build_graph", lambda: object())
