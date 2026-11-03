@@ -1,5 +1,5 @@
 """`hints`: how a printed command looks on each install, decided at call time."""
-from ask_your_library import hints, paths
+from ask_your_library import hints, paths, preflight
 from ask_your_library.i18n import t
 from ask_your_library.index_meta import rebuild_hint
 
@@ -22,7 +22,8 @@ def test_sentences_built_elsewhere_follow_the_install_at_call_time(monkeypatch):
     assert "uv run" not in rebuild_hint("transcripts_ollama")
     assert "from a clone of the repository" in rebuild_hint("cards_ollama")
     monkeypatch.setattr(paths, "REPO_ROOT", "/some/clone")
-    assert "bash scripts/install-mac.sh" in t("pf_no_ollama", url="u", pulls="p")
+    assert "bash scripts/install-mac.sh" in preflight.no_ollama_action("darwin")
+    assert "re-run `uv run ayl init`" in preflight.no_ollama_action("linux")
     assert "uv run ayl add" in rebuild_hint("transcripts_ollama")
 
 

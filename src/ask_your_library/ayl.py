@@ -121,7 +121,8 @@ def report_environment(index_only: bool = False, db_path: Path | None = None,
     if shown:
         cli.say(t("pf_header"), error=True)
         for problem in shown:
-            cli.say(f"  - {problem}", error=True)
+            # A problem of several lines (pf_no_ollama) keeps them under its bullet.
+            cli.say(f"  - {problem}".replace("\n", "\n    "), error=True)
     notices = getattr(problems, "notices", [])
     if doctor:
         cards = {t("pf_no_cards", table=tables_for(name)["cards"])
