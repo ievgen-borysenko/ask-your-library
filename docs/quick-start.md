@@ -5,7 +5,7 @@ what each step does, and every command the project ships.
 
 ## Install
 
-Requirements: [uv](https://docs.astral.sh/uv/) (it provides Python 3.11+ itself) and
+Requirements: [uv](https://docs.astral.sh/uv/) (it provides Python 3.11.5+ itself) and
 [Ollama](https://ollama.com), installed and running — Ollama runs the embeddings in both modes
 and, in the default configuration, the answering model too. No account and no API key: see
 [Fully local, no account](configuration.md#fully-local-no-account).
