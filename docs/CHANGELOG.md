@@ -2,11 +2,17 @@
 
 ## Unreleased
 
-- **An EPUB's text is capped at 20 million characters, as a PDF's is (#124).** The archive caps
-  (64 MiB a file, 512 MiB in all) bounded the bytes, not the text they decode to, so one EPUB of
-  text alone could hand the embedder about 27 times what a PDF may. `ayl add` now keeps a running
-  count as the spine's documents are read and refuses the file, with the PDF reader's line, at the
-  document that takes it over, reading no further.
+- **An EPUB's text is capped at 20 million characters, as a PDF's is, and an EPUB's or a PDF's
+  labels at 500 (#124).** The archive caps (64 MiB a file, 512 MiB in all) bounded the bytes, not
+  the text they decode to, so one EPUB of text alone could hand the embedder about 27 times what a
+  PDF may. `ayl add` now keeps a running count as the spine's documents are read, the blank line
+  that joins two files of one chapter included, and refuses the file, with the PDF reader's line,
+  at the document that takes it over, reading no further. Labels were bounded by neither cap, and
+  every chunk carries them (the section title in its id, the title, author and section in front of
+  the text it embeds): a 3 KB EPUB with 400,000 characters of text and a 100,000-character title
+  and contents entry handed the embedder 37.4 million characters. A title, an author line or a
+  contents or outline entry is now cut to its first 499 characters and `…`, and that file hands it
+  630,000.
 - **Both shipped configurations re-measured on one commit, reports and sidecars committed.**
   [`docs/eval-results/2026-11-02-rerun/`](eval-results/2026-11-02-rerun/README.md) holds the
   harness's own reports and JSON sidecars, unedited, of the hosted default and the local default on

@@ -39,7 +39,10 @@ as text; two-column layouts come out in whatever order the producer drew them.
 The title is the document information dictionary's `/Title`, else the XMP
 `dc:title`; the author `/Author`, else the XMP `dc:creator` names, joined.
 Metadata that cannot be read is treated as absent, and the caller falls back to
-the file-name rule of a text book.
+the file-name rule of a text book. Every label (the title, the author line and
+each name in it, an outline entry) is cut to `chapters.MAX_LABEL_CHARS`, as an
+EPUB's is: the text caps do not count labels, and the chunker copies them into
+every chunk.
 
 A PDF is untrusted input, and **the bound is a process boundary**. `read_pdf`
 does not read the file: it starts a child Python process
@@ -148,7 +151,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..sanitize import LINE_BREAK_RE, strip_control_chars
-from .chapters import FRONT_MATTER_SECTION, unique_titles
+from .chapters import FRONT_MATTER_SECTION, shorten_label, unique_titles
 
 # --- bounds -------------------------------------------------------------------
 # A long novel is 300-600 pages and under 2 MB of text; a dense page is 3,000 to
@@ -697,7 +700,8 @@ def clean_label(label) -> str:
     is not text (the library hands undecodable strings over as bytes)."""
     if not isinstance(label, str):
         return ""
-    return _SPACES.sub(" ", LINE_BREAK_RE.sub(" ", strip_control_chars(label))).strip()
+    return shorten_label(
+        _SPACES.sub(" ", LINE_BREAK_RE.sub(" ", strip_control_chars(label))).strip())
 
 
 def visible_chars(text: str) -> int:
@@ -763,7 +767,7 @@ def metadata(reader) -> tuple[str, str]:
             title = title or clean_label(titles.get("x-default")
                                          or next(iter(titles.values()), ""))
             names = [clean_label(name) for name in xmp.dc_creator or []]
-            author = author or ", ".join(name for name in names if name)
+            author = author or shorten_label(", ".join(name for name in names if name))
     except Exception:
         pass
     return title, author

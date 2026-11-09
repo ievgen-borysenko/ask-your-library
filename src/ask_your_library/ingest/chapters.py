@@ -468,3 +468,29 @@ def unique_titles(sections: list[tuple[str, str]]) -> list[tuple[str, str]]:
         taken.add(name)
         out.append((name, body))
     return out
+
+
+# How long an EPUB or a PDF reader lets a label it takes from the file be: the
+# book's title, its author line and each name in it, a contents or outline
+# entry. The text caps (`MAX_TOTAL_CHARS` in both readers) count the text and
+# nothing else, and a label is paid once a chunk, not once: the chunker writes
+# the section title into every chunk id and puts the title, the author and the
+# section in front of every chunk the embedder reads, so a label the file made
+# megabytes long cost as much again for every chunk. Well above a real one (a
+# long title with its subtitle, or an older novel's chapter title that sums up
+# the chapter, runs to two or three hundred characters), and below a chunk's
+# own length.
+MAX_LABEL_CHARS = 500
+
+
+def shorten_label(label: str) -> str:
+    """`label` cut to MAX_LABEL_CHARS, ending in `…` when it was cut.
+
+    Shortened, not refused: both readers take a book's labels as a best effort
+    (a book with no title is named by its file, an unusable contents list
+    falls back to numbered sections), and the first few hundred characters of
+    a label still name what the whole of it did. Two labels cut to the same
+    prefix are told apart by `unique_titles`, which may add ` (N)`."""
+    if len(label) <= MAX_LABEL_CHARS:
+        return label
+    return label[:MAX_LABEL_CHARS - 1].rstrip() + "…"

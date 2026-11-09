@@ -48,9 +48,15 @@ An EPUB is untrusted input. What is bounded, and how:
   `MAX_MEMBER_BYTES`, `MAX_TOTAL_BYTES`): a zip bomb is refused before it is
   inflated, and a member whose header lies about its size is cut off at the cap
   and refused; the text the spine yields is capped too (`MAX_TOTAL_CHARS`, the
-  PDF reader's figure), counted as each document is extracted, so a book of
-  text alone is refused at the document that takes it over, before the rest of
-  the spine is read;
+  PDF reader's figure), counted as each document is extracted, with the blank
+  line that may join it to the document before it, so a book of text alone is
+  refused at the document that takes it over, before the rest of the spine is
+  read, and the sections returned hold no more than that in all;
+- every label (the title, the author line and each name in it, a navigation
+  entry) is cut to `chapters.MAX_LABEL_CHARS`, not refused: the text cap does
+  not count labels, and the chunker copies them into every chunk, the section
+  title into its id and the title, author and section in front of the text it
+  embeds;
 - a reference from the package or the navigation that resolves outside the
   archive's root is ignored, and one to a member that is not there is refused;
 - XML (`container.xml`, the package, the NCX, `encryption.xml`) is parsed by
@@ -91,7 +97,7 @@ from urllib.parse import unquote, urlsplit
 from xml.etree import ElementTree as ET
 
 from ..sanitize import strip_control_chars
-from .chapters import FRONT_MATTER_SECTION, FULL_TEXT_SECTION, unique_titles
+from .chapters import FRONT_MATTER_SECTION, FULL_TEXT_SECTION, shorten_label, unique_titles
 
 # --- bounds -------------------------------------------------------------------
 # A long novel is a few hundred members and well under 10 MiB of text; an
@@ -128,6 +134,8 @@ CONTENT_TYPES = frozenset({"application/xhtml+xml", "text/html"})
 NCX_TYPE = "application/x-dtbncx+xml"
 SECTION_FALLBACK = "Section {n}"
 NOTES_SECTION = "Notes"
+# Between two documents' texts in one section (`build_sections`).
+DOCUMENT_JOINER = "\n\n"
 
 NS = {
     "c": "urn:oasis:names:tc:opendocument:xmlns:container",
@@ -522,7 +530,7 @@ def extract_text(markup: str) -> str:
 
 
 def clean_label(label: str) -> str:
-    return re.sub(r"\s+", " ", strip_control_chars(label)).strip()
+    return shorten_label(re.sub(r"\s+", " ", strip_control_chars(label)).strip())
 
 
 # --- the navigation -----------------------------------------------------------
@@ -631,7 +639,7 @@ def creators(metadata: ET.Element) -> str:
             role = creator.get(OPF_ROLE) or roles.get(creator.get("id") or "", "")
             named.append((name, role))
     authors = [name for name, role in named if role in ("", "aut")]
-    return ", ".join(authors or [name for name, _ in named])
+    return shorten_label(", ".join(authors or [name for name, _ in named]))
 
 
 @dataclass
@@ -722,7 +730,7 @@ def build_sections(documents: list[tuple[str, str, bool]], titles: dict[str, str
             sections[-1][1].append(text)
         else:
             sections.append((FRONT_MATTER_SECTION, [text]))
-    joined = [(title, "\n\n".join(p.strip() for p in parts if p.strip()))
+    joined = [(title, DOCUMENT_JOINER.join(p.strip() for p in parts if p.strip()))
               for title, parts in sections]
     return unique_titles([(title, text) for title, text in joined if text])
 
@@ -749,7 +757,9 @@ def read_epub(path: Path) -> EpubBook:
                         continue
                     seen.add(member)
                     text = extract_text(read_text_member(archive, member))
-                    total += len(text)
+                    # With the joiner `build_sections` may put before it, so
+                    # the sections returned never hold more than the cap.
+                    total += len(text) + len(DOCUMENT_JOINER)
                     if total > MAX_TOTAL_CHARS:
                         raise EpubRefused(f"it holds more than {MAX_TOTAL_CHARS:,} characters "
                                           "of text")
