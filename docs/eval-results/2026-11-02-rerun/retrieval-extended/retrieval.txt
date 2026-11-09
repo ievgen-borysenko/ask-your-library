@@ -1,0 +1,26 @@
+| question | expected | in agent window | cards rank | transcripts rank |
+|---|---|---|---|---|
+| q01-moors-hound | 1 | 1/1 | 1 | 1 |
+| q06-verne-guaranteed-clarify | 2 | 2/2 | 1 | 1 |
+| q10-alice-size-changing | 1 | 1/1 | 1 | 1 |
+| h01-sea-monster-vessel | 1 | 1/1 | 1 | 2 |
+| h02-lupin-robbery-from-prison | 1 | 1/1 | 1 | 1 |
+| h03-love-destroys-two-generations | 1 | 1/1 | 1 | - |
+| h04-young-after-many-years | 1 | 1/1 | 3 | 1 |
+| h08-holmes-knew-afghanistan | 1 | 1/1 | 1 | 1 |
+| h09-jane-left-rochester | 1 | 1/1 | 1 | 1 |
+| h10-pirates-black-paper | 1 | 1/1 | 1 | 1 |
+| h11-frankenstein-second-monster | 1 | 1/1 | 1 | 2 |
+| h13-moby-dick-ending | 1 | 1/1 | 1 | 1 |
+| h14-cenci-public-sympathy | 1 | 1/1 | 1 | 1 |
+| h15-wells-two-dangers | 2 | 2/2 | 1 | 1 |
+| h16-which-stoic-book | 2 | 2/2 | 1 | 1 |
+| h17-lupin-beats-holmes | 2 | 1/2 MISS | 1 | 1 |
+| h22-gothic-chase-ambiguous | 2 | 1/2 MISS | 1 | - |
+
+Embeddings: bge-m3 via ollama (no answering model is called here)
+
+Retriever-window metrics (raw question as query; window = top-4 cards + top-4 transcripts):
+  single-book presence: 12/12 = 100%
+  multi-book full coverage: 3/5; mean coverage 80%
+Per-corpus diagnostics (not agent metrics): hit@2: 17/17   hit@4: 17/17   hit@8: 17/17   MRR(best-of-two): 1.000

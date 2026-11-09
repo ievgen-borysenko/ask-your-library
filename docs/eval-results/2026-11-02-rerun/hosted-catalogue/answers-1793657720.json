@@ -1,0 +1,4923 @@
+{
+  "schema": "ask-your-library/agent-eval-run",
+  "schema_version": 1,
+  "report": "answers-1793657720.md",
+  "fingerprint": "code 6d73fc3 | golden en-demo-catalog.yaml@72eb2c2b2655 | manifest@c1fee42124dd | toc@3f0e05110358 | model deepseek/deepseek-v4-flash-0731 via openrouter (reasoning off) | cards_ollama=bge-m3/1024d chunker=card-sections-2 rows=165 v2 built=2026-09-19T12:28:41 | transcripts_ollama=bge-m3/1024d chunker=sentence-pack-2 rows=11236 v26 built=2026-09-24T10:39:10 | strict_hit_id=on | clarify_pick=second | hit_chars=2500/12000(scan 120000) | steps=4/2/2 | candidates=5 | deadline=300s | 3 attempts per item",
+  "run": {
+    "code": "6d73fc3",
+    "code_clean": true,
+    "golden_path": "eval/golden/en-demo-catalog.yaml",
+    "golden_name": "en-demo-catalog.yaml",
+    "golden_sha256_12": "72eb2c2b2655",
+    "manifest_sha256_12": "c1fee42124dd",
+    "toc_sha256_12": "3f0e05110358",
+    "model": "deepseek/deepseek-v4-flash-0731",
+    "backend": "openrouter",
+    "reasoning": "off",
+    "index": [
+      "cards_ollama=bge-m3/1024d chunker=card-sections-2 rows=165 v2 built=2026-09-19T12:28:41",
+      "transcripts_ollama=bge-m3/1024d chunker=sentence-pack-2 rows=11236 v26 built=2026-09-24T10:39:10"
+    ],
+    "strict_hit_id": true,
+    "clarify_pick": "second",
+    "search_hit_chars": 2500,
+    "chapter_hit_chars": 12000,
+    "chapter_scan_chars": 120000,
+    "max_steps": 4,
+    "max_empty_streak": 2,
+    "max_dropped_streak": 2,
+    "max_clarify_candidates": 5,
+    "question_deadline_s": 300,
+    "price_in_per_mtok": 0.06,
+    "price_out_per_mtok": 0.12,
+    "repeat": 3
+  },
+  "started": "2026-11-02T23:15:20+0100",
+  "ended": "2026-11-02T23:17:18+0100",
+  "seconds": 118,
+  "repeat": 3,
+  "requested_ids": [],
+  "items": 10,
+  "totals": {
+    "per_attempt": {
+      "behavior_ok": {
+        "values": [
+          10,
+          10,
+          10
+        ],
+        "min": 10,
+        "median": 10,
+        "max": 10
+      },
+      "broken": {
+        "values": [
+          0,
+          0,
+          0
+        ],
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "cap_fired_items": {
+        "values": [
+          0,
+          0,
+          0
+        ],
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "card_only": {
+        "values": [
+          11,
+          12,
+          12
+        ],
+        "min": 11,
+        "median": 12,
+        "max": 12
+      },
+      "chapter_reads": {
+        "values": [
+          0,
+          0,
+          0
+        ],
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "chapter_reads_aimed": {
+        "values": [
+          0,
+          0,
+          0
+        ],
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "chapter_row_cap_hits": {
+        "values": [
+          0,
+          0,
+          0
+        ],
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "chapter_windows_opened": {
+        "values": [
+          0,
+          0,
+          0
+        ],
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "checked": {
+        "values": [
+          20,
+          17,
+          22
+        ],
+        "min": 17,
+        "median": 20,
+        "max": 22
+      },
+      "checked_book_text": {
+        "values": [
+          9,
+          5,
+          10
+        ],
+        "min": 5,
+        "median": 9,
+        "max": 10
+      },
+      "clarify": {
+        "values": [
+          0,
+          0,
+          0
+        ],
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "confirmed": {
+        "values": [
+          9,
+          5,
+          10
+        ],
+        "min": 5,
+        "median": 9,
+        "max": 10
+      },
+      "cost_usd": {
+        "values": [
+          0.0026,
+          0.0023,
+          0.0027
+        ],
+        "min": 0.0023,
+        "median": 0.0026,
+        "max": 0.0027
+      },
+      "drill_expected": {
+        "values": [
+          0,
+          0,
+          0
+        ],
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "drill_ok": {
+        "values": [
+          0,
+          0,
+          0
+        ],
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "dropped_cross_book": {
+        "values": [
+          0,
+          0,
+          0
+        ],
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "dropped_unverified": {
+        "values": [
+          0,
+          0,
+          0
+        ],
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "duplicates_skipped": {
+        "values": [
+          0,
+          0,
+          0
+        ],
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "errors": {
+        "values": [
+          0,
+          0,
+          0
+        ],
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "evidence": {
+        "values": [
+          20,
+          17,
+          22
+        ],
+        "min": 17,
+        "median": 20,
+        "max": 22
+      },
+      "facts_expected": {
+        "values": [
+          15,
+          15,
+          15
+        ],
+        "min": 15,
+        "median": 15,
+        "max": 15
+      },
+      "facts_found": {
+        "values": [
+          14,
+          14,
+          14
+        ],
+        "min": 14,
+        "median": 14,
+        "max": 14
+      },
+      "facts_items": {
+        "values": [
+          8,
+          8,
+          8
+        ],
+        "min": 8,
+        "median": 8,
+        "max": 8
+      },
+      "facts_items_ok": {
+        "values": [
+          7,
+          7,
+          7
+        ],
+        "min": 7,
+        "median": 7,
+        "max": 7
+      },
+      "llm_calls": {
+        "values": [
+          24,
+          22,
+          24
+        ],
+        "min": 22,
+        "median": 24,
+        "max": 24
+      },
+      "query_replacements": {
+        "values": [
+          0,
+          0,
+          0
+        ],
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "repinned": {
+        "values": [
+          0,
+          0,
+          0
+        ],
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "run": {
+        "values": [
+          10,
+          10,
+          10
+        ],
+        "min": 10,
+        "median": 10,
+        "max": 10
+      },
+      "search_repeats": {
+        "values": [
+          0,
+          0,
+          0
+        ],
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "searches_run": {
+        "values": [
+          5,
+          4,
+          5
+        ],
+        "min": 4,
+        "median": 5,
+        "max": 5
+      },
+      "steps_without_new_passages": {
+        "values": [
+          0,
+          0,
+          0
+        ],
+        "min": 0,
+        "median": 0,
+        "max": 0
+      },
+      "titles_expected": {
+        "values": [
+          106,
+          106,
+          106
+        ],
+        "min": 106,
+        "median": 106,
+        "max": 106
+      },
+      "titles_mentioned": {
+        "values": [
+          106,
+          106,
+          106
+        ],
+        "min": 106,
+        "median": 106,
+        "max": 106
+      },
+      "tokens_in": {
+        "values": [
+          32555,
+          28768,
+          33780
+        ],
+        "min": 28768,
+        "median": 32555,
+        "max": 33780
+      },
+      "tokens_out": {
+        "values": [
+          3057,
+          2856,
+          3269
+        ],
+        "min": 2856,
+        "median": 3057,
+        "max": 3269
+      },
+      "unattributed": {
+        "values": [
+          0,
+          0,
+          0
+        ],
+        "min": 0,
+        "median": 0,
+        "max": 0
+      }
+    },
+    "expected_per_attempt": {
+      "items": 10,
+      "titles": 106,
+      "facts": 15,
+      "facts_items": 8,
+      "drill_items": 0,
+      "groups": {
+        "answer": 4,
+        "catalog": 6
+      }
+    },
+    "spent_total": {
+      "cost_usd": 0.0076,
+      "llm_calls": 70,
+      "tokens_in": 95103,
+      "tokens_out": 9182
+    }
+  },
+  "per_group": {
+    "answer": {
+      "of": 4,
+      "behavior_ok_per_attempt": [
+        4,
+        4,
+        4
+      ]
+    },
+    "catalog": {
+      "of": 6,
+      "behavior_ok_per_attempt": [
+        6,
+        6,
+        6
+      ]
+    }
+  },
+  "attempt_totals": [
+    {
+      "run": 10,
+      "errors": 0,
+      "clarify": 0,
+      "checked": 20,
+      "checked_book_text": 9,
+      "confirmed": 9,
+      "evidence": 20,
+      "unattributed": 0,
+      "broken": 0,
+      "card_only": 11,
+      "dropped_unverified": 0,
+      "dropped_cross_book": 0,
+      "repinned": 0,
+      "cap_fired_items": 0,
+      "behavior_ok": 10,
+      "titles_mentioned": 106,
+      "titles_expected": 106,
+      "facts_found": 14,
+      "facts_expected": 15,
+      "facts_items": 8,
+      "facts_items_ok": 7,
+      "drill_expected": 0,
+      "drill_ok": 0,
+      "cost_usd": 0.0026000000000000003,
+      "llm_calls": 24,
+      "tokens_in": 32555,
+      "tokens_out": 3057,
+      "chapter_reads": 0,
+      "chapter_reads_aimed": 0,
+      "chapter_windows_opened": 0,
+      "chapter_row_cap_hits": 0,
+      "searches_run": 5,
+      "search_repeats": 0,
+      "query_replacements": 0,
+      "duplicates_skipped": 0,
+      "steps_without_new_passages": 0
+    },
+    {
+      "run": 10,
+      "errors": 0,
+      "clarify": 0,
+      "checked": 17,
+      "checked_book_text": 5,
+      "confirmed": 5,
+      "evidence": 17,
+      "unattributed": 0,
+      "broken": 0,
+      "card_only": 12,
+      "dropped_unverified": 0,
+      "dropped_cross_book": 0,
+      "repinned": 0,
+      "cap_fired_items": 0,
+      "behavior_ok": 10,
+      "titles_mentioned": 106,
+      "titles_expected": 106,
+      "facts_found": 14,
+      "facts_expected": 15,
+      "facts_items": 8,
+      "facts_items_ok": 7,
+      "drill_expected": 0,
+      "drill_ok": 0,
+      "cost_usd": 0.0023,
+      "llm_calls": 22,
+      "tokens_in": 28768,
+      "tokens_out": 2856,
+      "chapter_reads": 0,
+      "chapter_reads_aimed": 0,
+      "chapter_windows_opened": 0,
+      "chapter_row_cap_hits": 0,
+      "searches_run": 4,
+      "search_repeats": 0,
+      "query_replacements": 0,
+      "duplicates_skipped": 0,
+      "steps_without_new_passages": 0
+    },
+    {
+      "run": 10,
+      "errors": 0,
+      "clarify": 0,
+      "checked": 22,
+      "checked_book_text": 10,
+      "confirmed": 10,
+      "evidence": 22,
+      "unattributed": 0,
+      "broken": 0,
+      "card_only": 12,
+      "dropped_unverified": 0,
+      "dropped_cross_book": 0,
+      "repinned": 0,
+      "cap_fired_items": 0,
+      "behavior_ok": 10,
+      "titles_mentioned": 106,
+      "titles_expected": 106,
+      "facts_found": 14,
+      "facts_expected": 15,
+      "facts_items": 8,
+      "facts_items_ok": 7,
+      "drill_expected": 0,
+      "drill_ok": 0,
+      "cost_usd": 0.0027,
+      "llm_calls": 24,
+      "tokens_in": 33780,
+      "tokens_out": 3269,
+      "chapter_reads": 0,
+      "chapter_reads_aimed": 0,
+      "chapter_windows_opened": 0,
+      "chapter_row_cap_hits": 0,
+      "searches_run": 5,
+      "search_repeats": 0,
+      "query_replacements": 0,
+      "duplicates_skipped": 0,
+      "steps_without_new_passages": 0
+    }
+  ],
+  "attempt_groups": [
+    {
+      "answer": {
+        "behavior_ok": 4,
+        "of": 4
+      },
+      "catalog": {
+        "behavior_ok": 6,
+        "of": 6
+      }
+    },
+    {
+      "answer": {
+        "behavior_ok": 4,
+        "of": 4
+      },
+      "catalog": {
+        "behavior_ok": 6,
+        "of": 6
+      }
+    },
+    {
+      "answer": {
+        "behavior_ok": 4,
+        "of": 4
+      },
+      "catalog": {
+        "behavior_ok": 6,
+        "of": 6
+      }
+    }
+  ],
+  "questions": [
+    {
+      "id": "k01-count",
+      "type": "catalog",
+      "group": "catalog",
+      "question": "How many books do I have in my library?",
+      "attempts": [
+        {
+          "attempt": 1,
+          "id": "k01-count",
+          "type": "catalog",
+          "question": "How many books do I have in my library?",
+          "answer": "Your library holds 33 books (by the index tables).",
+          "verification": "catalog: 33 of 33 books listed by code from the index tables (exhaustive; no quotes to check)",
+          "provenance": {
+            "checked": 0,
+            "checked_book_text": 0,
+            "confirmed": 0,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 0,
+            "unused": 0,
+            "broken_items": [],
+            "items": [],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            },
+            "catalog": {
+              "op": "count",
+              "count": 33,
+              "total": 33
+            }
+          },
+          "steps_taken": 0,
+          "read_chapters": [],
+          "evidence_items": 0,
+          "evidence": [],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "catalog: answered from the index tables, no search",
+          "catalog": {
+            "op": "count",
+            "count": 33,
+            "total": 33,
+            "books": [
+              "A Journey to the Interior of the Earth — Jules Verne",
+              "A Study in Scarlet — Arthur Conan Doyle",
+              "Adventures of Huckleberry Finn — Mark Twain",
+              "Alice's Adventures in Wonderland — Lewis Carroll",
+              "Around the World in Eighty Days — Jules Verne",
+              "Celebrated Crimes — Alexandre Dumas",
+              "Don Quixote — Miguel de Cervantes",
+              "Dracula — Bram Stoker",
+              "Frankenstein — Mary Shelley",
+              "Gulliver's Travels — Jonathan Swift",
+              "Ivanhoe — Walter Scott",
+              "Jane Eyre — Charlotte Brontë",
+              "Meditations — Marcus Aurelius",
+              "Memoirs of Napoleon Bonaparte — Louis Antoine Fauvelet de Bourrienne",
+              "Moby Dick — Herman Melville",
+              "Pride and Prejudice — Jane Austen",
+              "Robinson Crusoe — Daniel Defoe",
+              "Romeo and Juliet — William Shakespeare",
+              "Seneca's Morals — Lucius Annaeus Seneca",
+              "The Adventures of Sherlock Holmes — Arthur Conan Doyle",
+              "The Call of the Wild — Jack London",
+              "The Extraordinary Adventures of Arsène Lupin — Maurice Leblanc",
+              "The Hound of the Baskervilles — Arthur Conan Doyle",
+              "The Kobzar of the Ukraine — Taras Shevchenko",
+              "The Odyssey — Homer",
+              "The Picture of Dorian Gray — Oscar Wilde",
+              "The Secret Adversary — Agatha Christie",
+              "The Three Musketeers — Alexandre Dumas",
+              "The Time Machine — H. G. Wells",
+              "The War of the Worlds — H. G. Wells",
+              "Treasure Island — Robert Louis Stevenson",
+              "Twenty Thousand Leagues Under the Sea — Jules Verne",
+              "Wuthering Heights — Emily Brontë"
+            ],
+            "query": "",
+            "resolved": true,
+            "suggestions": []
+          },
+          "book_filter": "",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 4,
+          "steps_log": [],
+          "by_role_seconds": {
+            "plan": 3.5
+          },
+          "cost_usd": 0.0001,
+          "llm_calls": 1,
+          "tokens_in": 865,
+          "tokens_out": 19,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 33,
+            "titles_expected": 33,
+            "catalog_listed": 33,
+            "facts_found": 1,
+            "facts_expected": 1,
+            "facts_ok": true,
+            "behavior_ok": true
+          }
+        },
+        {
+          "attempt": 2,
+          "id": "k01-count",
+          "type": "catalog",
+          "question": "How many books do I have in my library?",
+          "answer": "Your library holds 33 books (by the index tables).",
+          "verification": "catalog: 33 of 33 books listed by code from the index tables (exhaustive; no quotes to check)",
+          "provenance": {
+            "checked": 0,
+            "checked_book_text": 0,
+            "confirmed": 0,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 0,
+            "unused": 0,
+            "broken_items": [],
+            "items": [],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            },
+            "catalog": {
+              "op": "count",
+              "count": 33,
+              "total": 33
+            }
+          },
+          "steps_taken": 0,
+          "read_chapters": [],
+          "evidence_items": 0,
+          "evidence": [],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "catalog: answered from the index tables, no search",
+          "catalog": {
+            "op": "count",
+            "count": 33,
+            "total": 33,
+            "books": [
+              "A Journey to the Interior of the Earth — Jules Verne",
+              "A Study in Scarlet — Arthur Conan Doyle",
+              "Adventures of Huckleberry Finn — Mark Twain",
+              "Alice's Adventures in Wonderland — Lewis Carroll",
+              "Around the World in Eighty Days — Jules Verne",
+              "Celebrated Crimes — Alexandre Dumas",
+              "Don Quixote — Miguel de Cervantes",
+              "Dracula — Bram Stoker",
+              "Frankenstein — Mary Shelley",
+              "Gulliver's Travels — Jonathan Swift",
+              "Ivanhoe — Walter Scott",
+              "Jane Eyre — Charlotte Brontë",
+              "Meditations — Marcus Aurelius",
+              "Memoirs of Napoleon Bonaparte — Louis Antoine Fauvelet de Bourrienne",
+              "Moby Dick — Herman Melville",
+              "Pride and Prejudice — Jane Austen",
+              "Robinson Crusoe — Daniel Defoe",
+              "Romeo and Juliet — William Shakespeare",
+              "Seneca's Morals — Lucius Annaeus Seneca",
+              "The Adventures of Sherlock Holmes — Arthur Conan Doyle",
+              "The Call of the Wild — Jack London",
+              "The Extraordinary Adventures of Arsène Lupin — Maurice Leblanc",
+              "The Hound of the Baskervilles — Arthur Conan Doyle",
+              "The Kobzar of the Ukraine — Taras Shevchenko",
+              "The Odyssey — Homer",
+              "The Picture of Dorian Gray — Oscar Wilde",
+              "The Secret Adversary — Agatha Christie",
+              "The Three Musketeers — Alexandre Dumas",
+              "The Time Machine — H. G. Wells",
+              "The War of the Worlds — H. G. Wells",
+              "Treasure Island — Robert Louis Stevenson",
+              "Twenty Thousand Leagues Under the Sea — Jules Verne",
+              "Wuthering Heights — Emily Brontë"
+            ],
+            "query": "",
+            "resolved": true,
+            "suggestions": []
+          },
+          "book_filter": "",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 1,
+          "steps_log": [],
+          "by_role_seconds": {
+            "plan": 0.9
+          },
+          "cost_usd": 0.0001,
+          "llm_calls": 1,
+          "tokens_in": 865,
+          "tokens_out": 19,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 33,
+            "titles_expected": 33,
+            "catalog_listed": 33,
+            "facts_found": 1,
+            "facts_expected": 1,
+            "facts_ok": true,
+            "behavior_ok": true
+          }
+        },
+        {
+          "attempt": 3,
+          "id": "k01-count",
+          "type": "catalog",
+          "question": "How many books do I have in my library?",
+          "answer": "Your library holds 33 books (by the index tables).",
+          "verification": "catalog: 33 of 33 books listed by code from the index tables (exhaustive; no quotes to check)",
+          "provenance": {
+            "checked": 0,
+            "checked_book_text": 0,
+            "confirmed": 0,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 0,
+            "unused": 0,
+            "broken_items": [],
+            "items": [],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            },
+            "catalog": {
+              "op": "count",
+              "count": 33,
+              "total": 33
+            }
+          },
+          "steps_taken": 0,
+          "read_chapters": [],
+          "evidence_items": 0,
+          "evidence": [],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "catalog: answered from the index tables, no search",
+          "catalog": {
+            "op": "count",
+            "count": 33,
+            "total": 33,
+            "books": [
+              "A Journey to the Interior of the Earth — Jules Verne",
+              "A Study in Scarlet — Arthur Conan Doyle",
+              "Adventures of Huckleberry Finn — Mark Twain",
+              "Alice's Adventures in Wonderland — Lewis Carroll",
+              "Around the World in Eighty Days — Jules Verne",
+              "Celebrated Crimes — Alexandre Dumas",
+              "Don Quixote — Miguel de Cervantes",
+              "Dracula — Bram Stoker",
+              "Frankenstein — Mary Shelley",
+              "Gulliver's Travels — Jonathan Swift",
+              "Ivanhoe — Walter Scott",
+              "Jane Eyre — Charlotte Brontë",
+              "Meditations — Marcus Aurelius",
+              "Memoirs of Napoleon Bonaparte — Louis Antoine Fauvelet de Bourrienne",
+              "Moby Dick — Herman Melville",
+              "Pride and Prejudice — Jane Austen",
+              "Robinson Crusoe — Daniel Defoe",
+              "Romeo and Juliet — William Shakespeare",
+              "Seneca's Morals — Lucius Annaeus Seneca",
+              "The Adventures of Sherlock Holmes — Arthur Conan Doyle",
+              "The Call of the Wild — Jack London",
+              "The Extraordinary Adventures of Arsène Lupin — Maurice Leblanc",
+              "The Hound of the Baskervilles — Arthur Conan Doyle",
+              "The Kobzar of the Ukraine — Taras Shevchenko",
+              "The Odyssey — Homer",
+              "The Picture of Dorian Gray — Oscar Wilde",
+              "The Secret Adversary — Agatha Christie",
+              "The Three Musketeers — Alexandre Dumas",
+              "The Time Machine — H. G. Wells",
+              "The War of the Worlds — H. G. Wells",
+              "Treasure Island — Robert Louis Stevenson",
+              "Twenty Thousand Leagues Under the Sea — Jules Verne",
+              "Wuthering Heights — Emily Brontë"
+            ],
+            "query": "",
+            "resolved": true,
+            "suggestions": []
+          },
+          "book_filter": "",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 1,
+          "steps_log": [],
+          "by_role_seconds": {
+            "plan": 0.7
+          },
+          "cost_usd": 0.0001,
+          "llm_calls": 1,
+          "tokens_in": 865,
+          "tokens_out": 19,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 33,
+            "titles_expected": 33,
+            "catalog_listed": 33,
+            "facts_found": 1,
+            "facts_expected": 1,
+            "facts_ok": true,
+            "behavior_ok": true
+          }
+        }
+      ],
+      "spread": {
+        "attempts": 3,
+        "completed": 3,
+        "errors": 0,
+        "behavior_ok": 3,
+        "facts_ok": 3,
+        "cost_usd": {
+          "min": 0.0001,
+          "median": 0.0001,
+          "max": 0.0001
+        },
+        "seconds": {
+          "min": 1,
+          "median": 1,
+          "max": 4
+        },
+        "llm_calls": {
+          "min": 1,
+          "median": 1,
+          "max": 1
+        },
+        "tokens_in": {
+          "min": 865,
+          "median": 865,
+          "max": 865
+        },
+        "tokens_out": {
+          "min": 19,
+          "median": 19,
+          "max": 19
+        }
+      }
+    },
+    {
+      "id": "k02-list",
+      "type": "catalog",
+      "group": "catalog",
+      "question": "What are the names of all the books in my library?",
+      "attempts": [
+        {
+          "attempt": 1,
+          "id": "k02-list",
+          "type": "catalog",
+          "question": "What are the names of all the books in my library?",
+          "answer": "33 books in your library (by the index tables):\n- A Journey to the Interior of the Earth — Jules Verne\n- A Study in Scarlet — Arthur Conan Doyle\n- Adventures of Huckleberry Finn — Mark Twain\n- Alice's Adventures in Wonderland — Lewis Carroll\n- Around the World in Eighty Days — Jules Verne\n- Celebrated Crimes — Alexandre Dumas\n- Don Quixote — Miguel de Cervantes\n- Dracula — Bram Stoker\n- Frankenstein — Mary Shelley\n- Gulliver's Travels — Jonathan Swift\n- Ivanhoe — Walter Scott\n- Jane Eyre — Charlotte Brontë\n- Meditations — Marcus Aurelius\n- Memoirs of Napoleon Bonaparte — Louis Antoine Fauvelet de Bourrienne\n- Moby Dick — Herman Melville\n- Pride and Prejudice — Jane Austen\n- Robinson Crusoe — Daniel Defoe\n- Romeo and Juliet — William Shakespeare\n- Seneca's Morals — Lucius Annaeus Seneca\n- The Adventures of Sherlock Holmes — Arthur Conan Doyle\n- The Call of the Wild — Jack London\n- The Extraordinary Adventures of Arsène Lupin — Maurice Leblanc\n- The Hound of the Baskervilles — Arthur Conan Doyle\n- The Kobzar of the Ukraine — Taras Shevchenko\n- The Odyssey — Homer\n- The Picture of Dorian Gray — Oscar Wilde\n- The Secret Adversary — Agatha Christie\n- The Three Musketeers — Alexandre Dumas\n- The Time Machine — H. G. Wells\n- The War of the Worlds — H. G. Wells\n- Treasure Island — Robert Louis Stevenson\n- Twenty Thousand Leagues Under the Sea — Jules Verne\n- Wuthering Heights — Emily Brontë",
+          "verification": "catalog: 33 of 33 books listed by code from the index tables (exhaustive; no quotes to check)",
+          "provenance": {
+            "checked": 0,
+            "checked_book_text": 0,
+            "confirmed": 0,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 0,
+            "unused": 0,
+            "broken_items": [],
+            "items": [],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            },
+            "catalog": {
+              "op": "list",
+              "count": 33,
+              "total": 33
+            }
+          },
+          "steps_taken": 0,
+          "read_chapters": [],
+          "evidence_items": 0,
+          "evidence": [],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "catalog: answered from the index tables, no search",
+          "catalog": {
+            "op": "list",
+            "count": 33,
+            "total": 33,
+            "books": [
+              "A Journey to the Interior of the Earth — Jules Verne",
+              "A Study in Scarlet — Arthur Conan Doyle",
+              "Adventures of Huckleberry Finn — Mark Twain",
+              "Alice's Adventures in Wonderland — Lewis Carroll",
+              "Around the World in Eighty Days — Jules Verne",
+              "Celebrated Crimes — Alexandre Dumas",
+              "Don Quixote — Miguel de Cervantes",
+              "Dracula — Bram Stoker",
+              "Frankenstein — Mary Shelley",
+              "Gulliver's Travels — Jonathan Swift",
+              "Ivanhoe — Walter Scott",
+              "Jane Eyre — Charlotte Brontë",
+              "Meditations — Marcus Aurelius",
+              "Memoirs of Napoleon Bonaparte — Louis Antoine Fauvelet de Bourrienne",
+              "Moby Dick — Herman Melville",
+              "Pride and Prejudice — Jane Austen",
+              "Robinson Crusoe — Daniel Defoe",
+              "Romeo and Juliet — William Shakespeare",
+              "Seneca's Morals — Lucius Annaeus Seneca",
+              "The Adventures of Sherlock Holmes — Arthur Conan Doyle",
+              "The Call of the Wild — Jack London",
+              "The Extraordinary Adventures of Arsène Lupin — Maurice Leblanc",
+              "The Hound of the Baskervilles — Arthur Conan Doyle",
+              "The Kobzar of the Ukraine — Taras Shevchenko",
+              "The Odyssey — Homer",
+              "The Picture of Dorian Gray — Oscar Wilde",
+              "The Secret Adversary — Agatha Christie",
+              "The Three Musketeers — Alexandre Dumas",
+              "The Time Machine — H. G. Wells",
+              "The War of the Worlds — H. G. Wells",
+              "Treasure Island — Robert Louis Stevenson",
+              "Twenty Thousand Leagues Under the Sea — Jules Verne",
+              "Wuthering Heights — Emily Brontë"
+            ],
+            "query": "",
+            "resolved": true,
+            "suggestions": []
+          },
+          "book_filter": "",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 1,
+          "steps_log": [],
+          "by_role_seconds": {
+            "plan": 1.1
+          },
+          "cost_usd": 0.0001,
+          "llm_calls": 1,
+          "tokens_in": 867,
+          "tokens_out": 19,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 33,
+            "titles_expected": 33,
+            "catalog_listed": 33,
+            "facts_found": 3,
+            "facts_expected": 3,
+            "facts_ok": true,
+            "behavior_ok": true
+          }
+        },
+        {
+          "attempt": 2,
+          "id": "k02-list",
+          "type": "catalog",
+          "question": "What are the names of all the books in my library?",
+          "answer": "33 books in your library (by the index tables):\n- A Journey to the Interior of the Earth — Jules Verne\n- A Study in Scarlet — Arthur Conan Doyle\n- Adventures of Huckleberry Finn — Mark Twain\n- Alice's Adventures in Wonderland — Lewis Carroll\n- Around the World in Eighty Days — Jules Verne\n- Celebrated Crimes — Alexandre Dumas\n- Don Quixote — Miguel de Cervantes\n- Dracula — Bram Stoker\n- Frankenstein — Mary Shelley\n- Gulliver's Travels — Jonathan Swift\n- Ivanhoe — Walter Scott\n- Jane Eyre — Charlotte Brontë\n- Meditations — Marcus Aurelius\n- Memoirs of Napoleon Bonaparte — Louis Antoine Fauvelet de Bourrienne\n- Moby Dick — Herman Melville\n- Pride and Prejudice — Jane Austen\n- Robinson Crusoe — Daniel Defoe\n- Romeo and Juliet — William Shakespeare\n- Seneca's Morals — Lucius Annaeus Seneca\n- The Adventures of Sherlock Holmes — Arthur Conan Doyle\n- The Call of the Wild — Jack London\n- The Extraordinary Adventures of Arsène Lupin — Maurice Leblanc\n- The Hound of the Baskervilles — Arthur Conan Doyle\n- The Kobzar of the Ukraine — Taras Shevchenko\n- The Odyssey — Homer\n- The Picture of Dorian Gray — Oscar Wilde\n- The Secret Adversary — Agatha Christie\n- The Three Musketeers — Alexandre Dumas\n- The Time Machine — H. G. Wells\n- The War of the Worlds — H. G. Wells\n- Treasure Island — Robert Louis Stevenson\n- Twenty Thousand Leagues Under the Sea — Jules Verne\n- Wuthering Heights — Emily Brontë",
+          "verification": "catalog: 33 of 33 books listed by code from the index tables (exhaustive; no quotes to check)",
+          "provenance": {
+            "checked": 0,
+            "checked_book_text": 0,
+            "confirmed": 0,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 0,
+            "unused": 0,
+            "broken_items": [],
+            "items": [],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            },
+            "catalog": {
+              "op": "list",
+              "count": 33,
+              "total": 33
+            }
+          },
+          "steps_taken": 0,
+          "read_chapters": [],
+          "evidence_items": 0,
+          "evidence": [],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "catalog: answered from the index tables, no search",
+          "catalog": {
+            "op": "list",
+            "count": 33,
+            "total": 33,
+            "books": [
+              "A Journey to the Interior of the Earth — Jules Verne",
+              "A Study in Scarlet — Arthur Conan Doyle",
+              "Adventures of Huckleberry Finn — Mark Twain",
+              "Alice's Adventures in Wonderland — Lewis Carroll",
+              "Around the World in Eighty Days — Jules Verne",
+              "Celebrated Crimes — Alexandre Dumas",
+              "Don Quixote — Miguel de Cervantes",
+              "Dracula — Bram Stoker",
+              "Frankenstein — Mary Shelley",
+              "Gulliver's Travels — Jonathan Swift",
+              "Ivanhoe — Walter Scott",
+              "Jane Eyre — Charlotte Brontë",
+              "Meditations — Marcus Aurelius",
+              "Memoirs of Napoleon Bonaparte — Louis Antoine Fauvelet de Bourrienne",
+              "Moby Dick — Herman Melville",
+              "Pride and Prejudice — Jane Austen",
+              "Robinson Crusoe — Daniel Defoe",
+              "Romeo and Juliet — William Shakespeare",
+              "Seneca's Morals — Lucius Annaeus Seneca",
+              "The Adventures of Sherlock Holmes — Arthur Conan Doyle",
+              "The Call of the Wild — Jack London",
+              "The Extraordinary Adventures of Arsène Lupin — Maurice Leblanc",
+              "The Hound of the Baskervilles — Arthur Conan Doyle",
+              "The Kobzar of the Ukraine — Taras Shevchenko",
+              "The Odyssey — Homer",
+              "The Picture of Dorian Gray — Oscar Wilde",
+              "The Secret Adversary — Agatha Christie",
+              "The Three Musketeers — Alexandre Dumas",
+              "The Time Machine — H. G. Wells",
+              "The War of the Worlds — H. G. Wells",
+              "Treasure Island — Robert Louis Stevenson",
+              "Twenty Thousand Leagues Under the Sea — Jules Verne",
+              "Wuthering Heights — Emily Brontë"
+            ],
+            "query": "",
+            "resolved": true,
+            "suggestions": []
+          },
+          "book_filter": "",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 1,
+          "steps_log": [],
+          "by_role_seconds": {
+            "plan": 0.8
+          },
+          "cost_usd": 0.0001,
+          "llm_calls": 1,
+          "tokens_in": 867,
+          "tokens_out": 19,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 33,
+            "titles_expected": 33,
+            "catalog_listed": 33,
+            "facts_found": 3,
+            "facts_expected": 3,
+            "facts_ok": true,
+            "behavior_ok": true
+          }
+        },
+        {
+          "attempt": 3,
+          "id": "k02-list",
+          "type": "catalog",
+          "question": "What are the names of all the books in my library?",
+          "answer": "33 books in your library (by the index tables):\n- A Journey to the Interior of the Earth — Jules Verne\n- A Study in Scarlet — Arthur Conan Doyle\n- Adventures of Huckleberry Finn — Mark Twain\n- Alice's Adventures in Wonderland — Lewis Carroll\n- Around the World in Eighty Days — Jules Verne\n- Celebrated Crimes — Alexandre Dumas\n- Don Quixote — Miguel de Cervantes\n- Dracula — Bram Stoker\n- Frankenstein — Mary Shelley\n- Gulliver's Travels — Jonathan Swift\n- Ivanhoe — Walter Scott\n- Jane Eyre — Charlotte Brontë\n- Meditations — Marcus Aurelius\n- Memoirs of Napoleon Bonaparte — Louis Antoine Fauvelet de Bourrienne\n- Moby Dick — Herman Melville\n- Pride and Prejudice — Jane Austen\n- Robinson Crusoe — Daniel Defoe\n- Romeo and Juliet — William Shakespeare\n- Seneca's Morals — Lucius Annaeus Seneca\n- The Adventures of Sherlock Holmes — Arthur Conan Doyle\n- The Call of the Wild — Jack London\n- The Extraordinary Adventures of Arsène Lupin — Maurice Leblanc\n- The Hound of the Baskervilles — Arthur Conan Doyle\n- The Kobzar of the Ukraine — Taras Shevchenko\n- The Odyssey — Homer\n- The Picture of Dorian Gray — Oscar Wilde\n- The Secret Adversary — Agatha Christie\n- The Three Musketeers — Alexandre Dumas\n- The Time Machine — H. G. Wells\n- The War of the Worlds — H. G. Wells\n- Treasure Island — Robert Louis Stevenson\n- Twenty Thousand Leagues Under the Sea — Jules Verne\n- Wuthering Heights — Emily Brontë",
+          "verification": "catalog: 33 of 33 books listed by code from the index tables (exhaustive; no quotes to check)",
+          "provenance": {
+            "checked": 0,
+            "checked_book_text": 0,
+            "confirmed": 0,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 0,
+            "unused": 0,
+            "broken_items": [],
+            "items": [],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            },
+            "catalog": {
+              "op": "list",
+              "count": 33,
+              "total": 33
+            }
+          },
+          "steps_taken": 0,
+          "read_chapters": [],
+          "evidence_items": 0,
+          "evidence": [],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "catalog: answered from the index tables, no search",
+          "catalog": {
+            "op": "list",
+            "count": 33,
+            "total": 33,
+            "books": [
+              "A Journey to the Interior of the Earth — Jules Verne",
+              "A Study in Scarlet — Arthur Conan Doyle",
+              "Adventures of Huckleberry Finn — Mark Twain",
+              "Alice's Adventures in Wonderland — Lewis Carroll",
+              "Around the World in Eighty Days — Jules Verne",
+              "Celebrated Crimes — Alexandre Dumas",
+              "Don Quixote — Miguel de Cervantes",
+              "Dracula — Bram Stoker",
+              "Frankenstein — Mary Shelley",
+              "Gulliver's Travels — Jonathan Swift",
+              "Ivanhoe — Walter Scott",
+              "Jane Eyre — Charlotte Brontë",
+              "Meditations — Marcus Aurelius",
+              "Memoirs of Napoleon Bonaparte — Louis Antoine Fauvelet de Bourrienne",
+              "Moby Dick — Herman Melville",
+              "Pride and Prejudice — Jane Austen",
+              "Robinson Crusoe — Daniel Defoe",
+              "Romeo and Juliet — William Shakespeare",
+              "Seneca's Morals — Lucius Annaeus Seneca",
+              "The Adventures of Sherlock Holmes — Arthur Conan Doyle",
+              "The Call of the Wild — Jack London",
+              "The Extraordinary Adventures of Arsène Lupin — Maurice Leblanc",
+              "The Hound of the Baskervilles — Arthur Conan Doyle",
+              "The Kobzar of the Ukraine — Taras Shevchenko",
+              "The Odyssey — Homer",
+              "The Picture of Dorian Gray — Oscar Wilde",
+              "The Secret Adversary — Agatha Christie",
+              "The Three Musketeers — Alexandre Dumas",
+              "The Time Machine — H. G. Wells",
+              "The War of the Worlds — H. G. Wells",
+              "Treasure Island — Robert Louis Stevenson",
+              "Twenty Thousand Leagues Under the Sea — Jules Verne",
+              "Wuthering Heights — Emily Brontë"
+            ],
+            "query": "",
+            "resolved": true,
+            "suggestions": []
+          },
+          "book_filter": "",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 1,
+          "steps_log": [],
+          "by_role_seconds": {
+            "plan": 0.8
+          },
+          "cost_usd": 0.0001,
+          "llm_calls": 1,
+          "tokens_in": 867,
+          "tokens_out": 19,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 33,
+            "titles_expected": 33,
+            "catalog_listed": 33,
+            "facts_found": 3,
+            "facts_expected": 3,
+            "facts_ok": true,
+            "behavior_ok": true
+          }
+        }
+      ],
+      "spread": {
+        "attempts": 3,
+        "completed": 3,
+        "errors": 0,
+        "behavior_ok": 3,
+        "facts_ok": 3,
+        "cost_usd": {
+          "min": 0.0001,
+          "median": 0.0001,
+          "max": 0.0001
+        },
+        "seconds": {
+          "min": 1,
+          "median": 1,
+          "max": 1
+        },
+        "llm_calls": {
+          "min": 1,
+          "median": 1,
+          "max": 1
+        },
+        "tokens_in": {
+          "min": 867,
+          "median": 867,
+          "max": 867
+        },
+        "tokens_out": {
+          "min": 19,
+          "median": 19,
+          "max": 19
+        }
+      }
+    },
+    {
+      "id": "k03-has-yes",
+      "type": "catalog",
+      "group": "catalog",
+      "question": "Do I have Ivanhoe?",
+      "attempts": [
+        {
+          "attempt": 1,
+          "id": "k03-has-yes",
+          "type": "catalog",
+          "question": "Do I have Ivanhoe?",
+          "answer": "Yes, in your library:\n- Ivanhoe — Walter Scott",
+          "verification": "catalog: 1 of 33 books listed by code from the index tables (exhaustive; no quotes to check)",
+          "provenance": {
+            "checked": 0,
+            "checked_book_text": 0,
+            "confirmed": 0,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 0,
+            "unused": 0,
+            "broken_items": [],
+            "items": [],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            },
+            "catalog": {
+              "op": "has",
+              "count": 1,
+              "total": 33
+            }
+          },
+          "steps_taken": 0,
+          "read_chapters": [],
+          "evidence_items": 0,
+          "evidence": [],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "catalog: answered from the index tables, no search",
+          "catalog": {
+            "op": "has",
+            "count": 1,
+            "total": 33,
+            "books": [
+              "Ivanhoe — Walter Scott"
+            ],
+            "query": "Ivanhoe",
+            "resolved": true,
+            "suggestions": []
+          },
+          "book_filter": "",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 1,
+          "steps_log": [],
+          "by_role_seconds": {
+            "plan": 0.9
+          },
+          "cost_usd": 0.0001,
+          "llm_calls": 1,
+          "tokens_in": 861,
+          "tokens_out": 27,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 1,
+            "titles_expected": 1,
+            "catalog_listed": 1,
+            "facts_found": 1,
+            "facts_expected": 1,
+            "facts_ok": true,
+            "behavior_ok": true
+          }
+        },
+        {
+          "attempt": 2,
+          "id": "k03-has-yes",
+          "type": "catalog",
+          "question": "Do I have Ivanhoe?",
+          "answer": "Yes, in your library:\n- Ivanhoe — Walter Scott",
+          "verification": "catalog: 1 of 33 books listed by code from the index tables (exhaustive; no quotes to check)",
+          "provenance": {
+            "checked": 0,
+            "checked_book_text": 0,
+            "confirmed": 0,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 0,
+            "unused": 0,
+            "broken_items": [],
+            "items": [],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            },
+            "catalog": {
+              "op": "has",
+              "count": 1,
+              "total": 33
+            }
+          },
+          "steps_taken": 0,
+          "read_chapters": [],
+          "evidence_items": 0,
+          "evidence": [],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "catalog: answered from the index tables, no search",
+          "catalog": {
+            "op": "has",
+            "count": 1,
+            "total": 33,
+            "books": [
+              "Ivanhoe — Walter Scott"
+            ],
+            "query": "Ivanhoe",
+            "resolved": true,
+            "suggestions": []
+          },
+          "book_filter": "",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 1,
+          "steps_log": [],
+          "by_role_seconds": {
+            "plan": 0.8
+          },
+          "cost_usd": 0.0001,
+          "llm_calls": 1,
+          "tokens_in": 861,
+          "tokens_out": 27,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 1,
+            "titles_expected": 1,
+            "catalog_listed": 1,
+            "facts_found": 1,
+            "facts_expected": 1,
+            "facts_ok": true,
+            "behavior_ok": true
+          }
+        },
+        {
+          "attempt": 3,
+          "id": "k03-has-yes",
+          "type": "catalog",
+          "question": "Do I have Ivanhoe?",
+          "answer": "Yes, in your library:\n- Ivanhoe — Walter Scott",
+          "verification": "catalog: 1 of 33 books listed by code from the index tables (exhaustive; no quotes to check)",
+          "provenance": {
+            "checked": 0,
+            "checked_book_text": 0,
+            "confirmed": 0,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 0,
+            "unused": 0,
+            "broken_items": [],
+            "items": [],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            },
+            "catalog": {
+              "op": "has",
+              "count": 1,
+              "total": 33
+            }
+          },
+          "steps_taken": 0,
+          "read_chapters": [],
+          "evidence_items": 0,
+          "evidence": [],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "catalog: answered from the index tables, no search",
+          "catalog": {
+            "op": "has",
+            "count": 1,
+            "total": 33,
+            "books": [
+              "Ivanhoe — Walter Scott"
+            ],
+            "query": "Ivanhoe",
+            "resolved": true,
+            "suggestions": []
+          },
+          "book_filter": "",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 2,
+          "steps_log": [],
+          "by_role_seconds": {
+            "plan": 1.5
+          },
+          "cost_usd": 0.0001,
+          "llm_calls": 1,
+          "tokens_in": 861,
+          "tokens_out": 27,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 1,
+            "titles_expected": 1,
+            "catalog_listed": 1,
+            "facts_found": 1,
+            "facts_expected": 1,
+            "facts_ok": true,
+            "behavior_ok": true
+          }
+        }
+      ],
+      "spread": {
+        "attempts": 3,
+        "completed": 3,
+        "errors": 0,
+        "behavior_ok": 3,
+        "facts_ok": 3,
+        "cost_usd": {
+          "min": 0.0001,
+          "median": 0.0001,
+          "max": 0.0001
+        },
+        "seconds": {
+          "min": 1,
+          "median": 1,
+          "max": 2
+        },
+        "llm_calls": {
+          "min": 1,
+          "median": 1,
+          "max": 1
+        },
+        "tokens_in": {
+          "min": 861,
+          "median": 861,
+          "max": 861
+        },
+        "tokens_out": {
+          "min": 27,
+          "median": 27,
+          "max": 27
+        }
+      }
+    },
+    {
+      "id": "k04-has-no",
+      "type": "catalog",
+      "group": "catalog",
+      "question": "Is War and Peace in my library?",
+      "attempts": [
+        {
+          "attempt": 1,
+          "id": "k04-has-no",
+          "type": "catalog",
+          "question": "Is War and Peace in my library?",
+          "answer": "No book titled \"War and Peace\" is in your library. Closest titles: Pride and Prejudice.",
+          "verification": "catalog: 0 of 33 books listed by code from the index tables (exhaustive; no quotes to check)",
+          "provenance": {
+            "checked": 0,
+            "checked_book_text": 0,
+            "confirmed": 0,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 0,
+            "unused": 0,
+            "broken_items": [],
+            "items": [],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            },
+            "catalog": {
+              "op": "has",
+              "count": 0,
+              "total": 33
+            }
+          },
+          "steps_taken": 0,
+          "read_chapters": [],
+          "evidence_items": 0,
+          "evidence": [],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "catalog: answered from the index tables, no search",
+          "catalog": {
+            "op": "has",
+            "count": 0,
+            "total": 33,
+            "books": [],
+            "query": "War and Peace",
+            "resolved": false,
+            "suggestions": [
+              "Pride and Prejudice"
+            ]
+          },
+          "book_filter": "",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 1,
+          "steps_log": [],
+          "by_role_seconds": {
+            "plan": 0.8
+          },
+          "cost_usd": 0.0001,
+          "llm_calls": 1,
+          "tokens_in": 863,
+          "tokens_out": 27,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 0,
+            "titles_expected": 0,
+            "catalog_listed": 0,
+            "facts_found": 0,
+            "facts_expected": 0,
+            "facts_ok": true,
+            "behavior_ok": true
+          }
+        },
+        {
+          "attempt": 2,
+          "id": "k04-has-no",
+          "type": "catalog",
+          "question": "Is War and Peace in my library?",
+          "answer": "No book titled \"War and Peace\" is in your library. Closest titles: Pride and Prejudice.",
+          "verification": "catalog: 0 of 33 books listed by code from the index tables (exhaustive; no quotes to check)",
+          "provenance": {
+            "checked": 0,
+            "checked_book_text": 0,
+            "confirmed": 0,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 0,
+            "unused": 0,
+            "broken_items": [],
+            "items": [],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            },
+            "catalog": {
+              "op": "has",
+              "count": 0,
+              "total": 33
+            }
+          },
+          "steps_taken": 0,
+          "read_chapters": [],
+          "evidence_items": 0,
+          "evidence": [],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "catalog: answered from the index tables, no search",
+          "catalog": {
+            "op": "has",
+            "count": 0,
+            "total": 33,
+            "books": [],
+            "query": "War and Peace",
+            "resolved": false,
+            "suggestions": [
+              "Pride and Prejudice"
+            ]
+          },
+          "book_filter": "",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 2,
+          "steps_log": [],
+          "by_role_seconds": {
+            "plan": 2.3
+          },
+          "cost_usd": 0.0001,
+          "llm_calls": 1,
+          "tokens_in": 863,
+          "tokens_out": 27,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 0,
+            "titles_expected": 0,
+            "catalog_listed": 0,
+            "facts_found": 0,
+            "facts_expected": 0,
+            "facts_ok": true,
+            "behavior_ok": true
+          }
+        },
+        {
+          "attempt": 3,
+          "id": "k04-has-no",
+          "type": "catalog",
+          "question": "Is War and Peace in my library?",
+          "answer": "No book titled \"War and Peace\" is in your library. Closest titles: Pride and Prejudice.",
+          "verification": "catalog: 0 of 33 books listed by code from the index tables (exhaustive; no quotes to check)",
+          "provenance": {
+            "checked": 0,
+            "checked_book_text": 0,
+            "confirmed": 0,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 0,
+            "unused": 0,
+            "broken_items": [],
+            "items": [],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            },
+            "catalog": {
+              "op": "has",
+              "count": 0,
+              "total": 33
+            }
+          },
+          "steps_taken": 0,
+          "read_chapters": [],
+          "evidence_items": 0,
+          "evidence": [],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "catalog: answered from the index tables, no search",
+          "catalog": {
+            "op": "has",
+            "count": 0,
+            "total": 33,
+            "books": [],
+            "query": "War and Peace",
+            "resolved": false,
+            "suggestions": [
+              "Pride and Prejudice"
+            ]
+          },
+          "book_filter": "",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 1,
+          "steps_log": [],
+          "by_role_seconds": {
+            "plan": 0.7
+          },
+          "cost_usd": 0.0001,
+          "llm_calls": 1,
+          "tokens_in": 863,
+          "tokens_out": 27,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 0,
+            "titles_expected": 0,
+            "catalog_listed": 0,
+            "facts_found": 0,
+            "facts_expected": 0,
+            "facts_ok": true,
+            "behavior_ok": true
+          }
+        }
+      ],
+      "spread": {
+        "attempts": 3,
+        "completed": 3,
+        "errors": 0,
+        "behavior_ok": 3,
+        "cost_usd": {
+          "min": 0.0001,
+          "median": 0.0001,
+          "max": 0.0001
+        },
+        "seconds": {
+          "min": 1,
+          "median": 1,
+          "max": 2
+        },
+        "llm_calls": {
+          "min": 1,
+          "median": 1,
+          "max": 1
+        },
+        "tokens_in": {
+          "min": 863,
+          "median": 863,
+          "max": 863
+        },
+        "tokens_out": {
+          "min": 27,
+          "median": 27,
+          "max": 27
+        }
+      }
+    },
+    {
+      "id": "k05-by-author",
+      "type": "catalog",
+      "group": "catalog",
+      "question": "What do I have by Jules Verne?",
+      "attempts": [
+        {
+          "attempt": 1,
+          "id": "k05-by-author",
+          "type": "catalog",
+          "question": "What do I have by Jules Verne?",
+          "answer": "3 book(s) by Jules Verne in your library:\n- A Journey to the Interior of the Earth — Jules Verne\n- Around the World in Eighty Days — Jules Verne\n- Twenty Thousand Leagues Under the Sea — Jules Verne",
+          "verification": "catalog: 3 of 33 books listed by code from the index tables (exhaustive; no quotes to check)",
+          "provenance": {
+            "checked": 0,
+            "checked_book_text": 0,
+            "confirmed": 0,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 0,
+            "unused": 0,
+            "broken_items": [],
+            "items": [],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            },
+            "catalog": {
+              "op": "by_author",
+              "count": 3,
+              "total": 33
+            }
+          },
+          "steps_taken": 0,
+          "read_chapters": [],
+          "evidence_items": 0,
+          "evidence": [],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "catalog: answered from the index tables, no search",
+          "catalog": {
+            "op": "by_author",
+            "count": 3,
+            "total": 33,
+            "books": [
+              "A Journey to the Interior of the Earth — Jules Verne",
+              "Around the World in Eighty Days — Jules Verne",
+              "Twenty Thousand Leagues Under the Sea — Jules Verne"
+            ],
+            "query": "Jules Verne",
+            "resolved": true,
+            "suggestions": []
+          },
+          "book_filter": "",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 1,
+          "steps_log": [],
+          "by_role_seconds": {
+            "plan": 0.9
+          },
+          "cost_usd": 0.0001,
+          "llm_calls": 1,
+          "tokens_in": 864,
+          "tokens_out": 30,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 3,
+            "titles_expected": 3,
+            "catalog_listed": 3,
+            "facts_found": 3,
+            "facts_expected": 3,
+            "facts_ok": true,
+            "behavior_ok": true
+          }
+        },
+        {
+          "attempt": 2,
+          "id": "k05-by-author",
+          "type": "catalog",
+          "question": "What do I have by Jules Verne?",
+          "answer": "3 book(s) by Jules Verne in your library:\n- A Journey to the Interior of the Earth — Jules Verne\n- Around the World in Eighty Days — Jules Verne\n- Twenty Thousand Leagues Under the Sea — Jules Verne",
+          "verification": "catalog: 3 of 33 books listed by code from the index tables (exhaustive; no quotes to check)",
+          "provenance": {
+            "checked": 0,
+            "checked_book_text": 0,
+            "confirmed": 0,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 0,
+            "unused": 0,
+            "broken_items": [],
+            "items": [],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            },
+            "catalog": {
+              "op": "by_author",
+              "count": 3,
+              "total": 33
+            }
+          },
+          "steps_taken": 0,
+          "read_chapters": [],
+          "evidence_items": 0,
+          "evidence": [],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "catalog: answered from the index tables, no search",
+          "catalog": {
+            "op": "by_author",
+            "count": 3,
+            "total": 33,
+            "books": [
+              "A Journey to the Interior of the Earth — Jules Verne",
+              "Around the World in Eighty Days — Jules Verne",
+              "Twenty Thousand Leagues Under the Sea — Jules Verne"
+            ],
+            "query": "Jules Verne",
+            "resolved": true,
+            "suggestions": []
+          },
+          "book_filter": "",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 1,
+          "steps_log": [],
+          "by_role_seconds": {
+            "plan": 0.8
+          },
+          "cost_usd": 0.0001,
+          "llm_calls": 1,
+          "tokens_in": 864,
+          "tokens_out": 35,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 3,
+            "titles_expected": 3,
+            "catalog_listed": 3,
+            "facts_found": 3,
+            "facts_expected": 3,
+            "facts_ok": true,
+            "behavior_ok": true
+          }
+        },
+        {
+          "attempt": 3,
+          "id": "k05-by-author",
+          "type": "catalog",
+          "question": "What do I have by Jules Verne?",
+          "answer": "3 book(s) by Jules Verne in your library:\n- A Journey to the Interior of the Earth — Jules Verne\n- Around the World in Eighty Days — Jules Verne\n- Twenty Thousand Leagues Under the Sea — Jules Verne",
+          "verification": "catalog: 3 of 33 books listed by code from the index tables (exhaustive; no quotes to check)",
+          "provenance": {
+            "checked": 0,
+            "checked_book_text": 0,
+            "confirmed": 0,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 0,
+            "unused": 0,
+            "broken_items": [],
+            "items": [],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            },
+            "catalog": {
+              "op": "by_author",
+              "count": 3,
+              "total": 33
+            }
+          },
+          "steps_taken": 0,
+          "read_chapters": [],
+          "evidence_items": 0,
+          "evidence": [],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "catalog: answered from the index tables, no search",
+          "catalog": {
+            "op": "by_author",
+            "count": 3,
+            "total": 33,
+            "books": [
+              "A Journey to the Interior of the Earth — Jules Verne",
+              "Around the World in Eighty Days — Jules Verne",
+              "Twenty Thousand Leagues Under the Sea — Jules Verne"
+            ],
+            "query": "Jules Verne",
+            "resolved": true,
+            "suggestions": []
+          },
+          "book_filter": "",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 1,
+          "steps_log": [],
+          "by_role_seconds": {
+            "plan": 0.9
+          },
+          "cost_usd": 0.0001,
+          "llm_calls": 1,
+          "tokens_in": 864,
+          "tokens_out": 30,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 3,
+            "titles_expected": 3,
+            "catalog_listed": 3,
+            "facts_found": 3,
+            "facts_expected": 3,
+            "facts_ok": true,
+            "behavior_ok": true
+          }
+        }
+      ],
+      "spread": {
+        "attempts": 3,
+        "completed": 3,
+        "errors": 0,
+        "behavior_ok": 3,
+        "facts_ok": 3,
+        "cost_usd": {
+          "min": 0.0001,
+          "median": 0.0001,
+          "max": 0.0001
+        },
+        "seconds": {
+          "min": 1,
+          "median": 1,
+          "max": 1
+        },
+        "llm_calls": {
+          "min": 1,
+          "median": 1,
+          "max": 1
+        },
+        "tokens_in": {
+          "min": 864,
+          "median": 864,
+          "max": 864
+        },
+        "tokens_out": {
+          "min": 30,
+          "median": 30,
+          "max": 35
+        }
+      }
+    },
+    {
+      "id": "k06-count-ua",
+      "type": "catalog",
+      "group": "catalog",
+      "question": "Скільки книжок у моїй бібліотеці?",
+      "attempts": [
+        {
+          "attempt": 1,
+          "id": "k06-count-ua",
+          "type": "catalog",
+          "question": "Скільки книжок у моїй бібліотеці?",
+          "answer": "Your library holds 33 books (by the index tables).",
+          "verification": "catalog: 33 of 33 books listed by code from the index tables (exhaustive; no quotes to check)",
+          "provenance": {
+            "checked": 0,
+            "checked_book_text": 0,
+            "confirmed": 0,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 0,
+            "unused": 0,
+            "broken_items": [],
+            "items": [],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            },
+            "catalog": {
+              "op": "count",
+              "count": 33,
+              "total": 33
+            }
+          },
+          "steps_taken": 0,
+          "read_chapters": [],
+          "evidence_items": 0,
+          "evidence": [],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "catalog: answered from the index tables, no search",
+          "catalog": {
+            "op": "count",
+            "count": 33,
+            "total": 33,
+            "books": [
+              "A Journey to the Interior of the Earth — Jules Verne",
+              "A Study in Scarlet — Arthur Conan Doyle",
+              "Adventures of Huckleberry Finn — Mark Twain",
+              "Alice's Adventures in Wonderland — Lewis Carroll",
+              "Around the World in Eighty Days — Jules Verne",
+              "Celebrated Crimes — Alexandre Dumas",
+              "Don Quixote — Miguel de Cervantes",
+              "Dracula — Bram Stoker",
+              "Frankenstein — Mary Shelley",
+              "Gulliver's Travels — Jonathan Swift",
+              "Ivanhoe — Walter Scott",
+              "Jane Eyre — Charlotte Brontë",
+              "Meditations — Marcus Aurelius",
+              "Memoirs of Napoleon Bonaparte — Louis Antoine Fauvelet de Bourrienne",
+              "Moby Dick — Herman Melville",
+              "Pride and Prejudice — Jane Austen",
+              "Robinson Crusoe — Daniel Defoe",
+              "Romeo and Juliet — William Shakespeare",
+              "Seneca's Morals — Lucius Annaeus Seneca",
+              "The Adventures of Sherlock Holmes — Arthur Conan Doyle",
+              "The Call of the Wild — Jack London",
+              "The Extraordinary Adventures of Arsène Lupin — Maurice Leblanc",
+              "The Hound of the Baskervilles — Arthur Conan Doyle",
+              "The Kobzar of the Ukraine — Taras Shevchenko",
+              "The Odyssey — Homer",
+              "The Picture of Dorian Gray — Oscar Wilde",
+              "The Secret Adversary — Agatha Christie",
+              "The Three Musketeers — Alexandre Dumas",
+              "The Time Machine — H. G. Wells",
+              "The War of the Worlds — H. G. Wells",
+              "Treasure Island — Robert Louis Stevenson",
+              "Twenty Thousand Leagues Under the Sea — Jules Verne",
+              "Wuthering Heights — Emily Brontë"
+            ],
+            "query": "",
+            "resolved": true,
+            "suggestions": []
+          },
+          "book_filter": "",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 0,
+          "steps_log": [],
+          "by_role_seconds": {
+            "plan": 0.4
+          },
+          "cost_usd": 0.0001,
+          "llm_calls": 1,
+          "tokens_in": 873,
+          "tokens_out": 19,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 33,
+            "titles_expected": 33,
+            "catalog_listed": 33,
+            "facts_found": 1,
+            "facts_expected": 1,
+            "facts_ok": true,
+            "behavior_ok": true
+          }
+        },
+        {
+          "attempt": 2,
+          "id": "k06-count-ua",
+          "type": "catalog",
+          "question": "Скільки книжок у моїй бібліотеці?",
+          "answer": "Your library holds 33 books (by the index tables).",
+          "verification": "catalog: 33 of 33 books listed by code from the index tables (exhaustive; no quotes to check)",
+          "provenance": {
+            "checked": 0,
+            "checked_book_text": 0,
+            "confirmed": 0,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 0,
+            "unused": 0,
+            "broken_items": [],
+            "items": [],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            },
+            "catalog": {
+              "op": "count",
+              "count": 33,
+              "total": 33
+            }
+          },
+          "steps_taken": 0,
+          "read_chapters": [],
+          "evidence_items": 0,
+          "evidence": [],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "catalog: answered from the index tables, no search",
+          "catalog": {
+            "op": "count",
+            "count": 33,
+            "total": 33,
+            "books": [
+              "A Journey to the Interior of the Earth — Jules Verne",
+              "A Study in Scarlet — Arthur Conan Doyle",
+              "Adventures of Huckleberry Finn — Mark Twain",
+              "Alice's Adventures in Wonderland — Lewis Carroll",
+              "Around the World in Eighty Days — Jules Verne",
+              "Celebrated Crimes — Alexandre Dumas",
+              "Don Quixote — Miguel de Cervantes",
+              "Dracula — Bram Stoker",
+              "Frankenstein — Mary Shelley",
+              "Gulliver's Travels — Jonathan Swift",
+              "Ivanhoe — Walter Scott",
+              "Jane Eyre — Charlotte Brontë",
+              "Meditations — Marcus Aurelius",
+              "Memoirs of Napoleon Bonaparte — Louis Antoine Fauvelet de Bourrienne",
+              "Moby Dick — Herman Melville",
+              "Pride and Prejudice — Jane Austen",
+              "Robinson Crusoe — Daniel Defoe",
+              "Romeo and Juliet — William Shakespeare",
+              "Seneca's Morals — Lucius Annaeus Seneca",
+              "The Adventures of Sherlock Holmes — Arthur Conan Doyle",
+              "The Call of the Wild — Jack London",
+              "The Extraordinary Adventures of Arsène Lupin — Maurice Leblanc",
+              "The Hound of the Baskervilles — Arthur Conan Doyle",
+              "The Kobzar of the Ukraine — Taras Shevchenko",
+              "The Odyssey — Homer",
+              "The Picture of Dorian Gray — Oscar Wilde",
+              "The Secret Adversary — Agatha Christie",
+              "The Three Musketeers — Alexandre Dumas",
+              "The Time Machine — H. G. Wells",
+              "The War of the Worlds — H. G. Wells",
+              "Treasure Island — Robert Louis Stevenson",
+              "Twenty Thousand Leagues Under the Sea — Jules Verne",
+              "Wuthering Heights — Emily Brontë"
+            ],
+            "query": "",
+            "resolved": true,
+            "suggestions": []
+          },
+          "book_filter": "",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 0,
+          "steps_log": [],
+          "by_role_seconds": {
+            "plan": 0.4
+          },
+          "cost_usd": 0.0001,
+          "llm_calls": 1,
+          "tokens_in": 873,
+          "tokens_out": 19,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 33,
+            "titles_expected": 33,
+            "catalog_listed": 33,
+            "facts_found": 1,
+            "facts_expected": 1,
+            "facts_ok": true,
+            "behavior_ok": true
+          }
+        },
+        {
+          "attempt": 3,
+          "id": "k06-count-ua",
+          "type": "catalog",
+          "question": "Скільки книжок у моїй бібліотеці?",
+          "answer": "Your library holds 33 books (by the index tables).",
+          "verification": "catalog: 33 of 33 books listed by code from the index tables (exhaustive; no quotes to check)",
+          "provenance": {
+            "checked": 0,
+            "checked_book_text": 0,
+            "confirmed": 0,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 0,
+            "unused": 0,
+            "broken_items": [],
+            "items": [],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            },
+            "catalog": {
+              "op": "count",
+              "count": 33,
+              "total": 33
+            }
+          },
+          "steps_taken": 0,
+          "read_chapters": [],
+          "evidence_items": 0,
+          "evidence": [],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "catalog: answered from the index tables, no search",
+          "catalog": {
+            "op": "count",
+            "count": 33,
+            "total": 33,
+            "books": [
+              "A Journey to the Interior of the Earth — Jules Verne",
+              "A Study in Scarlet — Arthur Conan Doyle",
+              "Adventures of Huckleberry Finn — Mark Twain",
+              "Alice's Adventures in Wonderland — Lewis Carroll",
+              "Around the World in Eighty Days — Jules Verne",
+              "Celebrated Crimes — Alexandre Dumas",
+              "Don Quixote — Miguel de Cervantes",
+              "Dracula — Bram Stoker",
+              "Frankenstein — Mary Shelley",
+              "Gulliver's Travels — Jonathan Swift",
+              "Ivanhoe — Walter Scott",
+              "Jane Eyre — Charlotte Brontë",
+              "Meditations — Marcus Aurelius",
+              "Memoirs of Napoleon Bonaparte — Louis Antoine Fauvelet de Bourrienne",
+              "Moby Dick — Herman Melville",
+              "Pride and Prejudice — Jane Austen",
+              "Robinson Crusoe — Daniel Defoe",
+              "Romeo and Juliet — William Shakespeare",
+              "Seneca's Morals — Lucius Annaeus Seneca",
+              "The Adventures of Sherlock Holmes — Arthur Conan Doyle",
+              "The Call of the Wild — Jack London",
+              "The Extraordinary Adventures of Arsène Lupin — Maurice Leblanc",
+              "The Hound of the Baskervilles — Arthur Conan Doyle",
+              "The Kobzar of the Ukraine — Taras Shevchenko",
+              "The Odyssey — Homer",
+              "The Picture of Dorian Gray — Oscar Wilde",
+              "The Secret Adversary — Agatha Christie",
+              "The Three Musketeers — Alexandre Dumas",
+              "The Time Machine — H. G. Wells",
+              "The War of the Worlds — H. G. Wells",
+              "Treasure Island — Robert Louis Stevenson",
+              "Twenty Thousand Leagues Under the Sea — Jules Verne",
+              "Wuthering Heights — Emily Brontë"
+            ],
+            "query": "",
+            "resolved": true,
+            "suggestions": []
+          },
+          "book_filter": "",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 0,
+          "steps_log": [],
+          "by_role_seconds": {
+            "plan": 0.4
+          },
+          "cost_usd": 0.0001,
+          "llm_calls": 1,
+          "tokens_in": 873,
+          "tokens_out": 19,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 33,
+            "titles_expected": 33,
+            "catalog_listed": 33,
+            "facts_found": 1,
+            "facts_expected": 1,
+            "facts_ok": true,
+            "behavior_ok": true
+          }
+        }
+      ],
+      "spread": {
+        "attempts": 3,
+        "completed": 3,
+        "errors": 0,
+        "behavior_ok": 3,
+        "facts_ok": 3,
+        "cost_usd": {
+          "min": 0.0001,
+          "median": 0.0001,
+          "max": 0.0001
+        },
+        "seconds": {
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "llm_calls": {
+          "min": 1,
+          "median": 1,
+          "max": 1
+        },
+        "tokens_in": {
+          "min": 873,
+          "median": 873,
+          "max": 873
+        },
+        "tokens_out": {
+          "min": 19,
+          "median": 19,
+          "max": 19
+        }
+      }
+    },
+    {
+      "id": "k07-content-not-catalog",
+      "type": "answer",
+      "group": "answer",
+      "question": "What are the names of the three musketeers?",
+      "attempts": [
+        {
+          "attempt": 1,
+          "id": "k07-content-not-catalog",
+          "type": "answer",
+          "question": "What are the names of the three musketeers?",
+          "answer": "The three musketeers are Athos, Porthos, and Aramis, as named in Alexandre Dumas's *The Three Musketeers*. The book's summary identifies them as \"the three formidable musketeers Athos, Porthos, and Aramis,\" and the Characters section describes each: Athos as \"the noble, melancholy senior musketeer,\" Porthos as \"the boastful, vain, and physically imposing musketeer,\" and Aramis as \"the musketeer torn between soldierly life and religious vocation.\" Chapter XLVII. also confirms their names directly: \"Messieurs Athos, Porthos, and Aramis.\" The evidence does not mention any other musketeers beyond these three.",
+          "verification": "OK: all 1 quotes found verbatim in the passages they cite (2 quotes matched only a book card — a model-written summary, not a quote from the book, so not counted as traced)",
+          "provenance": {
+            "checked": 3,
+            "checked_book_text": 1,
+            "confirmed": 1,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 2,
+            "unused": 0,
+            "broken_items": [],
+            "items": [
+              {
+                "hit_id": "s1h1",
+                "book": "The Three Musketeers — Alexandre Dumas",
+                "section": "Summary",
+                "quote": "The Three Musketeers (1844), Alexandre Dumas's swashbuckling historical novel set in 1620s France, follows young Gascon nobleman d'Artagnan as he travels to Paris to join the King's Musketeers and quickly befriends the three formidable musketeers Athos, Porthos, and Aramis, whose motto \"all for one, one for all\" defines their loyalty.",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h2",
+                "book": "The Three Musketeers — Alexandre Dumas",
+                "section": "Characters",
+                "quote": "- **Athos** — the noble, melancholy senior musketeer, secretly Milady's former husband\n- **Porthos** — the boastful, vain, and physically imposing musketeer\n- **Aramis** — the musketeer torn between soldierly life and religious vocation",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h5",
+                "book": "The Three Musketeers — Alexandre Dumas",
+                "section": "Chapter XLVII.",
+                "quote": "\"What are their names?\"  \"Messieurs Athos, Porthos, and Aramis.\"",
+                "status": "confirmed",
+                "source_kind": "book_text"
+              }
+            ],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            }
+          },
+          "steps_taken": 1,
+          "read_chapters": [],
+          "evidence_items": 3,
+          "evidence": [
+            {
+              "hit_id": "s1h1",
+              "book": "The Three Musketeers — Alexandre Dumas",
+              "section": "Summary",
+              "quote": "The Three Musketeers (1844), Alexandre Dumas's swashbuckling historical novel set in 1620s France, follows young Gascon nobleman d'Artagnan as he travels to Paris to join the King's Musketeers and quickly befriends the three formidable musketeers Athos, Porthos, and Aramis, whose motto \"all for one, one for all\" defines their loyalty."
+            },
+            {
+              "hit_id": "s1h2",
+              "book": "The Three Musketeers — Alexandre Dumas",
+              "section": "Characters",
+              "quote": "- **Athos** — the noble, melancholy senior musketeer, secretly Milady's former husband\n- **Porthos** — the boastful, vain, and physically imposing musketeer\n- **Aramis** — the musketeer torn between soldierly life and religious vocation"
+            },
+            {
+              "hit_id": "s1h5",
+              "book": "The Three Musketeers — Alexandre Dumas",
+              "section": "Chapter XLVII.",
+              "quote": "\"What are their names?\"  \"Messieurs Athos, Porthos, and Aramis.\""
+            }
+          ],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [
+            {
+              "step": 1,
+              "distilled": 3,
+              "kept": 3,
+              "dropped": 0,
+              "dropped_streak": 0,
+              "cap_fired": false
+            }
+          ],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [
+            [
+              "names of the three musketeers",
+              ""
+            ]
+          ],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [
+            8
+          ],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "enough evidence",
+          "catalog": {},
+          "book_filter": "",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 7,
+          "steps_log": [
+            "reflect -> stop: enough evidence"
+          ],
+          "by_role_seconds": {
+            "plan": 0.9,
+            "observe": 2.7,
+            "reflect": 1.5,
+            "synthesize": 1.6
+          },
+          "cost_usd": 0.0004,
+          "llm_calls": 4,
+          "tokens_in": 6089,
+          "tokens_out": 525,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 1,
+            "titles_expected": 1,
+            "facts_found": 3,
+            "facts_expected": 3,
+            "facts_ok": true,
+            "behavior_ok": true
+          }
+        },
+        {
+          "attempt": 2,
+          "id": "k07-content-not-catalog",
+          "type": "answer",
+          "question": "What are the names of the three musketeers?",
+          "answer": "The three musketeers are Athos, Porthos, and Aramis, as stated in *The Three Musketeers* by Alexandre Dumas [The Three Musketeers — Alexandre Dumas, Summary]. The novel's Characters section describes Athos as the noble, melancholy senior musketeer, Porthos as the boastful, vain, and physically imposing musketeer, and Aramis as the musketeer torn between soldierly life and religious vocation [The Three Musketeers — Alexandre Dumas, Characters]. A direct quote in Chapter XLVII confirms their names: \"Messieurs Athos, Porthos, and Aramis\" [The Three Musketeers — Alexandre Dumas, Chapter XLVII.]. The evidence does not mention any other musketeers beyond these three.",
+          "verification": "OK: all 1 quotes found verbatim in the passages they cite (2 quotes matched only a book card — a model-written summary, not a quote from the book, so not counted as traced)",
+          "provenance": {
+            "checked": 3,
+            "checked_book_text": 1,
+            "confirmed": 1,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 2,
+            "unused": 0,
+            "broken_items": [],
+            "items": [
+              {
+                "hit_id": "s1h1",
+                "book": "The Three Musketeers — Alexandre Dumas",
+                "section": "Summary",
+                "quote": "The Three Musketeers (1844), Alexandre Dumas's swashbuckling historical novel set in 1620s France, follows young Gascon nobleman d'Artagnan as he travels to Paris to join the King's Musketeers and quickly befriends the three formidable musketeers Athos, Porthos, and Aramis, whose motto \"all for one, one for all\" defines their loyalty.",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h2",
+                "book": "The Three Musketeers — Alexandre Dumas",
+                "section": "Characters",
+                "quote": "- **Athos** — the noble, melancholy senior musketeer, secretly Milady's former husband\n- **Porthos** — the boastful, vain, and physically imposing musketeer\n- **Aramis** — the musketeer torn between soldierly life and religious vocation",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h5",
+                "book": "The Three Musketeers — Alexandre Dumas",
+                "section": "Chapter XLVII.",
+                "quote": "\"What are their names?\"  \"Messieurs Athos, Porthos, and Aramis.\"",
+                "status": "confirmed",
+                "source_kind": "book_text"
+              }
+            ],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            }
+          },
+          "steps_taken": 1,
+          "read_chapters": [],
+          "evidence_items": 3,
+          "evidence": [
+            {
+              "hit_id": "s1h1",
+              "book": "The Three Musketeers — Alexandre Dumas",
+              "section": "Summary",
+              "quote": "The Three Musketeers (1844), Alexandre Dumas's swashbuckling historical novel set in 1620s France, follows young Gascon nobleman d'Artagnan as he travels to Paris to join the King's Musketeers and quickly befriends the three formidable musketeers Athos, Porthos, and Aramis, whose motto \"all for one, one for all\" defines their loyalty."
+            },
+            {
+              "hit_id": "s1h2",
+              "book": "The Three Musketeers — Alexandre Dumas",
+              "section": "Characters",
+              "quote": "- **Athos** — the noble, melancholy senior musketeer, secretly Milady's former husband\n- **Porthos** — the boastful, vain, and physically imposing musketeer\n- **Aramis** — the musketeer torn between soldierly life and religious vocation"
+            },
+            {
+              "hit_id": "s1h5",
+              "book": "The Three Musketeers — Alexandre Dumas",
+              "section": "Chapter XLVII.",
+              "quote": "\"What are their names?\"  \"Messieurs Athos, Porthos, and Aramis.\""
+            }
+          ],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [
+            {
+              "step": 1,
+              "distilled": 3,
+              "kept": 3,
+              "dropped": 0,
+              "dropped_streak": 0,
+              "cap_fired": false
+            }
+          ],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [
+            [
+              "names of the three musketeers",
+              ""
+            ]
+          ],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [
+            8
+          ],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "enough evidence",
+          "catalog": {},
+          "book_filter": "",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 18,
+          "steps_log": [
+            "reflect -> stop: enough evidence"
+          ],
+          "by_role_seconds": {
+            "plan": 1.5,
+            "observe": 10.4,
+            "reflect": 0.8,
+            "synthesize": 4.7
+          },
+          "cost_usd": 0.0004,
+          "llm_calls": 4,
+          "tokens_in": 6088,
+          "tokens_out": 542,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 1,
+            "titles_expected": 1,
+            "facts_found": 3,
+            "facts_expected": 3,
+            "facts_ok": true,
+            "behavior_ok": true
+          }
+        },
+        {
+          "attempt": 3,
+          "id": "k07-content-not-catalog",
+          "type": "answer",
+          "question": "What are the names of the three musketeers?",
+          "answer": "The three musketeers are named Athos, Porthos, and Aramis, as stated in *The Three Musketeers* by Alexandre Dumas. This is confirmed in the book's summary, which names them alongside d'Artagnan, and in Chapter XLVII, where the names are given in response to an inquiry.",
+          "verification": "OK: all 1 quotes found verbatim in the passages they cite (1 quotes matched only a book card — a model-written summary, not a quote from the book, so not counted as traced)",
+          "provenance": {
+            "checked": 2,
+            "checked_book_text": 1,
+            "confirmed": 1,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 1,
+            "unused": 0,
+            "broken_items": [],
+            "items": [
+              {
+                "hit_id": "s1h1",
+                "book": "The Three Musketeers — Alexandre Dumas",
+                "section": "Summary",
+                "quote": "The Three Musketeers (1844), Alexandre Dumas's swashbuckling historical novel set in 1620s France, follows young Gascon nobleman d'Artagnan as he travels to Paris to join the King's Musketeers and quickly befriends the three formidable musketeers Athos, Porthos, and Aramis, whose motto \"all for one, one for all\" defines their loyalty.",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h5",
+                "book": "The Three Musketeers — Alexandre Dumas",
+                "section": "Chapter XLVII.",
+                "quote": "\"Did you inquire the names of those three Musketeers?\"  \"Yes, monseigneur.\"  \"What are their names?\"  \"Messieurs Athos, Porthos, and Aramis.\"",
+                "status": "confirmed",
+                "source_kind": "book_text"
+              }
+            ],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            }
+          },
+          "steps_taken": 1,
+          "read_chapters": [],
+          "evidence_items": 2,
+          "evidence": [
+            {
+              "hit_id": "s1h1",
+              "book": "The Three Musketeers — Alexandre Dumas",
+              "section": "Summary",
+              "quote": "The Three Musketeers (1844), Alexandre Dumas's swashbuckling historical novel set in 1620s France, follows young Gascon nobleman d'Artagnan as he travels to Paris to join the King's Musketeers and quickly befriends the three formidable musketeers Athos, Porthos, and Aramis, whose motto \"all for one, one for all\" defines their loyalty."
+            },
+            {
+              "hit_id": "s1h5",
+              "book": "The Three Musketeers — Alexandre Dumas",
+              "section": "Chapter XLVII.",
+              "quote": "\"Did you inquire the names of those three Musketeers?\"  \"Yes, monseigneur.\"  \"What are their names?\"  \"Messieurs Athos, Porthos, and Aramis.\""
+            }
+          ],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [
+            {
+              "step": 1,
+              "distilled": 2,
+              "kept": 2,
+              "dropped": 0,
+              "dropped_streak": 0,
+              "cap_fired": false
+            }
+          ],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [
+            [
+              "names of the three musketeers",
+              ""
+            ]
+          ],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [
+            8
+          ],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "enough evidence",
+          "catalog": {},
+          "book_filter": "",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 5,
+          "steps_log": [
+            "reflect -> stop: enough evidence"
+          ],
+          "by_role_seconds": {
+            "plan": 1.0,
+            "observe": 1.8,
+            "reflect": 0.8,
+            "synthesize": 1.8
+          },
+          "cost_usd": 0.0004,
+          "llm_calls": 4,
+          "tokens_in": 5981,
+          "tokens_out": 360,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 1,
+            "titles_expected": 1,
+            "facts_found": 3,
+            "facts_expected": 3,
+            "facts_ok": true,
+            "behavior_ok": true
+          }
+        }
+      ],
+      "spread": {
+        "attempts": 3,
+        "completed": 3,
+        "errors": 0,
+        "behavior_ok": 3,
+        "facts_ok": 3,
+        "cost_usd": {
+          "min": 0.0004,
+          "median": 0.0004,
+          "max": 0.0004
+        },
+        "seconds": {
+          "min": 5,
+          "median": 7,
+          "max": 18
+        },
+        "llm_calls": {
+          "min": 4,
+          "median": 4,
+          "max": 4
+        },
+        "tokens_in": {
+          "min": 5981,
+          "median": 6088,
+          "max": 6089
+        },
+        "tokens_out": {
+          "min": 360,
+          "median": 525,
+          "max": 542
+        }
+      }
+    },
+    {
+      "id": "k08-about-whaling",
+      "type": "answer",
+      "group": "answer",
+      "question": "What do I have about whaling?",
+      "attempts": [
+        {
+          "attempt": 1,
+          "id": "k08-about-whaling",
+          "type": "answer",
+          "question": "What do I have about whaling?",
+          "answer": "Based on the evidence from *Moby Dick* by Herman Melville, what you have about whaling is a detailed, encyclopedic treatment of the subject, woven into the novel's narrative. The book includes numerous chapters that detail whale anatomy, classification, and the practical work of whaling—the chase, the kill, and the trying-out of blubber—alongside the main story [Moby Dick — Herman Melville, Plot]. The novel is described as interweaving a revenge narrative with lengthy digressive chapters on cetology, whaling technique, and philosophical meditation, making it as much an encyclopedic meditation on knowledge and obsession as an adventure story [Moby Dick — Herman Melville, Summary]. Key takeaways confirm that Melville intersperses the narrative with detailed, encyclopedic chapters on whale biology and the whaling industry [Moby Dick — Herman Melville, Key Takeaways].\n\nSpecifically, in Chapter 32 (Cetology), you have information on the sperm whale, described as the largest inhabitant of the globe, the most formidable to encounter, the most majestic in aspect, and the most valuable in commerce, being the only creature from which spermaceti is obtained [Moby Dick — Herman Melville, CHAPTER 32. Cetology.]. The same chapter also covers the right whale, which yields whalebone or baleen and \"whale oil,\" noted as an inferior article in commerce [Moby Dick — Herman Melville, CHAPTER 32. Cetology.].\n\nIn Chapter 24 (The Advocate), you have a defense of whaling as a respectable and even imperial vocation, citing old English statutory law that declares the whale a \"royal fish\" [Moby Dick — Herman Melville, CHAPTER 24. The Advocate.]. The chapter also addresses the common perception that whaling is a \"butchering sort of business\" surrounded by defilements, which the text argues is a leading reason the world declines to honor whalemen [Moby Dick — Herman Melville, CHAPTER 24. The Advocate.].\n\nThe evidence does not cover any personal or historical whaling records you might own, nor does it address modern whaling practices or regulations—it is entirely about the content of Melville's novel.",
+          "verification": "OK: all 4 quotes found verbatim in the passages they cite (3 quotes matched only a book card — a model-written summary, not a quote from the book, so not counted as traced)",
+          "provenance": {
+            "checked": 7,
+            "checked_book_text": 4,
+            "confirmed": 4,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 3,
+            "unused": 0,
+            "broken_items": [],
+            "items": [
+              {
+                "hit_id": "s1h1",
+                "book": "Moby Dick — Herman Melville",
+                "section": "Plot",
+                "quote": "Numerous chapters detail whale anatomy, classification, and the practical work of whaling (the chase, the kill, the trying-out of blubber) alongside the narrative.",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h2",
+                "book": "Moby Dick — Herman Melville",
+                "section": "Summary",
+                "quote": "Interweaving a fairly straightforward revenge narrative with lengthy digressive chapters on cetology, whaling technique, and philosophical meditation, Melville builds a novel that is as much an encyclopedic meditation on knowledge, obsession, and the unknowable as it is an adventure story.",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h3",
+                "book": "Moby Dick — Herman Melville",
+                "section": "Key Takeaways",
+                "quote": "Melville intersperses the narrative with detailed, encyclopedic chapters on whale biology and the whaling industry",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h6",
+                "book": "Moby Dick — Herman Melville",
+                "section": "CHAPTER 32. Cetology.",
+                "quote": "He is, without doubt, the largest inhabitant of the globe; the most formidable of all whales to encounter; the most majestic in aspect; and lastly, by far the most valuable in commerce; he being the only creature from which that valuable substance, spermaceti, is obtained.",
+                "status": "confirmed",
+                "source_kind": "book_text"
+              },
+              {
+                "hit_id": "s1h8",
+                "book": "Moby Dick — Herman Melville",
+                "section": "CHAPTER 32. Cetology.",
+                "quote": "It yields the article commonly known as whalebone or baleen; and the oil specially known as \"whale oil,\" an inferior article in commerce.",
+                "status": "confirmed",
+                "source_kind": "book_text"
+              },
+              {
+                "hit_id": "s2h5",
+                "book": "Moby Dick — Herman Melville",
+                "section": "CHAPTER 24. The Advocate.",
+                "quote": "Whaling not respectable? Whaling is imperial! By old English statutory law, the whale is declared “a royal fish.”",
+                "status": "confirmed",
+                "source_kind": "book_text"
+              },
+              {
+                "hit_id": "s2h6",
+                "book": "Moby Dick — Herman Melville",
+                "section": "CHAPTER 24. The Advocate.",
+                "quote": "Doubtless one leading reason why the world declines honoring us whalemen, is this: they think that, at best, our vocation amounts to a butchering sort of business; and that when actively engaged therein, we are surrounded by all manner of defilements.",
+                "status": "confirmed",
+                "source_kind": "book_text"
+              }
+            ],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            }
+          },
+          "steps_taken": 2,
+          "read_chapters": [],
+          "evidence_items": 7,
+          "evidence": [
+            {
+              "hit_id": "s1h1",
+              "book": "Moby Dick — Herman Melville",
+              "section": "Plot",
+              "quote": "Numerous chapters detail whale anatomy, classification, and the practical work of whaling (the chase, the kill, the trying-out of blubber) alongside the narrative."
+            },
+            {
+              "hit_id": "s1h2",
+              "book": "Moby Dick — Herman Melville",
+              "section": "Summary",
+              "quote": "Interweaving a fairly straightforward revenge narrative with lengthy digressive chapters on cetology, whaling technique, and philosophical meditation, Melville builds a novel that is as much an encyclopedic meditation on knowledge, obsession, and the unknowable as it is an adventure story."
+            },
+            {
+              "hit_id": "s1h3",
+              "book": "Moby Dick — Herman Melville",
+              "section": "Key Takeaways",
+              "quote": "Melville intersperses the narrative with detailed, encyclopedic chapters on whale biology and the whaling industry"
+            },
+            {
+              "hit_id": "s1h6",
+              "book": "Moby Dick — Herman Melville",
+              "section": "CHAPTER 32. Cetology.",
+              "quote": "He is, without doubt, the largest inhabitant of the globe; the most formidable of all whales to encounter; the most majestic in aspect; and lastly, by far the most valuable in commerce; he being the only creature from which that valuable substance, spermaceti, is obtained."
+            },
+            {
+              "hit_id": "s1h8",
+              "book": "Moby Dick — Herman Melville",
+              "section": "CHAPTER 32. Cetology.",
+              "quote": "It yields the article commonly known as whalebone or baleen; and the oil specially known as \"whale oil,\" an inferior article in commerce."
+            },
+            {
+              "hit_id": "s2h5",
+              "book": "Moby Dick — Herman Melville",
+              "section": "CHAPTER 24. The Advocate.",
+              "quote": "Whaling not respectable? Whaling is imperial! By old English statutory law, the whale is declared “a royal fish.”"
+            },
+            {
+              "hit_id": "s2h6",
+              "book": "Moby Dick — Herman Melville",
+              "section": "CHAPTER 24. The Advocate.",
+              "quote": "Doubtless one leading reason why the world declines honoring us whalemen, is this: they think that, at best, our vocation amounts to a butchering sort of business; and that when actively engaged therein, we are surrounded by all manner of defilements."
+            }
+          ],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [
+            {
+              "step": 1,
+              "distilled": 5,
+              "kept": 5,
+              "dropped": 0,
+              "dropped_streak": 0,
+              "cap_fired": false
+            },
+            {
+              "step": 2,
+              "distilled": 2,
+              "kept": 2,
+              "dropped": 0,
+              "dropped_streak": 0,
+              "cap_fired": false
+            }
+          ],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [
+            [
+              "whaling",
+              ""
+            ],
+            [
+              "whaling industry",
+              ""
+            ]
+          ],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [
+            8,
+            3
+          ],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "enough evidence",
+          "catalog": {},
+          "book_filter": "",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 11,
+          "steps_log": [
+            "reflect -> whaling industry",
+            "reflect -> stop: enough evidence"
+          ],
+          "by_role_seconds": {
+            "plan": 0.9,
+            "observe": 4.2,
+            "reflect": 2.3,
+            "synthesize": 3.0
+          },
+          "cost_usd": 0.0008,
+          "llm_calls": 6,
+          "tokens_in": 10311,
+          "tokens_out": 1141,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 1,
+            "titles_expected": 1,
+            "facts_found": 1,
+            "facts_expected": 1,
+            "facts_ok": true,
+            "behavior_ok": true
+          }
+        },
+        {
+          "attempt": 2,
+          "id": "k08-about-whaling",
+          "type": "answer",
+          "question": "What do I have about whaling?",
+          "answer": "Based on the evidence from *Moby Dick* by Herman Melville, you have extensive material about whaling. The book's plot includes \"Numerous chapters detail whale anatomy, classification, and the practical work of whaling (the chase, the kill, the trying-out of blubber) alongside the narrative\" [Moby Dick — Herman Melville, Plot]. The summary notes that Melville \"Interweaving a fairly straightforward revenge narrative with lengthy digressive chapters on cetology, whaling technique, and philosophical meditation\" [Moby Dick — Herman Melville, Summary]. The key takeaways state that \"Melville intersperses the narrative with detailed, encyclopedic chapters on whale biology and the whaling industry\" [Moby Dick — Herman Melville, Key Takeaways].\n\nSpecific details from Chapter 32, \"Cetology,\" describe the sperm whale as \"the largest inhabitant of the globe; the most formidable of all whales to encounter; the most majestic in aspect; and lastly, by far the most valuable in commerce; he being the only creature from which that valuable substance, spermaceti, is obtained\" [Moby Dick — Herman Melville, CHAPTER 32. Cetology.]. The same chapter also mentions that the right whale \"yields the article commonly known as whalebone or baleen; and the oil specially known as 'whale oil,' an inferior article in commerce\" [Moby Dick — Herman Melville, CHAPTER 32. Cetology.].\n\nThe evidence covers the practical aspects of whaling (chase, kill, blubber processing), the encyclopedic treatment of whale biology and classification, and the commercial value of whale products. It does not, however, provide information on the historical, economic, or cultural context of whaling beyond what is stated above, nor does it cover any personal or specific details about your own involvement with whaling.",
+          "verification": "OK: all 2 quotes found verbatim in the passages they cite (3 quotes matched only a book card — a model-written summary, not a quote from the book, so not counted as traced)",
+          "provenance": {
+            "checked": 5,
+            "checked_book_text": 2,
+            "confirmed": 2,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 3,
+            "unused": 0,
+            "broken_items": [],
+            "items": [
+              {
+                "hit_id": "s1h1",
+                "book": "Moby Dick — Herman Melville",
+                "section": "Plot",
+                "quote": "Numerous chapters detail whale anatomy, classification, and the practical work of whaling (the chase, the kill, the trying-out of blubber) alongside the narrative.",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h2",
+                "book": "Moby Dick — Herman Melville",
+                "section": "Summary",
+                "quote": "Interweaving a fairly straightforward revenge narrative with lengthy digressive chapters on cetology, whaling technique, and philosophical meditation, Melville builds a novel that is as much an encyclopedic meditation on knowledge, obsession, and the unknowable as it is an adventure story.",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h3",
+                "book": "Moby Dick — Herman Melville",
+                "section": "Key Takeaways",
+                "quote": "Melville intersperses the narrative with detailed, encyclopedic chapters on whale biology and the whaling industry",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h6",
+                "book": "Moby Dick — Herman Melville",
+                "section": "CHAPTER 32. Cetology.",
+                "quote": "He is, without doubt, the largest inhabitant of the globe; the most formidable of all whales to encounter; the most majestic in aspect; and lastly, by far the most valuable in commerce; he being the only creature from which that valuable substance, spermaceti, is obtained.",
+                "status": "confirmed",
+                "source_kind": "book_text"
+              },
+              {
+                "hit_id": "s1h8",
+                "book": "Moby Dick — Herman Melville",
+                "section": "CHAPTER 32. Cetology.",
+                "quote": "It yields the article commonly known as whalebone or baleen; and the oil specially known as \"whale oil,\" an inferior article in commerce.",
+                "status": "confirmed",
+                "source_kind": "book_text"
+              }
+            ],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            }
+          },
+          "steps_taken": 1,
+          "read_chapters": [],
+          "evidence_items": 5,
+          "evidence": [
+            {
+              "hit_id": "s1h1",
+              "book": "Moby Dick — Herman Melville",
+              "section": "Plot",
+              "quote": "Numerous chapters detail whale anatomy, classification, and the practical work of whaling (the chase, the kill, the trying-out of blubber) alongside the narrative."
+            },
+            {
+              "hit_id": "s1h2",
+              "book": "Moby Dick — Herman Melville",
+              "section": "Summary",
+              "quote": "Interweaving a fairly straightforward revenge narrative with lengthy digressive chapters on cetology, whaling technique, and philosophical meditation, Melville builds a novel that is as much an encyclopedic meditation on knowledge, obsession, and the unknowable as it is an adventure story."
+            },
+            {
+              "hit_id": "s1h3",
+              "book": "Moby Dick — Herman Melville",
+              "section": "Key Takeaways",
+              "quote": "Melville intersperses the narrative with detailed, encyclopedic chapters on whale biology and the whaling industry"
+            },
+            {
+              "hit_id": "s1h6",
+              "book": "Moby Dick — Herman Melville",
+              "section": "CHAPTER 32. Cetology.",
+              "quote": "He is, without doubt, the largest inhabitant of the globe; the most formidable of all whales to encounter; the most majestic in aspect; and lastly, by far the most valuable in commerce; he being the only creature from which that valuable substance, spermaceti, is obtained."
+            },
+            {
+              "hit_id": "s1h8",
+              "book": "Moby Dick — Herman Melville",
+              "section": "CHAPTER 32. Cetology.",
+              "quote": "It yields the article commonly known as whalebone or baleen; and the oil specially known as \"whale oil,\" an inferior article in commerce."
+            }
+          ],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [
+            {
+              "step": 1,
+              "distilled": 5,
+              "kept": 5,
+              "dropped": 0,
+              "dropped_streak": 0,
+              "cap_fired": false
+            }
+          ],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [
+            [
+              "whaling",
+              ""
+            ]
+          ],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [
+            8
+          ],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "enough evidence",
+          "catalog": {},
+          "book_filter": "",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 7,
+          "steps_log": [
+            "reflect -> stop: enough evidence"
+          ],
+          "by_role_seconds": {
+            "plan": 1.1,
+            "observe": 2.4,
+            "reflect": 1.0,
+            "synthesize": 2.7
+          },
+          "cost_usd": 0.0004,
+          "llm_calls": 4,
+          "tokens_in": 5725,
+          "tokens_out": 867,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 1,
+            "titles_expected": 1,
+            "facts_found": 1,
+            "facts_expected": 1,
+            "facts_ok": true,
+            "behavior_ok": true
+          }
+        },
+        {
+          "attempt": 3,
+          "id": "k08-about-whaling",
+          "type": "answer",
+          "question": "What do I have about whaling?",
+          "answer": "Based on the evidence from *Moby Dick* by Herman Melville, you have extensive material on whaling. The book covers the practical work of whaling, including the chase, the kill, and the trying-out of blubber, as detailed in the Plot section [Moby Dick — Herman Melville, Plot]. The Summary notes that the novel includes lengthy digressive chapters on whaling technique [Moby Dick — Herman Melville, Summary], and the Key Takeaways confirm detailed, encyclopedic chapters on the whaling industry [Moby Dick — Herman Melville, Key Takeaways].\n\nSpecific details include: the sperm whale is described as the most valuable in commerce, being the only creature from which spermaceti is obtained [Moby Dick — Herman Melville, CHAPTER 32. Cetology.]; the Right Whale yields whalebone or baleen and an inferior \"whale oil\" [Moby Dick — Herman Melville, CHAPTER 32. Cetology.]. The book also discusses the social status of whaling, noting that by old English statutory law the whale is declared \"a royal fish\" and that whaling is \"imperial\" [Moby Dick — Herman Melville, CHAPTER 24. The Advocate.], while acknowledging that the world often views whalemen as engaged in a \"butchering sort of business\" [Moby Dick — Herman Melville, CHAPTER 24. The Advocate.]. Additionally, there is material on whaling culture, such as scrimshaw—sketches and carvings made by fishermen on whale teeth and bone [Moby Dick — Herman Melville, CHAPTER 57. Of Whales in Paint; in Teeth; in Wood; in Sheet-Iron; in], and the peculiarities of the whale fishery as a profession [Moby Dick — Herman Melville, CHAPTER 53. The Gam.].\n\nThe evidence does not cover every aspect of whaling (e.g., specific hunting techniques in detail, economic history, or modern whaling), so if you need those, that information is missing from the provided material.",
+          "verification": "OK: all 6 quotes found verbatim in the passages they cite (3 quotes matched only a book card — a model-written summary, not a quote from the book, so not counted as traced)",
+          "provenance": {
+            "checked": 9,
+            "checked_book_text": 6,
+            "confirmed": 6,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 3,
+            "unused": 0,
+            "broken_items": [],
+            "items": [
+              {
+                "hit_id": "s1h1",
+                "book": "Moby Dick — Herman Melville",
+                "section": "Plot",
+                "quote": "Numerous chapters detail whale anatomy, classification, and the practical work of whaling (the chase, the kill, the trying-out of blubber) alongside the narrative.",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h2",
+                "book": "Moby Dick — Herman Melville",
+                "section": "Summary",
+                "quote": "Interweaving a fairly straightforward revenge narrative with lengthy digressive chapters on cetology, whaling technique, and philosophical meditation, Melville builds a novel that is as much an encyclopedic meditation on knowledge, obsession, and the unknowable as it is an adventure story.",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h3",
+                "book": "Moby Dick — Herman Melville",
+                "section": "Key Takeaways",
+                "quote": "Melville intersperses the narrative with detailed, encyclopedic chapters on whale biology and the whaling industry",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h6",
+                "book": "Moby Dick — Herman Melville",
+                "section": "CHAPTER 32. Cetology.",
+                "quote": "He is, without doubt, the largest inhabitant of the globe; the most formidable of all whales to encounter; the most majestic in aspect; and lastly, by far the most valuable in commerce; he being the only creature from which that valuable substance, spermaceti, is obtained.",
+                "status": "confirmed",
+                "source_kind": "book_text"
+              },
+              {
+                "hit_id": "s1h8",
+                "book": "Moby Dick — Herman Melville",
+                "section": "CHAPTER 32. Cetology.",
+                "quote": "It yields the article commonly known as whalebone or baleen; and the oil specially known as \"whale oil,\" an inferior article in commerce.",
+                "status": "confirmed",
+                "source_kind": "book_text"
+              },
+              {
+                "hit_id": "s2h5",
+                "book": "Moby Dick — Herman Melville",
+                "section": "CHAPTER 24. The Advocate.",
+                "quote": "Whaling not respectable? Whaling is imperial! By old English statutory law, the whale is declared “a royal fish.”",
+                "status": "confirmed",
+                "source_kind": "book_text"
+              },
+              {
+                "hit_id": "s2h6",
+                "book": "Moby Dick — Herman Melville",
+                "section": "CHAPTER 24. The Advocate.",
+                "quote": "Doubtless one leading reason why the world declines honoring us whalemen, is this: they think that, at best, our vocation amounts to a butchering sort of business; and that when actively engaged therein, we are surrounded by all manner of defilements.",
+                "status": "confirmed",
+                "source_kind": "book_text"
+              },
+              {
+                "hit_id": "s2h7",
+                "book": "Moby Dick — Herman Melville",
+                "section": "CHAPTER 57. Of Whales in Paint; in Teeth; in Wood; in Sheet-Iron; in",
+                "quote": "Throughout the Pacific, and also in Nantucket, and New Bedford, and Sag Harbor, you will come across lively sketches of whales and whaling-scenes, graven by the fishermen themselves on Sperm Whale-teeth, or ladies’ busks wrought out of the Right Whale-bone, and other like skrimshander articles, as the whalemen call the numerous little ingenious contrivances they elaborately carve out of the rough material, in their hours of ocean leisure.",
+                "status": "confirmed",
+                "source_kind": "book_text"
+              },
+              {
+                "hit_id": "s2h8",
+                "book": "Moby Dick — Herman Melville",
+                "section": "CHAPTER 53. The Gam.",
+                "quote": "All professions have their own little peculiarities of detail; so has the whale fishery.",
+                "status": "confirmed",
+                "source_kind": "book_text"
+              }
+            ],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            }
+          },
+          "steps_taken": 2,
+          "read_chapters": [],
+          "evidence_items": 9,
+          "evidence": [
+            {
+              "hit_id": "s1h1",
+              "book": "Moby Dick — Herman Melville",
+              "section": "Plot",
+              "quote": "Numerous chapters detail whale anatomy, classification, and the practical work of whaling (the chase, the kill, the trying-out of blubber) alongside the narrative."
+            },
+            {
+              "hit_id": "s1h2",
+              "book": "Moby Dick — Herman Melville",
+              "section": "Summary",
+              "quote": "Interweaving a fairly straightforward revenge narrative with lengthy digressive chapters on cetology, whaling technique, and philosophical meditation, Melville builds a novel that is as much an encyclopedic meditation on knowledge, obsession, and the unknowable as it is an adventure story."
+            },
+            {
+              "hit_id": "s1h3",
+              "book": "Moby Dick — Herman Melville",
+              "section": "Key Takeaways",
+              "quote": "Melville intersperses the narrative with detailed, encyclopedic chapters on whale biology and the whaling industry"
+            },
+            {
+              "hit_id": "s1h6",
+              "book": "Moby Dick — Herman Melville",
+              "section": "CHAPTER 32. Cetology.",
+              "quote": "He is, without doubt, the largest inhabitant of the globe; the most formidable of all whales to encounter; the most majestic in aspect; and lastly, by far the most valuable in commerce; he being the only creature from which that valuable substance, spermaceti, is obtained."
+            },
+            {
+              "hit_id": "s1h8",
+              "book": "Moby Dick — Herman Melville",
+              "section": "CHAPTER 32. Cetology.",
+              "quote": "It yields the article commonly known as whalebone or baleen; and the oil specially known as \"whale oil,\" an inferior article in commerce."
+            },
+            {
+              "hit_id": "s2h5",
+              "book": "Moby Dick — Herman Melville",
+              "section": "CHAPTER 24. The Advocate.",
+              "quote": "Whaling not respectable? Whaling is imperial! By old English statutory law, the whale is declared “a royal fish.”"
+            },
+            {
+              "hit_id": "s2h6",
+              "book": "Moby Dick — Herman Melville",
+              "section": "CHAPTER 24. The Advocate.",
+              "quote": "Doubtless one leading reason why the world declines honoring us whalemen, is this: they think that, at best, our vocation amounts to a butchering sort of business; and that when actively engaged therein, we are surrounded by all manner of defilements."
+            },
+            {
+              "hit_id": "s2h7",
+              "book": "Moby Dick — Herman Melville",
+              "section": "CHAPTER 57. Of Whales in Paint; in Teeth; in Wood; in Sheet-Iron; in",
+              "quote": "Throughout the Pacific, and also in Nantucket, and New Bedford, and Sag Harbor, you will come across lively sketches of whales and whaling-scenes, graven by the fishermen themselves on Sperm Whale-teeth, or ladies’ busks wrought out of the Right Whale-bone, and other like skrimshander articles, as the whalemen call the numerous little ingenious contrivances they elaborately carve out of the rough material, in their hours of ocean leisure."
+            },
+            {
+              "hit_id": "s2h8",
+              "book": "Moby Dick — Herman Melville",
+              "section": "CHAPTER 53. The Gam.",
+              "quote": "All professions have their own little peculiarities of detail; so has the whale fishery."
+            }
+          ],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [
+            {
+              "step": 1,
+              "distilled": 5,
+              "kept": 5,
+              "dropped": 0,
+              "dropped_streak": 0,
+              "cap_fired": false
+            },
+            {
+              "step": 2,
+              "distilled": 4,
+              "kept": 4,
+              "dropped": 0,
+              "dropped_streak": 0,
+              "cap_fired": false
+            }
+          ],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [
+            [
+              "whaling",
+              ""
+            ],
+            [
+              "whaling industry",
+              ""
+            ]
+          ],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [
+            8,
+            3
+          ],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "enough evidence",
+          "catalog": {},
+          "book_filter": "",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 11,
+          "steps_log": [
+            "reflect -> whaling industry",
+            "reflect -> stop: enough evidence"
+          ],
+          "by_role_seconds": {
+            "plan": 0.8,
+            "observe": 4.7,
+            "reflect": 2.2,
+            "synthesize": 3.6
+          },
+          "cost_usd": 0.0008,
+          "llm_calls": 6,
+          "tokens_in": 10641,
+          "tokens_out": 1333,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 1,
+            "titles_expected": 1,
+            "facts_found": 1,
+            "facts_expected": 1,
+            "facts_ok": true,
+            "behavior_ok": true
+          }
+        }
+      ],
+      "spread": {
+        "attempts": 3,
+        "completed": 3,
+        "errors": 0,
+        "behavior_ok": 3,
+        "facts_ok": 3,
+        "cost_usd": {
+          "min": 0.0004,
+          "median": 0.0008,
+          "max": 0.0008
+        },
+        "seconds": {
+          "min": 7,
+          "median": 11,
+          "max": 11
+        },
+        "llm_calls": {
+          "min": 4,
+          "median": 6,
+          "max": 6
+        },
+        "tokens_in": {
+          "min": 5725,
+          "median": 10311,
+          "max": 10641
+        },
+        "tokens_out": {
+          "min": 867,
+          "median": 1141,
+          "max": 1333
+        }
+      }
+    },
+    {
+      "id": "k09-mention-london",
+      "type": "answer",
+      "group": "answer",
+      "question": "Which of my books mention London?",
+      "attempts": [
+        {
+          "attempt": 1,
+          "id": "k09-mention-london",
+          "type": "answer",
+          "question": "Which of my books mention London?",
+          "answer": "Based on the evidence provided, the books that mention London are:\n\n- **The War of the Worlds** by H. G. Wells — mentioned in the Plot, Summary, and chapters XIV (\"IN LONDON\") and VIII (\"DEAD LONDON\"), e.g., \"London, which had gone to bed on Sunday night oblivious and inert, was awakened... to a vivid sense of danger\" [The War of the Worlds — H. G. Wells, XIV. IN LONDON.] and \"The farther I penetrated into London, the profounder grew the stillness\" [The War of the Worlds — H. G. Wells, VIII. DEAD LONDON.].\n\n- **The Adventures of Sherlock Holmes** by Arthur Conan Doyle — mentioned in the Themes section, referring to \"Victorian London's underworld and class contrasts\" [The Adventures of Sherlock Holmes — Arthur Conan Doyle, Themes].\n\n- **Around the World in Eighty Days** by Jules Verne — mentioned in the Characters section (\"a wealthy, imperturbably precise London gentleman\") and in CHAPTER XXXIV (\"all the clocks in London were striking ten minutes before nine\") [Around the World in Eighty Days — Jules Verne, Characters; CHAPTER XXXIV.].\n\n- **Dracula** by Bram Stoker — mentioned in CHAPTER II, with the quote \"I long to go through the crowded streets of your mighty London\" [Dracula — Bram Stoker, CHAPTER II].\n\nThe evidence does not indicate whether any other books in your collection mention London; it only covers these four titles.",
+          "verification": "OK: all 4 quotes found verbatim in the passages they cite (4 quotes matched only a book card — a model-written summary, not a quote from the book, so not counted as traced)",
+          "provenance": {
+            "checked": 8,
+            "checked_book_text": 4,
+            "confirmed": 4,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 4,
+            "unused": 0,
+            "broken_items": [],
+            "items": [
+              {
+                "hit_id": "s1h1",
+                "book": "The War of the Worlds — H. G. Wells",
+                "section": "Plot",
+                "quote": "mass panic drives Londoners into flight.",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h2",
+                "book": "The War of the Worlds — H. G. Wells",
+                "section": "Summary",
+                "quote": "runs alongside his brother's account of the panicked evacuation of London.",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h3",
+                "book": "The Adventures of Sherlock Holmes — Arthur Conan Doyle",
+                "section": "Themes",
+                "quote": "Victorian London's underworld and class contrasts",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h4",
+                "book": "Around the World in Eighty Days — Jules Verne",
+                "section": "Characters",
+                "quote": "a wealthy, imperturbably precise London gentleman",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h5",
+                "book": "The War of the Worlds — H. G. Wells",
+                "section": "XIV. IN LONDON.",
+                "quote": "London, which had gone to bed on Sunday night oblivious and inert, was awakened, in the small hours of Monday morning, to a vivid sense of danger.",
+                "status": "confirmed",
+                "source_kind": "book_text"
+              },
+              {
+                "hit_id": "s1h6",
+                "book": "Around the World in Eighty Days — Jules Verne",
+                "section": "CHAPTER XXXIV.",
+                "quote": "all the clocks in London were striking ten minutes before nine.",
+                "status": "confirmed",
+                "source_kind": "book_text"
+              },
+              {
+                "hit_id": "s1h7",
+                "book": "The War of the Worlds — H. G. Wells",
+                "section": "VIII. DEAD LONDON.",
+                "quote": "The farther I penetrated into London, the profounder grew the stillness.",
+                "status": "confirmed",
+                "source_kind": "book_text"
+              },
+              {
+                "hit_id": "s1h8",
+                "book": "Dracula — Bram Stoker",
+                "section": "CHAPTER II",
+                "quote": "I long to go through the crowded streets of your mighty London",
+                "status": "confirmed",
+                "source_kind": "book_text"
+              }
+            ],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            }
+          },
+          "steps_taken": 1,
+          "read_chapters": [],
+          "evidence_items": 8,
+          "evidence": [
+            {
+              "hit_id": "s1h1",
+              "book": "The War of the Worlds — H. G. Wells",
+              "section": "Plot",
+              "quote": "mass panic drives Londoners into flight."
+            },
+            {
+              "hit_id": "s1h2",
+              "book": "The War of the Worlds — H. G. Wells",
+              "section": "Summary",
+              "quote": "runs alongside his brother's account of the panicked evacuation of London."
+            },
+            {
+              "hit_id": "s1h3",
+              "book": "The Adventures of Sherlock Holmes — Arthur Conan Doyle",
+              "section": "Themes",
+              "quote": "Victorian London's underworld and class contrasts"
+            },
+            {
+              "hit_id": "s1h4",
+              "book": "Around the World in Eighty Days — Jules Verne",
+              "section": "Characters",
+              "quote": "a wealthy, imperturbably precise London gentleman"
+            },
+            {
+              "hit_id": "s1h5",
+              "book": "The War of the Worlds — H. G. Wells",
+              "section": "XIV. IN LONDON.",
+              "quote": "London, which had gone to bed on Sunday night oblivious and inert, was awakened, in the small hours of Monday morning, to a vivid sense of danger."
+            },
+            {
+              "hit_id": "s1h6",
+              "book": "Around the World in Eighty Days — Jules Verne",
+              "section": "CHAPTER XXXIV.",
+              "quote": "all the clocks in London were striking ten minutes before nine."
+            },
+            {
+              "hit_id": "s1h7",
+              "book": "The War of the Worlds — H. G. Wells",
+              "section": "VIII. DEAD LONDON.",
+              "quote": "The farther I penetrated into London, the profounder grew the stillness."
+            },
+            {
+              "hit_id": "s1h8",
+              "book": "Dracula — Bram Stoker",
+              "section": "CHAPTER II",
+              "quote": "I long to go through the crowded streets of your mighty London"
+            }
+          ],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [
+            {
+              "step": 1,
+              "distilled": 8,
+              "kept": 8,
+              "dropped": 0,
+              "dropped_streak": 0,
+              "cap_fired": false
+            }
+          ],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [
+            [
+              "london",
+              ""
+            ]
+          ],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [
+            8
+          ],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "enough evidence",
+          "catalog": {},
+          "book_filter": "",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 6,
+          "steps_log": [
+            "reflect -> stop: enough evidence"
+          ],
+          "by_role_seconds": {
+            "plan": 0.6,
+            "observe": 2.5,
+            "reflect": 0.5,
+            "synthesize": 2.4
+          },
+          "cost_usd": 0.0004,
+          "llm_calls": 4,
+          "tokens_in": 5309,
+          "tokens_out": 878,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 0,
+            "titles_expected": 0,
+            "facts_found": 0,
+            "facts_expected": 0,
+            "facts_ok": true,
+            "behavior_ok": true
+          }
+        },
+        {
+          "attempt": 2,
+          "id": "k09-mention-london",
+          "type": "answer",
+          "question": "Which of my books mention London?",
+          "answer": "Both of your books that mention London are **The War of the Worlds** by H. G. Wells and **Around the World in Eighty Days** by Jules Verne.\n\n- In **The War of the Worlds**, London is mentioned in the Plot and Summary sections: \"mass panic drives Londoners into flight\" [The War of the Worlds — H. G. Wells, Plot], \"the narrator's brother describes London's chaotic exodus\" [The War of the Worlds — H. G. Wells, Plot], \"Returning to a seemingly abandoned London\" [The War of the Worlds — H. G. Wells, Plot], and \"his brother's account of the panicked evacuation of London\" [The War of the Worlds — H. G. Wells, Summary].\n\n- In **Around the World in Eighty Days**, London is mentioned in the Plot section: \"Phileas Fogg, a wealthy, exactingly punctual London gentleman\" [Around the World in Eighty Days — Jules Verne, Plot].\n\nThe evidence also includes mentions of London in **Gulliver's Travels** by Jonathan Swift (\"the Thames at London Bridge\" [Gulliver's Travels — Jonathan Swift, PART II — CHAPTER II.]) and **Wuthering Heights** by Emily Brontë (\"how to get to London\" [Wuthering Heights — Emily Brontë, CHAPTER II]), but these are not your books — they are other authors' works cited in the evidence. If you meant only books you own or wrote, the answer is the two above. If you meant all books in the evidence, then all four are mentioned, but the question asks \"my books,\" so I have limited it to the two that are clearly attributed to you as the questioner's collection.",
+          "verification": "OK: all 2 quotes found verbatim in the passages they cite (6 quotes matched only a book card — a model-written summary, not a quote from the book, so not counted as traced)",
+          "provenance": {
+            "checked": 8,
+            "checked_book_text": 2,
+            "confirmed": 2,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 6,
+            "unused": 0,
+            "broken_items": [],
+            "items": [
+              {
+                "hit_id": "s1h1",
+                "book": "The War of the Worlds — H. G. Wells",
+                "section": "Plot",
+                "quote": "As the Martians advance, deploying poisonous Black Smoke, mass panic drives Londoners into flight.",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h1",
+                "book": "The War of the Worlds — H. G. Wells",
+                "section": "Plot",
+                "quote": "In a separate strand, the narrator's brother describes London's chaotic exodus and joins the Elphinstone sisters fleeing toward the coast, witnessing the ironclad Thunder Child ram two tripods before being destroyed itself.",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h1",
+                "book": "The War of the Worlds — H. G. Wells",
+                "section": "Plot",
+                "quote": "Returning to a seemingly abandoned London, the narrator finds the Martians already dead in their machines, killed by Earth's bacteria and pathogens against which they had no resistance.",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h4",
+                "book": "The War of the Worlds — H. G. Wells",
+                "section": "Summary",
+                "quote": "The narrator's ordeal, trapped near a Martian encampment and separated from his wife, runs alongside his brother's account of the panicked evacuation of London.",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h3",
+                "book": "Around the World in Eighty Days — Jules Verne",
+                "section": "Plot",
+                "quote": "Phileas Fogg, a wealthy, exactingly punctual London gentleman, bets his fellow Reform Club members twenty thousand pounds that he can travel around the world in eighty days using the era's new steamship and railway networks.",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h3",
+                "book": "Around the World in Eighty Days — Jules Verne",
+                "section": "Plot",
+                "quote": "In a final twist, Fogg realizes that by traveling eastward around the globe he has gained a full day across the International Date Line, arriving with time to spare.",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h5",
+                "book": "Gulliver's Travels — Jonathan Swift",
+                "section": "PART II — CHAPTER II.",
+                "quote": "and there was hardly a rivulet so small as the Thames at London Bridge.",
+                "status": "confirmed",
+                "source_kind": "book_text"
+              },
+              {
+                "hit_id": "s1h6",
+                "book": "Wuthering Heights — Emily Brontë",
+                "section": "CHAPTER II",
+                "quote": "I have no more idea how to get there than you would have how to get to London!",
+                "status": "confirmed",
+                "source_kind": "book_text"
+              }
+            ],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            }
+          },
+          "steps_taken": 1,
+          "read_chapters": [],
+          "evidence_items": 8,
+          "evidence": [
+            {
+              "hit_id": "s1h1",
+              "book": "The War of the Worlds — H. G. Wells",
+              "section": "Plot",
+              "quote": "As the Martians advance, deploying poisonous Black Smoke, mass panic drives Londoners into flight."
+            },
+            {
+              "hit_id": "s1h1",
+              "book": "The War of the Worlds — H. G. Wells",
+              "section": "Plot",
+              "quote": "In a separate strand, the narrator's brother describes London's chaotic exodus and joins the Elphinstone sisters fleeing toward the coast, witnessing the ironclad Thunder Child ram two tripods before being destroyed itself."
+            },
+            {
+              "hit_id": "s1h1",
+              "book": "The War of the Worlds — H. G. Wells",
+              "section": "Plot",
+              "quote": "Returning to a seemingly abandoned London, the narrator finds the Martians already dead in their machines, killed by Earth's bacteria and pathogens against which they had no resistance."
+            },
+            {
+              "hit_id": "s1h4",
+              "book": "The War of the Worlds — H. G. Wells",
+              "section": "Summary",
+              "quote": "The narrator's ordeal, trapped near a Martian encampment and separated from his wife, runs alongside his brother's account of the panicked evacuation of London."
+            },
+            {
+              "hit_id": "s1h3",
+              "book": "Around the World in Eighty Days — Jules Verne",
+              "section": "Plot",
+              "quote": "Phileas Fogg, a wealthy, exactingly punctual London gentleman, bets his fellow Reform Club members twenty thousand pounds that he can travel around the world in eighty days using the era's new steamship and railway networks."
+            },
+            {
+              "hit_id": "s1h3",
+              "book": "Around the World in Eighty Days — Jules Verne",
+              "section": "Plot",
+              "quote": "In a final twist, Fogg realizes that by traveling eastward around the globe he has gained a full day across the International Date Line, arriving with time to spare."
+            },
+            {
+              "hit_id": "s1h5",
+              "book": "Gulliver's Travels — Jonathan Swift",
+              "section": "PART II — CHAPTER II.",
+              "quote": "and there was hardly a rivulet so small as the Thames at London Bridge."
+            },
+            {
+              "hit_id": "s1h6",
+              "book": "Wuthering Heights — Emily Brontë",
+              "section": "CHAPTER II",
+              "quote": "I have no more idea how to get there than you would have how to get to London!"
+            }
+          ],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [
+            {
+              "step": 1,
+              "distilled": 8,
+              "kept": 8,
+              "dropped": 0,
+              "dropped_streak": 0,
+              "cap_fired": false
+            }
+          ],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [
+            [
+              "london mentioned in book",
+              ""
+            ]
+          ],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [
+            8
+          ],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "enough evidence",
+          "catalog": {},
+          "book_filter": "",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 10,
+          "steps_log": [
+            "reflect -> stop: enough evidence"
+          ],
+          "by_role_seconds": {
+            "plan": 0.7,
+            "observe": 5.1,
+            "reflect": 1.2,
+            "synthesize": 3.0
+          },
+          "cost_usd": 0.0005,
+          "llm_calls": 4,
+          "tokens_in": 6206,
+          "tokens_out": 1055,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 0,
+            "titles_expected": 0,
+            "facts_found": 0,
+            "facts_expected": 0,
+            "facts_ok": true,
+            "behavior_ok": true
+          }
+        },
+        {
+          "attempt": 3,
+          "id": "k09-mention-london",
+          "type": "answer",
+          "question": "Which of my books mention London?",
+          "answer": "Based on the evidence provided, the books that mention London are:\n\n- **The War of the Worlds** by H. G. Wells: London is mentioned multiple times, including the mass panic driving Londoners into flight, the chaotic exodus of London, and the narrator returning to an abandoned London. [The War of the Worlds — H. G. Wells, Plot] and [The War of the Worlds — H. G. Wells, Summary]\n- **Around the World in Eighty Days** by Jules Verne: London is mentioned as the home of Phileas Fogg, a London gentleman, and the location of the Reform Club. [Around the World in Eighty Days — Jules Verne, Plot]\n- **Gulliver's Travels** by Jonathan Swift: London is mentioned in a comparison to the Thames at London Bridge. [Gulliver's Travels — Jonathan Swift, PART II — CHAPTER II.]\n- **Wuthering Heights** by Emily Brontë: London is mentioned in a simile about not knowing how to get there. [Wuthering Heights — Emily Brontë, CHAPTER II]\n- **Moby Dick** by Herman Melville: London is mentioned in reference to a London edition of 1807. [Moby Dick — Herman Melville, CHAPTER 55. Of the Monstrous Pictures of Whales.]\n\nThe evidence does not cover any other books you might own, so I cannot confirm whether other books mention London.",
+          "verification": "OK: all 3 quotes found verbatim in the passages they cite (6 quotes matched only a book card — a model-written summary, not a quote from the book, so not counted as traced)",
+          "provenance": {
+            "checked": 9,
+            "checked_book_text": 3,
+            "confirmed": 3,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 6,
+            "unused": 0,
+            "broken_items": [],
+            "items": [
+              {
+                "hit_id": "s1h1",
+                "book": "The War of the Worlds — H. G. Wells",
+                "section": "Plot",
+                "quote": "As the Martians advance, deploying poisonous Black Smoke, mass panic drives Londoners into flight.",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h1",
+                "book": "The War of the Worlds — H. G. Wells",
+                "section": "Plot",
+                "quote": "In a separate strand, the narrator's brother describes London's chaotic exodus and joins the Elphinstone sisters fleeing toward the coast, witnessing the ironclad Thunder Child ram two tripods before being destroyed itself.",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h1",
+                "book": "The War of the Worlds — H. G. Wells",
+                "section": "Plot",
+                "quote": "Returning to a seemingly abandoned London, the narrator finds the Martians already dead in their machines, killed by Earth's bacteria and pathogens against which they had no resistance.",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h3",
+                "book": "Around the World in Eighty Days — Jules Verne",
+                "section": "Plot",
+                "quote": "Phileas Fogg, a wealthy, exactingly punctual London gentleman, bets his fellow Reform Club members twenty thousand pounds that he can travel around the world in eighty days using the era's new steamship and railway networks.",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h3",
+                "book": "Around the World in Eighty Days — Jules Verne",
+                "section": "Plot",
+                "quote": "In a final twist, Fogg realizes that by traveling eastward around the globe he has gained a full day across the International Date Line, arriving with time to spare.",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h4",
+                "book": "The War of the Worlds — H. G. Wells",
+                "section": "Summary",
+                "quote": "The narrator's ordeal, trapped near a Martian encampment and separated from his wife, runs alongside his brother's account of the panicked evacuation of London.",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h5",
+                "book": "Gulliver's Travels — Jonathan Swift",
+                "section": "PART II — CHAPTER II.",
+                "quote": "and there was hardly a rivulet so small as the Thames at London Bridge.",
+                "status": "confirmed",
+                "source_kind": "book_text"
+              },
+              {
+                "hit_id": "s1h6",
+                "book": "Wuthering Heights — Emily Brontë",
+                "section": "CHAPTER II",
+                "quote": "I have no more idea how to get there than you would have how to get to London!",
+                "status": "confirmed",
+                "source_kind": "book_text"
+              },
+              {
+                "hit_id": "s1h8",
+                "book": "Moby Dick — Herman Melville",
+                "section": "CHAPTER 55. Of the Monstrous Pictures of Whales.",
+                "quote": "In the abridged London edition of 1807, there are plates of an alleged “whale” and a “narwhale.”",
+                "status": "confirmed",
+                "source_kind": "book_text"
+              }
+            ],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            }
+          },
+          "steps_taken": 1,
+          "read_chapters": [],
+          "evidence_items": 9,
+          "evidence": [
+            {
+              "hit_id": "s1h1",
+              "book": "The War of the Worlds — H. G. Wells",
+              "section": "Plot",
+              "quote": "As the Martians advance, deploying poisonous Black Smoke, mass panic drives Londoners into flight."
+            },
+            {
+              "hit_id": "s1h1",
+              "book": "The War of the Worlds — H. G. Wells",
+              "section": "Plot",
+              "quote": "In a separate strand, the narrator's brother describes London's chaotic exodus and joins the Elphinstone sisters fleeing toward the coast, witnessing the ironclad Thunder Child ram two tripods before being destroyed itself."
+            },
+            {
+              "hit_id": "s1h1",
+              "book": "The War of the Worlds — H. G. Wells",
+              "section": "Plot",
+              "quote": "Returning to a seemingly abandoned London, the narrator finds the Martians already dead in their machines, killed by Earth's bacteria and pathogens against which they had no resistance."
+            },
+            {
+              "hit_id": "s1h3",
+              "book": "Around the World in Eighty Days — Jules Verne",
+              "section": "Plot",
+              "quote": "Phileas Fogg, a wealthy, exactingly punctual London gentleman, bets his fellow Reform Club members twenty thousand pounds that he can travel around the world in eighty days using the era's new steamship and railway networks."
+            },
+            {
+              "hit_id": "s1h3",
+              "book": "Around the World in Eighty Days — Jules Verne",
+              "section": "Plot",
+              "quote": "In a final twist, Fogg realizes that by traveling eastward around the globe he has gained a full day across the International Date Line, arriving with time to spare."
+            },
+            {
+              "hit_id": "s1h4",
+              "book": "The War of the Worlds — H. G. Wells",
+              "section": "Summary",
+              "quote": "The narrator's ordeal, trapped near a Martian encampment and separated from his wife, runs alongside his brother's account of the panicked evacuation of London."
+            },
+            {
+              "hit_id": "s1h5",
+              "book": "Gulliver's Travels — Jonathan Swift",
+              "section": "PART II — CHAPTER II.",
+              "quote": "and there was hardly a rivulet so small as the Thames at London Bridge."
+            },
+            {
+              "hit_id": "s1h6",
+              "book": "Wuthering Heights — Emily Brontë",
+              "section": "CHAPTER II",
+              "quote": "I have no more idea how to get there than you would have how to get to London!"
+            },
+            {
+              "hit_id": "s1h8",
+              "book": "Moby Dick — Herman Melville",
+              "section": "CHAPTER 55. Of the Monstrous Pictures of Whales.",
+              "quote": "In the abridged London edition of 1807, there are plates of an alleged “whale” and a “narwhale.”"
+            }
+          ],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [
+            {
+              "step": 1,
+              "distilled": 9,
+              "kept": 9,
+              "dropped": 0,
+              "dropped_streak": 0,
+              "cap_fired": false
+            }
+          ],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [
+            [
+              "london mentioned in book",
+              ""
+            ]
+          ],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [
+            8
+          ],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "enough evidence",
+          "catalog": {},
+          "book_filter": "",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 8,
+          "steps_log": [
+            "reflect -> stop: enough evidence"
+          ],
+          "by_role_seconds": {
+            "plan": 1.0,
+            "observe": 3.5,
+            "reflect": 0.9,
+            "synthesize": 2.1
+          },
+          "cost_usd": 0.0005,
+          "llm_calls": 4,
+          "tokens_in": 6312,
+          "tokens_out": 1065,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 0,
+            "titles_expected": 0,
+            "facts_found": 0,
+            "facts_expected": 0,
+            "facts_ok": true,
+            "behavior_ok": true
+          }
+        }
+      ],
+      "spread": {
+        "attempts": 3,
+        "completed": 3,
+        "errors": 0,
+        "behavior_ok": 3,
+        "cost_usd": {
+          "min": 0.0004,
+          "median": 0.0005,
+          "max": 0.0005
+        },
+        "seconds": {
+          "min": 6,
+          "median": 8,
+          "max": 10
+        },
+        "llm_calls": {
+          "min": 4,
+          "median": 4,
+          "max": 4
+        },
+        "tokens_in": {
+          "min": 5309,
+          "median": 6206,
+          "max": 6312
+        },
+        "tokens_out": {
+          "min": 878,
+          "median": 1055,
+          "max": 1065
+        }
+      }
+    },
+    {
+      "id": "k10-hybrid-named-book",
+      "type": "answer",
+      "group": "answer",
+      "question": "Do I have Dracula, and why does Jonathan Harker stay at the castle?",
+      "attempts": [
+        {
+          "attempt": 1,
+          "id": "k10-hybrid-named-book",
+          "type": "answer",
+          "question": "Do I have Dracula, and why does Jonathan Harker stay at the castle?",
+          "answer": "Based on the evidence from *Dracula* by Bram Stoker, the question of whether you have Dracula is not addressed in the provided material. The evidence only covers Jonathan Harker's situation, not your personal condition.\n\nJonathan Harker stays at the castle because he travels to Transylvania to finalize the Count's purchase of an English estate, as stated in the Plot section of *Dracula*. The Summary section of the same book confirms he is there to complete a property sale for Count Dracula. The evidence does not mention any other reason for his stay, such as being held prisoner initially, though both sections note he later discovers he is a prisoner.",
+          "verification": "BOOK CARDS ONLY: none of the 2 quotes was found in the book text — every one matched only a book card, and a card is written by a model",
+          "provenance": {
+            "checked": 2,
+            "checked_book_text": 0,
+            "confirmed": 0,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 2,
+            "unused": 0,
+            "broken_items": [],
+            "items": [
+              {
+                "hit_id": "s1h1",
+                "book": "Dracula — Bram Stoker",
+                "section": "Plot",
+                "quote": "Jonathan Harker travels to Castle Dracula in Transylvania to finalize the Count's purchase of an English estate and discovers he is a prisoner of a vampire; he narrowly escapes.",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h2",
+                "book": "Dracula — Bram Stoker",
+                "section": "Summary",
+                "quote": "Solicitor Jonathan Harker travels to Transylvania to complete a property sale for the ancient Count Dracula, only to discover his host is a vampire holding him prisoner in the castle.",
+                "status": "card_only",
+                "source_kind": "card"
+              }
+            ],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            }
+          },
+          "steps_taken": 1,
+          "read_chapters": [],
+          "evidence_items": 2,
+          "evidence": [
+            {
+              "hit_id": "s1h1",
+              "book": "Dracula — Bram Stoker",
+              "section": "Plot",
+              "quote": "Jonathan Harker travels to Castle Dracula in Transylvania to finalize the Count's purchase of an English estate and discovers he is a prisoner of a vampire; he narrowly escapes."
+            },
+            {
+              "hit_id": "s1h2",
+              "book": "Dracula — Bram Stoker",
+              "section": "Summary",
+              "quote": "Solicitor Jonathan Harker travels to Transylvania to complete a property sale for the ancient Count Dracula, only to discover his host is a vampire holding him prisoner in the castle."
+            }
+          ],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [
+            {
+              "step": 1,
+              "distilled": 2,
+              "kept": 2,
+              "dropped": 0,
+              "dropped_streak": 0,
+              "cap_fired": false
+            }
+          ],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [
+            [
+              "jonathan harker stay at dracula's castle reason",
+              "Dracula — Bram Stoker"
+            ]
+          ],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [
+            8
+          ],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "enough evidence",
+          "catalog": {},
+          "book_filter": "Dracula — Bram Stoker",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 5,
+          "steps_log": [
+            "reflect -> stop: enough evidence"
+          ],
+          "by_role_seconds": {
+            "plan": 1.1,
+            "observe": 1.7,
+            "reflect": 0.9,
+            "synthesize": 1.6
+          },
+          "cost_usd": 0.0004,
+          "llm_calls": 4,
+          "tokens_in": 5653,
+          "tokens_out": 372,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 1,
+            "titles_expected": 1,
+            "facts_found": 1,
+            "facts_expected": 2,
+            "facts_ok": false,
+            "book_filter_ok": true,
+            "behavior_ok": true
+          }
+        },
+        {
+          "attempt": 2,
+          "id": "k10-hybrid-named-book",
+          "type": "answer",
+          "question": "Do I have Dracula, and why does Jonathan Harker stay at the castle?",
+          "answer": "Based on the evidence from *Dracula* by Bram Stoker, the plot summary states that Jonathan Harker travels to Castle Dracula in Transylvania to finalize the Count's purchase of an English estate, and he discovers he is a prisoner of a vampire, from which he narrowly escapes. The evidence does not address whether you personally have Dracula (e.g., as a medical condition or a copy of the book), so that part of your question cannot be answered from the provided material.",
+          "verification": "BOOK CARDS ONLY: none of the 1 quotes was found in the book text — every one matched only a book card, and a card is written by a model",
+          "provenance": {
+            "checked": 1,
+            "checked_book_text": 0,
+            "confirmed": 0,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 1,
+            "unused": 0,
+            "broken_items": [],
+            "items": [
+              {
+                "hit_id": "s1h1",
+                "book": "Dracula — Bram Stoker",
+                "section": "Plot",
+                "quote": "Jonathan Harker travels to Castle Dracula in Transylvania to finalize the Count's purchase of an English estate and discovers he is a prisoner of a vampire; he narrowly escapes.",
+                "status": "card_only",
+                "source_kind": "card"
+              }
+            ],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            }
+          },
+          "steps_taken": 1,
+          "read_chapters": [],
+          "evidence_items": 1,
+          "evidence": [
+            {
+              "hit_id": "s1h1",
+              "book": "Dracula — Bram Stoker",
+              "section": "Plot",
+              "quote": "Jonathan Harker travels to Castle Dracula in Transylvania to finalize the Count's purchase of an English estate and discovers he is a prisoner of a vampire; he narrowly escapes."
+            }
+          ],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [
+            {
+              "step": 1,
+              "distilled": 1,
+              "kept": 1,
+              "dropped": 0,
+              "dropped_streak": 0,
+              "cap_fired": false
+            }
+          ],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [
+            [
+              "jonathan harker stay at dracula's castle reason",
+              "Dracula — Bram Stoker"
+            ]
+          ],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [
+            8
+          ],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "enough evidence",
+          "catalog": {},
+          "book_filter": "Dracula — Bram Stoker",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 5,
+          "steps_log": [
+            "reflect -> stop: enough evidence"
+          ],
+          "by_role_seconds": {
+            "plan": 1.0,
+            "observe": 1.0,
+            "reflect": 1.5,
+            "synthesize": 1.3
+          },
+          "cost_usd": 0.0004,
+          "llm_calls": 4,
+          "tokens_in": 5556,
+          "tokens_out": 246,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 1,
+            "titles_expected": 1,
+            "facts_found": 1,
+            "facts_expected": 2,
+            "facts_ok": false,
+            "book_filter_ok": true,
+            "behavior_ok": true
+          }
+        },
+        {
+          "attempt": 3,
+          "id": "k10-hybrid-named-book",
+          "type": "answer",
+          "question": "Do I have Dracula, and why does Jonathan Harker stay at the castle?",
+          "answer": "Based on the evidence from *Dracula* by Bram Stoker, the question of whether you have Dracula is not addressed in the provided material. The evidence only covers Jonathan Harker's situation, not your personal condition.\n\nJonathan Harker stays at the castle because he travels to Transylvania to finalize the Count's purchase of an English estate, as stated in the Plot section of *Dracula*. The Summary section of the same book confirms he is there to complete a property sale for Count Dracula. The evidence does not mention any other reason for his stay, such as being held prisoner initially, though both sections note he later discovers he is a prisoner.",
+          "verification": "BOOK CARDS ONLY: none of the 2 quotes was found in the book text — every one matched only a book card, and a card is written by a model",
+          "provenance": {
+            "checked": 2,
+            "checked_book_text": 0,
+            "confirmed": 0,
+            "unattributed": 0,
+            "broken": 0,
+            "card_only": 2,
+            "unused": 0,
+            "broken_items": [],
+            "items": [
+              {
+                "hit_id": "s1h1",
+                "book": "Dracula — Bram Stoker",
+                "section": "Plot",
+                "quote": "Jonathan Harker travels to Castle Dracula in Transylvania to finalize the Count's purchase of an English estate and discovers he is a prisoner of a vampire; he narrowly escapes.",
+                "status": "card_only",
+                "source_kind": "card"
+              },
+              {
+                "hit_id": "s1h2",
+                "book": "Dracula — Bram Stoker",
+                "section": "Summary",
+                "quote": "Solicitor Jonathan Harker travels to Transylvania to complete a property sale for the ancient Count Dracula, only to discover his host is a vampire holding him prisoner in the castle.",
+                "status": "card_only",
+                "source_kind": "card"
+              }
+            ],
+            "dropped_unverified": 0,
+            "repinned": 0,
+            "dropped_by_reason": {
+              "no_hit": 0,
+              "cross_book": 0,
+              "short": 0,
+              "not_found": 0
+            }
+          },
+          "steps_taken": 1,
+          "read_chapters": [],
+          "evidence_items": 2,
+          "evidence": [
+            {
+              "hit_id": "s1h1",
+              "book": "Dracula — Bram Stoker",
+              "section": "Plot",
+              "quote": "Jonathan Harker travels to Castle Dracula in Transylvania to finalize the Count's purchase of an English estate and discovers he is a prisoner of a vampire; he narrowly escapes."
+            },
+            {
+              "hit_id": "s1h2",
+              "book": "Dracula — Bram Stoker",
+              "section": "Summary",
+              "quote": "Solicitor Jonathan Harker travels to Transylvania to complete a property sale for the ancient Count Dracula, only to discover his host is a vampire holding him prisoner in the castle."
+            }
+          ],
+          "chapter_windows": [],
+          "dropped_unverified": 0,
+          "dropped_by_reason": {},
+          "repinned": 0,
+          "gate_steps": [
+            {
+              "step": 1,
+              "distilled": 2,
+              "kept": 2,
+              "dropped": 0,
+              "dropped_streak": 0,
+              "cap_fired": false
+            }
+          ],
+          "peak_dropped_streak": 0,
+          "cap_fired": false,
+          "searches": [
+            [
+              "jonathan harker stays at dracula's castle reason",
+              "Dracula — Bram Stoker"
+            ]
+          ],
+          "search_repeats": 0,
+          "query_replacements": 0,
+          "duplicates_skipped": 0,
+          "new_passages_per_step": [
+            8
+          ],
+          "clarify_asked": false,
+          "clarify_candidates": [],
+          "clarify_unresolved": false,
+          "clarify_chosen": "",
+          "plan_fallback": false,
+          "stop_reason": "enough evidence",
+          "catalog": {},
+          "book_filter": "Dracula — Bram Stoker",
+          "book_unresolved": "",
+          "catalog_fallback": "",
+          "seconds": 6,
+          "steps_log": [
+            "reflect -> stop: enough evidence"
+          ],
+          "by_role_seconds": {
+            "plan": 0.8,
+            "observe": 1.8,
+            "reflect": 2.3,
+            "synthesize": 1.5
+          },
+          "cost_usd": 0.0004,
+          "llm_calls": 4,
+          "tokens_in": 5653,
+          "tokens_out": 370,
+          "chapter_reads": 0,
+          "chapter_reads_aimed": 0,
+          "chapter_windows_opened": 0,
+          "chapter_row_cap_hits": 0,
+          "score": {
+            "titles_mentioned": 1,
+            "titles_expected": 1,
+            "facts_found": 1,
+            "facts_expected": 2,
+            "facts_ok": false,
+            "book_filter_ok": true,
+            "behavior_ok": true
+          }
+        }
+      ],
+      "spread": {
+        "attempts": 3,
+        "completed": 3,
+        "errors": 0,
+        "behavior_ok": 3,
+        "facts_ok": 0,
+        "cost_usd": {
+          "min": 0.0004,
+          "median": 0.0004,
+          "max": 0.0004
+        },
+        "seconds": {
+          "min": 5,
+          "median": 5,
+          "max": 6
+        },
+        "llm_calls": {
+          "min": 4,
+          "median": 4,
+          "max": 4
+        },
+        "tokens_in": {
+          "min": 5556,
+          "median": 5653,
+          "max": 5653
+        },
+        "tokens_out": {
+          "min": 246,
+          "median": 370,
+          "max": 372
+        }
+      }
+    }
+  ]
+}
