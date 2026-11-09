@@ -1461,13 +1461,17 @@ outside the archive root is ignored. The text is capped on its own, at 20 millio
 book, the figure ADR-030 sets for a PDF (#124): the byte caps bound the archive, and at one
 character a byte the spine could otherwise yield about 27 times that, every character of it to
 embed. The total is kept as each spine document is extracted, so the file is refused at the
-document that takes it over and the rest of the spine is not read; it counts the blank line that
-joins two documents of one section, so what the reader returns stays within it. Labels are not
-text and are bounded apart: the title, the author line and each name in it, and every contents
-entry are cut to 500 characters (`chapters.MAX_LABEL_CHARS`, which the PDF reader shares), not
-refused, since the chunker copies them into every chunk — the section title into its id, the
-title, author and section in front of the text it embeds — and a label the file made 64 MiB long
-was paid once a chunk. A ZIP64 archive is refused before `zipfile` opens it, rather
+document that takes it over and the rest of the spine is not read; it counts two characters for
+every document read, the blank line that may join it to the one before in a section, so what the
+reader returns stays within it. Labels are not text and are bounded apart: the title, the author
+line and each name in it, and every contents entry are cut to 500 characters
+(`labels.shorten_label`, which the PDF reader shares), not refused, since the chunker copies them
+into every chunk — the section title into its id, the title, author and section in front of the
+text it embeds — and a label the file made 64 MiB long was paid once a chunk. A cut label is its
+first 490 characters (a space at their end dropped), `… ` and eight hex characters of a SHA-256
+of the whole label: without the digest, two volumes whose long titles differ only past the cut
+would be one book key, and `ayl add` stops on two files that resolve to the same book. A ZIP64
+archive is refused before `zipfile` opens it, rather
 than parsed: an EPUB never needs one, and its end record's variable-length sector is a format
 detail a bound should not depend on. XML is parsed by ElementTree, which never fetches an external
 entity, and a package file that declares any entity is refused before a parser sees it — a
@@ -1590,8 +1594,8 @@ form-field walk that is never made, at 10,000 entries or 32 levels, 200 form dra
 XMP size and element count, the recovery of a damaged stream, `jbig2dec` never called), and the
 module caps the file at 256 MiB, the pages at 5,000, the text at 100,000 characters a page — the
 bytes a page shows counted per instruction through the library's public extraction callback, the characters they made after the page — and 20 million a book. The
-title, the author line and each outline entry are cut to 500 characters, as an EPUB's labels are
-(ADR-029, #124). The
+title, the author line and each outline entry are cut to 500 characters, ending in a digest of
+the whole label, as an EPUB's labels are (ADR-029, #124). The
 refusals are the EPUB's convention: one line, the file's path inside the folder and a fixed
 reason, never a quote; anything the library raises is named by its class only. Its own log lines
 and warnings are silenced while it reads, because they quote the file (an outline node it could

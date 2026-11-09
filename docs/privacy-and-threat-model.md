@@ -192,8 +192,8 @@ Designed for **localhost, single user**. Not designed for internet exposure:
   allocates as fast as the machine can is stopped a few hundred MiB past it on macOS, which lets no
   process set itself a hard memory limit; on Linux the child also caps its own address space —
   with a 256 MiB file cap, a 5,000-page cap and encryption refused. In both, a title, an author
-  line or a contents or outline entry is cut to 500 characters, since every chunk carries a copy
-  of it. A refused file costs one line naming it; the folder's
+  line or a contents or outline entry is cut to 500 characters, ending in a digest of the whole of
+  it, since every chunk carries a copy of it. A refused file costs one line naming it; the folder's
   other books are indexed. The limits are in [Add your own books](add-your-own-books.md); the
   extracted text is corpus text from then on, covered by the injection layers below and nothing
   more.

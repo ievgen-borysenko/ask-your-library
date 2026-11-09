@@ -25,7 +25,8 @@ import pytest
 
 from ask_your_library import ayl, library
 from ask_your_library.ingest import add_folder, pdf
-from ask_your_library.ingest.chapters import FRONT_MATTER_SECTION, MAX_LABEL_CHARS
+from ask_your_library.bookkey import TITLE_SEPARATOR
+from ask_your_library.ingest.chapters import FRONT_MATTER_SECTION
 from ask_your_library.ingest.lock import lock_path
 from ask_your_library.preflight import PreflightResult
 from conftest import REPO
@@ -408,16 +409,25 @@ def test_over_long_labels_are_cut_as_an_epub_s_are(tmp_path):
     book = pdf.read_in_process(make_pdf(
         tmp_path / "b.pdf", five_pages(), outline=outline,
         info={"Title": "The Copper Kettle, " + HUGE, "Author": "Ada " + HUGE}))
-    assert titles(book) == [FRONT_MATTER_SECTION, cut("Chapter One: "), "Chapter Two"]
-    assert (book.title, book.author) == (cut("The Copper Kettle, "), cut("Ada "))
+    assert titles(book) == [FRONT_MATTER_SECTION, cut("Chapter One: " + HUGE), "Chapter Two"]
+    assert (book.title, book.author) == (cut("The Copper Kettle, " + HUGE), cut("Ada " + HUGE))
 
 
 def test_an_xmp_author_line_long_only_once_joined_is_cut(tmp_path):
     names = b"".join(b"<rdf:li>Writer %03d</rdf:li>" % n for n in range(100))
     xmp = XMP.replace(b"<rdf:li>Bo Reed</rdf:li><rdf:li>Cy Ink</rdf:li>", names)
     author = pdf.read_in_process(make_pdf(tmp_path / "x.pdf", five_pages(), xmp=xmp)).author
-    assert author.startswith("Writer 000, Writer 001, ") and author.endswith("…")
-    assert len(author) <= MAX_LABEL_CHARS
+    assert author == cut(", ".join(f"Writer {n:03d}" for n in range(100)))
+
+
+def test_two_pdf_volumes_whose_long_titles_differ_only_past_the_cut_stay_two_books(tmp_path):
+    shared = "The Collected Letters, " + "N" * 589                    # 612 characters
+    folder = tmp_path / "books"
+    for word, wood in (("One", "amber"), ("Two", "birch")):
+        make_pdf(folder / f"{word}.pdf", [room(wood)],
+                 info={"Title": f"{shared} Volume {word}", "Author": "Ada Quill"})
+    assert {b.book for b in add_folder.read_folder(folder)} == {
+        f"{cut(f'{shared} Volume {word}')}{TITLE_SEPARATOR}Ada Quill" for word in ("One", "Two")}
 
 
 # --- refusals ----------------------------------------------------------------------------

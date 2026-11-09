@@ -40,9 +40,10 @@ The title is the document information dictionary's `/Title`, else the XMP
 `dc:title`; the author `/Author`, else the XMP `dc:creator` names, joined.
 Metadata that cannot be read is treated as absent, and the caller falls back to
 the file-name rule of a text book. Every label (the title, the author line and
-each name in it, an outline entry) is cut to `chapters.MAX_LABEL_CHARS`, as an
-EPUB's is: the text caps do not count labels, and the chunker copies them into
-every chunk.
+each name in it, an outline entry) longer than `labels.MAX_LABEL_CHARS` is cut
+to that length, ending in a digest of the whole label (`labels.shorten_label`),
+as an EPUB's is: the text caps do not count labels, and the chunker copies them
+into every chunk.
 
 A PDF is untrusted input, and **the bound is a process boundary**. `read_pdf`
 does not read the file: it starts a child Python process
@@ -151,7 +152,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..sanitize import LINE_BREAK_RE, strip_control_chars
-from .chapters import FRONT_MATTER_SECTION, shorten_label, unique_titles
+from .chapters import FRONT_MATTER_SECTION, unique_titles
+from .labels import shorten_label
 
 # --- bounds -------------------------------------------------------------------
 # A long novel is 300-600 pages and under 2 MB of text; a dense page is 3,000 to

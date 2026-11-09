@@ -48,15 +48,18 @@ An EPUB is untrusted input. What is bounded, and how:
   `MAX_MEMBER_BYTES`, `MAX_TOTAL_BYTES`): a zip bomb is refused before it is
   inflated, and a member whose header lies about its size is cut off at the cap
   and refused; the text the spine yields is capped too (`MAX_TOTAL_CHARS`, the
-  PDF reader's figure), counted as each document is extracted, with the blank
-  line that may join it to the document before it, so a book of text alone is
-  refused at the document that takes it over, before the rest of the spine is
-  read, and the sections returned hold no more than that in all;
+  PDF reader's figure), counted as each document is extracted, with a blank
+  line (`DOCUMENT_JOINER`, two characters) for every document read, the first
+  and empty ones included, since `build_sections` may join it to the one
+  before it; so a book of text alone is refused at the document that takes it
+  over, before the rest of the spine is read, and the sections returned hold
+  no more than that in all;
 - every label (the title, the author line and each name in it, a navigation
-  entry) is cut to `chapters.MAX_LABEL_CHARS`, not refused: the text cap does
-  not count labels, and the chunker copies them into every chunk, the section
-  title into its id and the title, author and section in front of the text it
-  embeds;
+  entry) longer than `labels.MAX_LABEL_CHARS` is cut to that length, ending in
+  a digest of the whole label (`labels.shorten_label`), not refused: the text
+  cap does not count labels, and the chunker copies them into every chunk, the
+  section title into its id and the title, author and section in front of the
+  text it embeds;
 - a reference from the package or the navigation that resolves outside the
   archive's root is ignored, and one to a member that is not there is refused;
 - XML (`container.xml`, the package, the NCX, `encryption.xml`) is parsed by
@@ -97,7 +100,8 @@ from urllib.parse import unquote, urlsplit
 from xml.etree import ElementTree as ET
 
 from ..sanitize import strip_control_chars
-from .chapters import FRONT_MATTER_SECTION, FULL_TEXT_SECTION, shorten_label, unique_titles
+from .chapters import FRONT_MATTER_SECTION, FULL_TEXT_SECTION, unique_titles
+from .labels import shorten_label
 
 # --- bounds -------------------------------------------------------------------
 # A long novel is a few hundred members and well under 10 MiB of text; an
@@ -757,8 +761,9 @@ def read_epub(path: Path) -> EpubBook:
                         continue
                     seen.add(member)
                     text = extract_text(read_text_member(archive, member))
-                    # With the joiner `build_sections` may put before it, so
-                    # the sections returned never hold more than the cap.
+                    # With a joiner for every document, the first and empty
+                    # ones included: `build_sections` may put one before it,
+                    # so the sections returned never hold more than the cap.
                     total += len(text) + len(DOCUMENT_JOINER)
                     if total > MAX_TOTAL_CHARS:
                         raise EpubRefused(f"it holds more than {MAX_TOTAL_CHARS:,} characters "
