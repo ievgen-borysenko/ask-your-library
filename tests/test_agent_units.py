@@ -82,7 +82,7 @@ def test_act_counts_redacted_lines_as_int(tmp_path, monkeypatch):
                 "Another ordinary line.")
     hit = {"corpus": "transcripts", "book": "Poisoned Book",
            "section": "Chapter 1", "text": poisoned, "score": 1.0}
-    monkeypatch.setattr(nodes, "search_both", lambda query, k=4, book=None: [dict(hit)])
+    monkeypatch.setattr(nodes, "search_both", lambda query, k=4, book=None, cards_k=None: [dict(hit)])
     llm.reset_usage()
 
     scratchpad = tmp_path / "scratch.md"
@@ -928,7 +928,7 @@ def test_act_returns_only_its_own_passages_for_the_append_reducer(monkeypatch, t
     from ask_your_library import nodes
 
     hit = {"corpus": "cards", "book": "B — A", "section": "S", "text": "t", "score": 1.0}
-    monkeypatch.setattr(nodes, "search_both", lambda query, k=4, book=None: [dict(hit)])
+    monkeypatch.setattr(nodes, "search_both", lambda query, k=4, book=None, cards_k=None: [dict(hit)])
     llm.reset_usage()
     scratchpad = tmp_path / "scratch.md"
     scratchpad.write_text("")
@@ -1364,7 +1364,7 @@ def test_act_probe_and_chosen_book_constrain_the_search(monkeypatch, tmp_path):
     from ask_your_library import nodes
 
     seen = []
-    monkeypatch.setattr(nodes, "search_both", lambda query, k=4, book=None: seen.append((query, book)) or [])
+    monkeypatch.setattr(nodes, "search_both", lambda query, k=4, book=None, cards_k=None: seen.append((query, book)) or [])
     llm.reset_usage()
     scratchpad = tmp_path / "s.md"
     scratchpad.write_text("")

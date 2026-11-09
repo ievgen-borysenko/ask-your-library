@@ -1,20 +1,22 @@
 """Retriever eval (no LLM, free): does the retriever window for the RAW golden
 question contain the expected book(s)?
 
-The window mirrors `search_both(query, k=4)`: top-4 card chunks followed by
-top-4 transcript chunks (8 hits, per-corpus order, no fusion across corpora).
+The window mirrors the agent's `search_both(query, k=4, cards_k=CARD_SLOTS)`:
+top-2 card chunks and top-4 transcript chunks (6 hits, per-corpus order, no
+fusion across corpora). Which of the two the agent then shows first does not
+matter here: presence is a set, not a rank.
 This is a component baseline, not agent quality: the agent's planner rewrites
 the question into its own English queries, and clarify / drill-down / answer
 correctness are measured by eval/run_agent_eval.py. This harness measures:
 
-- single-book questions: is the book present in the window (presence@8)?
+- single-book questions: is the book present in the window (presence@6)?
 - multi-book questions (aggregation / guaranteed clarify): coverage = how many
   of the expected books are present, and whether ALL of them are.
 
-Per-corpus ranks to depth 8 are printed as a diagnostic: a rank <= 4 in either
-corpus is what puts a book into the window. hit@2/hit@4 per corpus and MRR
-(best-of-two) are kept for comparability with earlier runs but are NOT agent
-metrics — do not publish them as such.
+Per-corpus ranks to depth 8 are printed as a diagnostic: a cards rank <= 2 or a
+transcripts rank <= 4 is what puts a book into the window. hit@2/hit@4 per
+corpus and MRR (best-of-two) are kept for comparability with earlier runs but
+are NOT agent metrics — do not publish them as such.
 
   uv run eval/run_retrieval_eval.py
   GOLDEN_PATH=... LIBRARY_DB_PATH=... uv run eval/run_retrieval_eval.py
@@ -24,11 +26,12 @@ from pathlib import Path
 
 import yaml
 
-from ask_your_library.library import search
+from ask_your_library.library import CARD_SLOTS, search
 
 GOLDEN_PATH = Path(os.environ.get("GOLDEN_PATH", Path(__file__).parent / "golden" / "en-demo.yaml"))
 DIAG_K = 8          # per-corpus diagnostic depth
-WINDOW_PER_CORPUS = 4   # must equal the k the agent passes to search_both
+WINDOW_PER_CORPUS = 4   # must equal the k the agent passes to search_both (transcripts)
+# and the cards' budget is the agent's own: CARD_SLOTS, imported, never restated
 
 
 def best_rank(hits: list[dict], expected_books: list[str]) -> int | None:
@@ -57,8 +60,9 @@ def main() -> None:
             continue  # refusal / judgment questions are not about retrieval
         cards = search("cards", item["question"], DIAG_K)
         transcripts = search("transcripts", item["question"], DIAG_K)
-        # Identical to search_both(question, k=4): top-k of the same fused lists.
-        window = cards[:WINDOW_PER_CORPUS] + transcripts[:WINDOW_PER_CORPUS]
+        # Identical to search_both(question, k=4, cards_k=CARD_SLOTS): top-k of
+        # the same fused lists, each corpus to its own budget.
+        window = cards[:CARD_SLOTS] + transcripts[:WINDOW_PER_CORPUS]
         rows.append({
             "id": item["id"],
             "expected": expected,
@@ -89,7 +93,8 @@ def main() -> None:
     from ask_your_library.config import EMBED_BACKEND, OLLAMA_EMBED_MODEL, OPENROUTER_EMBED_MODEL
     embed_model = OLLAMA_EMBED_MODEL if EMBED_BACKEND == "ollama" else OPENROUTER_EMBED_MODEL
     print(f"\nEmbeddings: {embed_model} via {EMBED_BACKEND} (no answering model is called here)")
-    print("\nRetriever-window metrics (raw question as query; window = top-4 cards + top-4 transcripts):")
+    print(f"\nRetriever-window metrics (raw question as query; window = top-{CARD_SLOTS} cards "
+          f"+ top-{WINDOW_PER_CORPUS} transcripts, presence@{CARD_SLOTS + WINDOW_PER_CORPUS}):")
     print(f"  single-book presence: {single_hits}/{len(single)}"
           + (f" = {single_hits / len(single):.0%}" if single else ""))
     if multi:

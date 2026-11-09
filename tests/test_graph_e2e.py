@@ -65,7 +65,11 @@ class FakeLibrary:
         # index metadata, and a scenario may need a title the search never returns.
         self.also_holds = list(also_holds)
 
-    def search_both(self, query: str, k: int = 4, book: str | None = None) -> list[dict]:
+    def search_both(self, query: str, k: int = 4, book: str | None = None,
+                    cards_k: int | None = None) -> list[dict]:
+        # CORPUS holds one card per book and two books, so the agent's card
+        # budget (CARD_SLOTS) never cuts anything here; it is accepted because
+        # act passes it.
         self.searches.append((query, book))
         books = [book] if book else self.books_for_query(query)
         return [hit(b, c, self.texts.get((b, c))) for b in books for c in ("cards", "transcripts") if b in CORPUS]
@@ -862,9 +866,9 @@ def test_a_spent_deadline_does_not_time_the_final_synthesize_out(monkeypatch, tm
         timeouts.append(kw["timeout"].read)
         return model
 
-    def slow_search(query, k=4, book=None):
+    def slow_search(query, k=4, book=None, cards_k=None):
         clock.t += 100          # the one step in flight outlasts the whole budget
-        return library.search_both(query, k=k, book=book)
+        return library.search_both(query, k=k, book=book, cards_k=cards_k)
 
     monkeypatch.setattr(llm, "ChatOpenAI", stub_chat_openai)
     monkeypatch.setattr(nodes, "search_both", slow_search)

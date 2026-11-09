@@ -123,10 +123,12 @@ def _hit(book: str, corpus: str) -> dict:
     return {"corpus": corpus, "book": book, "section": section, "text": text, "score": 0.03}
 
 
-def search_both(query: str, k: int = 4, book: str | None = None) -> list[dict]:
+def search_both(query: str, k: int = 4, book: str | None = None,
+                cards_k: int | None = None) -> list[dict]:
     """The retrieval window `act` searches with, in hit order: cards before
     text, book after book. `book` is the filter a resolved title or a chosen
-    clarify candidate sets."""
+    clarify candidate sets. `cards_k` (the agent's card budget) is accepted
+    because `act` passes it; one card per book never exceeds it."""
     books = [book] if book else list(_books_for(query))
     return [_hit(b, corpus) for b in books if b in PASSAGES
             for corpus in ("cards", "transcripts")][:max(k, 4)]

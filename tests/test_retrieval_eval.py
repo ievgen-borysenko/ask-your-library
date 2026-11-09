@@ -24,7 +24,9 @@ def test_window_matches_search_both_contract():
     from ask_your_library.nodes import act  # noqa: F401  (import guard only)
     import inspect
     from ask_your_library import nodes
-    # the plain search of a step: k=4 per corpus (the book filter after a
-    # clarify or in a coverage probe narrows, never widens, the window)
-    assert "search_both(state[\"current_query\"], k=4," in inspect.getsource(nodes.act)
+    # the plain search of a step: k=4 transcripts and CARD_SLOTS cards (the
+    # book filter after a clarify or in a coverage probe narrows, never
+    # widens, the window); tests/test_card_budget.py checks the window itself
+    assert "search_both(state[\"current_query\"], k=4, cards_k=CARD_SLOTS," in inspect.getsource(nodes.act)
     assert harness.WINDOW_PER_CORPUS == 4
+    assert harness.CARD_SLOTS == nodes.CARD_SLOTS

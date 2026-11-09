@@ -6,11 +6,13 @@ Five conditions, the same twelve core questions, one run each:
                     question only, through the same llm_invoke path, with a
                     system rule that says "answer from what you know, say when
                     you are unsure". No retrieval, no library, no provenance.
-  retrieve-answer   one search_both(question, k=4) call; the hits, sanitized
-                    through sanitize_context and cut to SEARCH_HIT_CHARS
-                    exactly as observe would see them, go straight into a
-                    single synthesize-style prompt. No plan/observe/reflect
-                    loop, no clarify, no validate (see PROVENANCE_NOTE).
+  retrieve-answer   one search_both(question, k=4) call (4 cards + 4
+                    transcripts, the window the loop had before its card
+                    budget); the hits, sanitized through sanitize_context
+                    and cut to SEARCH_HIT_CHARS exactly as observe would see
+                    them, go straight into a single synthesize-style prompt.
+                    No plan/observe/reflect loop, no clarify, no validate
+                    (see PROVENANCE_NOTE).
   cards-only        the full agent loop with search_both restricted to the
                     cards corpus. The restriction is a monkeypatch of the
                     `search_both` NAME inside ask_your_library.nodes (nodes.py
@@ -77,7 +79,7 @@ harness = load_harness()
 AGENT_CONDITIONS = {"cards-only": "cards", "transcripts-only": "transcripts", "agent": None}
 CONDITIONS = ("no-context", "retrieve-answer", "cards-only", "transcripts-only", "agent")
 
-SEARCH_K = 4   # what search_both gives the agent per corpus
+SEARCH_K = 4   # what search_both gives the agent per corpus (cards: library.CARD_SLOTS)
 
 NO_CONTEXT_RULES = (
     "Answer the user's question from what you already know. There is no library, "
@@ -99,19 +101,23 @@ PROVENANCE_NOTE = (
 def corpus_restriction(corpus: str | None):
     """Restrict the agent's retrieval to ONE corpus by rebinding the
     `search_both` name inside ask_your_library.nodes (nodes.py imports the
-    function by name at import time). k stays 4, so the condition removes a
-    corpus from the window rather than substituting it: the window is 4 hits
-    per step instead of 8."""
+    function by name at import time). Each corpus keeps the budget the agent
+    asks it for (`cards_k` for cards, `k` for transcripts), so the condition
+    removes a corpus from the window rather than substituting it: the window
+    is 2 hits per step (cards-only) or 4 (transcripts-only) instead of 6."""
     if corpus is None:
         yield
         return
     original = nodes_mod.search_both
 
-    def restricted(query: str, k: int = SEARCH_K, book: str | None = None) -> list[dict]:
+    def restricted(query: str, k: int = SEARCH_K, book: str | None = None,
+                   cards_k: int | None = None) -> list[dict]:
         # act passes `book` on every search since ADR-013 (None outside a
-        # resolved clarify or a coverage probe); the restriction must accept
-        # and forward it, or every act() call in this condition raises.
-        return corpus_search(corpus, query, k, book=book)
+        # resolved clarify or a coverage probe) and `cards_k` since the card
+        # budget; the restriction must accept and forward both, or every act()
+        # call in this condition raises.
+        budget = cards_k if corpus == "cards" and cards_k is not None else k
+        return corpus_search(corpus, query, budget, book=book)
 
     nodes_mod.search_both = restricted
     try:
@@ -332,14 +338,15 @@ CONDITION_BLURB = {
     "no-context": "the orchestrator model answers from memory: the question only, same "
                   "`llm_invoke` path, a system rule to answer from what it knows and say "
                   "when it is unsure. No retrieval.",
-    "retrieve-answer": "one `search_both(question, k=4)` call; the 8 hits, sanitized and cut "
-                       "to `SEARCH_HIT_CHARS` (1,200) as observe would see them, go straight "
+    "retrieve-answer": "one `search_both(question, k=4)` call; the 8 hits (4 cards + 4 "
+                       "transcripts), sanitized and cut to `SEARCH_HIT_CHARS` (1,200) as "
+                       "observe would see them, go straight "
                        "into one synthesize-style prompt. No plan/observe/reflect, no clarify, "
                        "no validate.",
     "cards-only": "the full agent loop, `search_both` restricted to the cards corpus "
-                  "(4 hits per step instead of 8).",
+                  "(2 hits per step, the agent's card budget, instead of 6).",
     "transcripts-only": "the full agent loop, `search_both` restricted to the transcripts "
-                        "corpus (4 hits per step instead of 8).",
+                        "corpus (4 hits per step instead of 6).",
     "agent": "the full loop as shipped — identical to `eval/run_agent_eval.py`.",
 }
 

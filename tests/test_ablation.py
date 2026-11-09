@@ -346,8 +346,9 @@ def test_artifact_table_carries_every_condition_and_flags_the_pre_check():
 
 
 def test_corpus_restriction_accepts_the_book_keyword_act_passes(monkeypatch, tmp_path):
-    """act() passes book= on every search since ADR-013; the restricted
-    search_both must accept and forward it (review of #49: TypeError)."""
+    """act() passes book= on every search since ADR-013, and cards_k= since
+    the card budget; the restricted search_both must accept and forward both
+    (review of #49: TypeError)."""
     import ask_your_library.nodes as nodes
     seen = []
     monkeypatch.setattr(ablation, "corpus_search", lambda corpus, query, k, book=None: seen.append((corpus, query, k, book)) or [])
@@ -360,4 +361,7 @@ def test_corpus_restriction_accepts_the_book_keyword_act_passes(monkeypatch, tmp
                    "scratchpad_path": str(scratchpad)})
         nodes.act({"current_query": "plain", "steps_taken": 1, "read_chapters": [], "scratchpad_path": str(scratchpad),
                    "clarify_chosen": "Chosen — B"})
-    assert seen == [("cards", "plain", 4, None), ("cards", "why", 4, "Some Book — A"), ("cards", "plain", 4, "Chosen — B")]
+    # the cards corpus gets the agent's card budget, on a search and on a probe alike
+    budget = nodes.CARD_SLOTS
+    assert seen == [("cards", "plain", budget, None), ("cards", "why", budget, "Some Book — A"),
+                    ("cards", "plain", budget, "Chosen — B")]
