@@ -432,8 +432,9 @@ def detection_stage(_payloads: dict) -> tuple[str, None]:
                  "why": PLANTED_WHY.format(why_only=WHY_ONLY_MARKER)},
                 {"hit_id": "s1h2", "book": "Dracula — Bram Stoker", "section": "Chapter 2",
                  "quote": "The castle stood on the edge of a terrible precipice.", "why": "the castle"}]
+    # Every marker-carrying default is overridden: the quote stays the marker's only way into reflect.
     state = hostile_reflect_state(evidence=evidence, question="Which book has a whale?",
-                                  read_chapters=[], queries=["whales"],
+                                  read_chapters=[], queries=["whales"], searches_run=[],
                                   hits_log=[{"hit_id": "s1h2", "step": 1, "book": "Dracula — Bram Stoker",
                                              "section": "Chapter 2", "corpus": "cards", "text": "x"}])
 
