@@ -215,7 +215,9 @@ Designed for **localhost, single user**. Not designed for internet exposure:
 Four layers, all partial:
 
 1. **Regex sanitizer** (`sanitize.py`) redacts instruction-like lines from retrieved text before
-   the model sees it, and counts redactions as telemetry.
+   the model sees it, and counts redactions as telemetry. It also runs on the searches block of
+   the `reflect` prompt (the searches already run are model text a passage may have steered),
+   and those redactions are not counted in `redacted_lines`.
 2. **System/data separation.** Rules live in the system message; question, conversation, results
    and evidence go in the user message wrapped in XML-like `<result>` / `<evidence>` blocks,
    with an explicit rule that they are data.
@@ -230,8 +232,8 @@ What the canary covers. Five of its six stages are deterministic and free (`--no
 available stages, and CI runs them in the `test-ui` job): the sanitizer; the `observe` controls;
 the **prompt boundary** - a fake transport records the LLM prompts of `observe`, `reflect` and
 `synthesize`, plus the clarify interrupt (`clarify` sends no prompt of its own, it only
-interrupts), on a state whose evidence `why`/`quote`, book and section titles, queued queries
-and clarify candidates all carry a marker and try to forge a delimiter, and the marker must
+interrupts), on a state whose evidence `why`/`quote`, book and section titles, queued queries, searches
+already run and clarify candidates all carry a marker and try to forge a delimiter, and the marker must
 appear only inside data-block bodies or neutralized attributes of the *user* message, never in
 the system message, with every untrusted `<` neutralized and no forged `<result>` /
 `<evidence>`; the **test's own detection** - the

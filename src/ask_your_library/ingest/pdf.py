@@ -93,9 +93,15 @@ fast, on what the library lets a caller bound:
   images, is switched off in its configuration; an encrypted file is refused
   before any password, the empty one included, is tried;
 - **the library's configuration**, every field set explicitly (`CONFIGURATION`):
-  each inflated stream capped (`MAX_STREAM_BYTES`), the page-tree walk stopped
-  past `2 * MAX_PAGES` entries or `MAX_PAGE_TREE_DEPTH` levels and the outline
-  walk past `MAX_OUTLINE_ENTRIES` entries or `MAX_OUTLINE_DEPTH` levels, at most
+  each inflated stream capped (`MAX_STREAM_BYTES`), the filters one stream
+  chains (`MAX_STREAM_FILTERS`) and the bytes its decoding passes through
+  (`MAX_STREAM_DECODING_BYTES`), the tokens one page's instructions hold
+  (`MAX_STREAM_TOKENS`), the elements of one array (`MAX_ARRAY_ELEMENTS`) and
+  the entries of one dictionary (`MAX_DICTIONARY_ENTRIES`), the page-tree walk
+  stopped past `2 * MAX_PAGES` entries or `MAX_PAGE_TREE_DEPTH` levels or
+  `MAX_PAGE_TREE_PAGE_ENTRIES` entries copied into its pages, and the
+  outline walk, and the form-field walk that is never made, past
+  `MAX_OUTLINE_ENTRIES` entries or `MAX_OUTLINE_DEPTH` levels, at most
   `MAX_FORM_DRAWS` forms drawn a page, XMP size and element count, the
   recovery of a damaged stream; the library also detects reference cycles,
   forbids entity declarations in XMP and rebuilds a damaged cross-reference
@@ -107,12 +113,13 @@ fast, on what the library lets a caller bound:
   (`MAX_PAGE_CHARS`); the characters of the whole book (`MAX_TOTAL_CHARS`).
 
 What these do not bound — the work and memory the library spends building a
-font's maps, a `/Differences` array of millions of names, a CMap range that
-stands for 65,536 entries, a form drawn two hundred times — the process
-boundary does. An earlier version counted those from inside, by replacing names
-in the library; each review found one more allocation the counters did not
-see, and the process boundary is the bound that does not depend on finding
-them all.
+font's maps, a CMap range that stands for 65,536 entries, a form drawn two
+hundred times — the process boundary does. (A `/Differences` array of millions
+of names was one of them until the library capped the elements of an array;
+it is now refused by that cap before it costs memory.) An earlier version
+counted those from inside, by replacing names in the library; each review
+found one more allocation the counters did not see, and the process boundary
+is the bound that does not depend on finding them all.
 
 The child prints one JSON document on stdout and exits with a known status
 (`EXIT_READ`, `EXIT_REFUSED`, `EXIT_ERROR`; `EXIT_MEMORY` and
@@ -149,13 +156,47 @@ from .chapters import FRONT_MATTER_SECTION, unique_titles
 MAX_FILE_BYTES = 256 * 1024 * 1024
 MAX_PAGES = 5_000
 MAX_STREAM_BYTES = 16 * 1024 * 1024          # one inflated stream (the library's cap)
+# A real stream has one filter or two (ASCII85 over Flate); the library allows 16.
+MAX_STREAM_FILTERS = 4
+# The library sums each filter's input and output for one stream: room for
+# every allowed filter to take in and give out one capped stream. The raw stream
+# is bounded only by the file and an ASCII filter's output is not capped, so
+# that is not a proof; but a chain that reaches this cap moves several times the
+# 16 MiB inflate cap every real book's stream stays under. It bounds the sum of
+# counted bytes, not which books can be read.
+MAX_STREAM_DECODING_BYTES = 2 * MAX_STREAM_FILTERS * MAX_STREAM_BYTES
 MAX_PAGE_CHARS = 100_000
+# The tokens one content stream may hold, its operands, operators and the
+# elements of their arrays and dictionaries counted alike. A page at
+# MAX_PAGE_CHARS written a glyph at a time, each glyph positioned and shown by
+# an instruction of its own, is five to nine tokens a character; twenty leaves
+# room for the drawing around the text. The library's own value, written out.
+# What it refuses that a book can hold: a vector figure drawn in the page's own
+# stream with more than about 650,000 segments (three tokens a segment), some
+# 10 MiB of instructions, refused as `could not be read`; the same figure drawn
+# as a form is skipped and the page read. Kept at the value the library's fix
+# for unbounded parsing chose rather than raised to what MAX_STREAM_BYTES
+# allows: a book read for its text rarely draws such a figure inline.
+MAX_STREAM_TOKENS = 20 * MAX_PAGE_CHARS
+# One array or dictionary, wherever it is read. A real array is a few dozen
+# elements to a few thousand: the largest are a CJK font's widths and the name
+# tree leaf of a book with many links, tens of thousands at most; a real
+# dictionary holds a few dozen keys. The library's own values, written out.
+MAX_ARRAY_ELEMENTS = 100_000
+MAX_DICTIONARY_ENTRIES = 100_000
 MAX_TOTAL_CHARS = 20_000_000
 MAX_OUTLINE_ENTRIES = 10_000
 # A real outline is a few levels deep and a real page tree four or five; the
 # library walks both recursively.
 MAX_OUTLINE_DEPTH = 32
 MAX_PAGE_TREE_DEPTH = 64
+# The entries the library copies into the pages it builds while it walks the
+# page tree: each page's own and those it inherits, once for every reference to
+# it, so one page of a hundred thousand entries named ten thousand times is not
+# copied ten thousand times. A real page holds a dozen or two and inherits at
+# most four; this is 400 a page at MAX_PAGES, 200 at the walk's 2 * MAX_PAGES
+# entries. The library's own value, written out.
+MAX_PAGE_TREE_PAGE_ENTRIES = 2_000_000
 # Forms one page may draw: a running head, a watermark, a figure built of
 # parts is a handful to a few dozen; past this the library skips the rest.
 MAX_FORM_DRAWS = 200
@@ -166,6 +207,10 @@ MAX_XMP_BYTES = 1024 * 1024
 MAX_XMP_ELEMENTS = 10_000
 # Objects the library may visit to find a document catalogue that is missing.
 MAX_ROOT_RECOVERY = 10_000
+# The entries of one cross-reference stream, one an object: a long book has
+# tens of thousands of objects, rarely more than a few hundred thousand. The
+# library's own value, written out.
+MAX_XREF_STREAM_ENTRIES = 2_000_000
 
 # The process boundary. A 400-page book reads in about 0.6 s and 40 MiB.
 MAX_SECONDS_PER_FILE = 60
@@ -189,6 +234,16 @@ CONFIGURATION = dict(
     lzw_maximum_output_length=MAX_STREAM_BYTES,
     run_length_maximum_output_length=MAX_STREAM_BYTES,
     jbig2_maximum_output_length=MAX_STREAM_BYTES,
+    # Brotli (PDF 2.0); its decoder is not installed here, so such a stream
+    # fails to decode, and is capped all the same.
+    brotli_maximum_output_length=MAX_STREAM_BYTES,
+    # The filters one stream chains, and the bytes its decoding passes through.
+    stream_filters_maximum_length=MAX_STREAM_FILTERS,
+    stream_decoding_work_maximum_length=MAX_STREAM_DECODING_BYTES,
+    # The parsing of a page's instructions, and of any array or dictionary.
+    stream_parsing_work_maximum_count=MAX_STREAM_TOKENS,
+    array_maximum_element_count=MAX_ARRAY_ELEMENTS,
+    dictionary_maximum_element_count=MAX_DICTIONARY_ENTRIES,
     # A page whose content is split over several streams, joined.
     array_based_stream_maximum_output_length=MAX_STREAM_BYTES,
     # Images are never decoded here; capped all the same.
@@ -200,9 +255,14 @@ CONFIGURATION = dict(
     zlib_maximum_recovery_input_length=MAX_RECOVERY_BYTES,
     page_tree_maximum_entries=2 * MAX_PAGES,
     page_tree_maximum_depth=MAX_PAGE_TREE_DEPTH,
+    page_tree_maximum_page_entries=MAX_PAGE_TREE_PAGE_ENTRIES,
     outline_maximum_entries=MAX_OUTLINE_ENTRIES,
     outline_maximum_depth=MAX_OUTLINE_DEPTH,
     xform_maximum_invocations_per_extraction=MAX_FORM_DRAWS,
+    # Form fields are never read here (nothing on this path walks the field
+    # tree); capped as the outline is, the other tree a book may carry.
+    form_fields_maximum_entries=MAX_OUTLINE_ENTRIES,
+    form_fields_maximum_depth=MAX_OUTLINE_DEPTH,
     xmp_maximum_input_length=MAX_XMP_BYTES,
     xmp_maximum_element_count=MAX_XMP_ELEMENTS,
     # The one external program the library can start (JBIG2 images): never.
@@ -231,6 +291,17 @@ PAGE_SECTION = "Page {n}"
 # The operators that show text, whose string operands are counted against
 # MAX_PAGE_CHARS while the page is interpreted (TJ's are inside its array).
 SHOW_TEXT = frozenset({b"Tj", b"TJ", b"'", b'"'})
+
+# The library's page-tree and outline caps, told apart from its other caps by
+# the start of their messages (matched, never shown: a message can carry a
+# number from the document). Walking either tree reads other objects too: the
+# catalogue, the named destinations, every object an object stream packs with
+# a page; another cap met on one of those is not the tree's, and is refused
+# as any other. A later version that rewords these falls back to that reason.
+PAGE_TREE_LIMITS = ("Maximum page tree depth reached", "Maximum page tree entry limit reached",
+                    "Maximum page tree page entry limit exceeded",
+                    "Detected cycle in /Pages hierarchy")
+OUTLINE_LIMITS = ("Maximum outline depth reached", "Maximum outline entry limit reached")
 
 # The child's exit statuses. Anything else (a crash, a signal) is a refusal
 # that names the status and nothing else.
@@ -367,8 +438,13 @@ def read_pdf(path: Path) -> PdfBook:
                 raise PdfRefused(too_slow_reason())
             rss = resident(proc.pid)
             if rss is None:
-                if proc.poll() is None:              # running, and not measurable
-                    raise PdfRefused(UNMEASURED)
+                # On macOS a child on its way out can no longer be read and is
+                # not reaped yet; one sample's wait tells it from a child
+                # running unmeasured, which is refused.
+                try:
+                    proc.wait(timeout=MEMORY_SAMPLE_SECONDS)
+                except subprocess.TimeoutExpired:
+                    raise PdfRefused(UNMEASURED) from None
             elif rss > MAX_CHILD_RSS_BYTES:
                 raise PdfRefused(too_big_reason())
         normal = proc.returncode in (EXIT_READ, EXIT_REFUSED, EXIT_ERROR)
@@ -643,7 +719,8 @@ def read_pages(reader) -> list[str]:
     try:
         count = len(reader.pages)
     except LimitReachedError as error:
-        # Too many entries or too many levels: the library does not say which.
+        if not str(error).startswith(PAGE_TREE_LIMITS):
+            raise                                    # another cap: `could not be read`
         raise PdfRefused("its page tree is too deep or too large to read") from error
     if count > MAX_PAGES:
         raise PdfRefused(f"it has {count:,} pages, and the limit is {MAX_PAGES:,}")
@@ -711,8 +788,10 @@ def outline_starts(reader, count: int) -> tuple[list[tuple[int, str]], str]:
     from pypdf.errors import LimitReachedError
     try:
         outline = reader.outline
-    except LimitReachedError:
-        return [], "its outline is too deep or too large to read"
+    except LimitReachedError as error:
+        if str(error).startswith(OUTLINE_LIMITS):
+            return [], "its outline is too deep or too large to read"
+        return [], "its outline could not be read (LimitReachedError)"
     except Exception as error:
         return [], f"its outline could not be read ({type(error).__name__})"
     if not outline:
@@ -764,8 +843,11 @@ def read_in_process(path: Path) -> PdfBook:
             if size > MAX_FILE_BYTES:
                 raise PdfRefused(f"the file is larger than {mib(MAX_FILE_BYTES)}")
             with quiet_pypdf(), apply_configuration(**CONFIGURATION):
+                # The constructor's bounds, every one set as the
+                # configuration's are (the second since 6.21.3).
                 reader = reader_class()(fp, strict=False,
-                                        root_object_recovery_limit=MAX_ROOT_RECOVERY)
+                                        root_object_recovery_limit=MAX_ROOT_RECOVERY,
+                                        xref_stream_maximum_entries=MAX_XREF_STREAM_ENTRIES)
                 if reader.is_encrypted:
                     raise PdfRefused(ENCRYPTED)
                 texts = read_pages(reader)

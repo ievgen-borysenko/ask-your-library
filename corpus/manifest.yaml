@@ -48,7 +48,10 @@ books:
     pg_id: 521
 
   - id: frankenstein
-    sha256: 7810cd483cffcf2cc8a1d8f0d5807931e69d4f48cd14149b8c76f88af82fead3
+    sha256: 2b97b7f8aad508649481d8dd4f6b54f9b965ddb3ba634e9151c815f537b49e42
+    # re-pinned 2026-11-02: PG recapitalised the title in two header lines ("or, the
+    # modern prometheus" -> "or, The modern Prometheus"), same file size; the header
+    # is stripped, so the prepared text and the chapter split are identical
     title: "Frankenstein"
     author: "Mary Shelley"
     source: gutenberg
@@ -128,9 +131,14 @@ books:
     pg_id: 1342
 
   - id: moby-dick
-    sha256: 907420db6c4b68c70e2988cd2ad9c8cf79138667a01b63376d18dd17fef1a18b
+    sha256: b5e88b71a1cda068e9ab1d94344c9d932338ba6da1a66def97a1aecd9cfcc87d
     # re-pinned 2026-09-10: PG regenerated the file — updated-date header line
     # plus three fixes in the text (two missing quote marks, "soil" -> "soul")
+    # re-pinned 2026-11-02: PG regenerated it on 2026-10-09 — updated-date header line,
+    # the J. Ross Browne extract set one speaker per line (front matter, before
+    # CHAPTER 1) and six stage directions put in parentheses (chapters 37, 38, 120,
+    # 121, 122, 127); the chapter split is unchanged. Compared with the initial-release
+    # copy (9a6844ac…) minus the three 2026-09-10 fixes: the 2026-09-10 copy was not kept
     title: "Moby Dick"
     author: "Herman Melville"
     source: gutenberg
@@ -175,7 +183,10 @@ books:
   # --- expansion batch (14.08): distractor pairs + user's picks ---
 
   - id: hound-of-the-baskervilles
-    sha256: f7c8c68729d32a5f6a04a5a9ad73d184176e66a6c76b3992c41c1ab47b427d98
+    sha256: aea75dfb3977a0a0222f838593c45dfbcb1af9fbb7bf5b60b1f13d5e452cbcf7
+    # re-pinned 2026-11-02: PG regenerated the file — updated-date header line plus
+    # one fix in chapter 2 (a dropped "sound of" restored in the Baskerville legend);
+    # the chapter split is unchanged
     title: "The Hound of the Baskervilles"
     author: "Arthur Conan Doyle"
     source: gutenberg

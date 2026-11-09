@@ -75,6 +75,31 @@ def test_reflect_step_shows_the_real_stop_reason(ui, monkeypatch):
     assert shown[-1][1].count("stopped:") == 1
 
 
+
+def test_reflect_step_says_which_search_already_ran(ui, monkeypatch):
+    """A repeat reflect caught (#163): the step names the search that had
+    already run above what ran instead, or above the stop."""
+    from ask_your_library.i18n import t
+    shown = []
+    monkeypatch.setattr(ui, "show_step",
+                        lambda name, text, default_open=False: shown.append((name, text, default_open)))
+    ui.render_event("reflect", {"current_query": "q2", "queries": [],
+                                "query_replaced": {"from": "q1", "to": "q2"}})
+    assert shown[-1][1] == t("ui_search_repeat", q="q1") + "\n" + t("ui_search_more", q="q2")
+    ui.render_event("reflect", {"current_query": "", "stop_reason": t("stop_no_new_query"),
+                                "query_replaced": {"from": "q1", "to": ""}})
+    assert shown[-1][1] == (t("ui_search_repeat", q="q1") + "\n"
+                            + t("ui_stopped", r=t("stop_no_new_query")))
+    assert shown[-1][2] is True
+    # nothing named, nothing said: the stop line alone
+    ui.render_event("reflect", {"current_query": "", "stop_reason": t("stop_no_new_query")})
+    assert shown[-1][1] == t("ui_stopped", r=t("stop_no_new_query"))
+    # a re-plan with nothing left to search: the reason, not an empty "- " query
+    ui.render_event("plan", {"mode": "answer", "current_query": "", "queries": [],
+                             "stop_reason": t("stop_no_new_query")})
+    assert shown[-1][1] == (t("ui_mode", mode="answer") + "\n"
+                            + t("ui_stopped", r=t("stop_no_new_query")))
+
 def test_badge_is_green_only_when_nothing_is_broken_or_unattributed(ui):
     def badge(**numbers):
         return ui.verification_badge({"verification": "v", "provenance": numbers})
@@ -893,10 +918,14 @@ OUR_WORDING = "This starts a new chat. The current chat stays in your history."
 # carry the same list in prose (Apache-2.0 §4(b)); this is the enforcement.
 STEP_PREFIXES = ("chat.messages.status.used", "chat.messages.status.using")
 WATERMARK = "chat.watermark"
+LOGIN_FIELD = {"auth.login.form.email.label": "Username",
+               "auth.login.form.email.placeholder": "admin",
+               "auth.login.form.email.required": "username is required"}
 OUR_VALUES = {NEW_CHAT_DESCRIPTION: OUR_WORDING,
               "chat.messages.status.used": "",
               "chat.messages.status.using": "",
-              WATERMARK: "Evidence provenance is checked in code. The reasoning is not."}
+              WATERMARK: "Evidence provenance is checked in code. The reasoning is not.",
+              **LOGIN_FIELD}
 
 
 def _leaves(node, path=""):
@@ -928,8 +957,8 @@ def test_the_project_translation_carries_the_whole_key_set_of_the_installed_one(
         f"missing: {sorted(set(theirs) - set(ours))}; extra: {sorted(set(ours) - set(theirs))}")
 
 
-def test_exactly_four_values_are_ours_and_the_rest_stays_upstreams():
-    """Four strings are this project's, and each one is a claim app.py cannot
+def test_exactly_seven_values_are_ours_and_the_rest_stays_upstreams():
+    """Seven strings are this project's, and each one is a claim app.py cannot
     make for itself:
 
     - the New Chat warning: chats are persisted by the data layer and stay in
@@ -942,10 +971,14 @@ def test_exactly_four_values_are_ours_and_the_rest_stays_upstreams():
       a badge reporting a code-only check and says less than this app knows.
       The replacement claims exactly what `validate` does: the provenance of
       the distilled EVIDENCE is checked, not the quotation marks inside the
-      answer the model wrote around it.
+      answer the model wrote around it;
+    - the login field: Chainlit asks for an "Email address" (me@example.com),
+      while the account app.py checks is a username, so the label, the
+      placeholder and the empty-field message say "username" (#139).
 
     The rest has to stay upstream's, or the file is a fork nobody re-reads on a
-    bump. en-US only: every other locale falls back to Chainlit's own copy."""
+    bump. en-US only: a language Chainlit ships gets Chainlit's own copy, and
+    one it does not ship (Ukrainian among them) falls back to this file."""
     ours = _leaves(json.loads(PROJECT_TRANSLATION.read_text(encoding="utf-8")))
     theirs = _leaves(_shipped_translation())
     assert {path for path, text in ours.items() if theirs[path] != text} == set(OUR_VALUES)
@@ -958,6 +991,9 @@ def test_exactly_four_values_are_ours_and_the_rest_stays_upstreams():
     assert "Evidence provenance is checked in code" in ours[WATERMARK]
     assert "reasoning is not" in ours[WATERMARK]
     assert "Quotes are checked" not in ours[WATERMARK]
+    # The login field names what app.py really checks; no trace of an email.
+    assert {path: ours[path] for path in LOGIN_FIELD} == LOGIN_FIELD
+    assert not any("email" in ours[path].lower() or "@" in ours[path] for path in LOGIN_FIELD)
 
 
 def test_startup_seeds_the_other_languages_and_leaves_ours_alone(tmp_path, monkeypatch):
@@ -983,13 +1019,13 @@ def test_startup_seeds_the_other_languages_and_leaves_ours_alone(tmp_path, monke
 
 def test_the_notice_attributes_the_vendored_chainlit_file():
     """Apache-2.0 §4(b) asks a modified third-party file to carry a notice that
-    it was changed, and a file that is upstream's byte for byte except four
+    it was changed, and a file that is upstream's byte for byte except seven
     values is exactly that. The file and the paragraph are one contract, so this
     test fails if either side goes: no NOTICE paragraph with a tracked copy, and
     no stale paragraph after the copy is dropped. The version is asserted too —
     a chainlit bump has to be a decision about this copy, not a silent drift
     between what NOTICE names and what the tree holds. Every changed key is
-    named in both records, so a fifth one cannot be added in silence."""
+    named in both records, so an eighth one cannot be added in silence."""
     from importlib.metadata import version
     notice = (REPO / "NOTICE").read_text(encoding="utf-8")
     if PROJECT_TRANSLATION.exists():

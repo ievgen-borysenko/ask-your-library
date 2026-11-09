@@ -26,6 +26,7 @@ decided here (`chainlit_dir`), for the web chat and for `ayl backup` alike: unde
 `$AYL_HOME/ui/.chainlit/`, beside the config this module writes (ADR-026), with a
 checkout's older `.chainlit/chat.db` still read where it is until the sunset.
 """
+import hashlib
 import ipaddress
 import json
 import os
@@ -44,6 +45,23 @@ APP = PACKAGE / "app.py"
 CONFIG_TEMPLATE = PACKAGE / "chainlit_config.toml"
 TRANSLATION = PACKAGE / "translations" / "en-US.json"
 WELCOME = PACKAGE / "welcome.md"
+
+# SHA-256 of every earlier version of the two copied files that a release
+# shipped since `prepare` started copying them (0.5.0). A copy byte-identical
+# to one of these is ours, left over from that release, and is replaced on the
+# next start; any other content is a reader's edit and stays theirs.
+SHIPPED_EARLIER = {
+    TRANSLATION.name: (
+        # 0.5.0 and 0.5.1 (c5606e8): the login field still read "Email address".
+        "a86d6996f51c9c9c637faffef5ea402a3ca40fa62fc3c5fa91faafa7808d6362",
+    ),
+    WELCOME.name: (
+        # 0.5.0 (c5606e8): told the reader to type the username into "Email address".
+        "193e8249a7ab8f810acdde39674767b75dbadab34009bc11f90ae6dc0b02df6d",
+        # 0.5.1 (f11808c): the same sentence, under the reworded footer line.
+        "66fa47b1c16d8d560163277dfa8a9da452723ad0e74cb7fd08145aedcb7a84ba",
+    ),
+}
 
 # Chainlit's own (chainlit/config.py); repeated rather than imported, because
 # `ayl ui --help` must answer on an installation without the `ui` extra.
@@ -313,17 +331,20 @@ def prepare(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> Path:
     to start on it rather than serving half a policy. The next start rewrites
     it from the template either way.
 
-    The translation and the welcome page are copied only when they are absent:
-    neither carries a decision the code depends on, and Chainlit itself would
-    otherwise seed the directory with its own `en-US.json` (the copy step
-    skips a file that already exists, which is the whole reason ours has to be
-    there first)."""
+    The translation and the welcome page are copied when they are absent, or
+    when the copy there is byte for byte one an earlier release put there
+    (`SHIPPED_EARLIER`), so an upgrade brings the new wording along; any other
+    content is a reader's edit and is left alone. Neither file carries a
+    decision the code depends on, and Chainlit itself would otherwise seed the
+    directory with its own `en-US.json` (the copy step skips a file that
+    already exists, which is the whole reason ours has to be there first)."""
     root = app_root()
     (root / ".chainlit" / "translations").mkdir(parents=True, exist_ok=True)
     (root / ".chainlit" / "config.toml").write_text(render_config(host, port), encoding="utf-8")
     for source, target in ((TRANSLATION, root / ".chainlit" / "translations" / "en-US.json"),
                            (WELCOME, root / "chainlit.md")):
-        if not target.exists():
+        if not target.exists() or (hashlib.sha256(target.read_bytes()).hexdigest()
+                                   in SHIPPED_EARLIER[source.name]):
             shutil.copyfile(source, target)
     return root
 

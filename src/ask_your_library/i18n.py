@@ -34,17 +34,21 @@ def get_lang() -> str:
 # installer does everything (Ollama included); a tool install has `ayl init`,
 # which pulls the models and writes the configuration once Ollama runs. Built
 # per call (`hints` reads the install at call time) and filled in by `t()`
-# itself, as `{setup_all}` and `{setup_pulls}`, so every caller of `t()` stays
-# as it is.
+# itself, as `{setup_init}`, `{setup_mac}` and `{setup_pulls}`, so every caller
+# of `t()` stays as it is. `setup_mac` is the clone's installer as a sentence
+# of its own, and empty outside a clone: it goes only into the macOS line of
+# pf_no_ollama_mac, because the script is a macOS installer.
 def _setup(lang: str) -> dict[str, str]:
     clone = from_clone()
     installer = "bash scripts/install-mac.sh" if clone else command("ayl init")
     if lang == "ua":
-        return {"setup_all": "Одна команда робить усе це: `bash scripts/install-mac.sh`. " if clone
-                else "Потім `ayl init` завантажить моделі й запише конфігурацію. ",
+        return {"setup_init": command("ayl init"),
+                "setup_mac": " З цього клону `bash scripts/install-mac.sh` робить усе це." if clone
+                else "",
                 "setup_pulls": f"`{installer}` завантажує моделі саме цієї конфігурації."}
-    return {"setup_all": "One command does all of that: `bash scripts/install-mac.sh`. " if clone
-            else "Then `ayl init` pulls the models and writes the configuration. ",
+    return {"setup_init": command("ayl init"),
+            "setup_mac": " From this clone, `bash scripts/install-mac.sh` does all of that." if clone
+            else "",
             "setup_pulls": f"`{installer}` pulls the models this configuration opens."}
 
 
@@ -138,6 +142,14 @@ _T = {
     "stop_enough": {
         "ua": "досить доказів",
         "en": "enough evidence",
+    },
+    # Every search the loop could still make has already run (#163): the model
+    # named one it made before, nothing unrun is queued, and the coverage gate
+    # has nothing new to force. Another step would only bring back passages the
+    # run already holds.
+    "stop_no_new_query": {
+        "ua": "немає нового запиту: кожен пошук, який лишався, уже виконано",
+        "en": "no new query: every search left has already run",
     },
     "stop_clarify_repeat": {
         "ua": "повторний clarify не дозволено — фінішуємо з наявним",
@@ -261,23 +273,39 @@ _T = {
               "Only the hosted configuration needs a key; the default one is local "
               "(LLM_BACKEND=ollama) and needs none.",
     },
-    # The first-run failure of the shipped default, so it carries the whole
-    # remedy rather than the one step that used to be missing: nothing is
-    # installed yet on the machine this is printed on. The pulls are the models
-    # THIS configuration reads (preflight.pull_commands), never a fixed pair.
+    # The first-run failure of the shipped default, in three lines: what is
+    # wrong, the one action for the platform this runs on (`action` is
+    # pf_no_ollama_mac or pf_no_ollama_other, picked by
+    # preflight.no_ollama_action), and the two ways around a local Ollama. No
+    # `ollama pull` lines: `ayl init`, which the action line ends on, pulls the
+    # models this configuration opens.
     "pf_no_ollama": {
-        "ua": "Не вдалося звернутися до Ollama на {url} (помилка з'єднання або запиту). "
-              "Типова конфігурація відповідає локально, і саме Ollama її запускає: "
-              "встанови (`brew install ollama`), запусти (`ollama serve`), потім {pulls}. "
-              "{setup_all}"
+        "ua": "Ollama не запущена на {url}.\n"
+              "{action}\n"
               "Якщо сервер в іншому місці — задай OLLAMA_URL; щоб відповідати на хмарній "
               "моделі — LLM_BACKEND=openrouter (потрібен ключ, і це коштує грошей).",
-        "en": "Could not reach Ollama at {url} (a connection or request error). "
-              "The default configuration answers locally, and Ollama is what runs it: "
-              "install it (`brew install ollama`), start it (`ollama serve`), then {pulls}. "
-              "{setup_all}"
+        "en": "Ollama is not running at {url}.\n"
+              "{action}\n"
               "Set OLLAMA_URL if your server is elsewhere, or LLM_BACKEND=openrouter to "
               "answer on a hosted model instead (that needs a key, and costs money).",
+    },
+    # macOS: most people run the Ollama app, and Homebrew is the other way; the
+    # clone's installer is offered here and nowhere else (`setup_mac`). The
+    # formula does not start the server, so the line starts it the way
+    # scripts/install-mac.sh does: `brew services run`, which adds no login item.
+    "pf_no_ollama_mac": {
+        "ua": "Відкрий застосунок Ollama або встанови її (`brew install ollama`) і підніми "
+              "сервер (`brew services run ollama`), потім запусти `{setup_init}` ще раз."
+              "{setup_mac}",
+        "en": "Open the Ollama app, or install it with `brew install ollama` and start it with "
+              "`brew services run ollama`; then re-run `{setup_init}`.{setup_mac}",
+    },
+    # Linux, Windows and anything else: no Homebrew, no macOS installer.
+    "pf_no_ollama_other": {
+        "ua": "Встанови її з https://ollama.com/download або запусти `ollama serve`, потім "
+              "запусти `{setup_init}` ще раз.",
+        "en": "Install it from https://ollama.com/download, or start it with `ollama serve`; "
+              "then re-run `{setup_init}`.",
     },
     "pf_ollama_bad_reply": {
         "ua": "Щось на {url} відповіло (HTTP {status}), але це не придатна відповідь /api/tags "
@@ -331,9 +359,9 @@ _T = {
         "en": "The environment is not ready:",
     },
     # ---- preflight: non-fatal notices (it works, but in a degraded shape)
-    # An interrupted install lands here, so these carry the same remedy as
-    # pf_no_ollama above: the pull is a download of gigabytes that has to
-    # finish, and the installer is the one command that finishes it. The size
+    # An interrupted install lands here, so these carry the pull and the
+    # command that finishes it, as pf_no_ollama's action line does: the pull
+    # is a download of gigabytes that has to finish. The size
     # is deliberately not a number: `ollama list` cannot be read for a model
     # that is not there, and a figure hard-coded per model would go stale the
     # first time OLLAMA_LLM_MODEL points elsewhere.
@@ -385,12 +413,25 @@ _T = {
     "cli_you": {"ua": "\nТи: ", "en": "\nYou: "},
     "cli_your_answer": {"ua": "Твоя відповідь: ", "en": "Your answer: "},
     "cli_bye": {"ua": "\nБувай!", "en": "\nBye!"},
+    # Said once before the first run on the local backend (#137): every
+    # research answer there takes minutes (61-217 s measured, docs/cost.md),
+    # the first one longest, and with nothing printed in the meantime a reader
+    # may stop a run that is working. `ayl init`'s next steps print the same
+    # sentence.
+    "cli_local_wait": {
+        "ua": "Локальна модель: дослідницька відповідь зазвичай займає 1-4 хвилини, "
+              "найдовше вперше, поки модель завантажується; питання до каталогу — "
+              "кілька секунд.",
+        "en": "Local model: a research answer usually takes 1-4 minutes, longest the "
+              "first time while the model loads; catalogue questions take seconds.",
+    },
     "ev_plan_fallback": {"ua": "[plan] планер не дав придатного плану (JSON або запити): шукаю за текстом питання",
                          "en": "[plan] the planner gave no usable plan (JSON or queries): searching the raw question"},
     "ev_plan": {"ua": "[plan] mode={mode}, запити: {queries}",
                 "en": "[plan] mode={mode}, queries: {queries}"},
     "ev_plan_catalog": {"ua": "[plan] mode=catalog, операція: {op}",
                         "en": "[plan] mode=catalog, operation: {op}"},
+    "ev_plan_stopped": {"ua": "[plan] зупинка: {r}", "en": "[plan] stopped: {r}"},
     "ev_plan_refusal": {"ua": "[plan] поза межами бібліотеки: відмова без пошуку",
                         "en": "[plan] outside the library: refusing without a search"},
     "ev_catalog_fallback_invalid_op": {"ua": "[plan] планер назвав операцію каталогу, якої нема: шукаю в текстах",
@@ -419,6 +460,8 @@ _T = {
                          "en": "[reflect] coverage gate: one look inside {book}, a candidate the evidence never touched"},
     "ev_reflect_search": {"ua": "[reflect] ще шукаємо: {q}",
                           "en": "[reflect] searching more: {q}"},
+    "ev_reflect_repeat": {"ua": "[reflect] цей пошук уже був: {q}",
+                          "en": "[reflect] already searched: {q}"},
     "ev_reflect_enough": {"ua": "[reflect] досить, синтезуємо",
                           "en": "[reflect] enough, synthesizing"},
     "ev_clarify": {"ua": "[clarify] уточнення користувача: {a}",
@@ -516,6 +559,7 @@ _T = {
     "ui_probe": {"ua": "coverage gate: одна перевірка кандидата {book}",
                  "en": "coverage gate: one look inside {book}"},
     "ui_search_more": {"ua": "ще шукаємо: {q}", "en": "searching more: {q}"},
+    "ui_search_repeat": {"ua": "цей пошук уже був: {q}", "en": "already searched: {q}"},
     "ui_enough": {"ua": "досить, синтезуємо", "en": "enough, synthesizing"},
     "ui_stopped": {"ua": "зупинка: {r}", "en": "stopped: {r}"},
     "ev_reflect_stopped": {"ua": "[reflect] зупинка: {r}", "en": "[reflect] stopped: {r}"},

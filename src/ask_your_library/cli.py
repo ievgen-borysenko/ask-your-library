@@ -30,7 +30,7 @@ import sys
 from importlib.metadata import PackageNotFoundError, version
 
 from .bookkey import split_read_query, unescape_marker
-from .config import QUESTION_DEADLINE_S, SUPPORTED_LANGS, TABLES
+from .config import LLM_BACKEND, QUESTION_DEADLINE_S, SUPPORTED_LANGS, TABLES
 from .graph import build_graph
 from .hints import config_docs
 from .home import scratch_dir
@@ -91,6 +91,10 @@ def print_event(node_name: str, update: dict) -> None:
             # The scope gate (#70): there is no query list to print, and
             # "queries: ['']" would be the only thing this line said.
             say(t("ev_plan_refusal"))
+        elif not update.get("current_query") and update.get("stop_reason"):
+            # A re-plan with nothing left to search (#163): the reason, not an
+            # empty query list.
+            say(t("ev_plan_stopped", r=update["stop_reason"]))
         else:
             say(t("ev_plan", mode=update["mode"],
                   queries=[update["current_query"]] + update["queries"]))
@@ -117,6 +121,10 @@ def print_event(node_name: str, update: dict) -> None:
         # line a reader sees is about the chapter, so the query comes off here
         # and everything below reads the marker it always read.
         nxt, _ = split_read_query(update.get("current_query") or "")
+        # A search the run already made, caught before it ran (#163): said
+        # first, so the line after it reads as what ran instead, or the stop.
+        if (update.get("query_replaced") or {}).get("from"):
+            say(t("ev_reflect_repeat", q=update["query_replaced"]["from"]))
         if nxt == "__clarify__":
             say(t("ev_reflect_clarify"))
         elif nxt and nxt.startswith("__chapter__|"):
@@ -279,7 +287,8 @@ def main(argv: list[str] | None = None, prog: str = "ask-library") -> None:
     if problems:
         say(t("pf_header"), error=True)
         for problem in problems:
-            say(f"  - {problem}", error=True)
+            # A problem of several lines (pf_no_ollama) keeps them under its bullet.
+            say(f"  - {problem}".replace("\n", "\n    "), error=True)
         # Every problem is printed; the status names the one to fix first. A
         # missing Ollama and a missing index are the two ways a fresh clone
         # fails, they are not the same failure, and neither is a traceback —
@@ -297,6 +306,13 @@ def main(argv: list[str] | None = None, prog: str = "ask-library") -> None:
             mark_reported(TABLES["cards"])
 
     graph = build_graph()
+    # Said before the first run, while nothing has been asked of the model yet
+    # (#137): on the local backend the first research answer takes minutes and
+    # nothing is printed in the meantime. On stderr with the preflight notices,
+    # so a script reading the answer off stdout is unaffected; never with a
+    # hosted backend, where it would not be true.
+    if LLM_BACKEND == "ollama":
+        say(t("cli_local_wait"), error=True)
 
     if args.question:
         question = " ".join(args.question)
