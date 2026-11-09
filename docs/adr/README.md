@@ -60,8 +60,9 @@ Status: accepted.
 
 `library.search` runs a vector search (bge-m3 through Ollama, 1024 dimensions) and a BM25/FTS
 search, twenty candidates each, and fuses the two lists with Reciprocal Rank Fusion written out in
-`library.py` (`RRF_K = 60`); `search_both` gives the agent four card and four transcript hits per
-step, and a broken FTS index degrades to vector-only with a warning. LanceDB's built-in hybrid
+`library.py` (`RRF_K = 60`); `search_both` gives the agent four transcript hits per step and,
+since 2026-11-09, two card hits (four before; ADR-005's amendment of that date), and a broken FTS
+index degrades to vector-only with a warning. LanceDB's built-in hybrid
 reranker was less code but ties the scoring to the library's API; a cross-encoder reranker was left
 out because nothing had measured ranking as the weak link.
 
@@ -303,8 +304,9 @@ unchanged — a copy never makes a step drier than its dropped quotes do.
 
 Status: accepted; the size of the budget was revised by ADR-012 and its MEANING by ADR-025
 (2026-09-17), 2026-09-16 added one number to what `reflect` sees, 2026-10-02 replaced the
-note `reflect` decided on with the verified quote, and 2026-11-09 showed `reflect` the searches
-the run already made (see below). The budget itself is unchanged.
+note `reflect` decided on with the verified quote, 2026-11-09 showed `reflect` the searches
+the run already made, and a second amendment of 2026-11-09 set how many book cards `observe` is
+shown, in what order and how often (see below). The per-hit budget itself is unchanged.
 
 Raw hits never reach `plan`, `reflect` or `synthesize`. `observe` receives one `<result>` block
 per hit, carrying that hit's id, book and section, with the text cut to `SEARCH_HIT_CHARS`
@@ -423,6 +425,25 @@ paraphrasing one up to the step limit, never shown what had run. The queries are
 passage may have steered, so the block is treated as a passage is — instruction-like lines redacted
 by `sanitize_context`, then `data_block`'s neutralization — and its sinks are the ones above: a
 proposal still goes through `str_field`, the marker guard and the repeat check of #163.
+
+Amended 2026-11-09 (#32's scope, cost and latency): **`observe` sees at most two book cards per
+step, transcripts first, and a card once per run unless a quote of its book was refused.**
+`observe`'s time is its input, and every search step showed four cards and four transcript chunks,
+cards first: the cards at rank 3-4 were a large share of that input and almost never the evidence
+kept, the same card came back step after step, and a step whose cards already answered left its
+own book text unquoted. Three changes, all in `act`, before the hit ids are given: `search_both`
+takes a card budget (`cards_k`) and the agent asks for `CARD_SLOTS` = 2 cards and 4 transcripts on
+a search step and on a coverage probe; a search step orders its passages transcripts first (stable
+inside each corpus); and a card whose book, section and text an earlier step already showed
+(`hits_log`, compared on the text as it stores it) is withheld. The exemption is #29's retry rule
+applied to cards: a card of a book named in the refusals `observe` is shown (`dropped_quotes`,
+exactly or as a bare title) comes back, so a paraphrased card line can be copied the next time.
+Transcripts are never withheld. What this ADR decides is unchanged: the per-hit budget, applied
+once in `act`, the gate reading the hits of the step, and only evidence travelling on. No new text
+reaches any prompt (`observe` sees a subset of what it saw, in another order), and the one decision
+model text now drives, which already-shown card comes back, can only bring back a passage the run
+has already retrieved and shown. The withheld cards are named in the scratchpad and in no state
+channel or event. The retrieval eval measures the same window (top-2 cards + top-4 transcripts).
 
 ## ADR-006: Clarify as an interrupt with a candidate list and a code resolver
 

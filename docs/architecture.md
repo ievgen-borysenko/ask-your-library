@@ -183,7 +183,12 @@ in [`adr/README.md`](adr/README.md), each with the measurement that settled it.
   keeps each passage, as observe saw it, in state under a stable hit id; plan, reflect and synthesize work on the distilled evidence,
   never on raw hits. `reflect` and `synthesize` both read an evidence item's verified quote, never
   `observe`'s note on it (#93, ADR-005): the decision to stop is made on what the books are known
-  to say.
+  to say. A search step (and a coverage probe) retrieves at most two book cards (`CARD_SLOTS`) and
+  four transcript chunks; a search step shows the transcripts first, and a card an earlier step
+  already showed is not shown again unless the gate refused a quote of its book (2026-11-09,
+  ADR-005). `act` applies all three before it gives the hit ids, so the ids, the scratchpad,
+  `hits_log` and the `observe` prompt hold one list; the scratchpad names the cards not shown
+  again.
 - **The chunk and that budget are one decision (17.09, ADR-025).** A chunk was 4,000 characters
   and the budget 2,500, so 90% of chunks were ranked on more text than was ever read; transcript
   chunks are packed to 2,400 now, under the budget, and a search hit arrives whole. A chapter read
