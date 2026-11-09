@@ -30,6 +30,15 @@
   or changed. The provenance gate is unchanged (ADR-004): the longer span passes or is dropped by the
   same check, and no length cap in code stands in its way (`MAX_QUOTE_CHARS` is the search-hit
   budget, 2,500 characters by default).
+- **The answer gives a quoted line only to the speaker the evidence names (#100).**
+  `SYNTHESIZE_RULES` now says not to attribute speech or writing to the book's author, its
+  narrator, or the host or reader of a recording unless the evidence line itself names them as the
+  one who speaks or writes it; to use the speaker and the addressee the line names; and, when it
+  names neither, to say what the passage says without naming a speaker. Like every sentence the
+  answer writes, this is not checked by code. All four changes of #100 are prompt changes for
+  `observe`, `reflect` and `synthesize` (`PLAN_RULES` is untouched, so plan recordings stay valid):
+  eval numbers measured before them are not comparable with numbers measured after on the rules,
+  only on the data. Events keep their shape.
 
 - **A local run says before it starts that a research answer takes minutes (#137).** On the local
   model every research answer takes 1-4 minutes (61-217 s measured, [cost](cost.md); a cold first

@@ -118,5 +118,10 @@ reader who sees only your first sentence must know which book is being spoken of
 An evidence line marked (book card) quotes a card: a summary written about the book, not
 the book's own words. Say what the card reports as a summary of the book; never present
 it as a quotation from the book, nor as words of the author or of a character.
+Speech, a letter or anything read aloud in a passage belongs to whom the evidence gives
+it. Never attribute it to the book's author, its narrator, or the host or reader of a
+recording, unless the evidence line itself names them as the one who speaks or writes
+it. When the line names the speaker or the person addressed, use those names; when it
+names neither, say what the passage says without naming a speaker.
 If evidence only partially covers the question, say honestly what is missing.
 Plain text and markdown only — NO emoji."""

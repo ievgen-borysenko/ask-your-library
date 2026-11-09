@@ -199,6 +199,9 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   span of up to four sentences. That is a prompt rule, not a check: a model may still keep the bare
   quote, and a speaker named only in another passage, or more than a few sentences away, does not
   travel with it. The provenance check holds the longer span to the same contiguous-copy rule.
+  `synthesize` is told to give speech and writing only to whom the evidence line names, and to
+  name no speaker when the line names none; nothing checks the answer's sentences against that
+  (the quote check covers the evidence, not the answer).
 - **The citation format varies between answers** (#118). The model writes the citations in
   `synthesize`, and nothing fixes their form; the quote check runs over the evidence, not over
   how the answer cites it.

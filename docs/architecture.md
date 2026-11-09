@@ -269,6 +269,10 @@ allowed past the usual two. The check is not changed for it (ADR-004): the longe
 contiguous run of the cited passage like any other quote, so a speaker stitched in from a sentence
 that is not adjacent, or across the "[...]" between two chunks of a chapter read, is dropped as
 `not_found`. No length cap in code stands in the way: `MAX_QUOTE_CHARS` is the search-hit budget.
+`SYNTHESIZE_RULES` then gives speech and writing only to whom the evidence line names as speaker or
+writer, never by default to the book's author, its narrator or a recording's host; with no one
+named, the answer names no speaker. That half is a rule the answer's sentences follow or not, and
+like every sentence the answer writes it is outside this check.
 
 **This verifies provenance, not correctness.** It proves the agent did not invent its evidence,
 and says nothing about whether the answer is right. Concrete example: if a character in the book

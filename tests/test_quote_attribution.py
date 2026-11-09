@@ -263,3 +263,36 @@ def test_a_span_across_a_chapter_read_gap_is_refused(monkeypatch):
                 "I told you last night that I might be going away sometime.")
     update = observe_one(monkeypatch, spanning, text=text)
     assert update["evidence"] == [] and update["dropped_by_reason"]["not_found"] == 1
+
+
+# ---------------------------------------------------------------- (d) synthesize gives words to their speaker
+def test_the_synthesize_rules_give_words_only_to_the_speaker_the_evidence_names():
+    rules = flat(prompts.SYNTHESIZE_RULES)
+    assert "Speech, a letter or anything read aloud in a passage" in rules
+    assert "Never attribute it to the book's author, its narrator" in rules
+    assert "host or reader of a recording" in rules
+    assert "unless the evidence line itself names them" in rules
+    assert "names the speaker or the person addressed, use those names" in rules
+    assert "without naming a speaker" in rules
+    # still a template with one placeholder, and still the rules the scripted backends route on
+    assert "{lang}" in prompts.SYNTHESIZE_RULES
+    prompts.SYNTHESIZE_RULES.format(lang="Answer in English.")
+    assert prompts.SYNTHESIZE_RULES.startswith("Answer the user's question USING ONLY the evidence")
+
+
+def test_the_rules_name_no_real_book_or_person():
+    """The rules are shared by every question, and a name in them is a name the
+    model can copy into an answer about another book (see the Don Quixote test
+    in test_agent_units.py). The reference case of #100 stays out of them."""
+    from pathlib import Path
+
+    text = Path(prompts.__file__).read_text(encoding="utf-8")
+    for name in ("Gilead", "John Ames", "Robinson", "Ishmael"):
+        assert name not in text
+
+
+def test_synthesize_still_sends_the_evidence_and_the_new_rules_together(monkeypatch):
+    seen = synthesize_prompt(monkeypatch)
+    assert "who speaks or writes" not in seen["user"]       # rules are system, not data
+    assert "names the speaker or the person addressed" in flat(seen["system"])
+    assert seen["role"] == "synthesize"
