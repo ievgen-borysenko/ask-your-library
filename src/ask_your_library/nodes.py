@@ -454,6 +454,10 @@ def act(state: AgentState) -> dict:
     # The search this step runs, as `searches_run` records it (#163); stays
     # None on a chapter read and on a malformed marker, which search nothing.
     searched = None
+    # Only a plain search step shows its transcripts before its cards (below);
+    # a chapter read is one passage and a coverage probe keeps its retriever
+    # order.
+    transcripts_first = False
     if marker_parts and len(marker_parts) != 3:
         # A malformed marker (fewer than three parts) is nothing to act on: no
         # hits, a note in the scratchpad, and the loop's CRAG gate counts the
@@ -542,6 +546,7 @@ def act(state: AgentState) -> dict:
                 if searched else [])
         empty_read_note = ""
         read_chapters = state.get("read_chapters", [])
+        transcripts_first = True
 
     # Injection defense: sanitize hit text before the model ever sees it.
     # The control/invisible strip happens HERE, on the passage itself and before
@@ -567,6 +572,17 @@ def act(state: AgentState) -> dict:
         if redacted:
             h["redacted_lines"] = redacted
             usage.redacted_lines += redacted
+
+    # The book's own text first, then the cards. `search_both` asks the corpora
+    # cards first, and `observe` read the cards first: on a step whose cards
+    # already answered, it kept a card line and the step's book text went
+    # unquoted. The order is set HERE, before the ids, so the ids, `hits_log`,
+    # the scratchpad and the `observe` prompt all follow one list. Stable: the
+    # retriever's order inside each corpus is kept. Retrieval keeps its own
+    # order; the order a step shows is this node's concern.
+    if transcripts_first:
+        hits = ([h for h in hits if h["corpus"] != "cards"]
+                + [h for h in hits if h["corpus"] == "cards"])
 
     # Raw hits go to the scratchpad file, not into the orchestrator's context.
     # Stable ids: evidence points at the hit it was copied from, and validate

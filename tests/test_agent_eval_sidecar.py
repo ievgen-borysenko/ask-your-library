@@ -1014,7 +1014,7 @@ def test_the_harness_reads_the_peak_and_the_cap_off_a_real_run(run):
     nowhere = "Ishmael was a lawyer in Boston."
     model = ScriptedModel(
         plan=[{"mode": "answer", "queries": ["q1", "q2", "q3", "q4"]}],
-        observe=[{"evidence": [evidence(MOBY, "transcripts", f"s{n}h2", quote=nowhere)]}
+        observe=[{"evidence": [evidence(MOBY, "transcripts", f"s{n}h1", quote=nowhere)]}
                  for n in (1, 2, 3)],
         reflect=[{"decision": "search", "next_query": "q2"},
                  {"decision": "search", "next_query": "q3"}],
@@ -1048,7 +1048,7 @@ def test_a_run_that_holds_one_dropped_step_never_reports_the_cap(run):
     model = ScriptedModel(
         plan=[{"mode": "answer", "queries": ["q1", "q2", "q3", "q4"]}],
         observe=[{"evidence": []},
-                 {"evidence": [evidence(MOBY, "transcripts", "s2h2",
+                 {"evidence": [evidence(MOBY, "transcripts", "s2h1",
                                         quote="Ishmael was a lawyer in Boston.")]},
                  {"evidence": []}],
         reflect=[{"decision": "search", "next_query": "q2"},
@@ -1075,9 +1075,9 @@ def test_the_baseline_follows_a_real_clarify_filter(run):
     model = ScriptedModel(
         plan=[{"mode": "identify", "queries": ["stranded traveller strange land"]},
               {"mode": "identify", "queries": ["Lilliput tiny people"]}],
-        observe=[{"evidence": [evidence(MOBY, "cards", "s1h1"),
-                               evidence(GULLIVER, "cards", "s1h3")]},
-                 {"evidence": [evidence(GULLIVER, "transcripts", "s2h2")]}],
+        observe=[{"evidence": [evidence(MOBY, "cards", "s1h3"),
+                               evidence(GULLIVER, "cards", "s1h4")]},
+                 {"evidence": [evidence(GULLIVER, "transcripts", "s2h1")]}],
         reflect=[{"decision": "clarify", "clarify_question": "Which one do you mean?"},
                  {"decision": "enough"}],
         synthesize=["Gulliver's Travels [Gulliver's Travels, Chapter 1]."],

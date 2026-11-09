@@ -125,10 +125,13 @@ def _hit(book: str, corpus: str) -> dict:
 
 def search_both(query: str, k: int = 4, book: str | None = None,
                 cards_k: int | None = None) -> list[dict]:
-    """The retrieval window `act` searches with, in hit order: cards before
-    text, book after book. `book` is the filter a resolved title or a chosen
-    clarify candidate sets. `cards_k` (the agent's card budget) is accepted
-    because `act` passes it; one card per book never exceeds it."""
+    """The retrieval window `act` searches with, in the order retrieval gives
+    it: cards before text, book after book. `act` then shows a search step's
+    transcripts first, so on one book the chapter is h1 and the card h2, and on
+    two the chapters are h1-h2 and the cards h3-h4. `book` is the filter a
+    resolved title or a chosen clarify candidate sets. `cards_k` (the agent's
+    card budget) is accepted because `act` passes it; one card per book never
+    exceeds it."""
     books = [book] if book else list(_books_for(query))
     return [_hit(b, corpus) for b in books if b in PASSAGES
             for corpus in ("cards", "transcripts")][:max(k, 4)]
@@ -211,10 +214,10 @@ SCRIPT = {
         "plan": [{"mode": "answer", "book": "Moby Dick",
                   "queries": ["who narrates the Pequod voyage", "opening line of the novel"]}],
         "observe": [{"evidence": [
-            {"hit_id": "s1h1", "book": MOBY, "section": "Summary",
+            {"hit_id": "s1h2", "book": MOBY, "section": "Summary",
              "quote": "A sailor named Ishmael joins the whaling ship Pequod.",
              "why": "names the narrator and the ship"},
-            {"hit_id": "s1h2", "book": MOBY, "section": "Chapter 1",
+            {"hit_id": "s1h1", "book": MOBY, "section": "Chapter 1",
              "quote": "Call me Ishmael.", "why": "the narrator introduces himself"}]}],
         "reflect": [{"decision": "enough"}],
         "synthesize": [RESEARCH_ANSWER],
@@ -240,7 +243,7 @@ SCRIPT = {
     "scope_fulfilled": {
         "plan": [{"mode": "answer", "queries": ["a sailor and a whaling ship"]}],
         "observe": [{"evidence": [
-            {"hit_id": "s1h1", "book": MOBY, "section": "Summary",
+            {"hit_id": "s1h2", "book": MOBY, "section": "Summary",
              "quote": "A sailor named Ishmael joins the whaling ship Pequod.",
              "why": "a passage from the library, under an answer that is not about it"}]}],
         "reflect": [{"decision": "enough"}],
@@ -256,14 +259,14 @@ SCRIPT = {
         ],
         "observe": [
             {"evidence": [
-                {"hit_id": "s1h1", "book": DRACULA, "section": "Key Takeaways",
+                {"hit_id": "s1h3", "book": DRACULA, "section": "Key Takeaways",
                  "quote": "The hunters chase the count back across Europe to his own castle,",
                  "why": "a hunt across Europe"},
-                {"hit_id": "s1h3", "book": FRANKENSTEIN, "section": "Key Takeaways",
+                {"hit_id": "s1h4", "book": FRANKENSTEIN, "section": "Key Takeaways",
                  "quote": "Victor pursues it north over the ice until his strength gives out.",
                  "why": "also a hunt, but northward"}]},
             {"evidence": [
-                {"hit_id": "s2h2", "book": DRACULA, "section": "Chapter 27",
+                {"hit_id": "s2h1", "book": DRACULA, "section": "Chapter 27",
                  "quote": "it crumbled into dust and passed from our sight.",
                  "why": "the end of the pursuit"}]},
         ],

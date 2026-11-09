@@ -4,7 +4,9 @@
 cards and four transcript chunks, cards first. Cards at rank 3-4 were a large
 share of that input and almost never the evidence the step kept. So the agent
 asks for `CARD_SLOTS` cards and four transcripts, on a search step and on a
-coverage probe alike, and the retrieval eval measures the same window.
+coverage probe alike, and the retrieval eval measures the same window. A search
+step shows its transcripts first: the ids, `hits_log`, the scratchpad and the
+`observe` prompt follow that one order.
 
 No model, no network, no index: the library is a fake table under the real
 `search_both`, or `search_both` itself is a fake that records what it was
@@ -136,3 +138,104 @@ def test_the_retrieval_eval_window_is_the_agent_window(monkeypatch, tmp_path, ca
     assert "| q-text4 | 1 | 1/1 | - | 4 |" in out
     assert "window = top-2 cards + top-4 transcripts, presence@6" in out
     assert "single-book presence: 1/2" in out
+
+
+# ---------------------------------------------------------------- transcripts before cards
+MOBY = "Moby Dick — Herman Melville"
+
+
+def _hit(corpus: str, n: int, book: str = MOBY, text: str | None = None) -> dict:
+    section = "Summary" if corpus == "cards" else f"Chapter {n}"
+    return {"corpus": corpus, "book": book, "section": section,
+            "text": text or f"{corpus} passage {n}: the white whale and the sea", "score": 0.03}
+
+
+def _act(monkeypatch, tmp_path, retrieved: list[dict], query: str = "white whale", **state) -> dict:
+    """One `act` step over a fake `search_both` that returns `retrieved` in the
+    order the real one does (cards, then transcripts)."""
+    monkeypatch.setattr(nodes, "search_both", lambda query, **kwargs: [dict(h) for h in retrieved])
+    llm.reset_usage()
+    scratchpad = tmp_path / "scratch.md"
+    if not scratchpad.exists():
+        scratchpad.write_text("")
+    return nodes.act({"current_query": query, "steps_taken": 0, "read_chapters": [],
+                      "scratchpad_path": str(scratchpad), **state})
+
+
+WINDOW = [_hit("cards", 1), _hit("cards", 2)] + [_hit("transcripts", n) for n in (1, 2, 3, 4)]
+
+
+def test_transcripts_come_before_cards_and_the_ids_follow_that_order(monkeypatch, tmp_path):
+    update = _act(monkeypatch, tmp_path, WINDOW)
+    assert [(h["hit_id"], h["corpus"]) for h in update["hits"]] == [
+        ("s1h1", "transcripts"), ("s1h2", "transcripts"), ("s1h3", "transcripts"),
+        ("s1h4", "transcripts"), ("s1h5", "cards"), ("s1h6", "cards")]
+    assert [h["hit_id"] for h in update["hits_log"]] == [f"s1h{i}" for i in range(1, 7)]
+
+
+def test_the_retrievers_order_inside_each_corpus_is_kept(monkeypatch, tmp_path):
+    """Stable: the reorder moves a corpus, never a passage inside one."""
+    retrieved = [_hit("cards", 7), _hit("cards", 3), _hit("transcripts", 9), _hit("transcripts", 2)]
+    update = _act(monkeypatch, tmp_path, retrieved)
+    assert [h["text"] for h in update["hits"]] == [retrieved[i]["text"] for i in (2, 3, 0, 1)]
+
+
+def test_a_chapter_read_is_the_one_hit_it_always_was(monkeypatch, tmp_path):
+    monkeypatch.setattr(nodes, "read_chapter",
+                        lambda book, section, max_chars=0: ("Call me Ishmael.", MOBY, "found"))
+    update = _act(monkeypatch, tmp_path, [], query=f"__chapter__|{MOBY}|Chapter 1")
+    assert [(h["hit_id"], h["corpus"], h["text"]) for h in update["hits"]] == [
+        ("s1h1", "transcripts", "Call me Ishmael.")]
+
+
+def test_a_coverage_probe_keeps_the_retrievers_order(monkeypatch, tmp_path):
+    """Only a plain search step is reordered; a probe inside one candidate book
+    shows its passages in the order retrieval gave them."""
+    retrieved = [_hit("cards", 1), _hit("transcripts", 1), _hit("transcripts", 2)]
+    update = _act(monkeypatch, tmp_path, retrieved, query=f"__book__|{MOBY}|the white whale")
+    assert [h["corpus"] for h in update["hits"]] == ["cards", "transcripts", "transcripts"]
+
+
+def _observe(monkeypatch, state: dict, evidence: list[dict]) -> tuple[dict, str]:
+    seen = {}
+
+    def ask_json(system, user, role):
+        seen["user"] = user
+        return {"evidence": evidence}
+    monkeypatch.setattr(llm, "ask_json", ask_json)
+    observed = nodes.observe({"question": "q", "current_query": state["current_query"],
+                              "empty_streak": 0, "evidence": [], **state})
+    return observed, seen["user"]
+
+
+def test_hits_log_the_scratchpad_and_the_observe_prompt_hold_the_same_passages_in_the_same_order(
+        monkeypatch, tmp_path):
+    update = _act(monkeypatch, tmp_path, WINDOW)
+    order = [(h["hit_id"], h["corpus"]) for h in update["hits"]]
+    assert [(h["hit_id"], h["corpus"]) for h in update["hits_log"]] == order
+
+    scratch = (tmp_path / "scratch.md").read_text()
+    in_scratch = [line.split(" | ")[0].removeprefix("<<<hit>>> ")
+                  for line in scratch.splitlines() if line.startswith("<<<hit>>>")]
+    assert in_scratch == [hit_id for hit_id, _ in order]
+
+    _, user = _observe(monkeypatch, {"current_query": "white whale", "hits": update["hits"]}, [])
+    positions = [user.index(f'hit_id="{hit_id}" corpus="{corpus}"') for hit_id, corpus in order]
+    assert positions == sorted(positions)
+    # and the text under each header is the text hits_log holds for that id
+    for entry in update["hits_log"]:
+        assert entry["text"] in user
+
+
+def test_a_quote_from_a_card_now_at_h5_still_confirms(monkeypatch, tmp_path):
+    """The gate finds a passage by its id, never by its position: a card quote
+    cited at the card's new id is kept where it was cited, not re-pinned."""
+    update = _act(monkeypatch, tmp_path, WINDOW)
+    card = update["hits"][4]
+    assert (card["hit_id"], card["corpus"]) == ("s1h5", "cards")
+    quote = "cards passage 1: the white whale"
+    observed, _ = _observe(monkeypatch, {"current_query": "white whale", "hits": update["hits"]},
+                           [{"hit_id": "s1h5", "book": MOBY, "section": "Summary",
+                             "quote": quote, "why": "w"}])
+    assert [(e["hit_id"], e["quote"]) for e in observed["evidence"]] == [("s1h5", quote)]
+    assert "repinned" not in observed and "dropped_unverified" not in observed

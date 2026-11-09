@@ -490,7 +490,7 @@ def walk_through_the_release_check(page, chainlit_server) -> None:
     # --- an evidence passage: OPENED and readable, not merely sent. (2.12
     # rendered these as code snippets and dropped the text inside them.)
     wait_for_the_run_to_finish(page, ANSWER_MS)
-    passage = open_details(page, "s1h1")
+    passage = open_details(page, "s1h2")      # the step shows the chapter first, the card second
     expect(passage).to_contain_text("Moby Dick — Herman Melville — Summary", timeout=RENDER_MS)
     # and the reader can see WHAT they opened: this one is the card
     expect(passage).to_contain_text("book card (a model-written summary)", timeout=RENDER_MS)
