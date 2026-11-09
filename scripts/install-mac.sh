@@ -190,8 +190,8 @@ done
 # as printed in bash or zsh: an argument holding anything but letters, digits
 # and _ . / : @ % + , = - is single-quoted, and so is an empty one or one that
 # starts with = or ~, which the shells expand. Unquoted, the range step 9 passes
-# (`--python >=3.11,<3.15`) is two redirections. Every other command this script
-# runs holds none of these and prints exactly as it did.
+# (`--python >=3.11.5,<3.15`) is two redirections. Every other command this
+# script runs holds none of these and prints exactly as it did.
 shown_command() {
     local arg out="" LC_ALL=C quote="'\\''"
     for arg in "$@"; do
@@ -1393,7 +1393,11 @@ fi
 note "requires-python >=$python_req"
 # From that floor up to PYTHON_CEILING (see its comment at the top). A floor
 # above the ceiling leaves nothing to ask uv for: that is this file out of date,
-# not the reader's machine, and it is said before uv is asked anything.
+# not the reader's machine, and it is said before uv is asked anything. The
+# floor only bounds what uv may find. What gets installed is the ceiling's minor
+# series, which uv resolves to the newest patch release it knows, never a patch
+# build such as the floor: `uv python install 3.11.5` installs exactly 3.11.5,
+# without the fixes of every later 3.11 release.
 IFS=. read -r floor_major floor_minor _ <<< "$python_req"
 IFS=. read -r ceiling_major ceiling_minor <<< "$PYTHON_CEILING"
 floor_minor="${floor_minor:-0}"

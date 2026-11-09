@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **`reflect` is shown the searches the run already made (#179).** Since #163 an exact or
+  normalised repeat is replaced or stops the loop, but `reflect` had never been shown which searches
+  had run, so it wrote paraphrases of them and the loop still ran to the step limit. Its prompt now
+  lists them, each normalised query with the book it was limited to, in a data block of its own
+  (`searches_already_run`, "(none)" before the first search); the queries are model text, so
+  instruction-like lines are redacted as in a passage and delimiters are neutralised. The rules ask
+  for a search only when it looks for something those could not have found, and otherwise for
+  "enough". It is a rule, not a check: a paraphrase the model still writes still runs
+  ([known limits](known-limits.md)). The injection canary plants its marker in this block too.
 - **A local run says before it starts that a research answer takes minutes (#137).** On the local
   model every research answer takes 1-4 minutes (61-217 s measured, [cost](cost.md); a cold first
   one 160.8 s, its immediate repeat 62.7 s), and `ayl ask` printed the question back and then
@@ -12,6 +21,58 @@
   prints nothing new, and stdout is unchanged. `ayl init`'s next steps now suggest a catalogue
   question first, `ayl ask "How many books do I have?"`, then a research one, and in the local mode
   end on the same sentence; the README and the quick start list the two questions the same way.
+- **A chapter whose HTML leaves out `</head>` before a `<body>` tag keeps its text.** `</head>` is
+  optional in HTML, and in a spine document that left it out (most likely a `text/html` one) the
+  whole body was read as part of the head and left out: the chapter was missing from the book, and a
+  book written that way throughout was refused as having no text. A `<body>` start tag now ends the
+  head, as it does in a browser; text placed directly inside the head is still left out. `ayl add`
+  reads every book in the folder anew on every run, so running `ayl add <folder>` again re-extracts
+  an affected book; `--rebuild` is not needed.
+- **A UTF-32 document is read as UTF-32.** The UTF-32 little-endian byte-order mark begins with the
+  UTF-16 one, and a document that started with it was decoded as UTF-16 with a NUL between its
+  characters: the HTML parser found no markup in it, so a chapter's raw tags, with the text of its
+  head, scripts and styles, were indexed as the chapter's text, and a package file written that way
+  refused the book as malformed. A document with the big-endian mark refused the book as not
+  readable in its encoding. Both UTF-32 marks are now checked before the UTF-16 ones. A document
+  whose decoded text holds a NUL is refused, with a line that says so: a UTF-16 or UTF-32 file
+  without a byte-order mark, the usual cause, was indexed as raw markup, and a stray NUL in a
+  UTF-8 file, which 0.5.1 stripped silently, refuses the book now too. The way out is to save that
+  document as UTF-8 in an EPUB editor, with any stray NUL taken out. Running `ayl add <folder>`
+  again re-extracts an affected book. A book that 0.5.1 indexed and that is refused now keeps its
+  old rows: a run keeps them, and `--prune` deletes only the rows of a file that is no longer in
+  the folder. Move the file out of the folder, then run `ayl add <folder> --prune`; that run stops
+  before it prunes anything when no book in the folder reads, so if the file was the folder's only
+  book, leave another readable book there for it.
+- **A chapter's DOCTYPE is dropped only from the start of the document, and only whole.** The HTML
+  parser leaves the tail of an internal subset (`]>`) in the text, so a content document's DOCTYPE
+  is taken off before it is read. That step took the first `<!DOCTYPE` anywhere in the document, in
+  capitals only, and ended its subset at the first `]>`: a DOCTYPE quoted in a CDATA section cut
+  the rest of the chapter after it out of the book, a lowercase `<!doctype html [ … ]>` left `]>`
+  at the start of the chapter's text, and a `]>` inside a quoted entity value left the rest of the
+  declaration there. Only a DOCTYPE in the prolog (after the XML declaration, comments, processing
+  instructions and whitespace) is dropped now, in any case, and its subset ends at a `]>` outside
+  quotes, comments and processing instructions. The match uses possessive quantifiers, which
+  Python 3.11.0 to 3.11.4 matched wrongly, so the project now needs Python 3.11.5 or later.
+  Running `ayl add <folder>` again re-extracts an affected book.
+- **The weekly pin check was red on Frankenstein: Project Gutenberg had recapitalised its title.**
+  The `pins` job of `corpus.yml` failed on 2026-10-27 with a checksum mismatch on PG 84. Against
+  the pinned copy, the new file differs in two header lines only, both above the START marker:
+  "Frankenstein; or, the modern prometheus" became "Frankenstein; or, The modern Prometheus", in
+  the eBook line and in `Title:`, at the same file size. The header is stripped, so the prepared
+  book is byte-identical, still 28 sections from Letter 1 to Chapter 24, and
+  `corpus/toc/frankenstein.json` and the book-identity fixture stay as they are. The entry is
+  re-pinned with the date and the drift, as the earlier re-pins were.
+- **Behind Frankenstein, two more pins had drifted: Moby Dick and The Hound of the Baskervilles.**
+  The job stops at the first mismatch, so these surfaced only once Frankenstein was re-pinned.
+  Hound (PG 2852, regenerated 2026-10-22), diffed against the pinned copy: the updated-date header
+  line and one fix in chapter 2, where a dropped "sound of" is restored in the Baskerville legend.
+  Moby Dick (PG 2701, regenerated 2026-10-09): the pinned copy of 2026-09-10 was not kept, so the
+  new file was diffed against an older one from February 2026, and the three fixes the 2026-09-10
+  re-pin recorded were taken out of the result. What is left is the updated-date header line, the
+  J. Ross Browne extract set one speaker per line (front matter, before CHAPTER 1, which the split
+  drops) and six stage directions put in parentheses in chapters 37, 38, 120, 121, 122 and 127.
+  Both books split as before (135 and 15 sections), their `corpus/toc` files regenerate
+  unchanged, and both entries are re-pinned with the date and the drift.
 - **The loop no longer runs a search it already ran, nor counts a quote it already holds (#163).**
   On a library of about 250 audiobooks a research question ran q1, q3, q1, q1 and stopped at the
   step limit with plan query q2 never searched; a comparison kept 9 evidence items, 5 of them
@@ -36,6 +97,16 @@
   `duplicates_skipped`. The agent eval records every search, the repeats among them, the repeats
   replaced, the quotes skipped and the new passages per step, and reports the totals. A paraphrase
   is still a new search ([known limits](known-limits.md)).
+- **The Ollama-not-running message is three lines and names the action for this platform
+  (#140).** It read as one paragraph, the same everywhere: Homebrew for Linux and Windows,
+  `bash scripts/install-mac.sh` from a clone on any OS, `ollama serve` where most Mac users run the
+  app, and the `ollama pull` lines next to the `ayl init` that pulls them. It now says
+  "Ollama is not running at <url>.", then one action — on macOS open the Ollama app, or
+  `brew install ollama` and start it with `brew services run ollama` as the installer does (from a
+  clone, `scripts/install-mac.sh` is offered there alone), elsewhere install from
+  ollama.com/download or `ollama serve` — then re-run `ayl init`, and on a third line `OLLAMA_URL`
+  for a remote server and `LLM_BACKEND=openrouter` for the hosted mode. The CLI keeps the three
+  lines under its bullet or `error:`. Exit status 5 is unchanged; the Ukrainian text follows.
 - **An interrupted `--rebuild` no longer lets a write with the old embedding model in (#147).**
   `ayl add --rebuild` drops the table and stamps it again only when the run finishes, and the
   dropped table's stamp stayed in place in between. A rebuild interrupted in its publish copy (an
@@ -84,8 +155,9 @@
   GHSA-pqxq-w44r-73xw), certifi 2026.7.22 to 2026.10.19 (GHSA-6q48-6c7w-9gw2), langgraph-sdk
   0.4.2 to 0.4.8 (PYSEC-2026-4240 / GHSA-fvww-7h3r-vfhp), mcp 1.29.0 to 1.30.0
   (GHSA-84m7-p3x7-pcfv) and multidict 6.7.1 to 6.9.1 (PYSEC-2026-4244 / GHSA-54p9-h82j-f925);
-  yarl moves from 1.24.5 to 1.25.1 because the new aiohttp requires it. `pyproject.toml` is
-  unchanged; no application behaviour changed, and certifi drops the emSign roots.
+  yarl moves from 1.24.5 to 1.25.1 because the new aiohttp requires it. No dependency declaration
+  in `pyproject.toml` changed; no application behaviour changed, and certifi drops the emSign
+  roots.
 - **The locked PDF library is updated for the open advisories.** `uv.lock` moves pypdf 6.19.0
   to 6.21.3: 6.20.0 and 6.20.1 fix GHSA-39mj-jf6j-2qj3, GHSA-7mh2-4gg2-979f,
   GHSA-9mx8-4j7g-633p and GHSA-qfv9-64jg-mh7p (#159), 6.21.0 to 6.21.2 fix GHSA-6vvc-x485-93v7,
@@ -137,6 +209,14 @@
   new exporter requires (opentelemetry-exporter-http-transport, opentelemetry-exporter-otlp-common).
   They come in only with the `ui` extra, through Chainlit's tracing dependency; nothing in this
   project calls them.
+- **The test suite leaves nothing in `eval/recordings/`.** One test of `--record-plans` handed
+  the harness the `plan_recording` module the test file had already loaded, whose recordings
+  directory was resolved when it was loaded, so it recorded into the checkout's `eval/recordings/`
+  whatever `AYL_PLAN_RECORDINGS_DIR` said, and the `.partial` of its deliberately broken recorder
+  stayed behind after every run (ignored by git, but written into every checkout the suite ran in,
+  and a failure in a read-only one). Every test in that file now records under pytest's `tmp_path`,
+  through the variable and the loaded module both, and the committed directory is compared before
+  and after each test.
 
 ## 0.5.1 (2026-10-05)
 

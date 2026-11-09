@@ -5,8 +5,8 @@ what each step does, and every command the project ships.
 
 ## Install
 
-Requirements: [uv](https://docs.astral.sh/uv/) (it provides Python itself: 3.11 or newer, and
-for a clone's locked environment 3.11 to 3.14, the newest series its wheels cover) and
+Requirements: [uv](https://docs.astral.sh/uv/) (it provides Python itself: 3.11.5 or newer, and
+for a clone's locked environment 3.11.5 to 3.14, the newest series its wheels cover) and
 [Ollama](https://ollama.com), installed and running — Ollama runs the embeddings in both modes
 and, in the default configuration, the answering model too. No account and no API key: see
 [Fully local, no account](configuration.md#fully-local-no-account).
@@ -159,7 +159,7 @@ bash scripts/install-mac.sh              # mostly download time
 [`scripts/install-mac.sh`](../scripts/install-mac.sh) installs `uv` and Ollama through Homebrew
 (whose own install command it prints and never runs for you), starts Ollama for this session
 only (`brew services run`, which registers no login item — the one-liner that makes it permanent
-is printed at the end), pulls the two models, syncs the locked environment on Python 3.11 to 3.14
+is printed at the end), pulls the two models, syncs the locked environment on Python 3.11.5 to 3.14
 (an interpreter uv already has in that range, else 3.14, which uv installs), writes the fully local
 `.env`, hands the demo library to `ayl init` (which asks its one question), and finishes on the
 preflight the CLI runs before every question. `install-mac.sh` also takes `--no-demo`,

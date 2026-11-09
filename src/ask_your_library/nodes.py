@@ -883,10 +883,25 @@ def reflect(state: AgentState) -> dict:
     evidence_lines = "\n".join(f"- {e['book']} ({e['section']}): \"{e['quote']}\""
                                for e in state["evidence"]) or "(none)"
     queued = state["queries"]
+    # The searches this run already made (#179), as `act` recorded them: the
+    # normalised query and the book it was limited to. The deterministic check
+    # below stops an exact repeat; this is what lets the model see that a
+    # paraphrase of one of them is not a new search either. The queries are
+    # model text, and a passage may have steered what the model wrote, so the
+    # body is treated as a passage is in `act`: control and invisible
+    # characters stripped first (`strip_control_chars`), so a zero-width space
+    # cannot hide an instruction line from the patterns, then instruction-like
+    # lines redacted (`sanitize_context`), then data_block's neutralization.
+    # The redaction is not counted in `redacted_lines`, which counts retrieved
+    # passages.
+    searches_run = sanitize_context(strip_control_chars("\n".join(
+        f"- {query}" + (f" (book: {book})" if book else "")
+        for query, book in state.get("searches_run") or [])))[0]
     lines = [
         data_block("question", state["question"], mode=state["mode"]),
         f"Steps used: {state['steps_taken']} of {MAX_STEPS}.",
         data_block("evidence_so_far", evidence_lines),
+        data_block("searches_already_run", searches_run or "(none)"),
         data_block("queued_queries", "\n".join(queued) or "(none)"),
         data_block("chapters_already_read", "\n".join(state.get("read_chapters") or []) or "(none)"),
     ]
@@ -993,9 +1008,11 @@ def reflect(state: AgentState) -> dict:
         return {"current_query": proposed, "queries": _without(state, queued, proposed)}
 
     # Not a query (wrong type, empty, or a reserved marker), or a search this
-    # run already made (#163): the reflect prompt shows the model its queue,
-    # not the searches behind it, and a small model names the same query again
-    # — q1, q3, q1, q1 on a real library, with q2 still queued and never run.
+    # run already made (#163): a small model names the same query again — q1,
+    # q3, q1, q1 on a real library, with q2 still queued and never run. Since
+    # #179 the prompt lists the searches already run, and the rules ask for a
+    # new one only when it can find something they could not; this check stays
+    # the guarantee, because a rule in a prompt is not one.
     # The first queued query that has not run takes its place. A repeat is
     # the only replacement the event reports: falling back to the queue for a
     # missing query is what this node has always done, and that event keeps

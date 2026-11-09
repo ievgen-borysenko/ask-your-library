@@ -355,6 +355,30 @@ def test_a_real_run_hands_step_11_to_ayl_init_and_a_failure_there_stops_it(sandb
 
 
 @mac_only
+def test_step_6_installs_a_python_series_never_the_floor_build(sandbox):
+    """The floor (`requires-python`) is the lower bound of the range `uv python
+    find` checks; what is installed when nothing in it answers is the
+    PYTHON_CEILING series, which uv resolves to its newest patch release.
+    `uv python install 3.11.5` would install exactly 3.11.5, without the fixes
+    of every later 3.11 release."""
+    root, records, env = sandbox
+    floor = re.search(r'^requires-python = ">=([0-9.]+)"',
+                      (root / "pyproject.toml").read_text(), re.MULTILINE).group(1)
+    series = "{}.{}".format(*python_ceiling())
+    assert (f"would run 'uv python install {series}' when no interpreter answers that\n"
+            in dry_run(sandbox))
+    stub = Path(env["PATH"].split(os.pathsep)[0]) / "uv"
+    stub.write_text(f'#!/bin/sh\necho "$@" >> "{records}/uv"\n'
+                    f'[ "$1" = "python" ] && [ "$2" = "find" ] && exit 1\nexit 0\n')
+    result = real_run(sandbox)
+    assert result.returncode == 0, result.stderr
+    calls = (records / "uv").read_text().splitlines()
+    assert [call for call in calls if call.startswith("python install")] == [
+        f"python install {series}"]
+    assert floor == series or f"python install {floor}" not in calls
+
+
+@mac_only
 def test_no_demo_points_at_ayl_add_instead(sandbox):
     out = dry_run(sandbox, "--no-demo")
     assert "no demo library (--no-demo)" in out
@@ -2211,8 +2235,8 @@ def requires_python():
 
 
 def python_floor():
-    match = re.fullmatch(r">=(\d+)\.(\d+)", requires_python())
-    assert match, f"requires-python is {requires_python()!r}, not the >=X.Y the script reads"
+    match = re.fullmatch(r">=(\d+)\.(\d+)(?:\.\d+)?", requires_python())
+    assert match, f"requires-python is {requires_python()!r}, not the >=X.Y[.Z] the script reads"
     return int(match[1]), int(match[2])
 
 
@@ -2418,8 +2442,8 @@ def test_the_dry_run_names_the_python_series_it_asks_uv_for(sandbox):
 
 @mac_only
 def test_a_printed_range_reads_back_as_the_command_that_runs(sandbox, tmp_path):
-    """`--python >=3.11,<3.15` pasted from the plan into a shell is two
-    redirections: a file called `=3.11,`, and a read from `3.15`. The range is
+    """`--python >=3.11.5,<3.15` pasted from the plan into a shell is two
+    redirections: a file called `=3.11.5,`, and a read from `3.15`. The range is
     quoted where the plan names the command, where the step runs it and where
     its failure is reported, and each line reads back as the arguments uv is
     given. A command with nothing to quote prints as it always did."""
