@@ -261,6 +261,15 @@ spliced into one "quote", a quote filed under the wrong passage, and service tex
 run log posing as a source. What it does not rule out is a model that copies a passage
 faithfully and reasons wrongly from it.
 
+**Who says a quote travels inside the quote (#100), and the check above is what holds it.**
+`OBSERVE_RULES` asks that a quote of speech, a letter, something read aloud or a reply in a
+dialogue take in the sentence beside it that says who speaks or writes and to whom, when that
+sentence is in the same passage: one contiguous span, up to four consecutive sentences, the one case
+allowed past the usual two. The check is not changed for it (ADR-004): the longer span must be a
+contiguous run of the cited passage like any other quote, so a speaker stitched in from a sentence
+that is not adjacent, or across the "[...]" between two chunks of a chapter read, is dropped as
+`not_found`. No length cap in code stands in the way: `MAX_QUOTE_CHARS` is the search-hit budget.
+
 **This verifies provenance, not correctness.** It proves the agent did not invent its evidence,
 and says nothing about whether the answer is right. Concrete example: if a character in the book
 lies and the agent quotes that lie verbatim from the correct chapter, provenance passes at 100%

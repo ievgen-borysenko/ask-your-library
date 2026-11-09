@@ -56,6 +56,12 @@ Distill ONLY the results that actually help answer the question. For each, extra
 a SHORT verbatim quote (max 2 sentences). The quote MUST be a character-exact,
 contiguous copy-paste from ONE result — never merge pieces, never translate,
 never reword. If no exact sentence supports the point, skip that result.
+Keep who says it. When the quote worth keeping is speech, a letter, something read
+aloud or a reply in a dialogue, and a sentence next to it in the SAME result says who
+speaks or writes and to whom, the quote includes that sentence: one contiguous span
+copied exactly from the result, up to four consecutive sentences (the one case allowed
+past two). Never join sentences that are not next to each other in the result — a
+"[...]" marks a gap, and a span never crosses it — and never add or change a word.
 Skip irrelevant results. Copy "hit_id", "book" and "section" exactly from the attributes
 of the ONE result the quote was copied from; provenance is checked against that result.
 Every quote is checked character by character against the result it cites and is discarded

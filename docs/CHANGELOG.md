@@ -22,6 +22,14 @@
   for a search only when it looks for something those could not have found, and otherwise for
   "enough". It is a rule, not a check: a paraphrase the model still writes still runs
   ([known limits](known-limits.md)). The injection canary plants its marker in this block too.
+- **`observe` keeps the sentence that says who speaks (#100).** When the quote worth keeping is
+  speech, a letter, something read aloud or a reply in a dialogue, and a sentence beside it in the
+  same passage says who speaks or writes and to whom, the quote takes that sentence in: one
+  contiguous span copied exactly, up to four consecutive sentences, the one case allowed past the
+  usual two; never sentences that are not adjacent, never across a "[...]" gap, never a word added
+  or changed. The provenance gate is unchanged (ADR-004): the longer span passes or is dropped by the
+  same check, and no length cap in code stands in its way (`MAX_QUOTE_CHARS` is the search-hit
+  budget, 2,500 characters by default).
 
 - **A local run says before it starts that a research answer takes minutes (#137).** On the local
   model every research answer takes 1-4 minutes (61-217 s measured, [cost](cost.md); a cold first

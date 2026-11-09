@@ -204,3 +204,62 @@ def test_the_rules_ask_for_a_search_only_when_it_can_find_something_new():
             'question.') in rules
     # the role routing of the scripted backends reads the first 40 characters
     assert prompts.REFLECT_RULES.startswith("You decide the next step of a research agent.")
+
+
+# ---------------------------------------------------------------- (c) observe keeps who says it
+LETTER = ("The old minister sat down to write to his young son. "
+          "I told you last night that I might be going away sometime. "
+          "You asked me where, and I said to be with the Lord. "
+          "He set the pen down and looked out at the yard.")
+
+
+def test_the_observe_rules_keep_the_sentence_that_says_who_speaks():
+    rules = flat(prompts.OBSERVE_RULES)
+    for kind in ("speech", "a letter", "read aloud", "dialogue"):
+        assert kind in rules
+    assert "who speaks or writes and to whom" in rules
+    assert "SAME result" in rules and "up to four consecutive sentences" in rules
+    assert "Never join sentences that are not next to each other" in rules
+    assert "never add or change a word" in rules
+    # what the gate checks is unchanged and still said
+    assert "checked character by character" in rules
+    # the role routing of the scripted backends reads the first 40 characters
+    assert prompts.OBSERVE_RULES.startswith("You distill search results for a research agent.")
+
+
+def observe_one(monkeypatch, quote: str, text: str = LETTER) -> dict:
+    llm.reset_usage()
+    monkeypatch.setattr(llm, "ask_json", lambda system, user, role: {"evidence": [
+        {"hit_id": "s1h1", "book": "A Novel", "section": "Episode 3", "quote": quote,
+         "why": "w"}]})
+    hits = [{"hit_id": "s1h1", "corpus": "transcripts", "book": "A Novel",
+             "section": "Episode 3", "text": text}]
+    return nodes.observe({"question": "q", "current_query": "cq", "empty_streak": 0,
+                          "evidence": [], "hits": hits})
+
+
+def test_a_four_sentence_span_with_its_speaker_passes_the_unchanged_gate(monkeypatch):
+    """The longer quote is held to the same check: no length cap in code
+    stands in its way (MAX_QUOTE_CHARS is the hit budget), and it is kept
+    exactly as the passage has it."""
+    from ask_your_library import config, provenance
+    assert len(LETTER) < provenance.MAX_QUOTE_CHARS == config.SEARCH_HIT_CHARS
+    update = observe_one(monkeypatch, LETTER)
+    assert [e["quote"] for e in update["evidence"]] == [LETTER]
+    assert "dropped_unverified" not in update
+
+
+def test_a_speaker_stitched_from_a_sentence_that_is_not_adjacent_is_refused(monkeypatch):
+    stitched = ("The old minister sat down to write to his young son. "
+                "You asked me where, and I said to be with the Lord.")
+    update = observe_one(monkeypatch, stitched)
+    assert update["evidence"] == [] and update["dropped_by_reason"]["not_found"] == 1
+
+
+def test_a_span_across_a_chapter_read_gap_is_refused(monkeypatch):
+    text = ("The old minister sat down to write to his young son.\n[...]\n"
+            "I told you last night that I might be going away sometime.")
+    spanning = ("The old minister sat down to write to his young son. "
+                "I told you last night that I might be going away sometime.")
+    update = observe_one(monkeypatch, spanning, text=text)
+    assert update["evidence"] == [] and update["dropped_by_reason"]["not_found"] == 1

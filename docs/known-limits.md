@@ -192,6 +192,13 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
 - **Comparative and aggregation questions may miss a work.** The planner issues queries centred
   on one side of the comparison and the other book is never retrieved. Decomposition per implied
   work is open ([backlog](backlog.md#agent-behaviour)).
+- **Who speaks a quoted line is the model's reading** (#100). A passage where someone reads
+  aloud, quotes a letter or answers in a dialogue used to reach the answer as the bare quote, and
+  the answer gave the words to the book's author or the recording's host. `observe` is now asked to
+  keep the sentence beside the quote that says who speaks or writes and to whom, as one contiguous
+  span of up to four sentences. That is a prompt rule, not a check: a model may still keep the bare
+  quote, and a speaker named only in another passage, or more than a few sentences away, does not
+  travel with it. The provenance check holds the longer span to the same contiguous-copy rule.
 - **The citation format varies between answers** (#118). The model writes the citations in
   `synthesize`, and nothing fixes their form; the quote check runs over the evidence, not over
   how the answer cites it.
