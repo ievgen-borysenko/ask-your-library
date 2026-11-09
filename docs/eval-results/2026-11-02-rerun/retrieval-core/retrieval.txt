@@ -1,0 +1,19 @@
+| question | expected | in agent window | cards rank | transcripts rank |
+|---|---|---|---|---|
+| c01-ivanhoe-disguised-knight | 1 | 1/1 | 1 | 1 |
+| c02-huck-go-to-hell | 1 | 1/1 | 1 | 1 |
+| c03-musketeers-women | 1 | 1/1 | 1 | 1 |
+| c04-crusoe-cannibals | 1 | 1/1 | 1 | 1 |
+| c05-quixote-windmills | 1 | 1/1 | 1 | 1 |
+| c06-fogg-missing-day | 1 | 1/1 | 1 | 1 |
+| c07-alice-trial | 1 | 1/1 | 1 | 1 |
+| c09-shipwreck-first-person | 2 | 2/2 | 1 | 1 |
+| c10-chivalry-two-books | 2 | 2/2 | 1 | 1 |
+| h06-kobzar-mother-servant | 1 | 1/1 | 1 | 1 |
+
+Embeddings: bge-m3 via ollama (no answering model is called here)
+
+Retriever-window metrics (raw question as query; window = top-4 cards + top-4 transcripts):
+  single-book presence: 8/8 = 100%
+  multi-book full coverage: 2/2; mean coverage 100%
+Per-corpus diagnostics (not agent metrics): hit@2: 10/10   hit@4: 10/10   hit@8: 10/10   MRR(best-of-two): 1.000
