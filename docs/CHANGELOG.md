@@ -4,7 +4,7 @@
 
 - **An EPUB's text is capped at 20 million characters, as a PDF's is (#124).** The archive caps
   (64 MiB a file, 512 MiB in all) bounded the bytes, not the text they decode to, so one EPUB of
-  text alone could hand the embedder about 25 times what a PDF may. `ayl add` now keeps a running
+  text alone could hand the embedder about 27 times what a PDF may. `ayl add` now keeps a running
   count as the spine's documents are read and refuses the file, with the PDF reader's line, at the
   document that takes it over, reading no further.
 - **`reflect` is shown the searches the run already made (#179).** Since #163 an exact or

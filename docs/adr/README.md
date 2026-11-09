@@ -1451,14 +1451,15 @@ it; with no usable contents, `Section N` — and never from headings guessed out
 heuristic the `.txt` path cannot avoid and an EPUB does not need.
 
 **An EPUB is untrusted input.** It is the first input `ayl add` takes that is a container rather
-than text, and its bounds are stated in the module and enforced before anything is read: members
+than text, and its bounds are stated in the module and enforced before anything is read (the text
+cap alone as the spine is read): members
 are read by name into memory and never extracted, so a member path is never a file path; an
 absolute or `..` member name refuses the file all the same, since nothing legitimate needs one;
 member count, per-member and total uncompressed size are capped by three constants, and every read
 is cut off at the per-member cap whatever the archive's header claims; a reference that resolves
 outside the archive root is ignored. The text is capped on its own, at 20 million characters a
 book, the figure ADR-030 sets for a PDF (#124): the byte caps bound the archive, and at one
-character a byte the spine could otherwise yield twenty-five times that, every character of it to
+character a byte the spine could otherwise yield about 27 times that, every character of it to
 embed. The total is kept as each spine document is extracted, so the file is refused at the
 document that takes it over and the rest of the spine is not read. A ZIP64 archive is refused before `zipfile` opens it, rather
 than parsed: an EPUB never needs one, and its end record's variable-length sector is a format

@@ -18,7 +18,7 @@ import lancedb
 import pytest
 
 from ask_your_library import ayl, library
-from ask_your_library.ingest import add_folder, epub
+from ask_your_library.ingest import add_folder, epub, pdf
 from ask_your_library.ingest.chapters import FRONT_MATTER_SECTION, FULL_TEXT_SECTION
 from ask_your_library.ingest.lock import lock_path
 from ask_your_library.preflight import PreflightResult
@@ -515,6 +515,10 @@ def test_a_book_over_the_total_text_cap_is_refused_with_the_pdf_readers_line(tmp
     path = make_epub(tmp_path / "b.epub", three_chapters())
     monkeypatch.setattr(epub, "MAX_TOTAL_CHARS", text_chars(path) - 1)
     assert refused(path) == f"it holds more than {text_chars(path) - 1:,} characters of text"
+
+
+def test_the_text_cap_is_the_pdf_readers_figure():
+    assert epub.MAX_TOTAL_CHARS == pdf.MAX_TOTAL_CHARS
 
 
 def test_the_text_cap_refuses_at_the_document_that_crosses_it(tmp_path, monkeypatch):
