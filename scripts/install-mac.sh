@@ -31,6 +31,17 @@ STEPS=12
 step_no=0
 # How long a freshly started Ollama gets to answer on /api/tags.
 OLLAMA_WAIT_S=60
+# The newest Python series for which every compiled package in uv.lock has a
+# macOS wheel. Left to itself uv takes the first interpreter it finds that meets
+# requires-python, and on a Mac whose only Python is newer than this series
+# `uv sync` falls back to source builds that need a Rust toolchain and fail
+# (#158; when this was written, 3.15 had no wheel for tiktoken, pydantic-core,
+# jiter and others). Step 6 asks uv for an interpreter between the
+# requires-python floor and this series, and installs this series when uv has
+# none; step 9 builds the environment on that range. Revisit it when uv.lock
+# gains wheels for a newer series: tests/test_install_script.py reads the lock,
+# and fails with the value to write here once the next series is covered too.
+PYTHON_CEILING=3.14
 
 step() {
     step_no=$((step_no + 1))
@@ -175,19 +186,36 @@ while [ $# -gt 0 ]; do
     shift
 done
 
+# A command as this script prints it, so that a line copied from the plan runs
+# as printed in bash or zsh: an argument holding anything but letters, digits
+# and _ . / : @ % + , = - is single-quoted, and so is an empty one or one that
+# starts with = or ~, which the shells expand. Unquoted, the range step 9 passes
+# (`--python >=3.11.5,<3.15`) is two redirections. Every other command this
+# script runs holds none of these and prints exactly as it did.
+shown_command() {
+    local arg out="" LC_ALL=C quote="'\\''"
+    for arg in "$@"; do
+        case "$arg" in
+            ""|[=~]*|*[!A-Za-z0-9_./:@%+,=-]*) arg="'${arg//\'/$quote}'" ;;
+        esac
+        out="${out:+$out }$arg"
+    done
+    printf '%s\n' "$out"
+}
+
 # A failing tool is reported here and the script exits 1 — one of the documented
 # codes. Bare "$@" would let `set -e` abort with the tool's own status instead,
 # printing nothing of ours: `brew install uv` exiting 17 ended the script at 17.
 run() {
     if [ "$dry_run" -eq 1 ]; then
-        printf '       would run: %s\n' "$*"
+        printf '       would run: %s\n' "$(shown_command "$@")"
         return 0
     fi
-    printf '       running: %s\n' "$*"
+    printf '       running: %s\n' "$(shown_command "$@")"
     local status=0
     "$@" || status=$?
     if [ "$status" -ne 0 ]; then
-        fail "$* failed with status $status."
+        fail "$(shown_command "$@") failed with status $status."
         fail "fix that and re-run: every step here is idempotent, so nothing is repeated."
         exit 1
     fi
@@ -1354,7 +1382,7 @@ else
 fi
 
 # --- 6. Python --------------------------------------------------------------
-step "Python: the version pyproject.toml requires, provided by uv"
+step "Python: a series pyproject.toml allows and the locked wheels cover, provided by uv"
 python_req="$(sed -n 's/^requires-python *= *">=\([0-9][0-9.]*\)".*/\1/p' pyproject.toml)"
 python_req="$(first_line "$python_req")"
 if [ -z "$python_req" ]; then
@@ -1362,19 +1390,40 @@ if [ -z "$python_req" ]; then
     fail "yourself (uv python install <version>) and re-run."
     exit 1
 fi
-# The floor is what an interpreter already here must meet. What gets installed
-# is its minor series (3.11.5 -> 3.11), which uv resolves to the newest patch
-# release it knows, never the floor build itself: `uv python install 3.11.5`
-# installs exactly 3.11.5, without the fixes of every later 3.11 release.
-python_series="$(printf '%s' "$python_req" | cut -d. -f1,2)"
 note "requires-python >=$python_req"
-if [ "$dry_run" -eq 1 ]; then
-    plan "check 'uv python find >=$python_req'"
-    plan "run 'uv python install $python_series' when no interpreter answers that"
-elif uv python find ">=$python_req" >/dev/null 2>&1; then
-    note "an interpreter >=$python_req is already available to uv"
+# From that floor up to PYTHON_CEILING (see its comment at the top). A floor
+# above the ceiling leaves nothing to ask uv for: that is this file out of date,
+# not the reader's machine, and it is said before uv is asked anything. The
+# floor only bounds what uv may find. What gets installed is the ceiling's minor
+# series, which uv resolves to the newest patch release it knows, never a patch
+# build such as the floor: `uv python install 3.11.5` installs exactly 3.11.5,
+# without the fixes of every later 3.11 release.
+IFS=. read -r floor_major floor_minor _ <<< "$python_req"
+IFS=. read -r ceiling_major ceiling_minor <<< "$PYTHON_CEILING"
+floor_minor="${floor_minor:-0}"
+if [ "$floor_major" -gt "$ceiling_major" ] \
+    || { [ "$floor_major" -eq "$ceiling_major" ] && [ "$floor_minor" -gt "$ceiling_minor" ]; }; then
+    fail "requires-python >=$python_req is above PYTHON_CEILING=$PYTHON_CEILING in this script, the"
+    fail "newest series the locked wheels were checked for. Raise PYTHON_CEILING, then re-run."
+    exit 1
+fi
+python_range=">=$python_req,<$ceiling_major.$((ceiling_minor + 1))"
+note "the locked wheels cover Python up to $PYTHON_CEILING: the range for uv is $python_range"
+# Exported, UV_PYTHON is the reader's own choice of interpreter and keeps
+# deciding `uv sync` and every `uv run`, as it did before the range existed. So
+# nothing is checked or installed for the range, which nothing would use.
+if [ -n "${UV_PYTHON:-}" ]; then
+    note "UV_PYTHON is exported, so uv uses the interpreter it names: this step checks"
+    note "and installs nothing, and step 9 passes no range. An interpreter above $PYTHON_CEILING"
+    note "has no wheels for the compiled packages, which are then built from source"
+    note "(a Rust toolchain); unset UV_PYTHON to use the range instead."
+elif [ "$dry_run" -eq 1 ]; then
+    plan "check: $(shown_command uv python find "$python_range")"
+    plan "run 'uv python install $PYTHON_CEILING' when no interpreter answers that"
+elif uv python find "$python_range" >/dev/null 2>&1; then
+    note "an interpreter in $python_range is already available to uv"
 else
-    run uv python install "$python_series"
+    run uv python install "$PYTHON_CEILING"
 fi
 
 # --- 7. Ollama --------------------------------------------------------------
@@ -1501,8 +1550,14 @@ if [ "$loaded_backend" = "ollama" ]; then
 fi
 
 # --- 9. dependencies --------------------------------------------------------
+# Pass step 6's range: without it uv builds on the first interpreter that meets
+# requires-python, Homebrew's 3.15 say. An exported UV_PYTHON is left to decide.
 step "Dependencies: the locked environment, with the web UI extra"
-run uv sync --locked --extra ui
+sync_args=(uv sync --locked --extra ui)
+if [ -z "${UV_PYTHON:-}" ]; then
+    sync_args+=(--python "$python_range")
+fi
+run "${sync_args[@]}"
 
 # --- 10. configuration ------------------------------------------------------
 # `local_env > .env` truncated .env into existence before the writer produced a
@@ -1905,8 +1960,7 @@ else
     printf '      neither, is what this script sets up without --hosted.\n'
 fi
 printf '  AYL_ALLOW_DEFAULT_LOGIN=1 uv run --extra ui ayl ui\n'
-printf '      the web chat on 127.0.0.1, login admin / change-me (the form asks for an\n'
-printf '      "Email address": type the username there). That variable is what\n'
+printf '      the web chat on 127.0.0.1, login admin / change-me. That variable is what\n'
 printf '      allows the placeholder password; set CHAINLIT_USERNAME and CHAINLIT_PASSWORD\n'
 printf '      for a real one and drop it.\n'
 if [ "$ollama_service" -eq 1 ]; then
