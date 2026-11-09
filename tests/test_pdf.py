@@ -1067,6 +1067,36 @@ def test_a_platform_where_memory_cannot_be_read_reads_nothing(tmp_path, monkeypa
     assert child_refused(path) == "memory cannot be measured here, so the file is not read"
 
 
+def test_a_child_on_its_way_out_is_read_not_refused(tmp_path, monkeypatch):
+    """#176: on macOS a child that is exiting can no longer be read before it
+    can be waited on, and a valid book was refused as unmeasured: the parent
+    found it unreadable and still running. Here the real reader prints its
+    book and then waits at a gate; the parent's sample opens the gate and
+    reads nothing, while the child still runs for 0.2 s before it exits. The
+    parent waits one sample (1 s here) for it to end, and reads the book."""
+    monkeypatch.setattr(pdf, "MEMORY_SAMPLE_SECONDS", 1.0)
+    path = make_pdf(tmp_path / "b.pdf", five_pages(), info=KETTLE)
+    done, leave = tmp_path / "done", tmp_path / "leave"
+    arguments = pdf.child_command(path)[4:]          # --child <path> --max-bytes N
+    body = ("import os, time\nstatus = pdf.child_main(sys.argv[1:])\n"
+            f"open({str(done)!r}, 'w').close()\nend = time.monotonic() + 30\n"
+            f"while not os.path.exists({str(leave)!r}) and time.monotonic() < end:\n"
+            "    time.sleep(0.005)\ntime.sleep(0.2)\nraise SystemExit(status)\n")
+    monkeypatch.setattr(pdf, "child_command", lambda path: child_code(body) + arguments)
+    read = pdf.resident_memory_reader()
+
+    def leaving(pid):
+        if pid != os.getpid() and done.exists():
+            leave.touch()
+            return None
+        return read(pid)
+    monkeypatch.setattr(pdf, "resident_memory_reader", lambda: leaving)
+    samples = recorded_samples(monkeypatch)
+    assert pdf.read_pdf(path) == pdf.read_in_process(path)
+    child = [value for pid, value, _ in samples if pid != os.getpid()]
+    assert child and child[-1] is None and None not in child[:-1]
+
+
 LINUX_STATUS = "Name:\tpython3\nVmPeak:\t  900000 kB\nVmHWM:\t   30000 kB\nVmRSS:\t   29000 kB\n"
 
 
