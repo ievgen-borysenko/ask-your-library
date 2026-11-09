@@ -178,7 +178,9 @@ in [`adr/README.md`](adr/README.md), each with the measurement that settled it.
   keeps each passage, as observe saw it, in state under a stable hit id; plan, reflect and synthesize work on the distilled evidence,
   never on raw hits. `reflect` and `synthesize` both read an evidence item's verified quote, never
   `observe`'s note on it (#93, ADR-005): the decision to stop is made on what the books are known
-  to say.
+  to say. A line whose quote comes from a book card carries the label "(book card)" (#100), put
+  there by code from the corpus of the hit the item is pinned to, and in `synthesize` after the
+  `[book, section]` citation rather than inside it; a line of the book's own text is unchanged.
 - **The chunk and that budget are one decision (17.09, ADR-025).** A chunk was 4,000 characters
   and the budget 2,500, so 90% of chunks were ranked on more text than was ever read; transcript
   chunks are packed to 2,400 now, under the budget, and a search hit arrives whole. A chapter read

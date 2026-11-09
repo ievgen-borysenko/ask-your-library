@@ -73,6 +73,8 @@ partial (cut, the rest is not available), empty (not in the index),
 ambiguous (that title belongs to more than one book: request it again only
 with the full "Title — Author" key). Never request a chapter listed there
 again otherwise, whatever its status.
+An evidence line marked (book card) quotes a card: a summary written about the
+book, not the book's own words.
 
 Decide ONE of:
 - Evidence is enough to answer well -> {{"decision": "enough"}}
@@ -102,5 +104,8 @@ literally, and never write a label the evidence does not carry. {lang}
 Name in your own text the book each evidence line comes from — the title is in the label
 that line carries — even when the evidence is thin or covers only part of the question: a
 reader who sees only your first sentence must know which book is being spoken of.
+An evidence line marked (book card) quotes a card: a summary written about the book, not
+the book's own words. Say what the card reports as a summary of the book; never present
+it as a quotation from the book, nor as words of the author or of a character.
 If evidence only partially covers the question, say honestly what is missing.
 Plain text and markdown only — NO emoji."""

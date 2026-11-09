@@ -38,8 +38,8 @@ from .library import (HEAD_MARKER_PREFIX, BookEntry, chapter_is_cut, list_books,
                       read_chapter, search_both)
 from .llm import data_block
 from .prompts import OBSERVE_RULES, PLAN_RULES, REFLECT_RULES, SYNTHESIZE_RULES
-from .provenance import (_normalize, _valid_evidence, validate,  # noqa: F401  (validate is wired by graph.py)
-                         window_around, window_span)
+from .provenance import (CARD_CORPUS, _normalize, _valid_evidence,  # noqa: F401  (validate is wired by graph.py)
+                         validate, window_around, window_span)
 from .sanitize import sanitize_context, strip_control_chars
 from .state import AgentState, is_loop_marker
 
@@ -58,6 +58,31 @@ CATALOG_FALLBACKS = ("invalid_op", "after_clarify", "mixed_intent")
 # already in that message, and a longer list would push them down the context
 # for no gain.
 DROPPED_QUOTES_SHOWN = 6
+
+# What an evidence line says when its quote comes from a book card rather than
+# from the book's own text (#100). A card is a summary one model call wrote at
+# ingest time, and its section titles ("Key Characters", "Themes") read like
+# chapters: without the label, `synthesize` put a card's sentence in the
+# author's mouth. REFLECT_RULES and SYNTHESIZE_RULES define it; code adds it.
+CARD_LABEL = "(book card)"
+
+
+def card_label(corpus: str) -> str:
+    """The label a line of evidence from `corpus` carries, with the space in
+    front of it, or "" for the book's own text. Code decides it from the
+    passage's record, never from anything a model wrote: the corpus is set by
+    `library.search` on the hit, and a hit with no corpus reads as book text,
+    as it does in `provenance.passage_index`."""
+    return f" {CARD_LABEL}" if corpus == CARD_CORPUS else ""
+
+
+def _corpus_of(state: AgentState) -> dict[str, str]:
+    """hit_id -> corpus, for every passage this run retrieved. An evidence item
+    is pinned to the hit that holds its quote (the gate re-pins it there), so
+    the corpus of that hit is the source of the quote. Only the corpus is read
+    here — never a passage's text, which reaches no node after `observe`."""
+    return {h["hit_id"]: h.get("corpus", "") for h in state.get("hits_log") or []
+            if h.get("hit_id")}
 
 # Per-hit text budget, shared by act (hits_log) and observe (prompt): the
 # quote-provenance check compares quotes against the passage as observe saw it,
@@ -880,8 +905,12 @@ def reflect(state: AgentState) -> dict:
     # control characters and neutralizes "<". This is the line the offline
     # replay of 02.10 measured, byte for byte. `why` stays in the state for the
     # scratchpad log and now reaches no prompt at all.
-    evidence_lines = "\n".join(f"- {e['book']} ({e['section']}): \"{e['quote']}\""
-                               for e in state["evidence"]) or "(none)"
+    # A quote from a book card is labelled as one (#100), by code and from the
+    # cited hit's corpus; a line of the book's own text is the line it was.
+    corpus_of = _corpus_of(state)
+    evidence_lines = "\n".join(
+        f"- {e['book']} ({e['section']}){card_label(corpus_of.get(e.get('hit_id', ''), ''))}: "
+        f"\"{e['quote']}\"" for e in state["evidence"]) or "(none)"
     queued = state["queries"]
     lines = [
         data_block("question", state["question"], mode=state["mode"]),
@@ -1068,8 +1097,9 @@ def synthesize(state: AgentState) -> dict:
     run retrieved, and it is pinned to that passage. Nothing here re-checks
     that — the point of the gate is that there is nothing left to re-check — but
     nothing here may widen it either: this node must keep reading `evidence` and
-    never `hits` or `hits_log`, or an unverified quote would reach the reader
-    around the gate. `validate` runs after this node and reports the same
+    never the text of `hits` or `hits_log`, or an unverified quote would reach
+    the reader around the gate. The one thing it reads off `hits_log` is a
+    passage's corpus, for the card label (#100) — metadata, not text. `validate` runs after this node and reports the same
     check over the same evidence, which is how the invariant is kept honest.
 
     What it does NOT cover, and the watermark says so: the sentences the model
@@ -1097,8 +1127,13 @@ def synthesize(state: AgentState) -> dict:
     # no label to hide behind. Book and section come from the index metadata,
     # already control-char-stripped in `act`, and are shown exactly as the
     # block header and the evidence card show them.
-    evidence_text = "\n".join(f"- [{e['book']}, {e['section']}] \"{e['quote']}\""
-                              for e in state["evidence"])
+    # The card label (#100) goes AFTER the citation label, outside its brackets,
+    # so the citation the model copies stays the book and the section; it is
+    # read off the cited hit's corpus in `hits_log`, the passage text never.
+    corpus_of = _corpus_of(state)
+    evidence_text = "\n".join(
+        f"- [{e['book']}, {e['section']}]{card_label(corpus_of.get(e.get('hit_id', ''), ''))} "
+        f"\"{e['quote']}\"" for e in state["evidence"])
     data = [data_block("question", state["question"])]
     if state.get("clarification"):
         data.append(data_block("clarification", state["clarification"]))

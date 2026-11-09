@@ -102,6 +102,8 @@ def test_retrieve_answer_cuts_and_sanitizes_exactly_as_observe_would(captured_ll
     # the agent's own synthesize node writes it.
     assert "[book, chapter]" in call["system"] and "opens with exactly that label" in call["system"]
     assert '- [Huck Finn — Mark Twain, Chapter XXXI] "' in call["user"]
+    # a card passage is labelled as one after its citation, as the agent's line is (#100)
+    assert '- [Huck Finn — Mark Twain, card] (book card) "' in call["user"]
     assert ITEM["question"] in call["user"]
     assert INJECTION not in call["user"]
     assert r["evidence_items"] == 2 and r["steps_taken"] == 1

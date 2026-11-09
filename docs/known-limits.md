@@ -203,9 +203,13 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   reading the chapter. Since 2026-09-16 the answer no longer hides it: a quote whose only verbatim
   match is a book card is counted apart from the traced quotes (`card_only` in `validate`), the
   badge says "+N matched only a book card — a model-written summary, not a quote from the book",
-  and the evidence list labels each passage "book text" or "book card". It is a label and a count,
-  not a fix: the agent still answers such questions from the card rather than reading the chapter,
-  and a question answered entirely off cards now says so instead of showing "n/n traced". **Every
+  and the evidence list labels each passage "book text" or "book card". Since #100 the model is
+  told as well: an evidence line from a card reaches `reflect` and `synthesize` marked "(book
+  card)", by code from the passage's corpus, and the rules say a card is a summary written about
+  the book, not its words. It is a label and a count, not a fix: the agent still answers such
+  questions from the card rather than reading the chapter, whether the answer says so is the
+  model's reading of the rule, and a question answered entirely off cards now says so instead of
+  showing "n/n traced". **Every
   eval report published before that date counted card matches inside the confirmed / unattributed /
   broken triple**, so the quote numbers quoted here and in the README's table describe retrieval
   provenance — the quote is verbatim in the passage it cites — and not that a book said it.

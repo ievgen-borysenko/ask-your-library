@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **The answer is told which evidence is a book card, and who says the words it quotes (#100).**
+  On a library of audiobooks, an episode in which an actor reads the opening of a novel, a
+  father's letter to his son, was answered as the episode host's words, though the sentence
+  saying who writes to whom stood next to the quote in the same passage; and a sentence from a
+  book card, a model-written summary, could be answered as the book's own words. An evidence line
+  from a card now reaches `reflect` and `synthesize` marked "(book card)": code reads the corpus of
+  the hit the item is pinned to, and the label sits after the `[book, section]` citation, so the
+  citation the answer copies is unchanged. Both rules say a card is a summary written about the
+  book, not its words, and `synthesize` must not present it as a quotation. A line of the book's
+  own text is byte for byte what it was. The ablation's retrieve-and-answer arm labels its card
+  passages the same way.
+
 - **A local run says before it starts that a research answer takes minutes (#137).** On the local
   model every research answer takes 1-4 minutes (61-217 s measured, [cost](cost.md); a cold first
   one 160.8 s, its immediate repeat 62.7 s), and `ayl ask` printed the question back and then

@@ -187,9 +187,11 @@ def run_retrieve_answer(item: dict) -> dict:
         # The same line shape the agent's synthesize node builds (nodes.py): the
         # citation label first, because SYNTHESIZE_RULES tells the model to cite
         # by copying it. This arm replaces the LOOP with a single retrieval, not
-        # the answering contract.
-        evidence_text = "\n".join(f"- [{p['book']}, {p['section']}] \"{p['text']}\""
-                                  for p in passages)
+        # the answering contract. A card passage carries the card label after
+        # the citation, as the agent's line does (#100).
+        evidence_text = "\n".join(
+            f"- [{p['book']}, {p['section']}]{nodes_mod.card_label(p['corpus'])} \"{p['text']}\""
+            for p in passages)
         data = [llm_mod.data_block("question", item["question"]),
                 llm_mod.data_block("evidence", evidence_text)]
         answer = llm_mod.llm_invoke(
