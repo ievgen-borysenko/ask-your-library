@@ -7,8 +7,9 @@
   harness's own reports and JSON sidecars, unedited, of the hosted default and the local default on
   the core, extended and catalogue sets at `--repeat 3`, the retriever eval, and the #29 bar on the
   local default at `--repeat 5` (met on both sets: core weakest attempt 9/11 against a floor of 9,
-  catalogue 10/10 in all five), all on `6d73fc3`. Manual correctness is unscored there; the README
-  "Measured" table and its intervals (#131) follow with the grades.
+  catalogue 10/10 in all five), all on `6d73fc3`, that is before #150, #169 and #179 below. Manual
+  correctness is unscored there; the README "Measured" table and its intervals (#131) follow with
+  the grades.
 - **`reflect` is shown the searches the run already made (#179).** Since #163 an exact or
   normalised repeat is replaced or stops the loop, but `reflect` had never been shown which searches
   had run, so it wrote paraphrases of them and the loop still ran to the step limit. Its prompt now

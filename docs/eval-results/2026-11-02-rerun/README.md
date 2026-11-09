@@ -13,7 +13,7 @@ this page, which summarises them.
 | Code | `6d73fc3` (`6d73fc39accc3a64bb8bd10e8c474c6b97d705fd`, `main` on 02.11.2026), detached checkout; every fingerprint stamps it clean (`--require-clean`, sidecar `code_clean: true`) |
 | When | 02.11.2026 23:01 to 03.11.2026 00:50 CET, one batch, every run sequential |
 | Machine | Mac mini (Apple Silicon) |
-| Index | the demo index under `_data/lancedb`, given as `LIBRARY_DB_PATH` (resolution clause 1, an explicit path): 35 books; `cards_ollama=bge-m3/1024d chunker=card-sections-2 rows=165 v2 built=2026-09-19T12:28:41`, `transcripts_ollama=bge-m3/1024d chunker=sentence-pack-2 rows=11236 v26 built=2026-09-24T10:39:10`; `ayl doctor` reported no drift before the runs |
+| Index | the demo index under `_data/lancedb`, given as `LIBRARY_DB_PATH` (resolution clause 1, an explicit path): 35 entries (33 books and the two canaries); `cards_ollama=bge-m3/1024d chunker=card-sections-2 rows=165 v2 built=2026-09-19T12:28:41`, `transcripts_ollama=bge-m3/1024d chunker=sentence-pack-2 rows=11236 v26 built=2026-09-24T10:39:10`; `ayl doctor` reported no drift before the runs |
 | Embeddings | `bge-m3` via Ollama (`EMBED_BACKEND=ollama`) for every run, hosted ones included |
 | Golden sets | core `en-demo.yaml@2c43defa8bc7` (11 items), extended `en-demo-extended.yaml@338002f35e0e` (21 items), catalogue `en-demo-catalog.yaml@72eb2c2b2655` (10 items); corpus `manifest@c1fee42124dd`, `toc@3f0e05110358` |
 | Step 1 flags | `--repeat 3 --clarify-pick second --require-clean` |
