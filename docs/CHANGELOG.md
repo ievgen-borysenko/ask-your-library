@@ -151,8 +151,11 @@
   and installs 3.14 when uv has none in that range (it used to install 3.11 when uv had nothing
   at 3.11 or later); step 9 builds the environment on that range, and `--dry-run` prints it. A Mac
   where uv already has an interpreter in the range keeps it and downloads nothing, and an
-  exported `UV_PYTHON` still decides. The series is `PYTHON_CEILING` in the script; a test reads
-  `uv.lock` and fails, naming the value to write, once the lock covers a newer one.
+  exported `UV_PYTHON` still decides. A uv pin does not: with a `.python-version` in the clone or
+  a global one, the first `uv run` after the sync rebuilds the environment on the pinned interpreter
+  ([quick start](quick-start.md#from-a-clone-on-a-mac-one-script-does-the-installs-too)). The
+  series is `PYTHON_CEILING` in the script; a test reads `uv.lock` and fails, naming the value to
+  write, once the lock covers a newer one.
 - **The installer's closing lines drop the "Email address" note (#139).** They told you to type
   the username where the web chat's login form asks for an "Email address"; with #139 that field
   is labelled Username, so `scripts/install-mac.sh` now prints only the login, `admin` /

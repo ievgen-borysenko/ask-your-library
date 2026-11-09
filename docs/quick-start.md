@@ -162,7 +162,11 @@ only (`brew services run`, which registers no login item — the one-liner that 
 is printed at the end), pulls the two models, syncs the locked environment on Python 3.11.5 to 3.14
 (an interpreter uv already has in that range, else 3.14, which uv installs), writes the fully local
 `.env`, hands the demo library to `ayl init` (which asks its one question), and finishes on the
-preflight the CLI runs before every question. `install-mac.sh` also takes `--no-demo`,
+preflight the CLI runs before every question. An exported `UV_PYTHON` decides instead of that
+range, but a uv pin does not: with a `.python-version` in the clone or uv's global one (both
+written by `uv python pin`), the first `uv run` after the sync rebuilds the environment on the
+pinned interpreter, which for a pin to 3.15 is one the locked wheels do not cover. Remove the pin,
+or export `UV_PYTHON=3.14`, before running the script. `install-mac.sh` also takes `--no-demo`,
 `--hosted` (the OpenRouter answering model, which needs a key you set yourself), `--yes` (build
 the demo library without asking) and `--help`; its `--print-env-resolution` prints how the
 installer resolved every setting that decides where your data goes, with values whose names look
