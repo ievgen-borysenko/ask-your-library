@@ -175,7 +175,7 @@ books:
     sha256: b167ce5e348bf805dfe4355dff2eae5c2e522b11cce003a6f98bb65a753bbc69
     # re-pinned 2026-11-09: PG regenerated the file on 2026-11-02. Diffed against the
     # pinned copy (ffbdb29c…): updated-date header line, a year fixed in the preface
-    # to the second edition ("Teubner edition of 894" -> "of 1894", before BOOK I,
+    # to the first edition ("Teubner edition of 894" -> "of 1894", before BOOK I,
     # which the split drops), a missing "]" restored in Book IV closing Butler's
     # bracketed passage at "struck up with his tune.]", and two blank lines dropped
     # before the END marker; the chapter split is unchanged

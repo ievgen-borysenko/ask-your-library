@@ -84,7 +84,7 @@
 - **The weekly pin check was red on The Odyssey: Project Gutenberg had regenerated it.**
   The `pins` job of `corpus.yml` failed on 2026-11-09 with a checksum mismatch on PG 1727
   (regenerated 2026-11-02). Diffed against the pinned copy, the new file changes four places: the
-  updated-date header line; a year in Butler's preface to the second edition ("Teubner edition of
+  updated-date header line; a year in Butler's preface to the first edition ("Teubner edition of
   894" became "of 1894"), which comes before BOOK I and is dropped by the split; a missing closing
   bracket restored in Book IV, where Butler's bracketed passage on the wedding feast now ends at
   "struck up with his tune.]"; and two blank lines dropped before the END marker. The prepared book
