@@ -2285,30 +2285,50 @@ def published_for(wheel_tags, arch):
     return any(tag.platform in mac_platforms(arch) for tag in tags.parse_tag(wheel_tags))
 
 
+def marker_points(minor):
+    """The CPython 3.<minor> versions at which a resolution marker of uv.lock can
+    change its answer: the series' first one (for the floor series, the
+    requires-python floor), and each python_full_version a marker names inside
+    the series with the patch release after it (for `<` and for `<=`)."""
+    floor = tuple(int(part) for part in requires_python().removeprefix(">=").split("."))
+    start = max((3, minor, 0), (floor + (0, 0))[:3])
+    named = {(tuple(int(part) for part in version.split(".")) + (0, 0))[:3]
+             for package in locked_packages() for marker in package.get("resolution-markers", [])
+             for version in re.findall(r"python_full_version\s*[<>=!~]+\s*'(\d+(?:\.\d+)*)",
+                                       marker)}
+    return sorted({start} | {point for version in named
+                             for point in (version, version[:2] + (version[2] + 1,))
+                             if point[:2] == (3, minor) and point >= start})
+
+
 def macos_wheel_gaps(minor):
     """The packages of uv.lock that `uv sync` would build from source on CPython
     3.<minor> on a Mac: each publishes a macOS wheel for some series but none
     that installs on this one, on an architecture it publishes for at all. A
     package with a pure-Python wheel needs no build; one with no macOS wheel
     (pywin32) is never installed on a Mac; one whose resolution markers leave
-    this series out is replaced by another version for it (numpy 2.4.6 is the
-    one below 3.12)."""
+    this series out, at each of its marker_points on that architecture, is
+    replaced by another version for it (numpy 2.4.6 is the one below 3.12)."""
     from packaging.markers import Marker      # pytest's own dependency
-    environment = {"python_version": f"3.{minor}", "python_full_version": f"3.{minor}.0",
-                   "sys_platform": "darwin", "platform_system": "Darwin", "os_name": "posix",
-                   "implementation_name": "cpython",
-                   "platform_python_implementation": "CPython"}
+    environments = {arch: [{"python_version": f"3.{minor}",
+                            "python_full_version": ".".join(map(str, point)),
+                            "sys_platform": "darwin", "platform_system": "Darwin",
+                            "platform_machine": arch, "os_name": "posix",
+                            "implementation_name": "cpython",
+                            "platform_python_implementation": "CPython"}
+                           for point in marker_points(minor)]
+                    for arch in MAC_ARCHES}
     gaps = []
     for package in locked_packages():
-        markers = package.get("resolution-markers")
-        if markers and not any(Marker(marker).evaluate(environment) for marker in markers):
-            continue
+        markers = [Marker(marker) for marker in package.get("resolution-markers", [])]
         wheels = [WHEEL_TAGS.search(wheel["url"])[1] for wheel in package.get("wheels", [])]
-        published = [arch for arch in MAC_ARCHES
-                     if any(published_for(wheel, arch) for wheel in wheels)]
-        if any(not any(installs_on(wheel, minor, arch) for wheel in wheels)
-               for arch in published):
-            gaps.append(f"{package['name']} {package['version']}")
+        for arch in MAC_ARCHES:
+            if (any(published_for(wheel, arch) for wheel in wheels)
+                    and not any(installs_on(wheel, minor, arch) for wheel in wheels)
+                    and (not markers or any(marker.evaluate(environment) for marker in markers
+                                            for environment in environments[arch]))):
+                gaps.append(f"{package['name']} {package['version']}")
+                break
     return gaps
 
 
@@ -2440,6 +2460,15 @@ def test_the_dry_run_names_the_python_series_it_asks_uv_for(sandbox):
     assert f"would run: uv sync --locked --extra ui --python '{wanted}'" in lines
 
 
+def shell_words(line):
+    """A printed command split as a shell splits it: `<` and `>` outside quotes
+    end a word, so an unquoted range reads back as redirections, not as one
+    argument (`shlex.split` keeps them inside the word)."""
+    lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    return list(lexer)
+
+
 @mac_only
 def test_a_printed_range_reads_back_as_the_command_that_runs(sandbox, tmp_path):
     """`--python >=3.11.5,<3.15` pasted from the plan into a shell is two
@@ -2451,20 +2480,20 @@ def test_a_printed_range_reads_back_as_the_command_that_runs(sandbox, tmp_path):
     sync = ["uv", "sync", "--locked", "--extra", "ui", "--python", python_range()]
     find = ["uv", "python", "find", python_range()]
     lines = printed_lines(dry_run(sandbox))
-    assert shlex.split(next(line.removeprefix("would run: ") for line in lines
+    assert shell_words(next(line.removeprefix("would run: ") for line in lines
                             if line.startswith("would run: uv sync"))) == sync
-    assert shlex.split(next(line.removeprefix("would check: ") for line in lines
+    assert shell_words(next(line.removeprefix("would check: ") for line in lines
                             if line.startswith("would check: "))) == find
     # A uv whose `sync` fails on every interpreter, so the run reaches both lines.
     uv_with_pythons(sandbox, tmp_path, "3.14.0", wheels=(3, 0))
     result = real_run(sandbox, "--no-demo")
     assert result.returncode == 1, result.stdout + result.stderr
     lines = printed_lines(result.stdout)
-    assert shlex.split(next(line.removeprefix("running: ") for line in lines
+    assert shell_words(next(line.removeprefix("running: ") for line in lines
                             if line.startswith("running: uv sync"))) == sync
     failed = [line.removesuffix(" failed with status 1.") for line in error_lines(result.stderr)
               if line.startswith("uv sync") and line.endswith(" failed with status 1.")]
-    assert [shlex.split(line) for line in failed] == [sync]
+    assert [shell_words(line) for line in failed] == [sync]
     assert f"running: ollama pull {embed_model}" in lines
 
 
