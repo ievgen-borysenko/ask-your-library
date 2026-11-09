@@ -635,12 +635,14 @@ def test_synthesize_is_never_given_a_quote_that_failed_the_gate(run):
 
 def test_step_limit_ends_the_loop_with_an_honest_stop_reason(run):
     steps = config.MAX_STEPS
-    # A different quote of the same card on every step: one quote taken twice is
-    # one piece of evidence (#163), and a step that only repeats one is dry.
-    words = CORPUS[MOBY]["cards"][1].split()
+    # A different quote of the same chapter on every step: one quote taken twice
+    # is one piece of evidence (#163), and a step that only repeats one is dry.
+    # The chapter, not the card: a card is shown once per run, and from step 2
+    # on this book's card is not in the window.
+    words = CORPUS[MOBY]["transcripts"][1].split()
     model = ScriptedModel(
         plan=[{"mode": "answer", "queries": [f"q{i}" for i in range(steps + 2)]}],
-        observe=[{"evidence": [evidence(MOBY, "cards", f"s{i}h2", quote=" ".join(words[:3 + i]))]}
+        observe=[{"evidence": [evidence(MOBY, "transcripts", f"s{i}h1", quote=" ".join(words[:3 + i]))]}
                  for i in range(1, steps + 1)],
         reflect=[{"decision": "search", "next_query": f"q{i}"} for i in range(1, steps + 1)],
         synthesize=["Whatever was found [Moby Dick, Summary]."],
@@ -649,11 +651,13 @@ def test_step_limit_ends_the_loop_with_an_honest_stop_reason(run):
     assert names(events).count("act") == steps
     assert by_name(events, "reflect")[-1]["stop_reason"] == t("stop_limit", n=steps)
     assert by_name(events, "metrics")[0]["steps_taken"] == steps
-    # every quote matched although the same card was hit each step: ids are per
-    # step. All of them are card quotes, so none is traced to the book text —
-    # what this pins is that the per-step ids resolve, not the verdict's colour.
-    assert by_name(events, "validate")[0]["provenance"]["card_only"] == steps
+    # every quote matched although the same chapter was hit each step: ids are
+    # per step, and what this pins is that the per-step ids resolve
+    assert by_name(events, "validate")[0]["provenance"]["confirmed"] == steps
     assert by_name(events, "validate")[0]["provenance"]["broken"] == 0
+    # the card was shown on step 1 only
+    assert [[h["corpus"] for h in a["hits"]] for a in by_name(events, "act")] == (
+        [["transcripts", "cards"]] + [["transcripts"]] * (steps - 1))
 
 
 def test_coverage_probe_looks_inside_the_named_uncovered_book_once(run):
@@ -736,7 +740,7 @@ def test_an_injection_line_in_a_hit_is_redacted_before_the_model_and_cannot_be_q
 def test_malformed_model_json_degrades_observe_to_a_dry_step_and_reflect_to_a_stop(run):
     model = ScriptedModel(
         plan=[{"mode": "answer", "queries": ["Ahab leg", "white whale"]}],
-        observe=["not json at all", "still { not json", {"evidence": [evidence(MOBY, "cards", "s2h2")]}],
+        observe=["not json at all", "still { not json", {"evidence": [evidence(MOBY, "transcripts", "s2h1")]}],
         reflect=[{"decision": "search", "next_query": "white whale"}, "garbage", "garbage again"],
         synthesize=["Ahab lost his leg [Moby Dick, Summary]."],
     )
@@ -745,9 +749,9 @@ def test_malformed_model_json_degrades_observe_to_a_dry_step_and_reflect_to_a_st
     assert by_name(events, "observe")[0]["empty_streak"] == 1 and by_name(events, "observe")[0]["evidence"] == []
     # reflect: two invalid replies = stop with what we have, the evidence of step 2 survives
     assert by_name(events, "reflect")[1]["stop_reason"] == t("stop_json")
-    # the surviving item is a card quote, so it is matched but not traced to the
-    # book; what this line is about is that step 2's evidence survived at all
-    assert by_name(events, "validate")[0]["provenance"]["card_only"] == 1
+    # what this line is about is that step 2's evidence survived at all (a
+    # chapter quote: step 1 already showed the card, so step 2 does not)
+    assert by_name(events, "validate")[0]["provenance"]["confirmed"] == 1
     assert by_name(events, "validate")[0]["provenance"]["checked"] == 1
     assert model.roles().count("observe") == 3 and model.roles().count("reflect") == 3
 
@@ -1282,9 +1286,12 @@ def test_the_reference_run_q1_q3_q1_q1_runs_q2_and_stops_without_repeating(run):
     searching q1 until the step limit."""
     model = ScriptedModel(
         plan=[{"mode": "answer", "queries": ["q1", "q2", "q3"]}],
+        # one new quote a step; from step 2 on both cards are withheld (shown
+        # on step 1), so the later quotes come from the two chapters
         observe=[{"evidence": [evidence(MOBY, "transcripts", "s1h1")]},
-                 {"evidence": [evidence(MOBY, "cards", "s2h3")]},
-                 {"evidence": [evidence(GULLIVER, "cards", "s3h4")]}],
+                 {"evidence": [evidence(GULLIVER, "transcripts", "s2h2")]},
+                 {"evidence": [evidence(MOBY, "transcripts", "s3h1",
+                                        quote="I thought I would sail about a little")]}],
         reflect=[{"decision": "search", "next_query": "q3"},
                  {"decision": "search", "next_query": "q1"},
                  {"decision": "search", "next_query": "Q1?"}],
@@ -1311,7 +1318,8 @@ def test_a_run_without_repeats_emits_the_events_it_always_did(run):
     model = ScriptedModel(
         plan=[{"mode": "answer", "queries": ["Ishmael sails", "Pequod voyage"]}],
         observe=[{"evidence": [evidence(MOBY, "transcripts", "s1h1")]},
-                 {"evidence": [evidence(MOBY, "cards", "s2h2")]}],
+                 {"evidence": [evidence(MOBY, "transcripts", "s2h1",
+                                        quote="I thought I would sail about a little")]}],
         reflect=[{"decision": "search", "next_query": "Pequod voyage"}, {"decision": "enough"}],
         synthesize=["Ishmael sails on the Pequod [Moby Dick, Chapter 1]."],
     )
@@ -1347,3 +1355,37 @@ def test_two_steps_of_quotes_the_run_already_holds_end_at_the_crag_gate(run):
     assert by_name(events, "reflect")[-1]["stop_reason"] == t("stop_crag", n=config.MAX_EMPTY_STREAK)
     assert names(events).count("act") == 3
     assert by_name(events, "validate")[0]["provenance"]["checked"] == 1
+
+
+# ---------------------------------------------------------------- the card budget
+def test_a_two_step_run_shows_a_books_card_once(run, tmp_path):
+    """Through the real graph: step 1 shows Moby Dick's chapter and then its
+    card; step 2 retrieves both again and shows the chapter only. The second
+    `observe` prompt holds no card, the scratchpad names the card it did not
+    show, and every event carries the keys it always carried."""
+    card_text = CORPUS[MOBY]["cards"][1]
+    model = ScriptedModel(
+        plan=[{"mode": "answer", "queries": ["Ishmael sails", "Pequod voyage"]}],
+        observe=[{"evidence": [evidence(MOBY, "transcripts", "s1h1")]},
+                 {"evidence": [evidence(MOBY, "transcripts", "s2h1",
+                                        quote="I thought I would sail about a little")]}],
+        reflect=[{"decision": "search", "next_query": "Pequod voyage"}, {"decision": "enough"}],
+        synthesize=["Ishmael sails [Moby Dick, Chapter 1]."],
+    )
+    library = FakeLibrary(lambda q: [MOBY])
+    _, events, _ = run(model, library, "Who narrates Moby Dick?")
+
+    assert library.searches == [("Ishmael sails", None), ("Pequod voyage", None)]   # retrieved twice
+    first, second = by_name(events, "act")
+    assert [(h["hit_id"], h["corpus"]) for h in first["hits"]] == [("s1h1", "transcripts"), ("s1h2", "cards")]
+    assert [(h["hit_id"], h["corpus"]) for h in second["hits"]] == [("s2h1", "transcripts")]
+    assert [h["hit_id"] for h in second["hits_log"]] == ["s2h1"]
+    assert card_text in model.nth("observe", 0)["user"]
+    assert card_text not in model.nth("observe", 1)["user"]
+    scratch = next(Path(tmp_path).glob("run-*.md")).read_text()
+    assert f"## step 2: Pequod voyage\n[cards not shown again: {MOBY} | Summary]\n" in scratch
+    assert [set(a) for a in (first, second)] == [{"hits", "hits_log", "steps_taken",
+                                                  "read_chapters", "searches_run"}] * 2
+    assert [set(u) for u in by_name(events, "observe")] == [{"evidence", "empty_streak"}] * 2
+    p = by_name(events, "validate")[0]["provenance"]
+    assert (p["confirmed"], p["card_only"], p["broken"]) == (2, 0, 0)

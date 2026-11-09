@@ -26,8 +26,8 @@ from .catalog import (mixed_intent, parse_catalog_request, render_catalog, resol
 # read_key / read_status / READ_STATUSES are re-exported, not used here: the
 # grammar is this node's contract with `reflect`, and it is read (and tested)
 # as part of it.
-from .bookkey import (READ_STATUSES, chapter_marker, read_key, read_status,  # noqa: F401
-                      same_chapter, split_read_query, unescape_marker)
+from .bookkey import (READ_STATUSES, chapter_marker, names_book, read_key,  # noqa: F401
+                      read_status, same_chapter, split_read_query, unescape_marker)
 from .clarify import _chosen_book, _clarify_candidates, _evidence_after_clarify
 from .config import (CHAPTER_HIT_CHARS, CHAPTER_SCAN_CHARS, LLM_TIMEOUT_S,
                      MAX_CLARIFY_CANDIDATES, MAX_DROPPED_STREAK, MAX_EMPTY_STREAK, MAX_STEPS,
@@ -440,6 +440,44 @@ def catalog(state: AgentState) -> dict:
 # bare-title rule under it — lives in `bookkey` with the rest of book identity.
 
 # ---------------------------------------------------------------- act
+def _card_key(hit: dict) -> tuple[str, str, str]:
+    """What makes two card passages one card: the book, the section and the
+    text, sanitized, as `hits_log` holds them. `hits_log` cuts a passage at its
+    step's limit, which is SEARCH_HIT_CHARS on a step of several hits and
+    CHAPTER_HIT_CHARS on a step of one, so the text is compared on the shorter
+    of the two cuts: equal there whichever limit stored it. A card whose text
+    changed between steps (an index rebuilt under a running question) is a new
+    card."""
+    return (hit["book"], hit["section"], hit["text"][:min(SEARCH_HIT_CHARS, CHAPTER_HIT_CHARS)])
+
+
+def _withhold_shown_cards(state: AgentState, hits: list[dict]) -> tuple[list[dict], list[dict]]:
+    """A book card is shown once per run: (the hits to show, the cards withheld).
+
+    Cards came back step after step, and every repeat cost `observe` its input
+    a second time for a passage it had already read; a card is a summary of a
+    whole book, so a later query rarely makes it say anything new. Transcripts
+    are not withheld: the #29 retry rule hands a refused passage back on the
+    next step, and that rule is written for the book's text.
+
+    One exemption, the same #29 reading applied to cards: a card of a book
+    whose quote the gate refused (the last DROPPED_QUOTES_SHOWN refusals, the
+    window `observe` is shown) comes back, so a model that paraphrased a card
+    line gets the line to copy again. The book is matched as the model wrote
+    it, exactly or as a bare title (`names_book`). The sink is bounded: model
+    text can at most bring back a card this run has already shown."""
+    shown = {_card_key(h) for h in state.get("hits_log") or [] if h.get("corpus") == "cards"}
+    if not shown:
+        return hits, []
+    refused = [d["book"].strip() for d in state.get("dropped_quotes") or []
+               if isinstance(d, dict) and isinstance(d.get("book"), str) and d["book"].strip()]
+
+    def withheld(h: dict) -> bool:
+        return (h["corpus"] == "cards" and _card_key(h) in shown
+                and not any(names_book(book, h["book"]) for book in refused))
+    return [h for h in hits if not withheld(h)], [h for h in hits if withheld(h)]
+
+
 def act(state: AgentState) -> dict:
     # Two kinds of action: a regular search, or reading a whole chapter (drill-down)
     # A chapter marker may carry one field more than the other two — what the
@@ -573,6 +611,13 @@ def act(state: AgentState) -> dict:
             h["redacted_lines"] = redacted
             usage.redacted_lines += redacted
 
+    # A card an earlier step already showed is not shown again (see
+    # `_withhold_shown_cards`). Here, after the sanitizer, so the text compared
+    # is the text `hits_log` holds, and before the ids, so the ids stay dense.
+    # `hits_seen` above counts what the retriever returned, withheld cards
+    # included.
+    hits, withheld = _withhold_shown_cards(state, hits)
+
     # The book's own text first, then the cards. `search_both` asks the corpora
     # cards first, and `observe` read the cards first: on a step whose cards
     # already answered, it kept a card line and the step's book text went
@@ -611,6 +656,11 @@ def act(state: AgentState) -> dict:
         with open(state["scratchpad_path"], "a", encoding="utf-8", errors="replace") as f:
             f.write(f"\n## step {step}: {strip_control_chars(state['current_query'])}\n"
                     f"{strip_control_chars(empty_read_note)}")
+            if withheld:
+                # Named here and nowhere else: no state channel and no event
+                # key carries them, so a run's events are the events they were.
+                f.write("[cards not shown again: "
+                        + "; ".join(f"{h['book']} | {h['section']}" for h in withheld) + "]\n")
             if window is not None:
                 looking_for = (f'"{window["looking_for"]}"' if window["looking_for"]
                                else "(none: head of the chapter)")
