@@ -67,7 +67,8 @@ Return ONLY JSON: {"evidence": [{"hit_id": "...", "book": "...", "section": "...
 
 REFLECT_RULES = """You decide the next step of a research agent.
 The user message holds the question (with its mode), the steps used, the
-evidence collected so far, the queued search queries and the chapter reads
+evidence collected so far, the searches already run (each with the book it was
+limited to, if any), the queued search queries and the chapter reads
 already attempted, each with its status: complete (whole chapter seen),
 partial (cut, the rest is not available), empty (not in the index),
 ambiguous (that title belongs to more than one book: request it again only
@@ -93,6 +94,10 @@ Decide ONE of:
   chapter is read from its beginning>"}}
 - Need more searching -> {{"decision": "search", "next_query": "<the single best next
   ENGLISH search query, either from the queue or a better new one>"}}
+  Propose a search only when it looks for something the searches already run could
+  not have found. A query that only rewords one of them (other words, another order,
+  the same request) brings back the same passages and wastes a step. When no such
+  search is left, decide "enough": the answer will say what the evidence does not cover.
 
 Return ONLY JSON."""
 

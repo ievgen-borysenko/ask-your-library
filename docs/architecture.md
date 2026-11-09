@@ -131,8 +131,13 @@ in [`adr/README.md`](adr/README.md), each with the measurement that settled it.
   ran under the book it settles on, so the same words inside a newly chosen book still run.
   `reflect` checks the search it is about to send: a repeat is replaced by the first queued query
   that has not run; with none left the coverage gate gets its one chance, with a search the run
-  has not made; otherwise the loop stops on its own reason, "no new query". The reflect prompt is
-  unchanged, and its event carries `query_replaced` only when one of these happened. `observe`
+  has not made; otherwise the loop stops on its own reason, "no new query". Its event carries
+  `query_replaced` only when one of these happened. Since #100 the reflect prompt also lists the
+  searches already run, each with the book it was limited to, in a data block of its own
+  (`searches_already_run`; the queries are model text, so the block is sanitized like a passage
+  and neutralized by `data_block`), and its rules ask for a new search only when it looks for
+  something those could not have found, else "enough". That rule is the model's to follow; the
+  check above stays the guarantee. `observe`
   keeps one copy of each (book, section, quote as the gate compares quotes), from earlier steps or
   the same one, and a step whose quotes were all copies counts as dry, so the CRAG gate ends a run
   that has stopped learning; a step that also dropped a quote keeps the #29 rule. A paraphrase is

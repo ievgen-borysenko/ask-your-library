@@ -13,6 +13,15 @@
   book, not its words, and `synthesize` must not present it as a quotation. A line of the book's
   own text is byte for byte what it was. The ablation's retrieve-and-answer arm labels its card
   passages the same way.
+- **`reflect` is shown the searches the run already made (#100).** Since #163 an exact or
+  normalised repeat is replaced or stops the loop, but `reflect` had never been shown which searches
+  had run, so it wrote paraphrases of them and the loop still ran to the step limit. Its prompt now
+  lists them, each normalised query with the book it was limited to, in a data block of its own
+  (`searches_already_run`, "(none)" before the first search); the queries are model text, so
+  instruction-like lines are redacted as in a passage and delimiters are neutralised. The rules ask
+  for a search only when it looks for something those could not have found, and otherwise for
+  "enough". It is a rule, not a check: a paraphrase the model still writes still runs
+  ([known limits](known-limits.md)). The injection canary plants its marker in this block too.
 
 - **A local run says before it starts that a research answer takes minutes (#137).** On the local
   model every research answer takes 1-4 minutes (61-217 s measured, [cost](cost.md); a cold first

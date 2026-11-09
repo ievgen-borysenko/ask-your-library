@@ -359,6 +359,17 @@ reserved action marker in it is rejected; book, section and `looking_for` reach 
 clarify question is model text shown to the reader, as it was before this change, and stays
 covered by the canary and the UI's neutralization (ADR-008).
 
+Amended 2026-11-09 (#100): **`reflect` also sees the searches the run already made**, in a block of
+their own, each normalised query with the book it was limited to (`searches_run`, recorded by
+`act` since #163). The rules ask for a new search only when it looks for something those could not
+have found, and otherwise for "enough": the loop had stopped repeating a search exactly but kept
+paraphrasing one up to the step limit, never shown what had run. The queries are model text that a
+passage may have steered, so the block is treated as a passage is — instruction-like lines redacted
+by `sanitize_context`, then `data_block`'s neutralization — and its sinks are the ones above: a
+proposal still goes through `str_field`, the marker guard and the repeat check of #163. An evidence
+line whose quote is pinned to a book card now carries "(book card)", a label code derives from the
+hit's corpus.
+
 Measured offline before it was written, on the decision only: `reflect` replayed on stored states
 with everything but the evidence line and the rule byte-identical, `deepseek/deepseek-v4-flash-0731`
 through OpenRouter, reasoning off, temperature 0, 149 calls (about $0.007). With the shipped rules

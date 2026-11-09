@@ -229,8 +229,8 @@ What the canary covers. Five of its six stages are deterministic and free (`--no
 available stages, and CI runs them in the `test-ui` job): the sanitizer; the `observe` controls;
 the **prompt boundary** - a fake transport records the LLM prompts of `observe`, `reflect` and
 `synthesize`, plus the clarify interrupt (`clarify` sends no prompt of its own, it only
-interrupts), on a state whose evidence `why`/`quote`, book and section titles, queued queries
-and clarify candidates all carry a marker and try to forge a delimiter, and the marker must
+interrupts), on a state whose evidence `why`/`quote`, book and section titles, queued queries, searches
+already run and clarify candidates all carry a marker and try to forge a delimiter, and the marker must
 appear only inside data-block bodies or neutralized attributes of the *user* message, never in
 the system message, with every untrusted `<` neutralized and no forged `<result>` /
 `<evidence>`; the **test's own detection** - the
