@@ -302,8 +302,9 @@ unchanged — a copy never makes a step drier than its dropped quotes do.
 ## ADR-005: `observe` sees a fixed budget of each hit; the rest of the loop sees only evidence
 
 Status: accepted; the size of the budget was revised by ADR-012 and its MEANING by ADR-025
-(2026-09-17), 2026-09-16 added one number to what `reflect` sees, and 2026-10-02 replaced the
-note `reflect` decided on with the verified quote (see below). The budget itself is unchanged.
+(2026-09-17), 2026-09-16 added one number to what `reflect` sees, 2026-10-02 replaced the
+note `reflect` decided on with the verified quote, and 2026-11-09 showed `reflect` the searches
+the run already made (see below). The budget itself is unchanged.
 
 Raw hits never reach `plan`, `reflect` or `synthesize`. `observe` receives one `<result>` block
 per hit, carrying that hit's id, book and section, with the text cut to `SEARCH_HIT_CHARS`
@@ -414,7 +415,7 @@ clarify in 1 of 3 attempts, where the shipped rules clarified in 9 of 9 attempts
 It fits the mechanism: with quotes from only one of the two books, the quotes do "cover" the
 question. Watched, not fixed here.
 
-Amended 2026-11-09 (#100): **`reflect` also sees the searches the run already made**, in a block of
+Amended 2026-11-09 (#179): **`reflect` also sees the searches the run already made**, in a block of
 their own, each normalised query with the book it was limited to (`searches_run`, recorded by
 `act` since #163). The rules ask for a new search only when it looks for something those could not
 have found, and otherwise for "enough": the loop had stopped repeating a search exactly but kept

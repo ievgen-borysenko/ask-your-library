@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **`reflect` is shown the searches the run already made (#100).** Since #163 an exact or
+- **`reflect` is shown the searches the run already made (#179).** Since #163 an exact or
   normalised repeat is replaced or stops the loop, but `reflect` had never been shown which searches
   had run, so it wrote paraphrases of them and the loop still ran to the step limit. Its prompt now
   lists them, each normalised query with the book it was limited to, in a data block of its own

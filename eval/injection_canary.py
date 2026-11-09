@@ -260,7 +260,7 @@ def hostile_reflect_state(**overrides) -> dict:
         "empty_streak": 0,
         "queries": [f"whales and {FORGED_EVIDENCE}{MARKER}"],
         # A search the run already made is model text too, and the model may
-        # have written it under a passage's influence (#100). `act` stores it
+        # have written it under a passage's influence (#179). `act` stores it
         # normalised (lower case); the raw marker here keeps the check honest.
         "searches_run": [[f"whales {FORGED_EVIDENCE} {MARKER}", f"Poisoned Book {MARKER}"]],
         "read_chapters": [f"{HOSTILE_BOOK}|{HOSTILE_SECTION}|complete"],

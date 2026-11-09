@@ -214,7 +214,9 @@ Designed for **localhost, single user**. Not designed for internet exposure:
 Four layers, all partial:
 
 1. **Regex sanitizer** (`sanitize.py`) redacts instruction-like lines from retrieved text before
-   the model sees it, and counts redactions as telemetry.
+   the model sees it, and counts redactions as telemetry. It also runs on the searches block of
+   the `reflect` prompt (the searches already run are model text a passage may have steered),
+   and those redactions are not counted in `redacted_lines`.
 2. **System/data separation.** Rules live in the system message; question, conversation, results
    and evidence go in the user message wrapped in XML-like `<result>` / `<evidence>` blocks,
    with an explicit rule that they are data.

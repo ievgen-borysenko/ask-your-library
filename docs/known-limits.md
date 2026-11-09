@@ -184,7 +184,7 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   "no new query". A quote the evidence already holds is not added again, and a step that brought
   only such quotes counts as dry. What is not caught is a paraphrase: "Ahab's missing leg" after
   "Ahab's leg" is a new search to this check, and if it brings back the passages the run already
-  holds, that step is spent. Since #100 `reflect` is shown the searches already run and told
+  holds, that step is spent. Since #179 `reflect` is shown the searches already run and told
   not to propose one that only rewords them, but that is a rule the model may not follow, not a
   check: the paraphrase still runs if the model writes it. The eval record counts such steps
   (`new_passages_per_step`, and "steps with no new passage" in the summary), so the cost is

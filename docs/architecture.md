@@ -132,7 +132,7 @@ in [`adr/README.md`](adr/README.md), each with the measurement that settled it.
   `reflect` checks the search it is about to send: a repeat is replaced by the first queued query
   that has not run; with none left the coverage gate gets its one chance, with a search the run
   has not made; otherwise the loop stops on its own reason, "no new query". Its event carries
-  `query_replaced` only when one of these happened. Since #100 the reflect prompt also lists the
+  `query_replaced` only when one of these happened. Since #179 the reflect prompt also lists the
   searches already run, each with the book it was limited to, in a data block of its own
   (`searches_already_run`; the queries are model text, so the block is sanitized like a passage
   and neutralized by `data_block`), and its rules ask for a new search only when it looks for
