@@ -1362,14 +1362,19 @@ if [ -z "$python_req" ]; then
     fail "yourself (uv python install <version>) and re-run."
     exit 1
 fi
+# The floor is what an interpreter already here must meet. What gets installed
+# is its minor series (3.11.5 -> 3.11), which uv resolves to the newest patch
+# release it knows, never the floor build itself: `uv python install 3.11.5`
+# installs exactly 3.11.5, without the fixes of every later 3.11 release.
+python_series="$(printf '%s' "$python_req" | cut -d. -f1,2)"
 note "requires-python >=$python_req"
 if [ "$dry_run" -eq 1 ]; then
     plan "check 'uv python find >=$python_req'"
-    plan "run 'uv python install $python_req' when no interpreter answers that"
+    plan "run 'uv python install $python_series' when no interpreter answers that"
 elif uv python find ">=$python_req" >/dev/null 2>&1; then
     note "an interpreter >=$python_req is already available to uv"
 else
-    run uv python install "$python_req"
+    run uv python install "$python_series"
 fi
 
 # --- 7. Ollama --------------------------------------------------------------

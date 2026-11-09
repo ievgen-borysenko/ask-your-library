@@ -7,6 +7,10 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 3
+    # A 7-day delay lets a compromised or yanked release be pulled before it is
+    # proposed; cooldown never delays security updates, which stay immediate.
+    cooldown:
+      default-days: 7
     groups:
       # One pull request for the whole lockfile: it is resolved as a unit, and
       # per-package branches would each re-resolve it and conflict. A group
@@ -27,6 +31,10 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 3
+    # A 7-day delay lets a compromised or yanked release be pulled before it is
+    # proposed; cooldown never delays security updates, which stay immediate.
+    cooldown:
+      default-days: 7
     groups:
       actions:
         applies-to: version-updates
