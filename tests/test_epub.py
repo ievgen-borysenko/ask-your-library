@@ -5,6 +5,7 @@ fixture is committed and no real book is read. The text of the test books is
 invented, low-entropy and plainly synthetic. No network: the embedder is faked
 as in test_add_folder.py, the index is a tmp_path LanceDB.
 """
+import hashlib
 import logging
 import os
 import struct
@@ -18,8 +19,10 @@ import lancedb
 import pytest
 
 from ask_your_library import ayl, library
-from ask_your_library.ingest import add_folder, epub
+from ask_your_library.bookkey import SLUG_DIGEST_CHARS, TITLE_SEPARATOR
+from ask_your_library.ingest import add_folder, epub, pdf
 from ask_your_library.ingest.chapters import FRONT_MATTER_SECTION, FULL_TEXT_SECTION
+from ask_your_library.ingest.labels import MAX_LABEL_CHARS, shorten_label
 from ask_your_library.ingest.lock import lock_path
 from ask_your_library.preflight import PreflightResult
 from conftest import REPO
@@ -492,6 +495,165 @@ def test_too_many_members_are_refused(tmp_path, monkeypatch):
     monkeypatch.setattr(epub, "MAX_MEMBERS", 8)
     with pytest.raises(epub.EpubRefused, match="too many files"):
         epub.read_epub(make_epub(tmp_path / "b.epub", three_chapters()))
+
+
+def text_chars(path, joiners: bool = True) -> int:
+    """The characters the spine yields, as `read_epub` counts them: each
+    document's text and the joiner `build_sections` may put before it (without
+    the joiners, the documents' text alone)."""
+    joiner = len(epub.DOCUMENT_JOINER) if joiners else 0
+    with zipfile.ZipFile(path) as zf:
+        archive = epub.Archive(zf)
+        return sum(len(epub.extract_text(epub.read_text_member(archive, member))) + joiner
+                   for member, _ in epub.read_package(archive, epub.package_path(archive)).spine)
+
+
+def test_a_book_at_the_total_text_cap_is_read(tmp_path, monkeypatch):
+    """The byte caps bound the archive; the text itself is capped like a PDF's,
+    and a book exactly at the cap is still read (the bound is `more than`)."""
+    path = make_epub(tmp_path / "b.epub", three_chapters())
+    monkeypatch.setattr(epub, "MAX_TOTAL_CHARS", text_chars(path))
+    assert titles(epub.read_epub(path)) == ["Chapter One", "Chapter Two", "Chapter Three"]
+
+
+def test_a_book_over_the_total_text_cap_is_refused_with_the_pdf_readers_line(tmp_path,
+                                                                            monkeypatch):
+    path = make_epub(tmp_path / "b.epub", three_chapters())
+    monkeypatch.setattr(epub, "MAX_TOTAL_CHARS", text_chars(path) - 1)
+    assert refused(path) == f"it holds more than {text_chars(path) - 1:,} characters of text"
+
+
+def test_the_text_cap_is_the_pdf_readers_figure():
+    assert epub.MAX_TOTAL_CHARS == pdf.MAX_TOTAL_CHARS
+
+
+def test_the_text_cap_refuses_at_the_document_that_crosses_it(tmp_path, monkeypatch):
+    """A running total, checked as each document is extracted: the first
+    chapter alone is over this cap, so the other two are never read."""
+    extracted = []
+    extract_text = epub.extract_text
+    monkeypatch.setattr(epub, "extract_text", lambda markup: extracted.append(markup) or
+                        extract_text(markup))
+    monkeypatch.setattr(epub, "MAX_TOTAL_CHARS", 10)
+    with pytest.raises(epub.EpubRefused, match="more than 10 characters of text"):
+        epub.read_epub(make_epub(tmp_path / "b.epub", three_chapters()))
+    assert len(extracted) == 1 and "amber" in extracted[0]
+
+
+def test_the_blank_line_joining_a_chapter_split_over_two_files_counts_against_the_cap(
+        tmp_path, monkeypatch):
+    """A chapter split over two files is one section, its two texts joined by a
+    blank line neither file holds: the cap counts one for every document, so
+    what `read_epub` returns is never longer than the cap."""
+    docs = [Doc("c1.xhtml", body("amber"), "Chapter One"), Doc("c2.xhtml", body("birch"))]
+    path = make_epub(tmp_path / "b.epub", docs)
+    bare = text_chars(path, joiners=False)
+    monkeypatch.setattr(epub, "MAX_TOTAL_CHARS", bare)
+    assert refused(path) == f"it holds more than {bare:,} characters of text"
+    monkeypatch.setattr(epub, "MAX_TOTAL_CHARS", text_chars(path))
+    book = epub.read_epub(path)
+    assert titles(book) == ["Chapter One"]
+    assert bare < sum(len(text) for _, text in book.sections) <= epub.MAX_TOTAL_CHARS
+
+
+# --- labels: what the text cap does not count ----------------------------------------
+# A label is paid once a chunk: the chunker writes the section title into every
+# chunk id, and puts the book key (title and author) and the section title in
+# front of every chunk the embedder reads.
+
+HUGE = "N" * 100_000
+
+
+def cut(label: str) -> str:
+    """`label`, longer than MAX_LABEL_CHARS, as a reader returns it: its head,
+    `… ` and 8 hex characters of the SHA-256 of all of it, 500 in all (the
+    labels here have no space where the head ends)."""
+    digest = hashlib.sha256(label.encode("utf-8")).hexdigest()[:8]
+    return label[:MAX_LABEL_CHARS - 10] + "… " + digest
+
+
+def test_a_label_at_the_cap_is_kept_whole_and_one_over_it_is_cut_to_the_cap():
+    at = "N" * MAX_LABEL_CHARS
+    assert shorten_label(at) == at
+    assert shorten_label(at + "x") == cut(at + "x") and len(cut(at + "x")) == MAX_LABEL_CHARS
+    # The digest is of the whole label: two that differ only past the cut differ.
+    assert shorten_label(at + "x") != shorten_label(at + "y")
+
+
+@pytest.mark.parametrize("version, nav, ncx", [(3, True, False), (2, False, True)],
+                         ids=["nav", "ncx"])
+def test_an_over_long_contents_entry_is_cut_not_refused(tmp_path, version, nav, ncx):
+    docs = three_chapters()
+    docs[1].label = "Chapter Two: " + HUGE
+    book = epub.read_epub(make_epub(tmp_path / "b.epub", docs, version=version, nav=nav,
+                                    ncx=ncx))
+    assert titles(book) == ["Chapter One", cut("Chapter Two: " + HUGE), "Chapter Three"]
+    assert len(titles(book)[1]) == MAX_LABEL_CHARS
+
+
+def test_an_over_long_title_and_author_are_cut_not_refused(tmp_path):
+    book = epub.read_epub(make_epub(tmp_path / "b.epub", three_chapters(),
+                                    title="The Copper Kettle, " + HUGE,
+                                    creators=(("Ada " + HUGE, None), ("Bo Reed", None))))
+    assert book.title == cut("The Copper Kettle, " + HUGE)
+    # Each name is a label, and so is the line they are joined into.
+    assert book.author == cut(cut("Ada " + HUGE) + ", Bo Reed")
+
+
+def test_an_author_line_long_only_once_joined_is_cut(tmp_path):
+    many = tuple((f"Writer {n:03d}", None) for n in range(100))     # 1,198 characters joined
+    author = epub.read_epub(make_epub(tmp_path / "b.epub", three_chapters(),
+                                      creators=many)).author
+    assert author == cut(", ".join(name for name, _ in many))
+
+
+def test_what_a_hostile_epub_builds_for_the_index_is_bounded_whatever_its_labels(
+        tmp_path, fake_embedder):
+    """A few KB of zip: about 150 chunks of text, and a title, an author and
+    three contents entries of 100,000 characters each. Uncut, every chunk
+    carried them: 300,000 characters in front of each chunk the embedder read,
+    and 100,000 in each chunk id. Cut, a chunk carries at most a fixed amount
+    besides its text, from the caps alone."""
+    text = "<p>" + ROOM.format("amber") * 1_500 + "</p>"
+    docs = [Doc("c1.xhtml", text, HUGE + " one"), Doc("c2.xhtml", text, HUGE + " two"),
+            Doc("c3.xhtml", text, HUGE + " one")]
+    folder = tmp_path / "books"
+    make_epub(folder / "hostile.epub", docs, title=HUGE, creators=((HUGE, None),))
+    assert add_folder.main([str(folder), "--db", str(tmp_path / "db")]) == 0
+    rows = lancedb.connect(tmp_path / "db").open_table("transcripts_ollama").to_arrow().to_pylist()
+    assert len(rows) > 140
+    # A section title is a label and the ` (N)` `unique_titles` may add; the
+    # book key is two labels; the row key is `slug`'s, whatever the labels.
+    section = MAX_LABEL_CHARS + len(f" ({epub.MAX_MEMBERS})")
+    book = 2 * MAX_LABEL_CHARS + len(TITLE_SEPARATOR)
+    note = 80 + len("-") + SLUG_DIGEST_CHARS
+    chunk_id = note + len(f"#{epub.MAX_MEMBERS}.") + section + len(f"/{len(rows)}")
+    in_front = book + len(" — ") + section + len("\n")       # `chunking.embedding_text`
+    assert max(len(r["chunk_id"]) for r in rows) <= chunk_id
+    assert max(len(r["book"]) for r in rows) <= book
+    assert len(fake_embedder.seen) == len(rows)
+    chunk_text = sum(len(r["text"]) for r in rows)
+    assert sum(len(seen) for seen in fake_embedder.seen) <= chunk_text + len(rows) * in_front
+    # Two entries that differ past the cut stay apart by their digests; two
+    # that are the same are told apart as ever, by ` (N)`.
+    assert {r["section"] for r in rows} == {cut(HUGE + " one"), cut(HUGE + " two"),
+                                            cut(HUGE + " one") + " (2)"}
+
+
+def test_two_volumes_whose_long_titles_differ_only_past_the_cut_stay_two_books(
+        tmp_path, fake_embedder):
+    """Two volumes by one author whose titles agree on far more than the cut
+    keeps: cut alike, they would be one book key, and `add_folder` stops the
+    whole run on two files that resolve to the same book."""
+    shared = "The Collected Letters, " + "N" * 589                    # 612 characters
+    folder = tmp_path / "books"
+    for word, wood in (("One", "amber"), ("Two", "birch")):
+        make_epub(folder / f"{word}.epub", [Doc("c1.xhtml", body(wood), "Chapter One")],
+                  title=f"{shared} Volume {word}")
+    assert add_folder.main([str(folder), "--db", str(tmp_path / "db")]) == 0
+    rows = lancedb.connect(tmp_path / "db").open_table("transcripts_ollama").to_arrow().to_pylist()
+    assert {r["book"] for r in rows} == {
+        f"{cut(f'{shared} Volume {word}')}{TITLE_SEPARATOR}Ada Quill" for word in ("One", "Two")}
 
 
 # --- the archive's directory, before zipfile reads it -----------------------------------

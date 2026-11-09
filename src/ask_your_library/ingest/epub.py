@@ -47,7 +47,19 @@ An EPUB is untrusted input. What is bounded, and how:
   bytes actually read from each member are capped (`MAX_MEMBERS`,
   `MAX_MEMBER_BYTES`, `MAX_TOTAL_BYTES`): a zip bomb is refused before it is
   inflated, and a member whose header lies about its size is cut off at the cap
-  and refused;
+  and refused; the text the spine yields is capped too (`MAX_TOTAL_CHARS`, the
+  PDF reader's figure), counted as each document is extracted, with a blank
+  line (`DOCUMENT_JOINER`, two characters) for every document read, the first
+  and empty ones included, since `build_sections` may join it to the one
+  before it; so a book of text alone is refused at the document that takes it
+  over, before the rest of the spine is read, and the sections returned hold
+  no more than that in all;
+- every label (the title, the author line and each name in it, a navigation
+  entry) longer than `labels.MAX_LABEL_CHARS` is cut to that length, ending in
+  a digest of the whole label (`labels.shorten_label`), not refused: the text
+  cap does not count labels, and the chunker copies them into every chunk, the
+  section title into its id and the title, author and section in front of the
+  text it embeds;
 - a reference from the package or the navigation that resolves outside the
   archive's root is ignored, and one to a member that is not there is refused;
 - XML (`container.xml`, the package, the NCX, `encryption.xml`) is parsed by
@@ -89,6 +101,7 @@ from xml.etree import ElementTree as ET
 
 from ..sanitize import strip_control_chars
 from .chapters import FRONT_MATTER_SECTION, FULL_TEXT_SECTION, unique_titles
+from .labels import shorten_label
 
 # --- bounds -------------------------------------------------------------------
 # A long novel is a few hundred members and well under 10 MiB of text; an
@@ -97,6 +110,10 @@ from .chapters import FRONT_MATTER_SECTION, FULL_TEXT_SECTION, unique_titles
 MAX_MEMBERS = 10_000
 MAX_MEMBER_BYTES = 64 * 1024 * 1024          # declared and actually read, per member
 MAX_TOTAL_BYTES = 512 * 1024 * 1024          # declared, all members together
+# The byte caps bound the archive, not the text: at one character a byte, the
+# spine could yield about 512 Mi characters, every one of them to embed. The
+# same figure as the PDF reader's `MAX_TOTAL_CHARS`.
+MAX_TOTAL_CHARS = 20_000_000
 # The central directory is read whole by `zipfile`; 16 MiB is over 1.6 KiB an
 # entry at MAX_MEMBERS, several times what a real EPUB's entry takes.
 MAX_DIRECTORY_BYTES = 16 * 1024 * 1024
@@ -121,6 +138,8 @@ CONTENT_TYPES = frozenset({"application/xhtml+xml", "text/html"})
 NCX_TYPE = "application/x-dtbncx+xml"
 SECTION_FALLBACK = "Section {n}"
 NOTES_SECTION = "Notes"
+# Between two documents' texts in one section (`build_sections`).
+DOCUMENT_JOINER = "\n\n"
 
 NS = {
     "c": "urn:oasis:names:tc:opendocument:xmlns:container",
@@ -515,7 +534,7 @@ def extract_text(markup: str) -> str:
 
 
 def clean_label(label: str) -> str:
-    return re.sub(r"\s+", " ", strip_control_chars(label)).strip()
+    return shorten_label(re.sub(r"\s+", " ", strip_control_chars(label)).strip())
 
 
 # --- the navigation -----------------------------------------------------------
@@ -624,7 +643,7 @@ def creators(metadata: ET.Element) -> str:
             role = creator.get(OPF_ROLE) or roles.get(creator.get("id") or "", "")
             named.append((name, role))
     authors = [name for name, role in named if role in ("", "aut")]
-    return ", ".join(authors or [name for name, _ in named])
+    return shorten_label(", ".join(authors or [name for name, _ in named]))
 
 
 @dataclass
@@ -715,7 +734,7 @@ def build_sections(documents: list[tuple[str, str, bool]], titles: dict[str, str
             sections[-1][1].append(text)
         else:
             sections.append((FRONT_MATTER_SECTION, [text]))
-    joined = [(title, "\n\n".join(p.strip() for p in parts if p.strip()))
+    joined = [(title, DOCUMENT_JOINER.join(p.strip() for p in parts if p.strip()))
               for title, parts in sections]
     return unique_titles([(title, text) for title, text in joined if text])
 
@@ -736,13 +755,20 @@ def read_epub(path: Path) -> EpubBook:
                 ordered = [(m, linear) for m, linear in ordered if m != package.nav]
                 if not ordered:
                     raise EpubRefused("no readable spine: it lists no XHTML/HTML document")
-                documents, seen = [], set()
+                documents, seen, total = [], set(), 0
                 for member, linear in ordered:
                     if member in seen:
                         continue
                     seen.add(member)
-                    documents.append((member, extract_text(read_text_member(archive, member)),
-                                      linear))
+                    text = extract_text(read_text_member(archive, member))
+                    # With a joiner for every document, the first and empty
+                    # ones included: `build_sections` may put one before it,
+                    # so the sections returned never hold more than the cap.
+                    total += len(text) + len(DOCUMENT_JOINER)
+                    if total > MAX_TOTAL_CHARS:
+                        raise EpubRefused(f"it holds more than {MAX_TOTAL_CHARS:,} characters "
+                                          "of text")
+                    documents.append((member, text, linear))
                 sections = build_sections(documents, titles_by_document(archive, package))
     except zipfile.BadZipFile as error:
         raise EpubRefused("malformed: not a readable zip archive") from error
