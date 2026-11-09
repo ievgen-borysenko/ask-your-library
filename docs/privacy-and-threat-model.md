@@ -185,12 +185,15 @@ Designed for **localhost, single user**. Not designed for internet exposure:
   an entry naming a port this server is not on is a page there allowed to read its threads.
 - **Book files are untrusted input, and parsing them is bounded.** `ayl add` reads EPUB and PDF
   files the reader did not write. An EPUB (ADR-029) is read in memory with the standard library,
-  with its archive limits checked before it is opened, unsafe member paths, XML entity
-  declarations in its package files and DRM refused. A PDF (ADR-030) is read by `pypdf` in a child
+  with its archive limits checked before it is opened, its text capped at 20 million characters as
+  a PDF's is, and unsafe member paths, XML entity declarations in its package files and DRM
+  refused. A PDF (ADR-030) is read by `pypdf` in a child
   process the parent stops past 60 s or 1 GiB of resident memory — a sampled bound, so a file that
   allocates as fast as the machine can is stopped a few hundred MiB past it on macOS, which lets no
   process set itself a hard memory limit; on Linux the child also caps its own address space —
-  with a 256 MiB file cap, a 5,000-page cap and encryption refused. A refused file costs one line naming it; the folder's
+  with a 256 MiB file cap, a 5,000-page cap and encryption refused. In both, a title, an author
+  line or a contents or outline entry is cut to 500 characters, ending in a digest of the whole of
+  it, since every chunk carries a copy of it. A refused file costs one line naming it; the folder's
   other books are indexed. The limits are in [Add your own books](add-your-own-books.md); the
   extracted text is corpus text from then on, covered by the injection layers below and nothing
   more.

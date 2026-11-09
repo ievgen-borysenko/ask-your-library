@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **An EPUB's text is capped at 20 million characters, as a PDF's is, and an EPUB's or a PDF's
+  labels at 500 (#124).** The archive caps (64 MiB a file, 512 MiB in all) bounded the bytes, not
+  the text they decode to, so one EPUB of text alone could hand the embedder about 27 times what a
+  PDF may. `ayl add` now keeps a running count as the spine's documents are read, with two
+  characters for each of them (the blank line that may join it to the one before), and refuses the
+  file, with the PDF reader's line, at the document that takes it over, reading no further. Labels
+  were bounded by neither cap, and every chunk carries them (the section title in its id, the
+  title, author and section in front of the text it embeds): a 3 KB EPUB with 400,000 characters
+  of text and a 100,000-character title and contents entry handed the embedder 37.4 million
+  characters. A title, an author line or a contents or outline entry over 500 characters is now
+  cut to 500: its first 490, `… ` and eight hex characters of a SHA-256 of the whole label, so two
+  long titles that differ only past the cut (two volumes of one work) stay two books. That file
+  now hands the embedder 630,000.
 - **Both shipped configurations re-measured on one commit, reports and sidecars committed.**
   [`docs/eval-results/2026-11-02-rerun/`](eval-results/2026-11-02-rerun/README.md) holds the
   harness's own reports and JSON sidecars, unedited, of the hosted default and the local default on
@@ -81,6 +94,16 @@
   drops) and six stage directions put in parentheses in chapters 37, 38, 120, 121, 122 and 127.
   Both books split as before (135 and 15 sections), their `corpus/toc` files regenerate
   unchanged, and both entries are re-pinned with the date and the drift.
+- **The weekly pin check was red on The Odyssey: Project Gutenberg had regenerated it.**
+  The `pins` job of `corpus.yml` failed on 2026-11-09 with a checksum mismatch on PG 1727
+  (regenerated 2026-11-02). Diffed against the pinned copy, the new file changes four places: the
+  updated-date header line; a year in Butler's preface to the first edition ("Teubner edition of
+  894" became "of 1894"), which comes before BOOK I and is dropped by the split; a missing closing
+  bracket restored in Book IV, where Butler's bracketed passage on the wedding feast now ends at
+  "struck up with his tune.]"; and two blank lines dropped before the END marker. The prepared book
+  differs from the old one by that one bracket, still 25 sections from BOOK I to BOOK XXIV plus
+  FOOTNOTES:, so `corpus/toc/odyssey.json` and the book-identity fixture stay as they are. The
+  entry is re-pinned with the date and the drift.
 - **The loop no longer runs a search it already ran, nor counts a quote it already holds (#163).**
   On a library of about 250 audiobooks a research question ran q1, q3, q1, q1 and stopped at the
   step limit with plan query q2 never searched; a comparison kept 9 evidence items, 5 of them
