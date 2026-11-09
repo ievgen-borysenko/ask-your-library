@@ -9,6 +9,15 @@
   local default at `--repeat 5` (met on both sets: core weakest attempt 9/11 against a floor of 9,
   catalogue 10/10 in all five), all on `6d73fc3`. Manual correctness is unscored there; the README
   "Measured" table and its intervals (#131) follow with the grades.
+- **`reflect` is shown the searches the run already made (#179).** Since #163 an exact or
+  normalised repeat is replaced or stops the loop, but `reflect` had never been shown which searches
+  had run, so it wrote paraphrases of them and the loop still ran to the step limit. Its prompt now
+  lists them, each normalised query with the book it was limited to, in a data block of its own
+  (`searches_already_run`, "(none)" before the first search); the queries are model text, so
+  instruction-like lines are redacted as in a passage and delimiters are neutralised. The rules ask
+  for a search only when it looks for something those could not have found, and otherwise for
+  "enough". It is a rule, not a check: a paraphrase the model still writes still runs
+  ([known limits](known-limits.md)). The injection canary plants its marker in this block too.
 - **A local run says before it starts that a research answer takes minutes (#137).** On the local
   model every research answer takes 1-4 minutes (61-217 s measured, [cost](cost.md); a cold first
   one 160.8 s, its immediate repeat 62.7 s), and `ayl ask` printed the question back and then
@@ -192,6 +201,14 @@
   new exporter requires (opentelemetry-exporter-http-transport, opentelemetry-exporter-otlp-common).
   They come in only with the `ui` extra, through Chainlit's tracing dependency; nothing in this
   project calls them.
+- **The test suite leaves nothing in `eval/recordings/`.** One test of `--record-plans` handed
+  the harness the `plan_recording` module the test file had already loaded, whose recordings
+  directory was resolved when it was loaded, so it recorded into the checkout's `eval/recordings/`
+  whatever `AYL_PLAN_RECORDINGS_DIR` said, and the `.partial` of its deliberately broken recorder
+  stayed behind after every run (ignored by git, but written into every checkout the suite ran in,
+  and a failure in a read-only one). Every test in that file now records under pytest's `tmp_path`,
+  through the variable and the loaded module both, and the committed directory is compared before
+  and after each test.
 
 ## 0.5.1 (2026-10-05)
 
