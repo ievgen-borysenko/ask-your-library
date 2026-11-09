@@ -194,6 +194,24 @@ def test_detection_stage_fails_when_the_injection_never_reaches_the_prompt(monke
         canary.detection_stage({})
 
 
+def test_detection_stage_fails_when_the_injection_never_reaches_the_reflect_prompt(monkeypatch):
+    """The same premise for reflect alone: the planted quote must be the only
+    carrier of the marker into its prompt. With benign quotes in reflect's
+    evidence (synthesize keeps the planted one), the reflect control must be
+    the one that fails, not a later stage that still sees the marker."""
+    real = canary.reflect
+
+    def benign_reflect(state):
+        evidence = [dict(e, quote="Call me Ishmael.") for e in state.get("evidence") or []]
+        return real({**state, "evidence": evidence})
+
+    monkeypatch.setattr(canary, "reflect", benign_reflect)
+    with pytest.raises(AssertionError, match="never reached the user prompt") as failure:
+        canary.detection_stage({})
+    assert any(entry.name == "benign_reflect" for entry in failure.traceback), \
+        "the premise check fired outside the reflect control"
+
+
 def test_detection_stage_fails_when_the_evidence_why_leaks_into_synthesize(monkeypatch):
     """Negative control the other way: if synthesize started putting `why` in
     its prompt, the stage must say so instead of quietly changing meaning."""
