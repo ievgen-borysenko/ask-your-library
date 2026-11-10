@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from ask_your_library import library, llm, nodes
-from ask_your_library.library import CARD_SLOTS
+from ask_your_library.library import CARD_SLOTS, IDENTIFY_CARD_SLOTS, card_slots
 
 BOOK = "Some Book — An Author"
 
@@ -105,6 +105,29 @@ def test_act_asks_the_library_for_the_card_budget_on_a_search_and_on_a_probe(mon
                      ("the white whale", {"k": 4, "cards_k": CARD_SLOTS, "book": BOOK})]
 
 
+def test_an_identify_run_keeps_four_cards_on_a_search_and_on_a_probe(monkeypatch, tmp_path):
+    """Which book is this? The answer is a book, and a card is often the one
+    passage that names it: an identify run asks for four cards, an answer run
+    (and a run with no mode yet) for two."""
+    asked = []
+    monkeypatch.setattr(nodes, "search_both",
+                        lambda query, **kwargs: asked.append((query, kwargs["cards_k"])) or [])
+    llm.reset_usage()
+    scratchpad = tmp_path / "s.md"
+    scratchpad.write_text("")
+    base = {"steps_taken": 0, "read_chapters": [], "scratchpad_path": str(scratchpad)}
+
+    nodes.act({**base, "mode": "identify", "current_query": "a gothic chase"})
+    nodes.act({**base, "mode": "identify", "current_query": f"__book__|{BOOK}|a chase"})
+    nodes.act({**base, "mode": "answer", "current_query": "white whale"})
+    nodes.act({**base, "mode": "catalog", "current_query": "white whale"})
+
+    assert IDENTIFY_CARD_SLOTS == 4
+    assert asked == [("a gothic chase", 4), ("a chase", 4), ("white whale", CARD_SLOTS),
+                     ("white whale", CARD_SLOTS)]
+    assert [card_slots(m) for m in ("identify", "answer", None, "")] == [4, 2, 2, 2]
+
+
 # ---------------------------------------------------------------- the retrieval eval measures the same window
 def _retrieval_harness():
     spec = importlib.util.spec_from_file_location(
@@ -138,8 +161,31 @@ def test_the_retrieval_eval_window_is_the_agent_window(monkeypatch, tmp_path, ca
     out = capsys.readouterr().out
     assert "| q-card3 | 1 | 0/1 MISS | 3 | - |" in out
     assert "| q-text4 | 1 | 1/1 | - | 4 |" in out
-    assert "window = top-2 cards + top-4 transcripts, presence@6" in out
+    assert ("window = top-2 cards + top-4 transcripts, presence@6; "
+            "identify questions top-4 cards, presence@8") in out
     assert "single-book presence: 1/2" in out
+
+
+def test_an_identify_question_is_measured_with_the_identify_budget(monkeypatch, capsys, tmp_path):
+    """The golden type stands in for the planner's mode: a book at cards
+    rank 3 is inside an identify question's window and outside an answer
+    question's."""
+    harness = _retrieval_harness()
+    ranked = {"cards": ["C1", "C2", "Card Three", "C4"], "transcripts": ["T1", "T2", "T3", "T4"]}
+    monkeypatch.setattr(harness, "search", lambda corpus, question, k: [
+        {"corpus": corpus, "book": f"{title} — A", "section": "S", "text": "t"}
+        for title in ranked[corpus][:k]])
+    golden = tmp_path / "golden.yaml"
+    golden.write_text("questions:\n"
+                      "  - {id: q-id, type: identify, question: a, expected_books: [Card Three]}\n"
+                      "  - {id: q-ans, type: answer, question: b, expected_books: [Card Three]}\n",
+                      encoding="utf-8")
+    monkeypatch.setattr(harness, "GOLDEN_PATH", golden)
+
+    harness.main()
+    out = capsys.readouterr().out
+    assert "| q-id | 1 | 1/1 | 3 | - |" in out
+    assert "| q-ans | 1 | 0/1 MISS | 3 | - |" in out
 
 
 # ---------------------------------------------------------------- transcripts before cards

@@ -34,7 +34,7 @@ from .config import (CHAPTER_HIT_CHARS, CHAPTER_SCAN_CHARS, LLM_TIMEOUT_S,
                      SEARCH_HIT_CHARS)
 from .coverage import coverage_probe
 from .i18n import t
-from .library import (CARD_SLOTS, HEAD_MARKER_PREFIX, BookEntry, chapter_is_cut, list_books,
+from .library import (HEAD_MARKER_PREFIX, BookEntry, card_slots, chapter_is_cut, list_books,
                       read_chapter, search_both)
 from .llm import data_block
 from .prompts import OBSERVE_RULES, PLAN_RULES, REFLECT_RULES, SYNTHESIZE_RULES
@@ -567,7 +567,8 @@ def act(state: AgentState) -> dict:
         # A probe with no words to search for retrieves nothing and is not
         # recorded: no node sends one, and act does not pay for one (#163).
         # The same card budget as a search step: one rule for every search.
-        hits = (search_both(probe_query, k=4, cards_k=CARD_SLOTS, book=unescape_marker(probe_book))
+        hits = (search_both(probe_query, k=4, cards_k=card_slots(state.get("mode")),
+                            book=unescape_marker(probe_book))
                 if searched else [])
         empty_read_note = ""
         read_chapters = state.get("read_chapters", [])
@@ -578,8 +579,9 @@ def act(state: AgentState) -> dict:
         searched = search_key(state, state["current_query"])
         # The same for a query with no words: no retrieval, no record (#163).
         # Four transcripts and CARD_SLOTS cards: the cards past the first two
-        # cost `observe` input and almost never held the evidence it kept.
-        hits = (search_both(state["current_query"], k=4, cards_k=CARD_SLOTS,
+        # cost `observe` input and almost never held the evidence it kept. An
+        # identify run keeps four (`library.card_slots`): its answer is a book.
+        hits = (search_both(state["current_query"], k=4, cards_k=card_slots(state.get("mode")),
                             book=_effective_book(state) or None)
                 if searched else [])
         empty_read_note = ""

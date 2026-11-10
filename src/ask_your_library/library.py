@@ -36,6 +36,18 @@ RRF_K = 60                # standard RRF constant
 # in the eval fingerprint covers a constant. The retrieval eval imports it, so
 # its window is the agent's window.
 CARD_SLOTS = 2
+# A step of a run whose plan is "identify" (which book is this?) keeps four
+# cards. The answer to such a question is a book, and a card is often the one
+# passage that names the book a vague description fits: with two, the third and
+# fourth candidate never reach `observe` and the clarify loses them (measured:
+# a two-book clarify lost its second book, a gothic-novel clarify lost its
+# second candidate and was not asked at all).
+IDENTIFY_CARD_SLOTS = 4
+
+
+def card_slots(mode: str | None) -> int:
+    """The card budget of one search step for the run's plan mode."""
+    return IDENTIFY_CARD_SLOTS if mode == "identify" else CARD_SLOTS
 
 _embedder = None
 _checked_tables: set[str] = set()

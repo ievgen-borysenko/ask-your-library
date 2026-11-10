@@ -184,7 +184,9 @@ in [`adr/README.md`](adr/README.md), each with the measurement that settled it.
   never on raw hits. `reflect` and `synthesize` both read an evidence item's verified quote, never
   `observe`'s note on it (#93, ADR-005): the decision to stop is made on what the books are known
   to say. A search step (and a coverage probe) retrieves at most two book cards (`CARD_SLOTS`) and
-  four transcript chunks; a search step shows the transcripts first, and a card an earlier step
+  four transcript chunks, four cards when the plan's mode is `identify` (`card_slots`: the answer
+  to "which book is this?" is a book, and a card is often the one passage that names it); a
+  search step shows the transcripts first, and a card an earlier step
   already showed is not shown again unless the gate refused a quote of its book (2026-11-09,
   ADR-005). `act` applies all three before it gives the hit ids, so the ids, the scratchpad,
   `hits_log` and the `observe` prompt hold one list; the scratchpad names the cards not shown

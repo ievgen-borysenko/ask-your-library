@@ -433,7 +433,8 @@ cards first: the cards at rank 3-4 were a large share of that input and almost n
 kept, the same card came back step after step, and a step whose cards already answered left its
 own book text unquoted. Three changes, all in `act`, before the hit ids are given: `search_both`
 takes a card budget (`cards_k`) and the agent asks for `CARD_SLOTS` = 2 cards and 4 transcripts on
-a search step and on a coverage probe; a search step orders its passages transcripts first (stable
+a search step and on a coverage probe, `IDENTIFY_CARD_SLOTS` = 4 cards when the plan's mode is
+`identify` (the answer is a book, and with two cards a clarify lost its second candidate); a search step orders its passages transcripts first (stable
 inside each corpus); and a card whose book, section and text an earlier step already showed
 (`hits_log`, compared on the text as it stores it) is withheld. The exemption is #29's retry rule
 applied to cards: a card of a book named in the refusals `observe` is shown (`dropped_quotes`,
@@ -443,7 +444,8 @@ once in `act`, the gate reading the hits of the step, and only evidence travelli
 reaches any prompt (`observe` sees a subset of what it saw, in another order), and the one decision
 model text now drives, which already-shown card comes back, can only bring back a passage the run
 has already retrieved and shown. The withheld cards are named in the scratchpad and in no state
-channel or event. The retrieval eval measures the same window (top-2 cards + top-4 transcripts).
+channel or event. The retrieval eval measures the same window (top-2 cards + top-4 transcripts;
+top-4 cards for a golden `identify` question).
 
 ## ADR-006: Clarify as an interrupt with a candidate list and a code resolver
 

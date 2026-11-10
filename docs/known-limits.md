@@ -210,7 +210,7 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   not a fix: the agent still answers such questions from the card rather than reading the chapter,
   and a question answered entirely off cards now says so instead of showing "n/n traced". Since
   2026-11-09 what `observe` is shown leans the other way: a search step shows its four transcript
-  chunks before at most two book cards, and a card the run has already shown is not shown again
+  chunks before at most two book cards (four in an `identify` run), and a card the run has already shown is not shown again
   unless the gate refused a quote of its book, so later steps are not filled with the same
   summaries. That is a counter-measure, not a fix either: a card can still be the only evidence a
   step keeps, and nothing makes the loop read the chapter. **Every

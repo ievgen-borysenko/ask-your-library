@@ -33,7 +33,9 @@ those the backend is read from the report's provenance header, not from the fing
 **`eval/run_retrieval_eval.py` - component baseline, no LLM calls.** Feeds the *raw* golden
 question to the retriever and asks whether the resulting window (top-2 card chunks + top-4
 transcript chunks, exactly what `search_both` gives the agent: the harness imports the agent's
-`CARD_SLOTS`) contains the expected book(s), presence@6. Reports before 2026-11-09 measured the
+`card_slots`) contains the expected book(s), presence@6; a question whose golden type is
+`identify` gets the identify budget, top-4 cards, presence@8 (the golden type stands in for the
+planner's mode, which this harness does not run). Reports before 2026-11-09 measured the
 window of four cards + four transcripts (presence@8) and are not comparable with later ones line
 for line. Single-book questions score presence; multi-book questions score coverage and whether *all*
 expected books are present. Per-corpus hit@k and MRR are diagnostics only. This measures the

@@ -362,6 +362,7 @@ def test_corpus_restriction_accepts_the_book_keyword_act_passes(monkeypatch, tmp
         nodes.act({"current_query": "plain", "steps_taken": 1, "read_chapters": [], "scratchpad_path": str(scratchpad),
                    "clarify_chosen": "Chosen — B"})
     # the cards corpus gets the agent's card budget, on a search and on a probe alike
-    budget = nodes.CARD_SLOTS
+    from ask_your_library.library import CARD_SLOTS
+    budget = CARD_SLOTS
     assert seen == [("cards", "plain", budget, None), ("cards", "why", budget, "Some Book — A"),
                     ("cards", "plain", budget, "Chosen — B")]

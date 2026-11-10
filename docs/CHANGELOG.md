@@ -7,13 +7,14 @@
   time is its input: the cards at rank 3-4 were a large share of what it read and almost never
   the evidence it kept, the same card came back step after step, and a step whose cards already
   answered left its own book text unquoted. A search step and a coverage probe now retrieve two
-  cards (`CARD_SLOTS`) and four transcripts; a search step shows the transcripts first, and the hit
+  cards (`CARD_SLOTS`) and four transcripts, four cards when the plan's mode is `identify`
+  (`IDENTIFY_CARD_SLOTS`: with two, a clarify lost its second candidate book); a search step shows the transcripts first, and the hit
   ids, the scratchpad, `hits_log` and the `observe` prompt follow that order; and a card an earlier
   step already showed is not shown again, unless the gate refused a quote of its book, which gets
   its cards back so a paraphrased line can be copied (the #29 retry rule). Transcripts are shown
   again as before. The scratchpad names the cards not shown again; no state channel or event key
   was added. The retrieval eval measures the same window (top-2 cards + top-4 transcripts,
-  presence@6), and the ablation's single-corpus conditions keep the card budget. The prompts and
+  presence@6; an `identify` question of the golden set top-4 cards, presence@8), and the ablation's single-corpus conditions keep the card budget. The prompts and
   the provenance gate are unchanged. Measurements are in the PR; in #32's scope (cost and latency).
 - **Both shipped configurations re-measured on one commit, reports and sidecars committed.**
   [`docs/eval-results/2026-11-02-rerun/`](eval-results/2026-11-02-rerun/README.md) holds the
