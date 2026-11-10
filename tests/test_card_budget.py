@@ -418,3 +418,22 @@ def test_a_coverage_probe_does_not_show_a_card_again_either(monkeypatch, tmp_pat
     probe = _act(monkeypatch, tmp_path, WINDOW, query=f"__book__|{MOBY}|the white whale",
                  steps_taken=1, hits_log=step1["hits_log"])
     assert [h["corpus"] for h in probe["hits"]] == ["transcripts"] * 4
+
+
+# ---------------------------------------------------------------- the clarify top-up still reads cards first
+def test_the_clarify_top_up_reads_each_steps_cards_before_its_transcripts():
+    """A search step shows its transcripts first, but the candidates a clarify
+    offers are topped up step by step with the cards' books first, as before:
+    two stray transcripts of step 2 must not push step 2's card books past the
+    candidate cap (measured: a shipwreck clarify lost Gulliver's Travels)."""
+    from ask_your_library.clarify import _clarify_candidates
+    log = [{"step": 1, "corpus": "transcripts", "book": "Crusoe"},
+           {"step": 1, "corpus": "transcripts", "book": "Moby"},
+           {"step": 1, "corpus": "cards", "book": "Crusoe"},
+           {"step": 2, "corpus": "transcripts", "book": "Holmes"},
+           {"step": 2, "corpus": "transcripts", "book": "Dorian"},
+           {"step": 2, "corpus": "cards", "book": "Huck"},
+           {"step": 2, "corpus": "cards", "book": "Gulliver"}]
+    state = {"evidence": [{"book": "Crusoe"}], "hits_log": log}
+    assert _clarify_candidates(state) == ["Crusoe", "Moby", "Huck", "Gulliver", "Holmes", "Dorian"]
+    assert _clarify_candidates(state)[:5][3] == "Gulliver"

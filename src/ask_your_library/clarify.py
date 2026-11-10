@@ -166,7 +166,12 @@ def _clarify_candidates(state: AgentState) -> list[str]:
     retrieved during the run (hits_log, first appearance first). The second
     candidate is often only in the retrieval window, never distilled: c09 in
     the 05.09 pick run offered Moby Dick from the last step while Gulliver sat
-    in the first step's window."""
+    in the first step's window.
+    Inside one step the cards come first: a card is about a book as a whole,
+    a transcript chunk can be any passage that shares a word with the query,
+    and a search step now SHOWS its transcripts first (ADR-005, 2026-11-09),
+    so `hits_log` alone would let two stray transcripts push a card's book
+    past MAX_CLARIFY_CANDIDATES. This is the order the top-up read before."""
     stored = state.get("clarify_candidates") or []
     if stored:
         return stored
@@ -174,7 +179,8 @@ def _clarify_candidates(state: AgentState) -> list[str]:
     for e in state.get("evidence", []):
         if e["book"] not in seen:
             seen.append(e["book"])
-    for h in state.get("hits_log", []):
+    log = state.get("hits_log", [])
+    for h in sorted(log, key=lambda h: (h.get("step", 0), h.get("corpus") != "cards")):
         if h["book"] not in seen:
             seen.append(h["book"])
     return seen

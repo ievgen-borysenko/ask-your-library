@@ -434,8 +434,10 @@ kept, the same card came back step after step, and a step whose cards already an
 own book text unquoted. Three changes, all in `act`, before the hit ids are given: `search_both`
 takes a card budget (`cards_k`) and the agent asks for `CARD_SLOTS` = 2 cards and 4 transcripts on
 a search step and on a coverage probe, `IDENTIFY_CARD_SLOTS` = 4 cards when the plan's mode is
-`identify` (the answer is a book, and with two cards a clarify lost its second candidate); a search step orders its passages transcripts first (stable
-inside each corpus); and a card whose book, section and text an earlier step already showed
+`identify` (the answer is a book, and with two cards a clarify lost its second candidate); a
+search step orders its passages transcripts first (stable inside each corpus; the clarify top-up
+of ADR-006 still reads each step's cards first); and a card whose book, section and text an
+earlier step already showed
 (`hits_log`, compared on the text as it stores it) is withheld. The exemption is #29's retry rule
 applied to cards: a card of a book named in the refusals `observe` is shown (`dropped_quotes`,
 exactly or as a bare title) comes back, so a paraphrased card line can be copied the next time.

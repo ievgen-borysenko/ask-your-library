@@ -9,7 +9,8 @@
   answered left its own book text unquoted. A search step and a coverage probe now retrieve two
   cards (`CARD_SLOTS`) and four transcripts, four cards when the plan's mode is `identify`
   (`IDENTIFY_CARD_SLOTS`: with two, a clarify lost its second candidate book); a search step shows the transcripts first, and the hit
-  ids, the scratchpad, `hits_log` and the `observe` prompt follow that order; and a card an earlier
+  ids, the scratchpad, `hits_log` and the `observe` prompt follow that order (the books a clarify
+  offers beyond the evidence are still read from each step's cards before its transcripts); and a card an earlier
   step already showed is not shown again, unless the gate refused a quote of its book, which gets
   its cards back so a paraphrased line can be copied (the #29 retry rule). Transcripts are shown
   again as before. The scratchpad names the cards not shown again; no state channel or event key
