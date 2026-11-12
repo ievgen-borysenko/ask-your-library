@@ -281,7 +281,11 @@ An unnamed `linear="no"` document continues nothing, so it is a section of its o
 (`Notes (2)` for the next), and a note is never cited as the chapter read before it. **With no usable table of contents** — none at all, or one that names none of the spine's
 documents — every document with text is a section of its own, `Section 1`, `Section 2`, … in
 reading order, and a book of one document is `Full text`. Nothing is inferred from headings in
-the text. Section names are made unique as for a text book.
+the text. Section names are made unique as for a text book. **A label is at most 500
+characters**: a title, an author line or a contents entry longer than that is cut to its first
+490 characters, `… ` and eight hex characters of a SHA-256 of the whole of it, and the book is
+indexed (every chunk of it carries a copy of its labels). The digest keeps two long titles that
+differ only past the cut, two volumes of one work, apart as two books.
 
 The text is taken out of the markup with Python's HTML parser: paragraphs and headings become
 paragraphs, scripts, styles, SVG and images are left out, whitespace is normalised, and the
@@ -306,7 +310,10 @@ the folder is indexed as usual:
 - **Could not be read**: anything else that goes wrong reading the file. The line names the kind
   of error and nothing of what it said, and the rest of the folder is indexed as usual.
 - **Too large**: more than 10,000 files in the archive, a directory over 16 MiB, any one file
-  over 64 MiB uncompressed, or over 512 MiB uncompressed in total. The file count is checked from
+  over 64 MiB uncompressed, over 512 MiB uncompressed in total, or more than **20 million
+  characters** of text in its documents (the PDF figure; counted as the documents are read, with
+  two characters for each document, the blank line that may join it to the one before, so the rest
+  of the book is not read once it is over). The file count is checked from
   the archive's end record and its directory, before the archive is opened, so a directory of a
   million entries costs no memory to refuse. A **ZIP64** archive is refused outright: ZIP64 exists
   for more than 65,535 files or a file over 4 GiB, which no EPUB needs. What is read is read into memory by name — nothing is ever
@@ -329,7 +336,8 @@ is refused rather than indexed empty.
 dictionary, else `dc:title` and the `dc:creator` names in its XMP metadata. With no title the file
 name rule above applies (`Title - Author.pdf`); with a title and no author the author is
 `Unknown`. A title the producing program wrote for you (a word processor's file name, say) is
-taken as written; front matter and title lines do not apply.
+taken as written; front matter and title lines do not apply. A title, an author line or an
+outline entry longer than 500 characters is cut as an EPUB's is.
 
 **A section comes from the outline**, the bookmarks a PDF viewer shows in its side panel, when the
 document has one. Each top-level entry opens a section at the page it points to, and the section

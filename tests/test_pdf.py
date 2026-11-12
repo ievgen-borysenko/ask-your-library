@@ -25,6 +25,7 @@ import pytest
 
 from ask_your_library import ayl, library
 from ask_your_library.ingest import add_folder, pdf
+from ask_your_library.bookkey import TITLE_SEPARATOR
 from ask_your_library.ingest.chapters import FRONT_MATTER_SECTION
 from ask_your_library.ingest.lock import lock_path
 from ask_your_library.preflight import PreflightResult
@@ -32,7 +33,7 @@ from conftest import REPO
 from test_add_folder import PARA, fake_embedder, write  # noqa: F401
 # The audit hook that watches every write is installed once, by test_epub, for
 # the whole process; the PDF leak test arms the same one.
-from test_epub import ROOM, _armed, _writes, make_epub, three_chapters
+from test_epub import HUGE, ROOM, _armed, _writes, cut, make_epub, three_chapters
 
 # --- writing a PDF ---------------------------------------------------------------
 
@@ -399,6 +400,34 @@ def test_the_file_name_rule_when_there_is_no_title(tmp_path):
     assert books == {"The Quiet Mill - Bo Reed.pdf": "The Quiet Mill — Bo Reed",
                      "Plain.pdf": "Plain — Unknown",
                      "Titled.pdf": "The Tin Bell — Unknown"}
+
+
+def test_over_long_labels_are_cut_as_an_epub_s_are(tmp_path):
+    """The title, the author and an outline entry are labels the text caps do
+    not count, and the chunker copies them into every chunk."""
+    outline = [Outline("Chapter One: " + HUGE, 1), Outline("Chapter Two", 3)]
+    book = pdf.read_in_process(make_pdf(
+        tmp_path / "b.pdf", five_pages(), outline=outline,
+        info={"Title": "The Copper Kettle, " + HUGE, "Author": "Ada " + HUGE}))
+    assert titles(book) == [FRONT_MATTER_SECTION, cut("Chapter One: " + HUGE), "Chapter Two"]
+    assert (book.title, book.author) == (cut("The Copper Kettle, " + HUGE), cut("Ada " + HUGE))
+
+
+def test_an_xmp_author_line_long_only_once_joined_is_cut(tmp_path):
+    names = b"".join(b"<rdf:li>Writer %03d</rdf:li>" % n for n in range(100))
+    xmp = XMP.replace(b"<rdf:li>Bo Reed</rdf:li><rdf:li>Cy Ink</rdf:li>", names)
+    author = pdf.read_in_process(make_pdf(tmp_path / "x.pdf", five_pages(), xmp=xmp)).author
+    assert author == cut(", ".join(f"Writer {n:03d}" for n in range(100)))
+
+
+def test_two_pdf_volumes_whose_long_titles_differ_only_past_the_cut_stay_two_books(tmp_path):
+    shared = "The Collected Letters, " + "N" * 589                    # 612 characters
+    folder = tmp_path / "books"
+    for word, wood in (("One", "amber"), ("Two", "birch")):
+        make_pdf(folder / f"{word}.pdf", [room(wood)],
+                 info={"Title": f"{shared} Volume {word}", "Author": "Ada Quill"})
+    assert {b.book for b in add_folder.read_folder(folder)} == {
+        f"{cut(f'{shared} Volume {word}')}{TITLE_SEPARATOR}Ada Quill" for word in ("One", "Two")}
 
 
 # --- refusals ----------------------------------------------------------------------------
@@ -1065,6 +1094,36 @@ def test_a_platform_where_memory_cannot_be_read_reads_nothing(tmp_path, monkeypa
     monkeypatch.setattr(pdf, "child_command",
                         lambda path: [sys.executable, "-I", "-c", "import time; time.sleep(5)"])
     assert child_refused(path) == "memory cannot be measured here, so the file is not read"
+
+
+def test_a_child_on_its_way_out_is_read_not_refused(tmp_path, monkeypatch):
+    """#176: on macOS a child that is exiting can no longer be read before it
+    can be waited on, and a valid book was refused as unmeasured: the parent
+    found it unreadable and still running. Here the real reader prints its
+    book and then waits at a gate; the parent's sample opens the gate and
+    reads nothing, while the child still runs for 0.2 s before it exits. The
+    parent waits one sample (1 s here) for it to end, and reads the book."""
+    monkeypatch.setattr(pdf, "MEMORY_SAMPLE_SECONDS", 1.0)
+    path = make_pdf(tmp_path / "b.pdf", five_pages(), info=KETTLE)
+    done, leave = tmp_path / "done", tmp_path / "leave"
+    arguments = pdf.child_command(path)[4:]          # --child <path> --max-bytes N
+    body = ("import os, time\nstatus = pdf.child_main(sys.argv[1:])\n"
+            f"open({str(done)!r}, 'w').close()\nend = time.monotonic() + 30\n"
+            f"while not os.path.exists({str(leave)!r}) and time.monotonic() < end:\n"
+            "    time.sleep(0.005)\ntime.sleep(0.2)\nraise SystemExit(status)\n")
+    monkeypatch.setattr(pdf, "child_command", lambda path: child_code(body) + arguments)
+    read = pdf.resident_memory_reader()
+
+    def leaving(pid):
+        if pid != os.getpid() and done.exists():
+            leave.touch()
+            return None
+        return read(pid)
+    monkeypatch.setattr(pdf, "resident_memory_reader", lambda: leaving)
+    samples = recorded_samples(monkeypatch)
+    assert pdf.read_pdf(path) == pdf.read_in_process(path)
+    child = [value for pid, value, _ in samples if pid != os.getpid()]
+    assert child and child[-1] is None and None not in child[:-1]
 
 
 LINUX_STATUS = "Name:\tpython3\nVmPeak:\t  900000 kB\nVmHWM:\t   30000 kB\nVmRSS:\t   29000 kB\n"
