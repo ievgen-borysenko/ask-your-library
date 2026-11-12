@@ -213,7 +213,10 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   chunks before at most two book cards (four in an `identify` run), and a card the run has already shown is not shown again
   unless the gate refused a quote of its book, so later steps are not filled with the same
   summaries. That is a counter-measure, not a fix either: a card can still be the only evidence a
-  step keeps, and nothing makes the loop read the chapter. **Every
+  step keeps, and nothing makes the loop read the chapter. And "already shown" means shown, not
+  read: a card shown on a step whose `observe` returned no usable JSON, so that nothing was kept
+  from it, is withheld on every later step all the same; measured on one question (c06), where the
+  second half of the answer was lost. **Every
   eval report published before that date counted card matches inside the confirmed / unattributed /
   broken triple**, so the quote numbers quoted here and in the README's table describe retrieval
   provenance — the quote is verbatim in the passage it cites — and not that a book said it.

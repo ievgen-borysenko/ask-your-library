@@ -61,7 +61,8 @@ Status: accepted.
 `library.search` runs a vector search (bge-m3 through Ollama, 1024 dimensions) and a BM25/FTS
 search, twenty candidates each, and fuses the two lists with Reciprocal Rank Fusion written out in
 `library.py` (`RRF_K = 60`); `search_both` gives the agent four transcript hits per step and,
-since 2026-11-09, two card hits (four before; ADR-005's amendment of that date), and a broken FTS
+since 2026-11-09, two card hits, four in an `identify` run (four always before; ADR-005's
+amendment of that date), and a broken FTS
 index degrades to vector-only with a warning. LanceDB's built-in hybrid
 reranker was less code but ties the scoring to the library's API; a cross-encoder reranker was left
 out because nothing had measured ranking as the weak link.
@@ -449,13 +450,18 @@ and from then on it is shown once like any card. The boundary is one integer, `c
 `steps_taken` at which the question was asked), written by the `clarify` node on the resume, so
 its event carries that one key more; a state without it (a run checkpointed before the node wrote
 it) counts every card, as the rule did before the reset.
+A known limit: "shown" means written to `hits_log`, not read, so a card shown on a step whose
+`observe` returned no usable JSON (nothing kept from that step) is withheld on every later step
+all the same; measured on one question (c06), where it cost the second half of the answer.
 Transcripts are never withheld. What this ADR decides is unchanged: the per-hit budget, applied
 once in `act`, the gate reading the hits of the step, and only evidence travelling on. No new text
 reaches any prompt (`observe` sees a subset of what it saw, in another order), and the one decision
 model text now drives, which already-shown card comes back, can only bring back a passage the run
 has already retrieved and shown. The withheld cards are named in the scratchpad and in no state
 channel or event (`clarify_step` records when the reader answered, not which cards were withheld).
-The retrieval eval measures the same window (top-2 cards + top-4 transcripts;
+One consequence outside `observe`: ADR-013's coverage gate counts and orders the uncovered books
+by their passages in `hits_log`, which now holds fewer cards, no repeated ones and transcripts
+first, so which uncovered named book it probes first can change. The retrieval eval measures the same window (top-2 cards + top-4 transcripts;
 top-4 cards for a golden `identify` question).
 
 ## ADR-006: Clarify as an interrupt with a candidate list and a code resolver

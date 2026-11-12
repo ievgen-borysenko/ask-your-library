@@ -53,6 +53,7 @@ import yaml
 
 from ask_your_library import llm as llm_mod
 from ask_your_library import nodes as nodes_mod
+from ask_your_library.config import SEARCH_HIT_CHARS
 from ask_your_library.prompts import SYNTHESIZE_RULES
 from ask_your_library.dataflow import failure_text
 from ask_your_library.i18n import t
@@ -104,7 +105,9 @@ def corpus_restriction(corpus: str | None):
     function by name at import time). Each corpus keeps the budget the agent
     asks it for (`cards_k` for cards, `k` for transcripts), so the condition
     removes a corpus from the window rather than substituting it: the window
-    is 2 hits per step (cards-only) or 4 (transcripts-only) instead of 6."""
+    is 2 hits per step (cards-only) or 4 (transcripts-only) instead of 6. An
+    `identify` question asks for 4 cards, so there it is 4 hits per step in
+    either condition instead of 8."""
     if corpus is None:
         yield
         return
@@ -339,14 +342,16 @@ CONDITION_BLURB = {
                   "`llm_invoke` path, a system rule to answer from what it knows and say "
                   "when it is unsure. No retrieval.",
     "retrieve-answer": "one `search_both(question, k=4)` call; the 8 hits (4 cards + 4 "
-                       "transcripts), sanitized and cut to `SEARCH_HIT_CHARS` (1,200) as "
-                       "observe would see them, go straight "
+                       f"transcripts), sanitized and cut to `SEARCH_HIT_CHARS` "
+                       f"({SEARCH_HIT_CHARS:,} in this run) as observe would see them, go straight "
                        "into one synthesize-style prompt. No plan/observe/reflect, no clarify, "
                        "no validate.",
     "cards-only": "the full agent loop, `search_both` restricted to the cards corpus "
-                  "(2 hits per step, the agent's card budget, instead of 6).",
+                  "(2 hits per step, the agent's card budget, instead of 6; an `identify` "
+                  "question gets 4 instead of 8).",
     "transcripts-only": "the full agent loop, `search_both` restricted to the transcripts "
-                        "corpus (4 hits per step instead of 6).",
+                        "corpus (4 hits per step instead of 6, or of 8 on an `identify` "
+                        "question).",
     "agent": "the full loop as shipped — identical to `eval/run_agent_eval.py`.",
 }
 

@@ -18,7 +18,11 @@
   on the first step after the resume, then once per run like any card. Transcripts are shown
   again as before. The scratchpad names the cards not shown again; one state channel was added,
   `clarify_step` (the step at which the clarify was asked), written by the `clarify` node, whose
-  event carries it; a run checkpointed before it existed counts every card shown. The retrieval eval measures the same window (top-2 cards + top-4 transcripts,
+  event carries it; a run checkpointed before it existed counts every card shown. The coverage
+  gate's probe of an uncovered named book (ADR-013) counts and orders books by their passages in
+  `hits_log`, which now holds fewer cards, no repeated ones and transcripts first, so which such
+  book it probes first can change. A card shown on a step whose `observe` returned no usable JSON
+  is withheld afterwards all the same (a known limit, measured on one question). The retrieval eval measures the same window (top-2 cards + top-4 transcripts,
   presence@6; an `identify` question of the golden set top-4 cards, presence@8), and the ablation's single-corpus conditions keep the card budget. The prompts and
   the provenance gate are unchanged. Measurements are in the PR; in #32's scope (cost and latency).
 - **An EPUB's text is capped at 20 million characters, as a PDF's is, and an EPUB's or a PDF's
