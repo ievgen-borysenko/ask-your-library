@@ -7,8 +7,8 @@ asks for `CARD_SLOTS` cards and four transcripts, on a search step and on a
 coverage probe alike, and the retrieval eval measures the same window. A search
 step shows its transcripts first: the ids, `hits_log`, the scratchpad and the
 `observe` prompt follow that one order. And a card is shown once per run, unless
-the gate refused a quote of its book: the scratchpad names what was withheld,
-the events do not.
+the gate refused a quote of its book or the step retrieved nothing else: the
+scratchpad names what was withheld, the events do not.
 
 No model, no network, no index: the library is a fake table under the real
 `search_both`, or `search_both` itself is a fake that records what it was
@@ -420,6 +420,37 @@ def test_a_run_with_no_clarify_and_a_state_from_before_the_clarify_step_withhold
     del later["clarify_step"]
     step2 = _act(monkeypatch, tmp_path, [GULLIVER_CARD, GULLIVER_TEXT], query="q2", **later)
     assert [h["text"] for h in step2["hits"]] == [GULLIVER_TEXT["text"]]
+
+
+def test_a_retrieval_of_shown_cards_only_withholds_nothing():
+    """The floor of the rule, on the function itself: a card already shown,
+    retrieved alone, is shown again, and nothing is reported withheld. An
+    empty retrieval stays empty."""
+    card = {"corpus": "cards", "book": MOBY, "section": "Summary", "text": "The white whale."}
+    assert nodes._withhold_shown_cards({"hits_log": [card]}, [card]) == ([card], [])
+    assert nodes._withhold_shown_cards({"hits_log": [card]}, []) == ([], [])
+
+
+def test_a_step_that_retrieved_only_shown_cards_shows_them_again(monkeypatch, tmp_path):
+    """Through `act`: a cards-only step whose every card was shown before is
+    not turned into an empty observation. It shows what it retrieved, under
+    dense ids, and the scratchpad names no card as withheld."""
+    _, step2 = _two_steps(monkeypatch, tmp_path, WINDOW, [WINDOW[0]])
+    assert [(h["hit_id"], h["corpus"], h["text"]) for h in step2["hits"]] == [
+        ("s2h1", "cards", WINDOW[0]["text"])]
+    assert [h["hit_id"] for h in step2["hits_log"]] == ["s2h1"]
+    step2_log = (tmp_path / "scratch.md").read_text().split("\n## step 2: q2\n")[1]
+    assert "not shown again" not in step2_log
+    assert step2_log.startswith("<<<hit>>> s2h1 ")
+
+
+def test_a_mixed_step_still_withholds_its_shown_card(monkeypatch, tmp_path):
+    """The floor applies only when nothing else would be shown: a shown card
+    next to a transcript is withheld as before."""
+    _, step2 = _two_steps(monkeypatch, tmp_path, WINDOW, [WINDOW[0], WINDOW[2]])
+    assert [(h["hit_id"], h["corpus"]) for h in step2["hits"]] == [("s2h1", "transcripts")]
+    step2_log = (tmp_path / "scratch.md").read_text().split("\n## step 2: q2\n")[1]
+    assert step2_log.startswith(f"[cards not shown again: {MOBY} | Summary]\n")
 
 
 def test_hit_ids_stay_dense_after_cards_are_withheld(monkeypatch, tmp_path):

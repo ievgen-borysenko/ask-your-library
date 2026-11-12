@@ -12,7 +12,9 @@
   ids, the scratchpad, `hits_log` and the `observe` prompt follow that order (the books a clarify
   offers beyond the evidence are still read from each step's cards before its transcripts); and a card an earlier
   step already showed is not shown again, unless the gate refused a quote of its book, which gets
-  its cards back so a paraphrased line can be copied (the #29 retry rule). After a clarify the
+  its cards back so a paraphrased line can be copied (the #29 retry rule). A step that retrieved
+  only cards already shown withholds nothing and shows them, so a cards-only step that found
+  something is never an empty observation that advances the dry streak. After a clarify the
   reader answered with a book, a card of that book shown only before the answer (a candidate
   offered from the retrieval window, its card shown among the other candidates') is shown once more
   on the first step after the resume, then once per run like any card. Transcripts are shown

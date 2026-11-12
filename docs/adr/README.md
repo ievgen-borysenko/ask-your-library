@@ -450,6 +450,10 @@ and from then on it is shown once like any card. The boundary is one integer, `c
 `steps_taken` at which the question was asked), written by the `clarify` node on the resume, so
 its event carries that one key more; a state without it (a run checkpointed before the node wrote
 it) counts every card, as the rule did before the reset.
+One floor: a step whose retrieval returned only cards already shown withholds nothing and shows
+them, as every step did before the rule. A cards-only step (the ablation's `cards-only`
+condition, a search inside a book whose only row is its card) would otherwise turn a retrieval
+that found something into an empty observation, advance the dry streak and could stop the run.
 A known limit: "shown" means written to `hits_log`, not read, so a card shown on a step whose
 `observe` returned no usable JSON (nothing kept from that step) is withheld on every later step
 all the same; measured on one question (c06), where it cost the second half of the answer.

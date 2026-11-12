@@ -475,7 +475,16 @@ def _withhold_shown_cards(state: AgentState, hits: list[dict]) -> tuple[list[dic
     question was asked), so the first step after the resume shows it again and
     the once-per-run rule then applies to it as to any card. A state without
     `clarify_step` (a run checkpointed before the clarify node wrote it) counts
-    every card, as the rule did before the reset."""
+    every card, as the rule did before the reset.
+
+    And one floor: a step whose retrieval returned passages, all of them cards
+    already shown, withholds nothing. A cards-only step (the ablation's
+    `cards-only` condition, or a search inside a book whose only row is its
+    card) would otherwise turn a retrieval that succeeded into an empty
+    observation: `observe` sees no passage, the dry streak advances and the
+    run can stop on a step that found something. Such a step shows what it
+    retrieved, as every step did before the rule, and the scratchpad names no
+    card as withheld."""
     chosen = state.get("clarify_chosen") or ""
     answered_after = state.get("clarify_step")
 
@@ -494,7 +503,10 @@ def _withhold_shown_cards(state: AgentState, hits: list[dict]) -> tuple[list[dic
     def withheld(h: dict) -> bool:
         return (h["corpus"] == "cards" and _card_key(h) in shown
                 and not any(names_book(book, h["book"]) for book in refused))
-    return [h for h in hits if not withheld(h)], [h for h in hits if withheld(h)]
+    shown_now = [h for h in hits if not withheld(h)]
+    if hits and not shown_now:
+        return hits, []
+    return shown_now, [h for h in hits if withheld(h)]
 
 
 def act(state: AgentState) -> dict:
