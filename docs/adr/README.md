@@ -441,12 +441,21 @@ earlier step already showed
 (`hits_log`, compared on the text as it stores it) is withheld. The exemption is #29's retry rule
 applied to cards: a card of a book named in the refusals `observe` is shown (`dropped_quotes`,
 exactly or as a bare title) comes back, so a paraphrased card line can be copied the next time.
+One reset, at a clarify the reader answered with a book: retrieval is limited to that book from
+then on (ADR-013), and a candidate offered from the retrieval window (ADR-006) may have had its card
+shown only before the choice, among the other candidates' cards. A card of the chosen book counts
+as shown only from the steps after the answer, so the first step after the resume shows it again,
+and from then on it is shown once like any card. The boundary is one integer, `clarify_step` (the
+`steps_taken` at which the question was asked), written by the `clarify` node on the resume, so
+its event carries that one key more; a state without it (a run checkpointed before the node wrote
+it) counts every card, as the rule did before the reset.
 Transcripts are never withheld. What this ADR decides is unchanged: the per-hit budget, applied
 once in `act`, the gate reading the hits of the step, and only evidence travelling on. No new text
 reaches any prompt (`observe` sees a subset of what it saw, in another order), and the one decision
 model text now drives, which already-shown card comes back, can only bring back a passage the run
 has already retrieved and shown. The withheld cards are named in the scratchpad and in no state
-channel or event. The retrieval eval measures the same window (top-2 cards + top-4 transcripts;
+channel or event (`clarify_step` records when the reader answered, not which cards were withheld).
+The retrieval eval measures the same window (top-2 cards + top-4 transcripts;
 top-4 cards for a golden `identify` question).
 
 ## ADR-006: Clarify as an interrupt with a candidate list and a code resolver

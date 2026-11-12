@@ -78,6 +78,10 @@ class AgentState(TypedDict):
     clarify_unresolved: bool       # the reply matched no candidate: evidence kept for all, reported
     clarify_chosen: str            # the resolved candidate key; later evidence is filtered to it
     clarify_asked: bool    # a clarify interrupt already happened this run (one allowed)
+    # the steps_taken at which the clarify was asked, written by the clarify node on the resume
+    # and absent before it: a card of the chosen book shown on a step up to this one was shown
+    # before the reader chose, and `act` shows it once more after the resume (ADR-005, 2026-11-09)
+    clarify_step: int
     coverage_probed: bool  # the one forced query at an uncovered candidate book has run (ADR-013)
     plan_fallback: bool    # the planner returned no valid JSON twice; the raw question became the one query
     catalog_fallback: str  # "" | "invalid_op" (catalog without a usable operation) | "after_clarify"

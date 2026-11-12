@@ -355,6 +355,73 @@ def test_a_bare_title_in_the_refusal_still_names_the_book(monkeypatch, tmp_path)
     assert [h["corpus"] for h in step2["hits"]].count("cards") == 0
 
 
+CRUSOE = "Robinson Crusoe — Daniel Defoe"
+CRUSOE_CARD = _hit("cards", 1, book=CRUSOE, text="A castaway alone on an island for many years.")
+GULLIVER_CARD = _hit("cards", 1, book=GULLIVER, text="A ship's surgeon among tiny people.")
+GULLIVER_TEXT = _hit("transcripts", 1, book=GULLIVER, text="I found myself tied down by threads.")
+
+
+def _answered_clarify(monkeypatch, tmp_path, chosen: str = GULLIVER) -> tuple[dict, dict]:
+    """Step 1 is an identify search that shows Crusoe's and Gulliver's cards;
+    the reader is asked which book and answers; the state the next `act` gets
+    carries what the clarify node wrote and the book the reply resolved to."""
+    step1 = _act(monkeypatch, tmp_path, [CRUSOE_CARD, GULLIVER_CARD, _hit("transcripts", 1, book=CRUSOE)],
+                 query="q1", mode="identify")
+    monkeypatch.setattr(nodes, "interrupt", lambda question: "the second one")
+    answered = nodes.clarify({"queries": ["Which book?"], "steps_taken": 1})
+    assert answered["clarify_step"] == 1
+    later = {"steps_taken": 1, "hits_log": step1["hits_log"], "mode": "answer",
+             "clarification": answered["clarification"], "clarify_asked": True,
+             "clarify_step": answered["clarify_step"], "clarify_chosen": chosen, "book_filter": ""}
+    return step1, later
+
+
+def test_the_chosen_books_card_shown_before_the_answer_is_shown_after_it(monkeypatch, tmp_path):
+    """The reproducer: the card that matched the reader's description was shown
+    on step 1 among another book's card; the reader chose its book, every later
+    step is limited to it, and the card must still be able to become evidence."""
+    _, later = _answered_clarify(monkeypatch, tmp_path)
+    step2 = _act(monkeypatch, tmp_path, [GULLIVER_CARD, GULLIVER_TEXT], query="q2", **later)
+    assert [h["text"] for h in step2["hits"]] == [GULLIVER_TEXT["text"], GULLIVER_CARD["text"]]
+
+
+def test_the_chosen_books_card_is_shown_once_after_the_answer_not_on_every_step(monkeypatch, tmp_path):
+    _, later = _answered_clarify(monkeypatch, tmp_path)
+    step2 = _act(monkeypatch, tmp_path, [GULLIVER_CARD, GULLIVER_TEXT], query="q2", **later)
+    step3 = _act(monkeypatch, tmp_path, [GULLIVER_CARD, GULLIVER_TEXT], query="q3",
+                 **{**later, "steps_taken": 2, "hits_log": later["hits_log"] + step2["hits_log"]})
+    assert [h["text"] for h in step3["hits"]] == [GULLIVER_TEXT["text"]]
+
+
+def test_only_the_chosen_books_card_is_shown_again_after_the_answer(monkeypatch, tmp_path):
+    """The other candidate's card stays withheld (a coverage probe or a chapter
+    read can still reach another book), and a reply that resolved to no book
+    resets nothing."""
+    _, later = _answered_clarify(monkeypatch, tmp_path)
+    step2 = _act(monkeypatch, tmp_path, [CRUSOE_CARD, GULLIVER_CARD], query=f"__book__|{CRUSOE}|q2",
+                 **later)
+    assert [h["text"] for h in step2["hits"]] == [GULLIVER_CARD["text"]]
+
+    _, unresolved = _answered_clarify(monkeypatch, tmp_path, chosen="")
+    step2 = _act(monkeypatch, tmp_path, [GULLIVER_CARD, GULLIVER_TEXT], query="q2", **unresolved)
+    assert [h["text"] for h in step2["hits"]] == [GULLIVER_TEXT["text"]]
+
+
+def test_a_run_with_no_clarify_and_a_state_from_before_the_clarify_step_withhold_as_before(
+        monkeypatch, tmp_path):
+    """No clarify: the once-per-run rule as it was. A state checkpointed after a
+    clarify by a version that did not write `clarify_step` (the chosen book set,
+    the step absent) counts every card, as that version did, and does not fail."""
+    first = [CRUSOE_CARD, GULLIVER_CARD, _hit("transcripts", 1, book=CRUSOE)]
+    _, step2 = _two_steps(monkeypatch, tmp_path, first, [GULLIVER_CARD, GULLIVER_TEXT])
+    assert [h["text"] for h in step2["hits"]] == [GULLIVER_TEXT["text"]]
+
+    _, later = _answered_clarify(monkeypatch, tmp_path)
+    del later["clarify_step"]
+    step2 = _act(monkeypatch, tmp_path, [GULLIVER_CARD, GULLIVER_TEXT], query="q2", **later)
+    assert [h["text"] for h in step2["hits"]] == [GULLIVER_TEXT["text"]]
+
+
 def test_hit_ids_stay_dense_after_cards_are_withheld(monkeypatch, tmp_path):
     new_card = _hit("cards", 1, book=GULLIVER, text="A ship's surgeon among tiny people.")
     second = [WINDOW[0], new_card] + WINDOW[2:]

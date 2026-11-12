@@ -465,8 +465,27 @@ def _withhold_shown_cards(state: AgentState, hits: list[dict]) -> tuple[list[dic
     window `observe` is shown) comes back, so a model that paraphrased a card
     line gets the line to copy again. The book is matched as the model wrote
     it, exactly or as a bare title (`names_book`). The sink is bounded: model
-    text can at most bring back a card this run has already shown."""
-    shown = {_card_key(h) for h in state.get("hits_log") or [] if h.get("corpus") == "cards"}
+    text can at most bring back a card this run has already shown.
+
+    And one reset, at a clarify the reader answered with a book: from then on
+    retrieval is limited to that book, and its card may have been shown only
+    among the other candidates' cards, before the choice (a candidate offered
+    from the retrieval window, ADR-006). Such a card counts as shown only from
+    the steps after the answer (`clarify_step`, the steps that had run when the
+    question was asked), so the first step after the resume shows it again and
+    the once-per-run rule then applies to it as to any card. A state without
+    `clarify_step` (a run checkpointed before the clarify node wrote it) counts
+    every card, as the rule did before the reset."""
+    chosen = state.get("clarify_chosen") or ""
+    answered_after = state.get("clarify_step")
+
+    def counts(h: dict) -> bool:
+        if h.get("corpus") != "cards":
+            return False
+        if chosen and isinstance(answered_after, int) and h["book"] == chosen:
+            return h.get("step", 0) > answered_after
+        return True
+    shown = {_card_key(h) for h in state.get("hits_log") or [] if counts(h)}
     if not shown:
         return hits, []
     refused = [d["book"].strip() for d in state.get("dropped_quotes") or []
@@ -1143,10 +1162,17 @@ def route_after_reflect(state: AgentState) -> str:
 # ---------------------------------------------------------------- clarify
 def clarify(state: AgentState) -> dict:
     """Human-in-the-loop: the graph suspends on interrupt(); the user's reply
-    is delivered back as its return value when the run is resumed."""
+    is delivered back as its return value when the run is resumed.
+
+    `clarify_step` records how many search steps had run when the question was
+    asked: the cards `act` showed up to then were shown before the reader
+    chose, and a card of the chosen book is shown again once after the resume
+    (`_withhold_shown_cards`). Written here, on the resume, so a run suspended
+    at this interrupt by an older version writes it too."""
     question_to_user = state["queries"][0]
     user_reply = interrupt(question_to_user)
-    return {"clarification": user_reply, "clarify_asked": True, "queries": []}
+    return {"clarification": user_reply, "clarify_asked": True, "queries": [],
+            "clarify_step": state.get("steps_taken", 0)}
 
 
 # ---------------------------------------------------------------- synthesize
