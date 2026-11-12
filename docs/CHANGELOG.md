@@ -14,7 +14,10 @@
   step already showed is not shown again, unless the gate refused a quote of its book, which gets
   its cards back so a paraphrased line can be copied (the #29 retry rule). A step that retrieved
   only cards already shown withholds nothing and shows them, so a cards-only step that found
-  something is never an empty observation that advances the dry streak. After a clarify the
+  something is never an empty observation that advances the dry streak. The per-hit budget follows
+  the step's action, not its hit count: a search or a coverage probe that returned (or, after
+  withholding, shows) one passage is cut at `SEARCH_HIT_CHARS` like any search, where a step of
+  one hit used to get `CHAPTER_HIT_CHARS`; a chapter read keeps `CHAPTER_HIT_CHARS`. After a clarify the
   reader answered with a book, a card of that book shown only before the answer (a candidate
   offered from the retrieval window, its card shown among the other candidates') is shown once more
   on the first step after the resume, then once per run like any card. Transcripts are shown

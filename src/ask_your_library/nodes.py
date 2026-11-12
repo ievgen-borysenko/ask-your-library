@@ -62,9 +62,16 @@ DROPPED_QUOTES_SHOWN = 6
 # Per-hit text budget, shared by act (hits_log) and observe (prompt): the
 # quote-provenance check compares quotes against the passage as observe saw it,
 # so the two MUST stay equal or honest quotes from a hit's tail read as broken.
-# SEARCH_HIT_CHARS: several hits per step. CHAPTER_HIT_CHARS: chapter drill-down,
-# one hit gets the whole read_chapter budget, so the "[chapter continues ...]"
-# marker at its end reaches the model. Both come from config (env-tunable).
+# Both get it from `step_hit_limit`, called with the step's `current_query`,
+# so they are equal by construction. The budget follows the step's ACTION, as
+# `_parse_action` reads it, and not the number of hits it returned:
+# CHAPTER_HIT_CHARS for a chapter read (drill-down: its one hit gets the whole
+# read_chapter budget, so the "[chapter continues ...]" marker at its end
+# reaches the model), SEARCH_HIT_CHARS for everything else — a search, a
+# coverage probe, and a malformed marker, which has no hit to cut. A search that
+# returned one hit (one passage of a small book, or one passage left after its
+# shown cards were withheld) is still a search and is cut as one. Both numbers
+# come from config (env-tunable).
 #
 # Since #28 neither limit usually CUTS anything, and that is the point: a
 # transcript chunk is packed to 2,400 characters, under the search budget, and
@@ -72,10 +79,39 @@ DROPPED_QUOTES_SHOWN = 6
 # CHAPTER_HIT_CHARS by `act`. The cut stays where it is — it is what makes the
 # two budgets equal by construction, whatever an index or a configuration
 # holds, and ADR-004's guarantee rests on that equality and not on the numbers.
+# An index built before #28 can still hold a 4,000-character chunk; a search
+# step shows it cut at SEARCH_HIT_CHARS however many hits came with it.
 
 
-def per_hit_limit(hit_count: int) -> int:
-    return CHAPTER_HIT_CHARS if hit_count == 1 else SEARCH_HIT_CHARS
+def _parse_action(current_query: str) -> tuple[str, str, str, list[str]]:
+    """What a step's `current_query` asks `act` to do: (kind, action,
+    read_query, marker_parts), kind being "malformed", "chapter", "probe" or
+    "search". The one reading of the channel, so the step `act` runs and the
+    budget `step_hit_limit` gives it cannot disagree.
+
+    A chapter marker may carry one field more than the other two — what the
+    model is looking for in that chapter — and it is taken off here, from the
+    right, so `action` is the three-part marker every reader of this channel
+    understands (`bookkey.split_read_query`). A marker of fewer than three
+    parts is malformed: nothing to act on."""
+    action, read_query = split_read_query(current_query)
+    marker_parts = action.split("|", 2) if is_loop_marker(action) else []
+    if marker_parts and len(marker_parts) != 3:
+        kind = "malformed"
+    elif action.startswith("__chapter__|"):
+        kind = "chapter"
+    elif action.startswith("__book__|"):
+        kind = "probe"
+    else:
+        kind = "search"
+    return kind, action, read_query, marker_parts
+
+
+def step_hit_limit(current_query: str) -> int:
+    """The per-hit budget of the step `current_query` names: CHAPTER_HIT_CHARS
+    for a chapter read, SEARCH_HIT_CHARS for any other step. `act` and
+    `observe` both call this with the same string (see the comment above)."""
+    return CHAPTER_HIT_CHARS if _parse_action(current_query)[0] == "chapter" else SEARCH_HIT_CHARS
 
 def _budget_spent(state: AgentState) -> bool:
     """No further search may run: the step budget is spent, or the time budget
@@ -442,13 +478,15 @@ def catalog(state: AgentState) -> dict:
 # ---------------------------------------------------------------- act
 def _card_key(hit: dict) -> tuple[str, str, str]:
     """What makes two card passages one card: the book, the section and the
-    text, sanitized, as `hits_log` holds them. `hits_log` cuts a passage at its
-    step's limit, which is SEARCH_HIT_CHARS on a step of several hits and
-    CHAPTER_HIT_CHARS on a step of one, so the text is compared on the shorter
-    of the two cuts: equal there whichever limit stored it. A card whose text
-    changed between steps (an index rebuilt under a running question) is a new
-    card."""
-    return (hit["book"], hit["section"], hit["text"][:min(SEARCH_HIT_CHARS, CHAPTER_HIT_CHARS)])
+    text, sanitized, as `hits_log` holds them. A card only ever comes from a
+    search or a coverage probe (a chapter read is the book's text), so
+    `hits_log` holds it cut at SEARCH_HIT_CHARS, the budget of those steps
+    (`step_hit_limit`), and the key compares that much of it: exactly the
+    text `observe` was shown. A card whose text changed between steps (an
+    index rebuilt under a running question) is a new card if the change is
+    inside that cut; a change past it is in text no step ever showed, and the
+    card is the one already shown."""
+    return (hit["book"], hit["section"], hit["text"][:SEARCH_HIT_CHARS])
 
 
 def _withhold_shown_cards(state: AgentState, hits: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -510,13 +548,10 @@ def _withhold_shown_cards(state: AgentState, hits: list[dict]) -> tuple[list[dic
 
 
 def act(state: AgentState) -> dict:
-    # Two kinds of action: a regular search, or reading a whole chapter (drill-down)
-    # A chapter marker may carry one field more than the other two — what the
-    # model is looking for in that chapter — and it is taken off here, from the
-    # right, so everything below reads the three-part marker it always read
-    # (`bookkey.split_read_query`).
-    action, read_query = split_read_query(state["current_query"])
-    marker_parts = action.split("|", 2) if is_loop_marker(action) else []
+    # Three kinds of action: a regular search, a coverage probe inside one book,
+    # or reading a whole chapter (drill-down), read off `current_query` by
+    # `_parse_action`, which `step_hit_limit` reads it with too.
+    kind, _, read_query, marker_parts = _parse_action(state["current_query"])
     # Where a chapter read's window sits in its section (#81): logged, never read
     # back by any node — the passage below is chosen exactly as it always was.
     window = None
@@ -527,14 +562,14 @@ def act(state: AgentState) -> dict:
     # a chapter read is one passage and a coverage probe keeps its retriever
     # order.
     transcripts_first = False
-    if marker_parts and len(marker_parts) != 3:
+    if kind == "malformed":
         # A malformed marker (fewer than three parts) is nothing to act on: no
         # hits, a note in the scratchpad, and the loop's CRAG gate counts the
         # dry step. Only reflect writes markers, so this is a guard, not a path.
         hits = []
         empty_read_note = f"[malformed action marker ignored: {state['current_query']}]\n"
         read_chapters = state.get("read_chapters", [])
-    elif action.startswith("__chapter__|"):
+    elif kind == "chapter":
         # Decoded here, once, so everything downstream — the read itself, the
         # hit's metadata, the read_chapters entry — carries the book key and
         # the section the index actually holds, separators and all.
@@ -591,7 +626,7 @@ def act(state: AgentState) -> dict:
                   else "empty" if not chapter_text
                   else "partial" if chapter_is_cut(chapter_text) else "complete")
         read_chapters = state.get("read_chapters", []) + [f"{book}|{section}|{status}"]
-    elif state["current_query"].startswith("__book__|"):
+    elif kind == "probe":
         # Coverage probe (ADR-013): one search inside a single candidate book.
         _, probe_book, probe_query = marker_parts
         searched = search_key(state, state["current_query"])
@@ -667,7 +702,9 @@ def act(state: AgentState) -> dict:
     # checks the quote against that hit's text as observe saw it (cut at limit).
     # The scratchpad is a human log only; no code parses it any more.
     step = state["steps_taken"] + 1
-    limit = per_hit_limit(len(hits))
+    # The budget of this step's action, not of how many hits it shows: a
+    # search left with one hit after its cards were withheld is still a search.
+    limit = step_hit_limit(state["current_query"])
     for i, h in enumerate(hits, 1):
         h["hit_id"] = f"s{step}h{i}"
     # Only this step's passages are returned: hits_log has an append reducer in
@@ -785,7 +822,7 @@ def _log_observed(state: AgentState, kept: list[dict], dropped=(), filtered=(),
 
 
 def observe(state: AgentState) -> dict:
-    limit = per_hit_limit(len(state["hits"]))
+    limit = step_hit_limit(state["current_query"])
     results = "\n".join(
         data_block("result", h["text"][:limit], index=i, hit_id=h.get("hit_id", ""),
                    corpus=h["corpus"], book=h["book"], section=h["section"])

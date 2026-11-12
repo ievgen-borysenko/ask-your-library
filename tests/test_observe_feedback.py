@@ -98,7 +98,7 @@ def test_a_step_that_lost_nothing_sends_the_user_message_it_always_sent(monkeypa
         {"hit_id": "s1h1", "book": "Moby Dick", "quote": "Call me Ishmael.", "why": "narrator"}])
 
     # the message as the code built it before the feedback block existed
-    limit = nodes.per_hit_limit(len(state["hits"]))
+    limit = nodes.step_hit_limit(state["current_query"])
     results = "\n".join(
         data_block("result", h["text"][:limit], index=i, hit_id=h.get("hit_id", ""),
                    corpus=h["corpus"], book=h["book"], section=h["section"])

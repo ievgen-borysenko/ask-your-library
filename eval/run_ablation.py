@@ -172,10 +172,10 @@ def run_no_context(item: dict) -> dict:
 
 def retrieved_passages(question: str, k: int = SEARCH_K) -> tuple[list[dict], int]:
     """One search_both call, then exactly what act/observe do to the text:
-    sanitize_context first, then cut to the per-hit budget, with a stable hit
-    id per passage. Returns (passages, redacted line count)."""
+    sanitize_context first, then cut to a search step's per-hit budget, with a
+    stable hit id per passage. Returns (passages, redacted line count)."""
     hits = library_search_both(question, k=k)
-    limit = nodes_mod.per_hit_limit(len(hits))
+    limit = nodes_mod.step_hit_limit(question)
     passages, redacted = [], 0
     for i, h in enumerate(hits, 1):
         clean, n = sanitize_context(h["text"])

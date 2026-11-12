@@ -307,7 +307,8 @@ Status: accepted; the size of the budget was revised by ADR-012 and its MEANING 
 (2026-09-17), 2026-09-16 added one number to what `reflect` sees, 2026-10-02 replaced the
 note `reflect` decided on with the verified quote, 2026-11-09 showed `reflect` the searches
 the run already made, and a second amendment of 2026-11-09 set how many book cards `observe` is
-shown, in what order and how often (see below). The per-hit budget itself is unchanged.
+shown, in what order and how often (see below). The per-hit budget's two numbers are unchanged;
+since the same amendment a step gets one of them by its action, not by how many hits it returned.
 
 Raw hits never reach `plan`, `reflect` or `synthesize`. `observe` receives one `<result>` block
 per hit, carrying that hit's id, book and section, with the text cut to `SEARCH_HIT_CHARS`
@@ -454,6 +455,14 @@ One floor: a step whose retrieval returned only cards already shown withholds no
 them, as every step did before the rule. A cards-only step (the ablation's `cards-only`
 condition, a search inside a book whose only row is its card) would otherwise turn a retrieval
 that found something into an empty observation, advance the dry streak and could stop the run.
+And the budget follows the action: `act` gave a step of exactly one hit `CHAPTER_HIT_CHARS`, so a
+search left with one passage after its shown card was withheld had its budget lifted from
+`SEARCH_HIT_CHARS` to `CHAPTER_HIT_CHARS` (a 4,000-character chunk of an index built before ADR-025
+reached `observe` whole). `act` and `observe` now take the budget from one function of the step's
+`current_query` (`nodes.step_hit_limit`): `CHAPTER_HIT_CHARS` for a chapter read and
+`SEARCH_HIT_CHARS` for a search or a coverage probe of any number of hits, one included. A card
+comes only from the latter, so `hits_log` holds every card at `SEARCH_HIT_CHARS`, and the card
+comparison above is made on that much text.
 A known limit: "shown" means written to `hits_log`, not read, so a card shown on a step whose
 `observe` returned no usable JSON (nothing kept from that step) is withheld on every later step
 all the same; measured on one question (c06), where it cost the second half of the answer.
@@ -1200,7 +1209,8 @@ a mixed index nothing could detect (ADR-020, ADR-024).
 **The constraint B is written under, which is the whole of its risk.** The window IS the
 provenance haystack. ADR-004 guarantees that a quote is a contiguous run of the passage it is
 pinned to, and that guarantee rests on `act` and `observe` cutting one string the same way
-(`per_hit_limit`). So the window is computed ONCE, in `act`, and the text it produces is what goes
+(`per_hit_limit` then, by hit count; since 2026-11-09 `step_hit_limit`, by the step's action, read
+off the same `current_query` in both). So the window is computed ONCE, in `act`, and the text it produces is what goes
 into `hits_log`, the scratchpad and the observe prompt; nothing downstream recomputes it. A window
 recomputed in `observe` — or later in `validate`, over a chapter that has since been re-ingested —
 would turn quotes honestly copied out of one window into quotes broken against another, which is

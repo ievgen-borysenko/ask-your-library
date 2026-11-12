@@ -707,7 +707,12 @@ def test_hits_are_cut_to_the_observe_window_and_a_quote_past_the_cut_is_dropped(
     search_act, chapter_act = by_name(events, "act")
     assert len(search_act["hits_log"][0]["text"]) == config.SEARCH_HIT_CHARS
     assert tail not in model.nth("observe")["user"] and head_quote in model.nth("observe")["user"]
-    assert len(chapter_act["hits_log"][0]["text"]) == len(chapter) == nodes.per_hit_limit(1) if len(chapter) > config.CHAPTER_HIT_CHARS else len(chapter)
+    # the chapter read is cut at the chapter budget, not the search one: its
+    # 4,000+ characters reach hits_log and the prompt whole
+    assert config.SEARCH_HIT_CHARS < len(chapter) < config.CHAPTER_HIT_CHARS
+    assert len(chapter_act["hits_log"][0]["text"]) == len(chapter)
+    assert chapter in model.nth("observe", 1)["user"]
+    assert nodes.step_hit_limit(f"__chapter__|{MOBY}|Chapter 1") == config.CHAPTER_HIT_CHARS
     assert by_name(events, "observe")[0]["dropped_unverified"] == 1
     p = by_name(events, "validate")[0]["provenance"]
     assert (p["confirmed"], p["broken"]) == (2, 0) and p["broken_items"] == []

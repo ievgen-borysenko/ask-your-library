@@ -143,11 +143,18 @@ def test_scratchpad_names_are_unique():
     assert re.search(r'run-\{int\(time\.time\(\)\)\}-\{uuid\.uuid4\(\)', src)
 
 
-def test_per_hit_limit_shared_between_act_and_observe():
+def test_step_hit_limit_shared_between_act_and_observe():
+    """The budget follows the step's action, read off `current_query`, never
+    the number of hits: a chapter read gets the chapter budget, a search, a
+    coverage probe and a malformed marker the search budget."""
     from ask_your_library.config import CHAPTER_HIT_CHARS, SEARCH_HIT_CHARS
-    from ask_your_library.nodes import per_hit_limit
-    assert per_hit_limit(1) == CHAPTER_HIT_CHARS
-    assert per_hit_limit(8) == SEARCH_HIT_CHARS
+    from ask_your_library.nodes import step_hit_limit
+    assert step_hit_limit("__chapter__|Some Book — A|Chapter 1") == CHAPTER_HIT_CHARS
+    assert step_hit_limit("__chapter_q__|the whale|Some Book — A|Chapter 1") == CHAPTER_HIT_CHARS
+    assert step_hit_limit("white whale") == SEARCH_HIT_CHARS
+    assert step_hit_limit("__book__|Some Book — A|white whale") == SEARCH_HIT_CHARS
+    assert step_hit_limit("__chapter__|Some Book — A") == SEARCH_HIT_CHARS      # malformed
+    assert step_hit_limit("") == SEARCH_HIT_CHARS
 
 
 HITS = [
@@ -1250,10 +1257,10 @@ def test_observe_window_is_a_config_knob_and_the_quote_cap_follows_it(monkeypatc
     from conftest import fresh_output, run_fresh
     from ask_your_library import config, nodes
 
-    assert nodes.per_hit_limit(8) == config.SEARCH_HIT_CHARS == provenance.MAX_QUOTE_CHARS
-    assert nodes.per_hit_limit(1) == config.CHAPTER_HIT_CHARS
+    assert nodes.step_hit_limit("q") == config.SEARCH_HIT_CHARS == provenance.MAX_QUOTE_CHARS
+    assert nodes.step_hit_limit("__chapter__|B|C") == config.CHAPTER_HIT_CHARS
     code = ("from ask_your_library import config, nodes, provenance; "
-            "print(config.SEARCH_HIT_CHARS, nodes.per_hit_limit(8), provenance.MAX_QUOTE_CHARS)")
+            "print(config.SEARCH_HIT_CHARS, nodes.step_hit_limit('q'), provenance.MAX_QUOTE_CHARS)")
     out = fresh_output(code, SEARCH_HIT_CHARS="4000").split()
     assert out == ["4000", "4000", "4000"]
     bad = run_fresh("from ask_your_library import config", check=False, SEARCH_HIT_CHARS="0")
