@@ -109,6 +109,19 @@ def test_retrieve_answer_cuts_and_sanitizes_exactly_as_observe_would(captured_ll
     assert ablation.harness.score(ITEM, r)["titles_mentioned"] == 0   # the fake answer names no book
 
 
+def test_retrieve_answer_cuts_a_marker_shaped_question_as_a_search(monkeypatch):
+    """The condition always searches, so the cut is the search budget even for
+    a question that reads like a chapter marker, and for a single hit."""
+    long_text = "x" * (config.CHAPTER_HIT_CHARS + 1000)
+    monkeypatch.setattr(ablation, "library_search_both", lambda q, k=4: fake_hits(long_text)[1:])
+
+    for question in ("__chapter__|Huck Finn — Mark Twain|Chapter XXXI",
+                     "__chapter_q__|the raft|Huck Finn — Mark Twain|Chapter XXXI",
+                     ITEM["question"]):
+        passages, _ = ablation.retrieved_passages(question)
+        assert [len(p["text"]) for p in passages] == [config.SEARCH_HIT_CHARS]
+
+
 def test_retrieve_answer_with_no_hits_refuses_instead_of_calling_the_model(captured_llm, monkeypatch):
     monkeypatch.setattr(ablation, "library_search_both", lambda q, k=4: [])
     r = ablation.run_retrieve_answer(ITEM)
