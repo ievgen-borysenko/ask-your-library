@@ -362,8 +362,10 @@ OPENROUTER_ENV_FILE = Path(_env_file).expanduser() if _env_file else None
 MAX_OUTPUT_TOKENS = int(_env("MAX_OUTPUT_TOKENS", "2048"))
 
 # What observe sees of each retrieved passage (ADR-025, superseding ADR-012).
-# SEARCH_HIT_CHARS caps a search hit (several per step); CHAPTER_HIT_CHARS caps
-# a chapter read (one hit). The provenance check compares quotes against the
+# SEARCH_HIT_CHARS caps each hit of a search step or a coverage probe, however
+# many it returned; CHAPTER_HIT_CHARS caps a chapter read (one hit). Which of
+# the two a step gets follows its action (`nodes.step_hit_limit`), never its
+# hit count. The provenance check compares quotes against the
 # same cut, so the cut is applied once, in act, and read from here everywhere
 # else.
 #

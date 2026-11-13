@@ -82,7 +82,7 @@ def test_initial_state_starts_with_no_searches():
 
 # ---------------------------------------------------------------- act
 def test_act_records_the_search_it_ran_and_never_a_chapter_read(monkeypatch, tmp_path):
-    monkeypatch.setattr(nodes, "search_both", lambda query, k=4, book=None: [])
+    monkeypatch.setattr(nodes, "search_both", lambda query, k=4, book=None, cards_k=None: [])
     monkeypatch.setattr(nodes, "read_chapter", lambda book, section, max_chars=0: ("", "", "missing"))
     llm.reset_usage()
     scratchpad = tmp_path / "s.md"
@@ -101,7 +101,7 @@ def test_act_records_the_search_it_ran_and_never_a_chapter_read(monkeypatch, tmp
 
 def test_act_retrieves_nothing_for_a_query_with_no_words(monkeypatch, tmp_path):
     calls = []
-    monkeypatch.setattr(nodes, "search_both", lambda query, k=4, book=None: calls.append(query) or [])
+    monkeypatch.setattr(nodes, "search_both", lambda query, k=4, book=None, cards_k=None: calls.append(query) or [])
     llm.reset_usage()
     scratchpad = tmp_path / "s.md"
     scratchpad.write_text("")

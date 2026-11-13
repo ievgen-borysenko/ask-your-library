@@ -26,15 +26,15 @@ from .catalog import (mixed_intent, parse_catalog_request, render_catalog, resol
 # read_key / read_status / READ_STATUSES are re-exported, not used here: the
 # grammar is this node's contract with `reflect`, and it is read (and tested)
 # as part of it.
-from .bookkey import (READ_STATUSES, chapter_marker, read_key, read_status,  # noqa: F401
-                      same_chapter, split_read_query, unescape_marker)
+from .bookkey import (READ_STATUSES, chapter_marker, names_book, read_key,  # noqa: F401
+                      read_status, same_chapter, split_read_query, unescape_marker)
 from .clarify import _chosen_book, _clarify_candidates, _evidence_after_clarify
 from .config import (CHAPTER_HIT_CHARS, CHAPTER_SCAN_CHARS, LLM_TIMEOUT_S,
                      MAX_CLARIFY_CANDIDATES, MAX_DROPPED_STREAK, MAX_EMPTY_STREAK, MAX_STEPS,
                      SEARCH_HIT_CHARS)
 from .coverage import coverage_probe
 from .i18n import t
-from .library import (HEAD_MARKER_PREFIX, BookEntry, chapter_is_cut, list_books,
+from .library import (HEAD_MARKER_PREFIX, BookEntry, card_slots, chapter_is_cut, list_books,
                       read_chapter, search_both)
 from .llm import data_block
 from .prompts import OBSERVE_RULES, PLAN_RULES, REFLECT_RULES, SYNTHESIZE_RULES
@@ -62,9 +62,16 @@ DROPPED_QUOTES_SHOWN = 6
 # Per-hit text budget, shared by act (hits_log) and observe (prompt): the
 # quote-provenance check compares quotes against the passage as observe saw it,
 # so the two MUST stay equal or honest quotes from a hit's tail read as broken.
-# SEARCH_HIT_CHARS: several hits per step. CHAPTER_HIT_CHARS: chapter drill-down,
-# one hit gets the whole read_chapter budget, so the "[chapter continues ...]"
-# marker at its end reaches the model. Both come from config (env-tunable).
+# Both get it from `step_hit_limit`, called with the step's `current_query`,
+# so they are equal by construction. The budget follows the step's ACTION, as
+# `_parse_action` reads it, and not the number of hits it returned:
+# CHAPTER_HIT_CHARS for a chapter read (drill-down: its one hit gets the whole
+# read_chapter budget, so the "[chapter continues ...]" marker at its end
+# reaches the model), SEARCH_HIT_CHARS for everything else — a search, a
+# coverage probe, and a malformed marker, which has no hit to cut. A search that
+# returned one hit (one passage of a small book, or one passage left after its
+# shown cards were withheld) is still a search and is cut as one. Both numbers
+# come from config (env-tunable).
 #
 # Since #28 neither limit usually CUTS anything, and that is the point: a
 # transcript chunk is packed to 2,400 characters, under the search budget, and
@@ -72,10 +79,39 @@ DROPPED_QUOTES_SHOWN = 6
 # CHAPTER_HIT_CHARS by `act`. The cut stays where it is — it is what makes the
 # two budgets equal by construction, whatever an index or a configuration
 # holds, and ADR-004's guarantee rests on that equality and not on the numbers.
+# An index built before #28 can still hold a 4,000-character chunk; a search
+# step shows it cut at SEARCH_HIT_CHARS however many hits came with it.
 
 
-def per_hit_limit(hit_count: int) -> int:
-    return CHAPTER_HIT_CHARS if hit_count == 1 else SEARCH_HIT_CHARS
+def _parse_action(current_query: str) -> tuple[str, str, str, list[str]]:
+    """What a step's `current_query` asks `act` to do: (kind, action,
+    read_query, marker_parts), kind being "malformed", "chapter", "probe" or
+    "search". The one reading of the channel, so the step `act` runs and the
+    budget `step_hit_limit` gives it cannot disagree.
+
+    A chapter marker may carry one field more than the other two — what the
+    model is looking for in that chapter — and it is taken off here, from the
+    right, so `action` is the three-part marker every reader of this channel
+    understands (`bookkey.split_read_query`). A marker of fewer than three
+    parts is malformed: nothing to act on."""
+    action, read_query = split_read_query(current_query)
+    marker_parts = action.split("|", 2) if is_loop_marker(action) else []
+    if marker_parts and len(marker_parts) != 3:
+        kind = "malformed"
+    elif action.startswith("__chapter__|"):
+        kind = "chapter"
+    elif action.startswith("__book__|"):
+        kind = "probe"
+    else:
+        kind = "search"
+    return kind, action, read_query, marker_parts
+
+
+def step_hit_limit(current_query: str) -> int:
+    """The per-hit budget of the step `current_query` names: CHAPTER_HIT_CHARS
+    for a chapter read, SEARCH_HIT_CHARS for any other step. `act` and
+    `observe` both call this with the same string (see the comment above)."""
+    return CHAPTER_HIT_CHARS if _parse_action(current_query)[0] == "chapter" else SEARCH_HIT_CHARS
 
 def _budget_spent(state: AgentState) -> bool:
     """No further search may run: the step budget is spent, or the time budget
@@ -440,28 +476,100 @@ def catalog(state: AgentState) -> dict:
 # bare-title rule under it — lives in `bookkey` with the rest of book identity.
 
 # ---------------------------------------------------------------- act
+def _card_key(hit: dict) -> tuple[str, str, str]:
+    """What makes two card passages one card: the book, the section and the
+    text, sanitized, as `hits_log` holds them. A card only ever comes from a
+    search or a coverage probe (a chapter read is the book's text), so
+    `hits_log` holds it cut at SEARCH_HIT_CHARS, the budget of those steps
+    (`step_hit_limit`), and the key compares that much of it: exactly the
+    text `observe` was shown. A card whose text changed between steps (an
+    index rebuilt under a running question) is a new card if the change is
+    inside that cut; a change past it is in text no step ever showed, and the
+    card is the one already shown."""
+    return (hit["book"], hit["section"], hit["text"][:SEARCH_HIT_CHARS])
+
+
+def _withhold_shown_cards(state: AgentState, hits: list[dict]) -> tuple[list[dict], list[dict]]:
+    """A book card is shown once per run: (the hits to show, the cards withheld).
+
+    Cards came back step after step, and every repeat cost `observe` its input
+    a second time for a passage it had already read; a card is a summary of a
+    whole book, so a later query rarely makes it say anything new. Transcripts
+    are not withheld: the #29 retry rule hands a refused passage back on the
+    next step, and that rule is written for the book's text.
+
+    One exemption, the same #29 reading applied to cards: a card of a book
+    whose quote the gate refused (the last DROPPED_QUOTES_SHOWN refusals, the
+    window `observe` is shown) comes back, so a model that paraphrased a card
+    line gets the line to copy again. The book is matched as the model wrote
+    it, exactly or as a bare title (`names_book`). The sink is bounded: model
+    text can at most bring back a card this run has already shown.
+
+    And one reset, at a clarify the reader answered with a book: from then on
+    retrieval is limited to that book, and its card may have been shown only
+    among the other candidates' cards, before the choice (a candidate offered
+    from the retrieval window, ADR-006). Such a card counts as shown only from
+    the steps after the answer (`clarify_step`, the steps that had run when the
+    question was asked), so the first step after the resume shows it again and
+    the once-per-run rule then applies to it as to any card. A state without
+    `clarify_step` (a run checkpointed before the clarify node wrote it) counts
+    every card, as the rule did before the reset.
+
+    And one floor: a step whose retrieval returned passages, all of them cards
+    already shown, withholds nothing. A cards-only step (the ablation's
+    `cards-only` condition, or a search inside a book whose only row is its
+    card) would otherwise turn a retrieval that succeeded into an empty
+    observation: `observe` sees no passage, the dry streak advances and the
+    run can stop on a step that found something. Such a step shows what it
+    retrieved, as every step did before the rule, and the scratchpad names no
+    card as withheld."""
+    chosen = state.get("clarify_chosen") or ""
+    answered_after = state.get("clarify_step")
+
+    def counts(h: dict) -> bool:
+        if h.get("corpus") != "cards":
+            return False
+        if chosen and isinstance(answered_after, int) and h["book"] == chosen:
+            return h.get("step", 0) > answered_after
+        return True
+    shown = {_card_key(h) for h in state.get("hits_log") or [] if counts(h)}
+    if not shown:
+        return hits, []
+    refused = [d["book"].strip() for d in state.get("dropped_quotes") or []
+               if isinstance(d, dict) and isinstance(d.get("book"), str) and d["book"].strip()]
+
+    def withheld(h: dict) -> bool:
+        return (h["corpus"] == "cards" and _card_key(h) in shown
+                and not any(names_book(book, h["book"]) for book in refused))
+    shown_now = [h for h in hits if not withheld(h)]
+    if hits and not shown_now:
+        return hits, []
+    return shown_now, [h for h in hits if withheld(h)]
+
+
 def act(state: AgentState) -> dict:
-    # Two kinds of action: a regular search, or reading a whole chapter (drill-down)
-    # A chapter marker may carry one field more than the other two — what the
-    # model is looking for in that chapter — and it is taken off here, from the
-    # right, so everything below reads the three-part marker it always read
-    # (`bookkey.split_read_query`).
-    action, read_query = split_read_query(state["current_query"])
-    marker_parts = action.split("|", 2) if is_loop_marker(action) else []
+    # Three kinds of action: a regular search, a coverage probe inside one book,
+    # or reading a whole chapter (drill-down), read off `current_query` by
+    # `_parse_action`, which `step_hit_limit` reads it with too.
+    kind, _, read_query, marker_parts = _parse_action(state["current_query"])
     # Where a chapter read's window sits in its section (#81): logged, never read
     # back by any node — the passage below is chosen exactly as it always was.
     window = None
     # The search this step runs, as `searches_run` records it (#163); stays
     # None on a chapter read and on a malformed marker, which search nothing.
     searched = None
-    if marker_parts and len(marker_parts) != 3:
+    # Only a plain search step shows its transcripts before its cards (below);
+    # a chapter read is one passage and a coverage probe keeps its retriever
+    # order.
+    transcripts_first = False
+    if kind == "malformed":
         # A malformed marker (fewer than three parts) is nothing to act on: no
         # hits, a note in the scratchpad, and the loop's CRAG gate counts the
         # dry step. Only reflect writes markers, so this is a guard, not a path.
         hits = []
         empty_read_note = f"[malformed action marker ignored: {state['current_query']}]\n"
         read_chapters = state.get("read_chapters", [])
-    elif action.startswith("__chapter__|"):
+    elif kind == "chapter":
         # Decoded here, once, so everything downstream — the read itself, the
         # hit's metadata, the read_chapters entry — carries the book key and
         # the section the index actually holds, separators and all.
@@ -518,13 +626,16 @@ def act(state: AgentState) -> dict:
                   else "empty" if not chapter_text
                   else "partial" if chapter_is_cut(chapter_text) else "complete")
         read_chapters = state.get("read_chapters", []) + [f"{book}|{section}|{status}"]
-    elif state["current_query"].startswith("__book__|"):
+    elif kind == "probe":
         # Coverage probe (ADR-013): one search inside a single candidate book.
         _, probe_book, probe_query = marker_parts
         searched = search_key(state, state["current_query"])
         # A probe with no words to search for retrieves nothing and is not
         # recorded: no node sends one, and act does not pay for one (#163).
-        hits = search_both(probe_query, k=4, book=unescape_marker(probe_book)) if searched else []
+        # The same card budget as a search step: one rule for every search.
+        hits = (search_both(probe_query, k=4, cards_k=card_slots(state.get("mode")),
+                            book=unescape_marker(probe_book))
+                if searched else [])
         empty_read_note = ""
         read_chapters = state.get("read_chapters", [])
     else:
@@ -533,10 +644,15 @@ def act(state: AgentState) -> dict:
         # the question named and the catalogue resolved works the same way (ADR-016).
         searched = search_key(state, state["current_query"])
         # The same for a query with no words: no retrieval, no record (#163).
-        hits = (search_both(state["current_query"], k=4, book=_effective_book(state) or None)
+        # Four transcripts and CARD_SLOTS cards: the cards past the first two
+        # cost `observe` input and almost never held the evidence it kept. An
+        # identify run keeps four (`library.card_slots`): its answer is a book.
+        hits = (search_both(state["current_query"], k=4, cards_k=card_slots(state.get("mode")),
+                            book=_effective_book(state) or None)
                 if searched else [])
         empty_read_note = ""
         read_chapters = state.get("read_chapters", [])
+        transcripts_first = True
 
     # Injection defense: sanitize hit text before the model ever sees it.
     # The control/invisible strip happens HERE, on the passage itself and before
@@ -563,12 +679,32 @@ def act(state: AgentState) -> dict:
             h["redacted_lines"] = redacted
             usage.redacted_lines += redacted
 
+    # A card an earlier step already showed is not shown again (see
+    # `_withhold_shown_cards`). Here, after the sanitizer, so the text compared
+    # is the text `hits_log` holds, and before the ids, so the ids stay dense.
+    # `hits_seen` above counts what the retriever returned, withheld cards
+    # included.
+    hits, withheld = _withhold_shown_cards(state, hits)
+
+    # The book's own text first, then the cards. `search_both` asks the corpora
+    # cards first, and `observe` read the cards first: on a step whose cards
+    # already answered, it kept a card line and the step's book text went
+    # unquoted. The order is set HERE, before the ids, so the ids, `hits_log`,
+    # the scratchpad and the `observe` prompt all follow one list. Stable: the
+    # retriever's order inside each corpus is kept. Retrieval keeps its own
+    # order; the order a step shows is this node's concern.
+    if transcripts_first:
+        hits = ([h for h in hits if h["corpus"] != "cards"]
+                + [h for h in hits if h["corpus"] == "cards"])
+
     # Raw hits go to the scratchpad file, not into the orchestrator's context.
     # Stable ids: evidence points at the hit it was copied from, and validate
     # checks the quote against that hit's text as observe saw it (cut at limit).
     # The scratchpad is a human log only; no code parses it any more.
     step = state["steps_taken"] + 1
-    limit = per_hit_limit(len(hits))
+    # The budget of this step's action, not of how many hits it shows: a
+    # search left with one hit after its cards were withheld is still a search.
+    limit = step_hit_limit(state["current_query"])
     for i, h in enumerate(hits, 1):
         h["hit_id"] = f"s{step}h{i}"
     # Only this step's passages are returned: hits_log has an append reducer in
@@ -590,6 +726,11 @@ def act(state: AgentState) -> dict:
         with open(state["scratchpad_path"], "a", encoding="utf-8", errors="replace") as f:
             f.write(f"\n## step {step}: {strip_control_chars(state['current_query'])}\n"
                     f"{strip_control_chars(empty_read_note)}")
+            if withheld:
+                # Named here and nowhere else: no state channel and no event
+                # key carries them, so a run's events are the events they were.
+                f.write("[cards not shown again: "
+                        + "; ".join(f"{h['book']} | {h['section']}" for h in withheld) + "]\n")
             if window is not None:
                 looking_for = (f'"{window["looking_for"]}"' if window["looking_for"]
                                else "(none: head of the chapter)")
@@ -681,7 +822,7 @@ def _log_observed(state: AgentState, kept: list[dict], dropped=(), filtered=(),
 
 
 def observe(state: AgentState) -> dict:
-    limit = per_hit_limit(len(state["hits"]))
+    limit = step_hit_limit(state["current_query"])
     results = "\n".join(
         data_block("result", h["text"][:limit], index=i, hit_id=h.get("hit_id", ""),
                    corpus=h["corpus"], book=h["book"], section=h["section"])
@@ -1070,10 +1211,17 @@ def route_after_reflect(state: AgentState) -> str:
 # ---------------------------------------------------------------- clarify
 def clarify(state: AgentState) -> dict:
     """Human-in-the-loop: the graph suspends on interrupt(); the user's reply
-    is delivered back as its return value when the run is resumed."""
+    is delivered back as its return value when the run is resumed.
+
+    `clarify_step` records how many search steps had run when the question was
+    asked: the cards `act` showed up to then were shown before the reader
+    chose, and a card of the chosen book is shown again once after the resume
+    (`_withhold_shown_cards`). Written here, on the resume, so a run suspended
+    at this interrupt by an older version writes it too."""
     question_to_user = state["queries"][0]
     user_reply = interrupt(question_to_user)
-    return {"clarification": user_reply, "clarify_asked": True, "queries": []}
+    return {"clarification": user_reply, "clarify_asked": True, "queries": [],
+            "clarify_step": state.get("steps_taken", 0)}
 
 
 # ---------------------------------------------------------------- synthesize

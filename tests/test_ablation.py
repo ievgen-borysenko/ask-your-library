@@ -109,6 +109,19 @@ def test_retrieve_answer_cuts_and_sanitizes_exactly_as_observe_would(captured_ll
     assert ablation.harness.score(ITEM, r)["titles_mentioned"] == 0   # the fake answer names no book
 
 
+def test_retrieve_answer_cuts_a_marker_shaped_question_as_a_search(monkeypatch):
+    """The condition always searches, so the cut is the search budget even for
+    a question that reads like a chapter marker, and for a single hit."""
+    long_text = "x" * (config.CHAPTER_HIT_CHARS + 1000)
+    monkeypatch.setattr(ablation, "library_search_both", lambda q, k=4: fake_hits(long_text)[1:])
+
+    for question in ("__chapter__|Huck Finn — Mark Twain|Chapter XXXI",
+                     "__chapter_q__|the raft|Huck Finn — Mark Twain|Chapter XXXI",
+                     ITEM["question"]):
+        passages, _ = ablation.retrieved_passages(question)
+        assert [len(p["text"]) for p in passages] == [config.SEARCH_HIT_CHARS]
+
+
 def test_retrieve_answer_with_no_hits_refuses_instead_of_calling_the_model(captured_llm, monkeypatch):
     monkeypatch.setattr(ablation, "library_search_both", lambda q, k=4: [])
     r = ablation.run_retrieve_answer(ITEM)
@@ -346,8 +359,9 @@ def test_artifact_table_carries_every_condition_and_flags_the_pre_check():
 
 
 def test_corpus_restriction_accepts_the_book_keyword_act_passes(monkeypatch, tmp_path):
-    """act() passes book= on every search since ADR-013; the restricted
-    search_both must accept and forward it (review of #49: TypeError)."""
+    """act() passes book= on every search since ADR-013, and cards_k= since
+    the card budget; the restricted search_both must accept and forward both
+    (review of #49: TypeError)."""
     import ask_your_library.nodes as nodes
     seen = []
     monkeypatch.setattr(ablation, "corpus_search", lambda corpus, query, k, book=None: seen.append((corpus, query, k, book)) or [])
@@ -360,4 +374,8 @@ def test_corpus_restriction_accepts_the_book_keyword_act_passes(monkeypatch, tmp
                    "scratchpad_path": str(scratchpad)})
         nodes.act({"current_query": "plain", "steps_taken": 1, "read_chapters": [], "scratchpad_path": str(scratchpad),
                    "clarify_chosen": "Chosen — B"})
-    assert seen == [("cards", "plain", 4, None), ("cards", "why", 4, "Some Book — A"), ("cards", "plain", 4, "Chosen — B")]
+    # the cards corpus gets the agent's card budget, on a search and on a probe alike
+    from ask_your_library.library import CARD_SLOTS
+    budget = CARD_SLOTS
+    assert seen == [("cards", "plain", budget, None), ("cards", "why", budget, "Some Book — A"),
+                    ("cards", "plain", budget, "Chosen — B")]

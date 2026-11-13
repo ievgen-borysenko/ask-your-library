@@ -28,6 +28,27 @@ log = logging.getLogger(__name__)
 CANDIDATES_PER_LIST = 20  # candidates taken from each search before fusion
 RRF_K = 60                # standard RRF constant
 
+# Book cards a search step of the agent is shown (`search_both(..., cards_k=)`;
+# transcripts keep `k`). Cards at rank 3-4 were a large share of what `observe`
+# read and almost never the evidence it kept, and `observe`'s time is its
+# input. Not a setting, for the reason `nodes.DROPPED_QUOTES_SHOWN` gives: it
+# is a shape of the prompt the eval numbers are measured on, and the code stamp
+# in the eval fingerprint covers a constant. The retrieval eval imports it, so
+# its window is the agent's window.
+CARD_SLOTS = 2
+# A step of a run whose plan is "identify" (which book is this?) keeps four
+# cards. The answer to such a question is a book, and a card is often the one
+# passage that names the book a vague description fits: with two, the third and
+# fourth candidate never reach `observe` and the clarify loses them (measured:
+# a two-book clarify lost its second book, a gothic-novel clarify lost its
+# second candidate and was not asked at all).
+IDENTIFY_CARD_SLOTS = 4
+
+
+def card_slots(mode: str | None) -> int:
+    """The card budget of one search step for the run's plan mode."""
+    return IDENTIFY_CARD_SLOTS if mode == "identify" else CARD_SLOTS
+
 _embedder = None
 _checked_tables: set[str] = set()
 _reported_missing: set[str] = set()
@@ -180,7 +201,8 @@ def _search_corpus(table, corpus: str, query: str, vector: list[float],
     return hits
 
 
-def search_both(query: str, k: int = 4, book: str | None = None) -> list[dict]:
+def search_both(query: str, k: int = 4, book: str | None = None,
+                cards_k: int | None = None) -> list[dict]:
     """Cards + transcripts in one call (no per-corpus routing yet).
 
     Two `search` calls embedded the query twice and opened LanceDB twice on
@@ -188,6 +210,11 @@ def search_both(query: str, k: int = 4, book: str | None = None) -> list[dict]:
     embedding, in the same order and for the same hits. The query is still
     embedded last, after the tables are found and their index fingerprints
     checked, so a missing corpus (or a whole missing index) costs no embedding.
+
+    `k` is per corpus; `cards_k`, when given, is the cards' own budget (the
+    agent passes `CARD_SLOTS`). None means `k` for both, as it always was. The
+    order stays cards, then transcripts: the order a step SHOWS its passages
+    in is `act`'s concern, not retrieval's.
     """
     db = lancedb.connect(DB_PATH)
     tables = [(corpus, open_table(db, TABLES[corpus]))
@@ -197,7 +224,8 @@ def search_both(query: str, k: int = 4, book: str | None = None) -> list[dict]:
     vector = embed_query(query)
     hits: list[dict] = []
     for corpus, table in tables:
-        hits += _search_corpus(table, corpus, query, vector, k, book)
+        budget = cards_k if corpus == "cards" and cards_k is not None else k
+        hits += _search_corpus(table, corpus, query, vector, budget, book)
     return hits
 
 

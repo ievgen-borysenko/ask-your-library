@@ -60,8 +60,10 @@ Status: accepted.
 
 `library.search` runs a vector search (bge-m3 through Ollama, 1024 dimensions) and a BM25/FTS
 search, twenty candidates each, and fuses the two lists with Reciprocal Rank Fusion written out in
-`library.py` (`RRF_K = 60`); `search_both` gives the agent four card and four transcript hits per
-step, and a broken FTS index degrades to vector-only with a warning. LanceDB's built-in hybrid
+`library.py` (`RRF_K = 60`); `search_both` gives the agent four transcript hits per step and,
+since 2026-11-09, two card hits, four in an `identify` run (four always before; ADR-005's
+amendment of that date), and a broken FTS
+index degrades to vector-only with a warning. LanceDB's built-in hybrid
 reranker was less code but ties the scoring to the library's API; a cross-encoder reranker was left
 out because nothing had measured ranking as the weak link.
 
@@ -303,8 +305,10 @@ unchanged — a copy never makes a step drier than its dropped quotes do.
 
 Status: accepted; the size of the budget was revised by ADR-012 and its MEANING by ADR-025
 (2026-09-17), 2026-09-16 added one number to what `reflect` sees, 2026-10-02 replaced the
-note `reflect` decided on with the verified quote, and 2026-11-09 showed `reflect` the searches
-the run already made (see below). The budget itself is unchanged.
+note `reflect` decided on with the verified quote, 2026-11-09 showed `reflect` the searches
+the run already made, and a second amendment of 2026-11-09 set how many book cards `observe` is
+shown, in what order and how often (see below). The per-hit budget's two numbers are unchanged;
+since the same amendment a step gets one of them by its action, not by how many hits it returned.
 
 Raw hits never reach `plan`, `reflect` or `synthesize`. `observe` receives one `<result>` block
 per hit, carrying that hit's id, book and section, with the text cut to `SEARCH_HIT_CHARS`
@@ -423,6 +427,55 @@ paraphrasing one up to the step limit, never shown what had run. The queries are
 passage may have steered, so the block is treated as a passage is — instruction-like lines redacted
 by `sanitize_context`, then `data_block`'s neutralization — and its sinks are the ones above: a
 proposal still goes through `str_field`, the marker guard and the repeat check of #163.
+
+Amended 2026-11-09 (#32's scope, cost and latency): **`observe` sees at most two book cards per
+step, transcripts first, and a card once per run unless a quote of its book was refused.**
+`observe`'s time is its input, and every search step showed four cards and four transcript chunks,
+cards first: the cards at rank 3-4 were a large share of that input and almost never the evidence
+kept, the same card came back step after step, and a step whose cards already answered left its
+own book text unquoted. Three changes, all in `act`, before the hit ids are given: `search_both`
+takes a card budget (`cards_k`) and the agent asks for `CARD_SLOTS` = 2 cards and 4 transcripts on
+a search step and on a coverage probe, `IDENTIFY_CARD_SLOTS` = 4 cards when the plan's mode is
+`identify` (the answer is a book, and with two cards a clarify lost its second candidate); a
+search step orders its passages transcripts first (stable inside each corpus; the clarify top-up
+of ADR-006 still reads each step's cards first); and a card whose book, section and text an
+earlier step already showed
+(`hits_log`, compared on the text as it stores it) is withheld. The exemption is #29's retry rule
+applied to cards: a card of a book named in the refusals `observe` is shown (`dropped_quotes`,
+exactly or as a bare title) comes back, so a paraphrased card line can be copied the next time.
+One reset, at a clarify the reader answered with a book: retrieval is limited to that book from
+then on (ADR-013), and a candidate offered from the retrieval window (ADR-006) may have had its card
+shown only before the choice, among the other candidates' cards. A card of the chosen book counts
+as shown only from the steps after the answer, so the first step after the resume shows it again,
+and from then on it is shown once like any card. The boundary is one integer, `clarify_step` (the
+`steps_taken` at which the question was asked), written by the `clarify` node on the resume, so
+its event carries that one key more; a state without it (a run checkpointed before the node wrote
+it) counts every card, as the rule did before the reset.
+One floor: a step whose retrieval returned only cards already shown withholds nothing and shows
+them, as every step did before the rule. A cards-only step (the ablation's `cards-only`
+condition, a search inside a book whose only row is its card) would otherwise turn a retrieval
+that found something into an empty observation, advance the dry streak and could stop the run.
+And the budget follows the action: `act` gave a step of exactly one hit `CHAPTER_HIT_CHARS`, so a
+search left with one passage after its shown card was withheld had its budget lifted from
+`SEARCH_HIT_CHARS` to `CHAPTER_HIT_CHARS` (a 4,000-character chunk of an index built before ADR-025
+reached `observe` whole). `act` and `observe` now take the budget from one function of the step's
+`current_query` (`nodes.step_hit_limit`): `CHAPTER_HIT_CHARS` for a chapter read and
+`SEARCH_HIT_CHARS` for a search or a coverage probe of any number of hits, one included. A card
+comes only from the latter, so `hits_log` holds every card at `SEARCH_HIT_CHARS`, and the card
+comparison above is made on that much text.
+A known limit: "shown" means written to `hits_log`, not read, so a card shown on a step whose
+`observe` returned no usable JSON (nothing kept from that step) is withheld on every later step
+all the same; measured on one question (c06), where it cost the second half of the answer.
+Transcripts are never withheld. What this ADR decides is unchanged: the per-hit budget, applied
+once in `act`, the gate reading the hits of the step, and only evidence travelling on. No new text
+reaches any prompt (`observe` sees a subset of what it saw, in another order), and the one decision
+model text now drives, which already-shown card comes back, can only bring back a passage the run
+has already retrieved and shown. The withheld cards are named in the scratchpad and in no state
+channel or event (`clarify_step` records when the reader answered, not which cards were withheld).
+One consequence outside `observe`: ADR-013's coverage gate counts and orders the uncovered books
+by their passages in `hits_log`, which now holds fewer cards, no repeated ones and transcripts
+first, so which uncovered named book it probes first can change. The retrieval eval measures the same window (top-2 cards + top-4 transcripts;
+top-4 cards for a golden `identify` question).
 
 ## ADR-006: Clarify as an interrupt with a candidate list and a code resolver
 
@@ -1156,7 +1209,8 @@ a mixed index nothing could detect (ADR-020, ADR-024).
 **The constraint B is written under, which is the whole of its risk.** The window IS the
 provenance haystack. ADR-004 guarantees that a quote is a contiguous run of the passage it is
 pinned to, and that guarantee rests on `act` and `observe` cutting one string the same way
-(`per_hit_limit`). So the window is computed ONCE, in `act`, and the text it produces is what goes
+(`per_hit_limit` then, by hit count; since 2026-11-09 `step_hit_limit`, by the step's action, read
+off the same `current_query` in both). So the window is computed ONCE, in `act`, and the text it produces is what goes
 into `hits_log`, the scratchpad and the observe prompt; nothing downstream recomputes it. A window
 recomputed in `observe` — or later in `validate`, over a chapter that has since been re-ingested —
 would turn quotes honestly copied out of one window into quotes broken against another, which is

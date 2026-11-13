@@ -589,7 +589,7 @@ def test_the_coverage_probe_carries_a_piped_book_key_too(monkeypatch, tmp_path):
 
     searched = []
     monkeypatch.setattr(nodes, "search_both",
-                        lambda query, k, book=None: searched.append(book) or [])
+                        lambda query, k, book=None, cards_k=None: searched.append(book) or [])
     llm.reset_usage()
     scratchpad = tmp_path / "scratch.md"
     scratchpad.write_text("")

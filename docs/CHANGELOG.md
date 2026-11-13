@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+- **`observe` is shown two book cards per step, transcripts first, each card once.** Every search
+  step showed `observe` four book cards and four transcript chunks, cards first, and `observe`'s
+  time is its input: the cards at rank 3-4 were a large share of what it read and almost never
+  the evidence it kept, the same card came back step after step, and a step whose cards already
+  answered left its own book text unquoted. A search step and a coverage probe now retrieve two
+  cards (`CARD_SLOTS`) and four transcripts, four cards when the plan's mode is `identify`
+  (`IDENTIFY_CARD_SLOTS`: with two, a clarify lost its second candidate book); a search step shows the transcripts first, and the hit
+  ids, the scratchpad, `hits_log` and the `observe` prompt follow that order (the books a clarify
+  offers beyond the evidence are still read from each step's cards before its transcripts); and a card an earlier
+  step already showed is not shown again, unless the gate refused a quote of its book, which gets
+  its cards back so a paraphrased line can be copied (the #29 retry rule). A step that retrieved
+  only cards already shown withholds nothing and shows them, so a cards-only step that found
+  something is never an empty observation that advances the dry streak. The per-hit budget follows
+  the step's action, not its hit count: a search or a coverage probe that returned (or, after
+  withholding, shows) one passage is cut at `SEARCH_HIT_CHARS` like any search, where a step of
+  one hit used to get `CHAPTER_HIT_CHARS`; a chapter read keeps `CHAPTER_HIT_CHARS`. After a clarify the
+  reader answered with a book, a card of that book shown only before the answer (a candidate
+  offered from the retrieval window, its card shown among the other candidates') is shown once more
+  on the first step after the resume, then once per run like any card. Transcripts are shown
+  again as before. The scratchpad names the cards not shown again; one state channel was added,
+  `clarify_step` (the step at which the clarify was asked), written by the `clarify` node, whose
+  event carries it; a run checkpointed before it existed counts every card shown. The coverage
+  gate's probe of an uncovered named book (ADR-013) counts and orders books by their passages in
+  `hits_log`, which now holds fewer cards, no repeated ones and transcripts first, so which such
+  book it probes first can change. A card shown on a step whose `observe` returned no usable JSON
+  is withheld afterwards all the same (a known limit, measured on one question). The retrieval eval measures the same window (top-2 cards + top-4 transcripts,
+  presence@6; an `identify` question of the golden set top-4 cards, presence@8), and the ablation's single-corpus conditions keep the card budget. The prompts and
+  the provenance gate are unchanged. Measurements are in the PR; in #32's scope (cost and latency).
 - **An EPUB's text is capped at 20 million characters, as a PDF's is, and an EPUB's or a PDF's
   labels at 500 (#124).** The archive caps (64 MiB a file, 512 MiB in all) bounded the bytes, not
   the text they decode to, so one EPUB of text alone could hand the embedder about 27 times what a
