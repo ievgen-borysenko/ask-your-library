@@ -77,7 +77,8 @@ agent queries and in what it sees of a hit, not in the ranking, which is why no 
 ## ADR-004: Quote provenance checked in code against the passage the quote was pinned to
 
 Status: accepted (rewritten in the release pass of 2026-09-05; amended twice on 2026-09-16, see
-below: the card split, then the move of the check to the evidence gate).
+below: the card split, then the move of the check to the evidence gate; amended again on
+2026-09-17 (#29) and 2026-11-01 (#163)).
 
 `act` gives every retrieved passage a stable id (`s<step>h<n>`) and stores it in `state.hits_log`
 exactly as `observe` will see it; `observe` must name the id a quote was copied from; the book and
@@ -708,7 +709,8 @@ ADR-013.
 
 ## ADR-013: A book filter after clarify and a deterministic coverage gate
 
-Status: accepted in its second variant (2026-09-06); the first variant was measured and rejected.
+Status: accepted in its second variant (2026-09-06); the first variant was measured and rejected;
+amended 2026-11-01 (#163).
 
 `library.search` takes a `book` filter, so that after a resolved clarify the retrieval itself is
 limited to the chosen book, and `reflect` spends one extra search before it may stop with evidence
@@ -1828,7 +1830,7 @@ the demo build (`scripts/ingest_demo_corpus.py`) has no separate drop, its whole
 through `rebuild_table` and is stamped at the end, so its `--book` upsert after such a rebuild,
 interrupted with another model of the same width, is still judged against the old stamp. That gap,
 and the reader side, which reads such an unstamped table on dims alone under an info line saying
-it was built before stamps existed, are tracked separately in a follow-up issue.
+it was built before stamps existed, are tracked separately in a follow-up issue, #157.
 Measurement: the issue's case replayed as a test (a fake 4-dimension embedder whose vector sign
 marks the model, the publish copy raising `KeyboardInterrupt`), no eval report.
 

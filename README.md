@@ -37,7 +37,8 @@ badge, and the evidence passage under it. Recorded on 2026-09-10, before 16.09 �
 book-card matches
 apart from traced book-text quotes now (they are still checked, and still counted), the evidence
 passages say which kind they are, the watermark under the composer is different, and the first
-frame is the login page rather than the chat. Both GIFs are due a re-record
+frame is the login page rather than the chat, with the field labelled Email address where 0.5.2
+says Username. Both GIFs are due a re-record
 ([`docs/backlog.md`](docs/backlog.md)).*
 
 ## One question, end to end
@@ -85,7 +86,7 @@ no account and no key. The hosted mode answers on [OpenRouter](https://openroute
 needs its key. Then one command installs `ayl`:
 
 ```bash
-uv tool install git+https://github.com/ievgen-borysenko/ask-your-library@v0.5.1
+uv tool install git+https://github.com/ievgen-borysenko/ask-your-library@v0.5.2
 uv tool update-shell                     # once, only if `ayl` is not found; then open a new terminal
 ayl init --dry-run                       # the plan, printed; nothing is changed
 ayl init                                 # the models (mostly download time) and the configuration
@@ -103,7 +104,7 @@ the `config.env` it wrote; that mode is billed per question ([`docs/cost.md`](do
 The web chat is an extra, so a tool install adds it by installing again with it:
 
 ```bash
-uv tool install --force 'ask-your-library[ui] @ git+https://github.com/ievgen-borysenko/ask-your-library@v0.5.1'
+uv tool install --force 'ask-your-library[ui] @ git+https://github.com/ievgen-borysenko/ask-your-library@v0.5.2'
 AYL_ALLOW_DEFAULT_LOGIN=1 ayl ui         # on 127.0.0.1; login admin / change-me, a throwaway demo
 ```
 
@@ -202,8 +203,8 @@ routing conditions are drawn node by node, with the decision records behind them
 
 Measured on 2026-09-07 (the two `v0.2.0-rc1` columns) and 2026-09-05 (`v0.1.0`) on Sonnet 4.6, the
 former hosted default — before the catalogue path, the evidence gate and the card-only split (#29),
-the re-chunk (#28) and the `reflect` change (#93), and not re-run since; six releases, `v0.2.0` to
-`v0.5.1`, have followed.
+the re-chunk (#28) and the `reflect` change (#93), and not re-run since; seven releases, `v0.2.0` to
+`v0.5.2`, have followed.
 
 | Measurement | Core v0.2.0-rc1 (11 questions, 2,500 + gate) | Extended v0.1.0 | Extended v0.2.0-rc1 |
 |---|---|---|---|
@@ -324,6 +325,11 @@ localhost demo with a published list of what it does not do
 ([`docs/known-limits.md`](docs/known-limits.md)) — read it the way you would read a worked
 example, not the way you would adopt a product.
 
+`v0.5.2` is the second patch of `v0.5.0`: the search loop no longer runs a search it already ran
+nor keeps a quote twice, and shows `observe` fewer book cards; the EPUB reader keeps text it used
+to lose and caps a book's text as the PDF reader does, and both readers cut a label at 500
+characters; the macOS installer builds on a Python the locked wheels cover; and the locked
+dependencies move past the open advisories.
 `v0.5.1` is a patch of `v0.5.0`: a credential in an endpoint's URL is kept out of the failure text
 the CLI, the web chat, the books ledger and the eval reports carry (#107), and an interrupted
 index rebuild no longer loses the only complete copy of a table (ADR-031). `v0.5.0`: installable

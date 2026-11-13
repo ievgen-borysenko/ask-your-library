@@ -3,11 +3,11 @@
 The harnesses, the golden sets and the runs behind the results table; the README carries the
 same table without this text around it.
 
-Every run reported **on this page** was produced on the **hosted** configuration
+Every run in the **tables on this page** was produced on the **hosted** configuration
 (`LLM_BACKEND=openrouter`, `anthropic/claude-sonnet-4.6`), which is not the shipped default: the
 default is local and free, a different answering model and therefore a different system, and no
-number on this page describes it. [`eval-results/`](eval-results/) is not hosted-only, and the four
-local agent-eval reports there say so in their own provenance headers:
+number in them describes it. [`eval-results/`](eval-results/) is not hosted-only, and the four
+local reports of September there say so in their own provenance headers:
 [`2026-09-10-local-models.md`](eval-results/2026-09-10-local-models.md), two `qwen2.5` sizes on
 `LLM_BACKEND=ollama`;
 [`2026-09-10-first-question-local.md`](eval-results/2026-09-10-first-question-local.md), one local
@@ -23,8 +23,10 @@ hosted reports on models other than Sonnet 4.6:
 [`2026-09-18-hosted-models.md`](eval-results/2026-09-18-hosted-models.md), which chose the hosted
 default of 18.09, and
 [`2026-09-19-hosted-default-quality.md`](eval-results/2026-09-19-hosted-default-quality.md), that
-default at `--repeat 3` with its answers graded by hand. The rule that separates the two kinds at
-a glance is the cost line: a hosted run carries its model's configured rates (`$3.0/M in, $15.0/M
+default at `--repeat 3` with its answers graded by hand. Nor does the re-measure of both shipped
+configurations on `6d73fc3` (2026-11-02, before #179 and #184):
+[`eval-results/2026-11-02-rerun/`](eval-results/2026-11-02-rerun/README.md). The rule that
+separates the two kinds at a glance is the cost line: a hosted run carries its model's configured rates (`$3.0/M in, $15.0/M
 out` on every Sonnet 4.6 run here), a local one `$0.0/M
 in, $0.0/M out`. From this release the harness fingerprint also names the backend outright — `model
 <name> via <backend>` — but every report committed before it prints `model <name>` alone, so for
@@ -328,7 +330,7 @@ four research items — one evidence item fewer on the London question — and $
 which the six catalogue items again cost $0.0136
 ([`eval-results/2026-09-10-catalogue-set.md`](eval-results/2026-09-10-catalogue-set.md)).
 
-Every number on this page was measured **once**, and a single sample of a system whose output
+Every number in the tables on this page was measured **once**, and a single sample of a system whose output
 varies is not a number with a spread: on any of these rows a difference of one or two questions
 between two runs is not a measured effect, which is why the ablation table below says so in its own
 limits and why the reports state the count of runs in their fingerprints. From this release that is
@@ -351,11 +353,11 @@ behaviour spread it was built for has to be measured on a hosted run**, where th
 core and extended sets at `--repeat 3`, behaviour and hand grades per attempt).
 Nothing in the tables below has been re-measured, and the numbers in them are what they always were.
 
-**Every number on this page was produced against the old chunker.** On 2026-09-17 (#28,
+**Every number in the tables on this page was produced against the old chunker.** On 2026-09-17 (#28,
 [ADR-025](adr/README.md)) transcript chunks went from a 4,000-character target to 2,400, so that a
 hit is no longer longer than the window `observe` reads it through — 90.3% of them were. That
-changes what is retrieved and what is ranked, on every question. No run in
-[`eval-results/`](eval-results/) has been re-made against a re-chunked index, and none was re-run
+changes what is retrieved and what is ranked, on every question. No run behind these tables, all in
+[`eval-results/`](eval-results/), has been re-made against a re-chunked index, and none was re-run
 to change a published number; the tables below describe the system as it was on the index they were
 measured on. **The comparison that matters has since been made, on the local default and not on
 this page's configuration**:

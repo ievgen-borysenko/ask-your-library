@@ -131,7 +131,7 @@ quote provenance: OK: all 4 quotes found verbatim in the passages they cite
 - **Hybrid fusion, not vector distance alone, ordered the window.** `s1h8` has the closest vector
   distance of all eight hits (0.7771) yet lands last after fusion, because the keyword side
   ranked the cards higher. It still made the 8-hit window, which is what the retrieval eval
-  measures.
+  measured then (two cards and four transcripts for a question like this since 2026-11-09, ADR-005).
 - **One step was enough here.** For a question with one clear target that is the right
   behaviour; the same "enough after one step" reflex is what makes the agent under-clarify on
   ambiguous identify questions (see [Known limits](../known-limits.md)), and what stops it going after the

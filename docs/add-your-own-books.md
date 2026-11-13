@@ -32,9 +32,9 @@ matter block or a title line; a folder named `*.epub` (an unpacked EPUB, the way
 one: zip it, or export it as a file; nothing inside it is read as a book of its own) and a folder
 named `*.pdf` (a PDF is a single file; nothing inside the folder is read either); an EPUB that is
 refused ([below](#an-epub)): DRM-protected, malformed, with an unsafe member path or an XML entity
-declaration in its package files, not readable in the encoding a document declares, over the
-archive limits, or without text; and a PDF that is refused ([below](#a-pdf)): without a text layer
-(a scan), encrypted, unreadable, or over its limits.
+declaration in its package files, not readable in the encoding a document declares or holding a
+NUL, over the archive limits, or without text; and a PDF that is refused ([below](#a-pdf)):
+without a text layer (a scan), encrypted, unreadable, or over its limits.
 A link is not followed, so nothing outside the folder is ever read or embedded; copy the file in
 if you want it indexed. A file skipped for any of these reasons never aborts the run — the
 others are still indexed, and every skip is named on stderr (hidden ones as a single line with
@@ -50,9 +50,10 @@ first run or a `--rebuild` publishes nothing (after a failed `--rebuild`, restor
 
 Re-running the command re-indexes, **one book at a time**. Each book is resolved to a stable
 `book_id` in the index's `books` ledger, its rows are deleted by that id and the new ones
-appended, and its ledger row is written before and after — so a run that adds one book to a
-library of three hundred touches that book alone, and the other 299 are neither read nor
-rewritten. The first build of a table is still a single staged publish (nothing to update yet).
+appended, and its ledger row is written before and after — so a run that adds a folder of one book
+to an index of three hundred touches that book alone, and the rows of the other 299 are not
+rewritten (the full-text index is still rebuilt over all of them, see below). A run over a folder reads and re-embeds every book in it. The first build of
+a table is still a single staged publish (nothing to update yet).
 A staged publish builds `<table>__staging`, drops the live table and copies staging over; one
 interrupted there (an error, a full disk, Ctrl-C, a kill) is finished by the next `ayl add`, which
 promotes the staging copy when the live table does not open or when the marker the publish wrote
@@ -292,8 +293,10 @@ paragraphs, scripts, styles, SVG and images are left out, whitespace is normalis
 control and invisible characters the text path strips are stripped here too. A document may
 declare its encoding in its XML prolog (`windows-1252`, say); one that does not decode as it
 declares, or declares UTF-7 or a codec that is not a character set, refuses the book rather than
-indexing mojibake. A DTD in a content document is dropped: the HTML parser never expands an entity
-it declares, so it is not refused there, only in the package files below.
+indexing mojibake. So does a document whose decoded text holds a NUL: a UTF-16 or UTF-32 file
+without a byte-order mark, its usual source, would otherwise be indexed as its raw markup. A DTD
+in a content document is dropped: the HTML parser never expands an entity it declares, so it is
+not refused there, only in the package files below.
 
 **Refused, with one line naming the file and why** — never a line of its text — and the rest of
 the folder is indexed as usual:
@@ -306,7 +309,7 @@ the folder is indexed as usual:
 - **Unsafe**: an archive member whose path is absolute or climbs out with `..`, and a package
   file (`container.xml`, the package document, `toc.ncx`, `encryption.xml`) that declares an XML
   entity (the "billion laughs" shape; a book has no need of one).
-- **Not readable in its declared encoding**: see above.
+- **Not readable in its declared encoding**, or **holding a NUL**: see above.
 - **Could not be read**: anything else that goes wrong reading the file. The line names the kind
   of error and nothing of what it said, and the rest of the folder is indexed as usual.
 - **Too large**: more than 10,000 files in the archive, a directory over 16 MiB, any one file
@@ -373,7 +376,8 @@ the folder is indexed as usual:
   what may be done with it. No password is tried, the empty one included, and nothing is
   decrypted; save an unrestricted copy if you have the right to.
 - **Could not be read**: anything the library raises while it reads the file — not a PDF, cut
-  short, a damaged object, a reference cycle, a stream that inflates past **16 MiB**, a font map
+  short, a damaged object, a reference cycle, a stream that inflates past **16 MiB**, chains more than
+  **4** filters or passes more than **128 MiB** through its decoding, a font map
   past the library's own limits, an array or a dictionary of more than **100,000** entries, a
   page whose instructions hold more than **2 million** tokens (a vector figure of more than about
   650,000 segments drawn on the page itself; one drawn as a form is skipped and the page read).

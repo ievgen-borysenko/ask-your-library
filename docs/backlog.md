@@ -46,6 +46,10 @@ open ones often refer to them.
   and an interrupted rebuild that no longer loses the only complete copy of a table (ADR-031),
   both reproduced by the audits of 04.10, and the documentation brought in line with the 0.5.0
   code.
+- 0.5.2 (2026-11-13) is a patch of everything merged since 0.5.1: no repeated searches or quotes
+  and fewer book cards per step (#163, #179, #184), the EPUB extraction fixes (#154, #155, #156)
+  and the EPUB text and label caps (#124), the rebuild stamp that goes with its table (#147), the
+  installer's Python range (#158), and the locked dependencies past the open advisories.
 
 ## Agent behaviour
 
@@ -200,7 +204,7 @@ open ones often refer to them.
   key, `contains` fallback), and no scalar index exists on `book` or `section` (the only index is
   FTS on `text`). A scalar index on those columns, or skipping the fallback when the exact query
   for the first variant already found the book under another section, is future work. The row
-  cap (1,000) still truncates a single section longer than that (logged) and, on the bare-title
+  cap (1,700) still truncates a single section longer than that (logged) and, on the bare-title
   fallback, is refused as `ambiguous` because candidate books may have been cut.
 - **The egress test's "Ollama is not running" port is reserved on UDP, which is not the same as
   owning it.** `tests/egress_guard.py`'s `reserved_loopback_port` needs two things at once: a port
@@ -237,7 +241,7 @@ open ones often refer to them.
   inside the SDK's own transport is an `httpx2.TimeoutException` and the `httpx.TimeoutException`
   arm of `CallTimeout` cannot see it. Harmless today — the SDK wraps such a timeout in
   `APITimeoutError`, which is the other arm and is what actually fires — but the comment at
-  `llm.py:~228` ("the bare httpx class is kept beside it for a timeout raised before the SDK wraps
+  `llm.py:~271` ("the bare httpx class is kept beside it for a timeout raised before the SDK wraps
   it") is false as written. The same seam is worth a second look next to it: the `httpx.Timeout`
   object `llm.llm()` builds is stored on the SDK's client unconverted (it is not an
   `httpx2.Timeout`), so whether the per-attempt bound is honoured rests on duck typing across two
@@ -269,7 +273,7 @@ open ones often refer to them.
   chats. The source-type half of this item closed on 16.09 — every passage now says "book text" or
   "book card (a model-written summary)", and a quote that matched only a card is counted apart from
   the traced ones (`provenance.validate`, `card_only`). The rest is not done: an opened passage
-  still does not say that it is the first 1,200 characters of a longer chunk, and a resumed chat
+  still does not say that it is the first 2,500 characters of a longer chunk, and a resumed chat
   has no passages at all, because `RunView` lives for one question and nothing persists the
   `hits_log` beside the message.
 - **On a phone, the answer after a clarify is gone before it can be read.** Measured on a screen
@@ -442,8 +446,9 @@ open ones often refer to them.
   chunks, median 2,304, longest 2,400, 0% over the window, +55% rows on the prepared texts), and a
   `read_chapter` that names what it is looking for is read around the best lexical match inside up
   to `CHAPTER_SCAN_CHARS` instead of from the chapter's head. The window is computed once in `act`
-  and stored in `hits_log`, because it is the provenance haystack. Behaviour: not measured, see the
-  open item above.
+  and stored in `hits_log`, because it is the provenance haystack. Behaviour: measured on
+  2026-09-18, see
+  [`eval-results/2026-09-18-rechunk-and-observe-feedback.md`](eval-results/2026-09-18-rechunk-and-observe-feedback.md).
 - ADR-013: `library.search(book=...)` filters both lists; after a resolved clarify retrieval is
   limited to the chosen book; a deterministic coverage gate in `reflect` spends one extra search
   before "enough"/"clarify" when the evidence names at most one book. The first variant (probe the

@@ -12,9 +12,9 @@ and, in the default configuration, the answering model too. No account and no AP
 [Fully local, no account](configuration.md#fully-local-no-account).
 
 ```bash
-uv tool install git+https://github.com/ievgen-borysenko/ask-your-library@v0.5.1
+uv tool install git+https://github.com/ievgen-borysenko/ask-your-library@v0.5.2
 uv tool update-shell                     # once, only if `ayl` is not found; then open a new terminal
-ayl --version                            # ayl 0.5.1
+ayl --version                            # ayl 0.5.2
 ```
 
 `uv tool install` puts `ayl` (and the two older names, `ask-library` and `ayl-add`) in uv's tool
@@ -23,7 +23,7 @@ shell's `PATH` when it is not there yet. To move to a later release, run the sam
 its tag and `--force`. The web chat is the `ui` extra, added by installing again with it:
 
 ```bash
-uv tool install --force 'ask-your-library[ui] @ git+https://github.com/ievgen-borysenko/ask-your-library@v0.5.1'
+uv tool install --force 'ask-your-library[ui] @ git+https://github.com/ievgen-borysenko/ask-your-library@v0.5.2'
 ```
 
 `ayl ui` without the extra says exactly this line. **From a clone** — for the demo library, the
