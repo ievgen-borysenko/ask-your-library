@@ -24,6 +24,68 @@ it replaced, `ask-library` and `ayl-add`, are still installed and still run the 
 prints one deprecation line and is removed at `0.6.0`, so a script of your own has one minor
 release to change the name it types.
 
+## From 0.5.1 to 0.5.2
+
+A patch: nothing to migrate and nothing to rebuild. Upgrade the install (`uv tool install --force
+git+https://github.com/ievgen-borysenko/ask-your-library@v0.5.2`, or `git pull && uv sync` in a
+clone); an index 0.5.1 built, its stamps and `config.env` are read as they are, because the
+chunker and the row schema are the ones 0.5.1 had. What an existing install meets:
+
+1. **Python 3.11.5 or later.** `requires-python` is now `>=3.11.5`: the EPUB reader's DOCTYPE
+   match needs it, and 3.11.0 to 3.11.4 matched it wrongly. On a Mac, `scripts/install-mac.sh`
+   builds a clone's environment on 3.11.5 to 3.14, the series the locked wheels cover (#158); a
+   plain `uv sync` on an interpreter newer than 3.14 turns into source builds
+   ([quick start](quick-start.md#install)).
+2. **EPUB books that 0.5.1 read wrongly are read again by the next `ayl add <folder>`.** A
+   chapter whose HTML leaves out `</head>` (#154), a document with a UTF-32 byte-order mark (#155)
+   and a DOCTYPE in lowercase, outside the prolog or with `]>` in a quoted value (#156) lost text,
+   let markup in as text, or refused the book under 0.5.1. `ayl add` reads and re-embeds every
+   book of the folder it is given on every run, so a plain `ayl add <folder>` reads them again;
+   `--rebuild` is not needed.
+3. **Some files are now refused, and a book 0.5.1 indexed from one keeps its rows.** An EPUB
+   document whose text holds a NUL (a UTF-16 or UTF-32 file without a byte-order mark, or a stray
+   NUL in UTF-8, which 0.5.1 stripped), an EPUB of more than 20 million characters of text (#124),
+   and a PDF over one of the caps 0.5.2 sets on the PDF library (#159, #161, #165;
+   [A PDF](add-your-own-books.md#a-pdf) lists them) are refused, each on one line. These caps are
+   fixed in the code, not settings. A refused file is not part of the run, so the rows an earlier
+   run wrote for it stay and keep answering. To take them out, move the file out of the folder
+   and run `ayl add <folder> --prune`, with at least one readable book left in the folder (a run
+   in which no book reads stops before it prunes anything). An EPUB refused for a NUL is kept by
+   saving that document as UTF-8 in an EPUB editor, with any NUL taken out, and running
+   `ayl add <folder>` again.
+4. **A label over 500 characters is cut (#124).** A title, an author line or a contents or
+   outline entry longer than that is indexed on the next run as its first 490 characters, `… ` and
+   eight hex characters of a digest of the whole label. The file is the same, so the book keeps
+   its id, and its rows are replaced.
+5. **A rebuild 0.5.1 did not finish still carries the old stamp (#147).** A `--rebuild` now drops
+   the table's stamp with the table, so one interrupted under 0.5.2 leaves its staging copy
+   unstamped, and the next plain `ayl add` refuses it, naming
+   `ayl add <folder> --rebuild --backup <dir>`. A rebuild that 0.5.1 started and did not finish
+   (stopped while embedding, in its publish copy, or before its final stamp) still carries the
+   stamp of the model it replaced: run that `--rebuild` again rather than a plain `ayl add`.
+   `ayl backup` over an index whose interrupted rebuild cannot be finished now stops on the one
+   line `ayl add` prints and exits 1 ([from 0.5.0 to 0.5.1](#from-050-to-051), item 2).
+6. **The web chat's login field reads Username (#139).** On its next start `ayl ui` replaces the
+   translation and the welcome page in the web chat's app root (`$AYL_HOME/ui` by default) when
+   the copy there is the one 0.5.0 or 0.5.1 wrote; a copy you edited is left alone, with its old
+   wording.
+7. **The demo library, from a clone.** Project Gutenberg regenerated Frankenstein and The Hound of
+   the Baskervilles, two of the six starter books, and Moby Dick and The Odyssey, and 0.5.2 pins
+   their new files (#170, #182). A demo library that is already built needs nothing. A build that
+   still has work to do (one that was interrupted, or `--demo --full` after the starter) checks
+   every cached download against the new pins, and a copy cached before the change (in
+   `~/AskYourLibrary/demo/cache/raw/`, or the clone's `data/raw/` for a build run by hand) stops it
+   on a checksum mismatch naming the file: move that file out of the cache and run the same
+   command again, which downloads it anew.
+8. **The search loop behaves differently, with nothing to migrate.** It no longer runs a search it
+   already ran in the same question, nor keeps a quote it already holds (#163), and it may stop on
+   a new reason, "no new query"; `reflect` is shown the searches already run (#179); and `observe`
+   is shown two book cards per step (four when the question is to identify a book), transcripts
+   first, each card once (#184). The CLI and the web chat name a search that already ran.
+   The Ollama-not-running message is three lines that name the action for this platform (#140),
+   and with `LLM_BACKEND=ollama`, `ayl ask` says on stderr before the first run that a research
+   answer takes minutes (#137); the exit statuses are unchanged.
+
 ## From 0.5.0 to 0.5.1
 
 A patch: nothing to migrate and nothing to rebuild. Upgrade the install (`uv tool install --force
@@ -63,8 +125,8 @@ ships here. What a reader of 0.3.1 meets, in the order it matters:
    same code and print one deprecation line each; they are removed at 0.6.0. A flag of
    `ayl-add` that chose another command (`--doctor`, `--backup`, `--restore`) is its own verb now.
 2. **An install that is not a clone.** `uv tool install
-   git+https://github.com/ievgen-borysenko/ask-your-library@v0.5.1` (0.5.0's patch, the one to
-   install) puts `ayl` on your `PATH` ([quick start](quick-start.md#install)); a clone keeps
+   git+https://github.com/ievgen-borysenko/ask-your-library@v0.5.2` (0.5.0's second patch, the
+   one to install) puts `ayl` on your `PATH` ([quick start](quick-start.md#install)); a clone keeps
    working as before, with `git pull && uv sync`. The demo library and the evals still need a
    clone.
 3. **`AYL_HOME`.** Everything built on this machine — your index, the demo library, the
@@ -495,7 +557,7 @@ uv run ayl backup ~/ayl-backups
 
 # 2. upgrade: from a clone, or as a tool (the tag of the release you want)
 git pull && uv sync
-uv tool install --force git+https://github.com/ievgen-borysenko/ask-your-library@v0.5.1
+uv tool install --force git+https://github.com/ievgen-borysenko/ask-your-library@v0.5.2
 
 # 3. what does the new code think of the old index?
 uv run ayl doctor

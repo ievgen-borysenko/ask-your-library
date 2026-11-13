@@ -48,9 +48,9 @@
   harness's own reports and JSON sidecars, unedited, of the hosted default and the local default on
   the core, extended and catalogue sets at `--repeat 3`, the retriever eval, and the #29 bar on the
   local default at `--repeat 5` (met on both sets: core weakest attempt 9/11 against a floor of 9,
-  catalogue 10/10 in all five), all on `6d73fc3`, that is before #150, #169 and #179 below. Manual
-  correctness is unscored there; the README "Measured" table and its intervals (#131) follow with
-  the grades.
+  catalogue 10/10 in all five), all on `6d73fc3`, that is before #150, #169 and #179 below and
+  #184 above. Manual correctness is unscored there; the README "Measured" table and its intervals
+  (#131) follow with the grades.
 - **`reflect` is shown the searches the run already made (#179).** Since #163 an exact or
   normalised repeat is replaced or stops the loop, but `reflect` had never been shown which searches
   had run, so it wrote paraphrases of them and the loop still ran to the step limit. Its prompt now
@@ -149,9 +149,9 @@
   nothing queued, which used to end the loop with no reason and read as "enough". `observe` keeps
   one copy of each (book, section, normalised quote), and a step whose quotes were all copies
   counts as dry, so two of them end the run at the CRAG gate; a step that also dropped a quote keeps
-  the #29 rule. Prompts are unchanged, and a run without repeats or copies emits the events it
-  always did: `reflect` adds `query_replaced` and `observe` adds `duplicates_skipped` only when they
-  happened, and the CLI and the web UI then name the search that already ran. `act`'s event gains
+  the #29 rule. Its prompts are unchanged (#179 above then lists the searches in `reflect`'s), and
+  a run without repeats or copies emits the events it always did: `reflect` adds `query_replaced`
+  and `observe` adds `duplicates_skipped` only when they happened, and the CLI and the web UI then name the search that already ran. `act`'s event gains
   `searches_run` on every search step, and `RunResult` gains `searches_run` and
   `duplicates_skipped`. The agent eval records every search, the repeats among them, the repeats
   replaced, the quotes skipped and the new passages per step, and reports the totals. A paraphrase
@@ -218,8 +218,8 @@
   0.4.2 to 0.4.8 (PYSEC-2026-4240 / GHSA-fvww-7h3r-vfhp), mcp 1.29.0 to 1.30.0
   (GHSA-84m7-p3x7-pcfv) and multidict 6.7.1 to 6.9.1 (PYSEC-2026-4244 / GHSA-54p9-h82j-f925);
   yarl moves from 1.24.5 to 1.25.1 because the new aiohttp requires it. No dependency declaration
-  in `pyproject.toml` changed; no application behaviour changed, and certifi drops the emSign
-  roots.
+  in `pyproject.toml` changed; no application behaviour changed, and certifi drops one root
+  certificate, emSign ECC Root CA - G3.
 - **The locked PDF library is updated for the open advisories.** `uv.lock` moves pypdf 6.19.0
   to 6.21.3: 6.20.0 and 6.20.1 fix GHSA-39mj-jf6j-2qj3, GHSA-7mh2-4gg2-979f,
   GHSA-9mx8-4j7g-633p and GHSA-qfv9-64jg-mh7p (#159), 6.21.0 to 6.21.2 fix GHSA-6vvc-x485-93v7,
@@ -265,6 +265,12 @@
   that memory is spent, as `its page tree is too deep or too large to read`. The bound on a
   cross-reference stream's entries that 6.21.3 added is now passed by name at the library's value,
   2,000,000, so nothing changes there.
+- **The grouped weekly lockfile update (#166).** `uv.lock` moves lancedb 0.39.0 to 0.41.0,
+  pyarrow 25.0.1 to 26.0.0, langgraph 1.2.14 to 1.2.18 (langgraph-checkpoint 4.2.0 to 4.3.1),
+  langchain-openai 1.6.6 to 1.7.3 (langchain-core following to 1.7.3), openai 3.22.1 to 3.41.0,
+  sqlalchemy 2.1.1 to 2.1.6 and python-dotenv 1.2.3 to 1.2.4, and for the tests pytest 9.1.1 to
+  9.2.0 and playwright 1.63.0 to 1.64.1; lance-namespace, langchain-protocol and langsmith follow.
+  No constraint in `pyproject.toml` changes.
 - **The locked OpenTelemetry packages are updated for an advisory.** `uv.lock` moves
   opentelemetry-api 1.44.0 to 1.45.1 (GHSA-xcq7-p3pf-p88h, unbounded `tracestate` parsing),
   with the rest of the OpenTelemetry family, which pins it exactly, and two small packages the
@@ -279,6 +285,12 @@
   and a failure in a read-only one). Every test in that file now records under pytest's `tmp_path`,
   through the variable and the loaded module both, and the committed directory is compared before
   and after each test.
+- **The release pass over the documentation.** The install lines name `v0.5.2`; the upgrading
+  page has what a 0.5.1 install meets (the Python floor, the EPUB books read again, the files now
+  refused and the rows they keep, the cut labels, a rebuild 0.5.1 left unfinished, the web chat's
+  copied files, the demo library's re-pinned downloads); add-your-own-books names the EPUB
+  document refused for a NUL and says that a run over a folder re-embeds every book in it; this
+  section gains the lockfile update of #166 and names the one root certificate certifi dropped.
 
 ## 0.5.1 (2026-10-05)
 
