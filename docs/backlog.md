@@ -447,7 +447,8 @@ open ones often refer to them.
   `read_chapter` that names what it is looking for is read around the best lexical match inside up
   to `CHAPTER_SCAN_CHARS` instead of from the chapter's head. The window is computed once in `act`
   and stored in `hits_log`, because it is the provenance haystack. Behaviour: measured on
-  2026-09-18, see the item above.
+  2026-09-18, see
+  [`eval-results/2026-09-18-rechunk-and-observe-feedback.md`](eval-results/2026-09-18-rechunk-and-observe-feedback.md).
 - ADR-013: `library.search(book=...)` filters both lists; after a resolved clarify retrieval is
   limited to the chosen book; a deterministic coverage gate in `reflect` spends one extra search
   before "enough"/"clarify" when the evidence names at most one book. The first variant (probe the

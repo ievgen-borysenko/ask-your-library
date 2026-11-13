@@ -51,8 +51,8 @@ first run or a `--rebuild` publishes nothing (after a failed `--rebuild`, restor
 Re-running the command re-indexes, **one book at a time**. Each book is resolved to a stable
 `book_id` in the index's `books` ledger, its rows are deleted by that id and the new ones
 appended, and its ledger row is written before and after — so a run that adds a folder of one book
-to an index of three hundred touches that book alone, and the rows of the other 299 are neither
-read nor rewritten. A run over a folder reads and re-embeds every book in it. The first build of
+to an index of three hundred touches that book alone, and the rows of the other 299 are not
+rewritten (the full-text index is still rebuilt over all of them, see below). A run over a folder reads and re-embeds every book in it. The first build of
 a table is still a single staged publish (nothing to update yet).
 A staged publish builds `<table>__staging`, drops the live table and copies staging over; one
 interrupted there (an error, a full disk, Ctrl-C, a kill) is finished by the next `ayl add`, which
@@ -376,7 +376,8 @@ the folder is indexed as usual:
   what may be done with it. No password is tried, the empty one included, and nothing is
   decrypted; save an unrestricted copy if you have the right to.
 - **Could not be read**: anything the library raises while it reads the file — not a PDF, cut
-  short, a damaged object, a reference cycle, a stream that inflates past **16 MiB**, a font map
+  short, a damaged object, a reference cycle, a stream that inflates past **16 MiB**, chains more than
+  **4** filters or passes more than **128 MiB** through its decoding, a font map
   past the library's own limits, an array or a dictionary of more than **100,000** entries, a
   page whose instructions hold more than **2 million** tokens (a vector figure of more than about
   650,000 segments drawn on the page itself; one drawn as a form is skipped and the page read).

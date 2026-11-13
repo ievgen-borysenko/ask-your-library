@@ -46,16 +46,18 @@ chunker and the row schema are the ones 0.5.1 had. What an existing install meet
    document whose text holds a NUL (a UTF-16 or UTF-32 file without a byte-order mark, or a stray
    NUL in UTF-8, which 0.5.1 stripped), an EPUB of more than 20 million characters of text (#124),
    and a PDF over one of the caps 0.5.2 sets on the PDF library (#159, #161, #165;
-   [A PDF](add-your-own-books.md#a-pdf) lists them) are refused, each on one line. These caps are
-   fixed in the code, not settings. A refused file is not part of the run, so the rows an earlier
+   [A PDF](add-your-own-books.md#a-pdf) lists them) are refused, each on one line; a PDF whose
+   outline alone holds an object over a cap is not refused, it is indexed by its pages under a
+   note that its outline could not be read. These caps are fixed in the code, not settings. A refused file is not part of the run, so the rows an earlier
    run wrote for it stay and keep answering. To take them out, move the file out of the folder
    and run `ayl add <folder> --prune`, with at least one readable book left in the folder (a run
    in which no book reads stops before it prunes anything). An EPUB refused for a NUL is kept by
    saving that document as UTF-8 in an EPUB editor, with any NUL taken out, and running
    `ayl add <folder>` again.
-4. **A label over 500 characters is cut (#124).** A title, an author line or a contents or
-   outline entry longer than that is indexed on the next run as its first 490 characters, `… ` and
-   eight hex characters of a digest of the whole label. The file is the same, so the book keeps
+4. **An EPUB's or a PDF's label over 500 characters is cut (#124).** A title, an author line or
+   a contents or outline entry longer than that is indexed on the next run as at most its first
+   490 characters, `… ` and eight hex characters of a digest of the whole label; a `.txt` or
+   `.md` title is not cut. The file is the same, so the book keeps
    its id, and its rows are replaced.
 5. **A rebuild 0.5.1 did not finish still carries the old stamp (#147).** A `--rebuild` now drops
    the table's stamp with the table, so one interrupted under 0.5.2 leaves its staging copy
