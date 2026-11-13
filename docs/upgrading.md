@@ -83,7 +83,9 @@ chunker and the row schema are the ones 0.5.1 had. What an existing install meet
    already ran in the same question, nor keeps a quote it already holds (#163), and it may stop on
    a new reason, "no new query"; `reflect` is shown the searches already run (#179); and `observe`
    is shown two book cards per step (four when the question is to identify a book), transcripts
-   first, each card once (#184). The CLI and the web chat name a search that already ran.
+   first, and normally each card once (#184; a card comes back after a refused quote of its book,
+   after a clarify answered with its book, and on a step that retrieved only cards already shown,
+   as the [changelog](CHANGELOG.md) entry says). The CLI and the web chat name a search that already ran.
    The Ollama-not-running message is three lines that name the action for this platform (#140),
    and with `LLM_BACKEND=ollama`, `ayl ask` says on stderr before the first run that a research
    answer takes minutes (#137); the exit statuses are unchanged.

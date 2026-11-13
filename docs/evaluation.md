@@ -7,7 +7,7 @@ Every run in the **tables on this page** was produced on the **hosted** configur
 (`LLM_BACKEND=openrouter`, `anthropic/claude-sonnet-4.6`), which is not the shipped default: the
 default is local and free, a different answering model and therefore a different system, and no
 number in them describes it. [`eval-results/`](eval-results/) is not hosted-only, and the four
-local agent-eval reports of September there say so in their own provenance headers:
+local reports of September there say so in their own provenance headers:
 [`2026-09-10-local-models.md`](eval-results/2026-09-10-local-models.md), two `qwen2.5` sizes on
 `LLM_BACKEND=ollama`;
 [`2026-09-10-first-question-local.md`](eval-results/2026-09-10-first-question-local.md), one local
