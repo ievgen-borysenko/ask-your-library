@@ -281,6 +281,10 @@ past the open advisories. A reader coming from 0.5.1 starts at
   sqlalchemy 2.1.1 to 2.1.6 and python-dotenv 1.2.3 to 1.2.4, and for the tests pytest 9.1.1 to
   9.2.0 and playwright 1.63.0 to 1.64.1; lance-namespace, langchain-protocol and langsmith follow.
   No constraint in `pyproject.toml` changes.
+- **A second grouped lockfile update (#191).** `uv.lock` moves langgraph 1.2.18 to 1.2.20,
+  langchain-openai 1.7.3 to 1.7.4 (langchain-core following to 1.8.0), openai 3.41.0 to 3.46.0,
+  pyarrow 26.0.0 to 26.0.1 and sqlalchemy 2.1.6 to 2.1.8. No constraint in `pyproject.toml`
+  changes.
 - **The locked OpenTelemetry packages are updated for an advisory.** `uv.lock` moves
   opentelemetry-api 1.44.0 to 1.45.1 (GHSA-xcq7-p3pf-p88h, unbounded `tracestate` parsing),
   with the rest of the OpenTelemetry family, which pins it exactly, and two small packages the
@@ -300,7 +304,8 @@ past the open advisories. A reader coming from 0.5.1 starts at
   refused and the rows they keep, the cut labels, a rebuild 0.5.1 left unfinished, the web chat's
   copied files, the demo library's re-pinned downloads); add-your-own-books names the EPUB
   document refused for a NUL and says that a run over a folder re-embeds every book in it; this
-  section gains the lockfile update of #166 and names the one root certificate certifi dropped.
+  section gains the lockfile updates of #166 and #191 and names the one root certificate certifi
+  dropped.
   On the reference pages: known-limits gives the question deadline as 1,200 s on the local default
   and 300 s hosted; the backlog's row cap, passage length and one line reference are the code's;
   evaluation says which of its statements are about its tables and names the re-measure of
