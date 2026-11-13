@@ -31,9 +31,10 @@ answer the question - it is here on purpose.
   In strict hit-id mode an evidence item must name the hit it was copied from, its book and
   section come from that hit record rather than from the model, and the provenance verdict reads
   "found verbatim in the passages they cite" - the cited hit, not the window as a whole.
-- The harness does not persist the `observe` step's selected evidence (quote + `why`), so the
-  traces show the window and the answer, not the intermediate JSON. `uv run ask-library` prints
-  the step events live if you want to watch the loop.
+- The harness did not persist the `observe` step's selected evidence (quote + `why`) in these
+  runs (the scratchpad logs it per step since #85), so the traces show the window and the
+  answer, not the intermediate JSON. `uv run ask-library` prints the step events live if you
+  want to watch the loop.
 
 ## Caveats
 

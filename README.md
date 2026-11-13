@@ -37,7 +37,8 @@ badge, and the evidence passage under it. Recorded on 2026-09-10, before 16.09 â
 book-card matches
 apart from traced book-text quotes now (they are still checked, and still counted), the evidence
 passages say which kind they are, the watermark under the composer is different, and the first
-frame is the login page rather than the chat. Both GIFs are due a re-record
+frame is the login page rather than the chat, with the field labelled Email address where 0.5.2
+says Username. Both GIFs are due a re-record
 ([`docs/backlog.md`](docs/backlog.md)).*
 
 ## One question, end to end

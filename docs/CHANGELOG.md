@@ -301,6 +301,11 @@ past the open advisories. A reader coming from 0.5.1 starts at
   copied files, the demo library's re-pinned downloads); add-your-own-books names the EPUB
   document refused for a NUL and says that a run over a folder re-embeds every book in it; this
   section gains the lockfile update of #166 and names the one root certificate certifi dropped.
+  On the reference pages: known-limits gives the question deadline as 1,200 s on the local default
+  and 300 s hosted; the backlog's row cap, passage length and one line reference are the code's;
+  evaluation says which of its statements are about its tables and names the re-measure of
+  2026-11-02; the ADR-031 amendment cites #157, and the status lines of ADR-004 and ADR-013 name
+  their later amendments.
 
 ## 0.5.1 (2026-10-05)
 

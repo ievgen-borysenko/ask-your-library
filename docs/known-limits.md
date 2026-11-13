@@ -220,10 +220,10 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   eval report published before that date counted card matches inside the confirmed / unattributed /
   broken triple**, so the quote numbers quoted here and in the README's table describe retrieval
   provenance — the quote is verbatim in the passage it cites — and not that a book said it.
-- **The time budget is coarse, and there is no hard deadline.** `QUESTION_DEADLINE_S` (300 s)
-  is a budget for continuing the search: it is checked before each next decision, never
-  mid-call, so the step in flight and the synthesis still complete. `LLM_TIMEOUT_S` is httpx's
-  read timeout, which bounds the wait for the next chunk of a response, not the whole request:
+- **The time budget is coarse, and there is no hard deadline.** `QUESTION_DEADLINE_S` (1,200 s
+  on the local default, 300 s hosted) is a budget for continuing the search: it is checked
+  before each next decision, never mid-call, so the step in flight and the synthesis still
+  complete. `LLM_TIMEOUT_S` is httpx's read timeout, which bounds the wait for the next chunk of a response, not the whole request:
   a provider that keeps sending slowly is not cut off. A search-loop call (plan, observe,
   reflect) is bounded per attempt by the smaller of `LLM_TIMEOUT_S` and what is left of the
   question's budget, never below 5 s. The retries are the client's own loop, not the SDK's
@@ -231,7 +231,7 @@ local default that ships since 0.3.0 — by the local run of 2026-09-10:
   makes): each attempt is given the budget that is left when it starts, and once a failure and
   its backoff would leave 5 s or less the call gives up instead of retrying. So a capped call,
   attempts and backoff included, stays inside the seconds the question had left when it began,
-  and with the local pair — 600 s a call against 300 s a question — no single loop call
+  and with the local pair — 600 s a call against 1,200 s a question — no single loop call
   outlives the whole question and then retries. Two calls keep the full `LLM_TIMEOUT_S` per
   attempt, and the full retry count: the final synthesis, and anything the loop issues once the
   budget is already spent. Bounding those by the seconds left would end a deadline-stopped run
