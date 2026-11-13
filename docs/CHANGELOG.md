@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.5.2 (2026-11-13)
+
+A patch release of everything merged since 0.5.1: the search loop no longer runs a search it
+already ran nor keeps a quote twice, `reflect` is shown the searches already made and `observe`
+fewer book cards (#163, #179, #184); the EPUB reader keeps text it lost and refuses what it
+misread (#154, #155, #156), and both readers cap a book's text and its labels (#124); the macOS
+installer builds on a Python the locked wheels cover (#158); and the locked dependencies move
+past the open advisories. A reader coming from 0.5.1 starts at
+[upgrading](upgrading.md#from-051-to-052).
+
 - **`observe` is shown two book cards per step, transcripts first, each card once.** Every search
   step showed `observe` four book cards and four transcript chunks, cards first, and `observe`'s
   time is its input: the cards at rank 3-4 were a large share of what it read and almost never
