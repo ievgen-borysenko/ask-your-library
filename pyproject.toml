@@ -40,7 +40,7 @@ dependencies = [
     # without the open advisories; below 7, because pdf.py sets every one of
     # those fields by name and replaces `PdfReader._handle_encryption`, which a
     # major version may rename. The lockfile resolves 6.21.4.
-    "pypdf>=6.21.4,<7",
+    "pypdf>=6.21.4,<8",
 ]
 
 [project.urls]
